@@ -99,9 +99,9 @@ async function handleUserMessage(
 
       // 注册 CLI stdout → WebSocket 转发
       conversationService.onOutput(sessionId, (cliMsg) => {
-        const serverMsg = translateCliMessage(cliMsg)
-        if (serverMsg) {
-          sendMessage(ws, serverMsg)
+        const serverMsgs = translateCliMessage(cliMsg)
+        for (const msg of serverMsgs) {
+          sendMessage(ws, msg)
         }
       })
     } catch (err) {
@@ -146,60 +146,256 @@ function handleStopGeneration(ws: ServerWebSocket<WebSocketData>) {
 // ============================================================================
 
 /**
- * 将 CLI stdout 的 stream-json 消息转换为 WebSocket ServerMessage。
+ * Track the type of the currently active content block by stream index.
+ * Used to determine whether a content_block_stop corresponds to a tool_use or text block.
+ */
+const activeBlockTypes = new Map<number, 'text' | 'tool_use'>()
+
+/**
+ * 将 CLI stdout 的 stream-json 消息转换为 WebSocket ServerMessage 数组。
  *
  * CLI 输出格式参考 src/bridge/sessionRunner.ts 中的 stream-json 协议。
+ * 返回数组以支持单条 CLI 消息产生多条 ServerMessage（例如多个内容块）。
  */
-function translateCliMessage(cliMsg: any): ServerMessage | null {
+function translateCliMessage(cliMsg: any): ServerMessage[] {
   switch (cliMsg.type) {
     case 'assistant': {
-      // 助手消息 - 提取文本内容
-      if (cliMsg.message?.content) {
-        const content = cliMsg.message.content
-        if (Array.isArray(content)) {
-          for (const block of content) {
-            if (block.type === 'text') {
-              return { type: 'content_delta', text: block.text }
+      // 检查是否有认证错误
+      if (cliMsg.error) {
+        return [{
+          type: 'error',
+          message: cliMsg.message?.content?.[0]?.text || cliMsg.error,
+          code: cliMsg.error,
+        }]
+      }
+
+      // 助手消息 - 提取所有内容块，每个块产生独立的 ServerMessage
+      if (cliMsg.message?.content && Array.isArray(cliMsg.message.content)) {
+        const messages: ServerMessage[] = []
+
+        for (const block of cliMsg.message.content) {
+          if (block.type === 'thinking' && block.thinking) {
+            // Bug #5: 处理 thinking 块
+            messages.push({ type: 'thinking', text: block.thinking })
+          } else if (block.type === 'text' && block.text) {
+            messages.push({ type: 'content_start', blockType: 'text' })
+            messages.push({ type: 'content_delta', text: block.text })
+          } else if (block.type === 'tool_use') {
+            // Bug #2: 不再 return，而是 push 到数组中
+            // Bug #3: 发送 tool input
+            // Bug #4: 发送 tool_use_complete
+            messages.push({
+              type: 'content_start',
+              blockType: 'tool_use',
+              toolName: block.name,
+              toolUseId: block.id,
+            })
+            if (block.input !== undefined) {
+              messages.push({
+                type: 'content_delta',
+                toolInput: JSON.stringify(block.input),
+              })
             }
+            messages.push({
+              type: 'tool_use_complete',
+              toolName: block.name,
+              toolUseId: block.id,
+              input: block.input,
+            })
+          }
+        }
+
+        return messages
+      }
+      return []
+    }
+
+    case 'user': {
+      // Bug #1: 处理 tool_result 消息
+      // CLI 发送 type:'user' 消息，其中 content 包含 tool_result 块
+      const messages: ServerMessage[] = []
+
+      if (cliMsg.message?.content && Array.isArray(cliMsg.message.content)) {
+        for (const block of cliMsg.message.content) {
+          if (block.type === 'tool_result') {
+            messages.push({
+              type: 'tool_result',
+              toolUseId: block.tool_use_id,
+              content: block.content,
+              isError: !!block.is_error,
+            })
           }
         }
       }
-      return null
+
+      return messages
+    }
+
+    case 'stream_event': {
+      // Bug #6: 处理增量流式事件
+      const event = cliMsg.event
+      if (!event) return []
+
+      switch (event.type) {
+        case 'message_start': {
+          return [{ type: 'status', state: 'streaming' }]
+        }
+
+        case 'content_block_start': {
+          const contentBlock = event.content_block
+          if (!contentBlock) return []
+
+          // Track the block type by index for content_block_stop
+          const index = event.index ?? 0
+          activeBlockTypes.set(index, contentBlock.type === 'tool_use' ? 'tool_use' : 'text')
+
+          if (contentBlock.type === 'tool_use') {
+            return [{
+              type: 'content_start',
+              blockType: 'tool_use',
+              toolName: contentBlock.name,
+              toolUseId: contentBlock.id,
+            }]
+          }
+          return [{ type: 'content_start', blockType: 'text' }]
+        }
+
+        case 'content_block_delta': {
+          const delta = event.delta
+          if (!delta) return []
+
+          if (delta.type === 'text_delta' && delta.text) {
+            return [{ type: 'content_delta', text: delta.text }]
+          }
+          if (delta.type === 'input_json_delta' && delta.partial_json) {
+            return [{ type: 'content_delta', toolInput: delta.partial_json }]
+          }
+          if (delta.type === 'thinking_delta' && delta.thinking) {
+            return [{ type: 'thinking', text: delta.thinking }]
+          }
+          return []
+        }
+
+        case 'content_block_stop': {
+          const index = event.index ?? 0
+          const blockType = activeBlockTypes.get(index)
+          activeBlockTypes.delete(index)
+
+          // For tool_use blocks, emit tool_use_complete
+          // Note: toolName and toolUseId may not be available at stop time
+          // from stream events alone; the UI should track them from content_block_start
+          if (blockType === 'tool_use') {
+            return [{
+              type: 'tool_use_complete',
+              toolName: '',
+              toolUseId: '',
+              input: null,
+            }]
+          }
+          return []
+        }
+
+        case 'message_stop': {
+          // message_stop is handled by the 'result' message
+          return []
+        }
+
+        case 'message_delta': {
+          // message_delta may contain stop_reason or usage updates
+          return []
+        }
+
+        default:
+          return []
+      }
     }
 
     case 'control_request': {
       // 权限请求 — CLI 需要用户授权才能执行工具
       if (cliMsg.request?.subtype === 'can_use_tool') {
-        return {
+        return [{
           type: 'permission_request',
           requestId: cliMsg.request_id,
           toolName: cliMsg.request.tool_name || 'Unknown',
           input: cliMsg.request.input || {},
           description: cliMsg.request.description,
-        }
+        }]
       }
-      return null
+      return []
     }
 
     case 'result': {
-      // 对话完成
-      if (cliMsg.subtype === 'success') {
-        return {
-          type: 'message_complete',
-          usage: {
-            input_tokens: cliMsg.usage?.input_tokens || 0,
-            output_tokens: cliMsg.usage?.output_tokens || 0,
-          },
-        }
+      // 对话结果（成功或错误）
+      const usage = {
+        input_tokens: cliMsg.usage?.input_tokens || 0,
+        output_tokens: cliMsg.usage?.output_tokens || 0,
       }
-      return null
+
+      if (cliMsg.is_error) {
+        // 错误和完成消息都发送
+        return [
+          {
+            type: 'error',
+            message: cliMsg.result || 'Unknown error',
+            code: 'CLI_ERROR',
+          },
+          { type: 'message_complete', usage },
+        ]
+      }
+
+      return [{ type: 'message_complete', usage }]
     }
 
-    case 'system':
-      return { type: 'status', state: 'idle' }
+    case 'system': {
+      // 区分不同的 system 子类型
+      const subtype = cliMsg.subtype
+      if (subtype === 'init') {
+        // CLI 初始化完成 — 发送模型信息
+        return [{ type: 'status', state: 'idle', verb: `Model: ${cliMsg.model || 'unknown'}` }]
+      }
+      if (subtype === 'hook_started' || subtype === 'hook_response') {
+        // Hook 执行中 — 不转发给前端
+        return []
+      }
+      // Bug #7: 处理 task/team system 消息
+      if (subtype === 'task_notification') {
+        return [{
+          type: 'system_notification',
+          subtype: 'task_notification',
+          message: cliMsg.message || cliMsg.title,
+          data: cliMsg,
+        }]
+      }
+      if (subtype === 'task_started') {
+        return [{
+          type: 'status',
+          state: 'tool_executing',
+          verb: cliMsg.message || 'Task started',
+        }]
+      }
+      if (subtype === 'task_progress') {
+        return [{
+          type: 'status',
+          state: 'tool_executing',
+          verb: cliMsg.message || 'Task in progress',
+        }]
+      }
+      if (subtype === 'session_state_changed') {
+        return [{
+          type: 'system_notification',
+          subtype: 'session_state_changed',
+          message: cliMsg.message,
+          data: cliMsg,
+        }]
+      }
+      // 其他 system 消息
+      return []
+    }
 
     default:
-      return null
+      // 未知类型 — 调试输出但不转发
+      console.log(`[WS] Unknown CLI message type: ${cliMsg.type}`, JSON.stringify(cliMsg).substring(0, 200))
+      return []
   }
 }
 

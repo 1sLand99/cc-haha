@@ -9,6 +9,8 @@ import { handleApiRequest } from './router.js'
 import { handleWebSocket, type WebSocketData } from './ws/handler.js'
 import { corsHeaders } from './middleware/cors.js'
 import { requireAuth } from './middleware/auth.js'
+import { teamWatcher } from './services/teamWatcher.js'
+import { cronScheduler } from './services/cronScheduler.js'
 
 const PORT = parseInt(process.env.SERVER_PORT || '3456', 10)
 const HOST = process.env.SERVER_HOST || '127.0.0.1'
@@ -77,6 +79,12 @@ export function startServer(port = PORT, host = HOST) {
 
     websocket: handleWebSocket,
   })
+
+  // Start watching ~/.claude/teams/ for real-time WebSocket push
+  teamWatcher.start()
+
+  // Start the cron scheduler to execute scheduled tasks
+  cronScheduler.start()
 
   console.log(`[Server] Claude Code API server running at http://${host}:${port}`)
   return server

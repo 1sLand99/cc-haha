@@ -36,7 +36,12 @@ export type ServerMessage =
   | { type: 'thinking'; text: string }
   | { type: 'status'; state: ChatState; verb?: string; elapsed?: number; tokens?: number }
   | { type: 'error'; message: string; code: string; retryable?: boolean }
+  | { type: 'system_notification'; subtype: string; message?: string; data?: unknown }
   | { type: 'pong' }
+  | { type: 'team_update'; teamName: string; members: TeamMemberStatus[] }
+  | { type: 'team_created'; teamName: string }
+  | { type: 'team_deleted'; teamName: string }
+  | { type: 'task_update'; taskId: string; status: string; progress?: string }
 
 export type TokenUsage = {
   input_tokens: number
@@ -46,6 +51,13 @@ export type TokenUsage = {
 }
 
 export type ChatState = 'idle' | 'thinking' | 'tool_executing' | 'streaming' | 'permission_pending'
+
+export type TeamMemberStatus = {
+  agentId: string
+  role: string
+  status: 'running' | 'idle' | 'completed' | 'error'
+  currentTask?: string
+}
 
 // ============================================================================
 // Internal types

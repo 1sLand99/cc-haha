@@ -18,7 +18,8 @@ export type CronTask = {
   cron: string // 5-field cron expression
   prompt: string
   createdAt: number // epoch ms
-  lastFiredAt?: number
+  lastFiredAt?: string // ISO timestamp of last execution
+  enabled?: boolean // allow disabling without deleting (default true)
   recurring?: boolean
   permanent?: boolean
   permissionMode?: string
@@ -91,6 +92,17 @@ export class CronService {
       throw ApiError.notFound(`Task not found: ${id}`)
     }
     data.tasks.splice(index, 1)
+    await this.writeTasksFile(data)
+  }
+
+  /** 更新任务的最后执行时间 */
+  async updateLastFired(taskId: string, timestamp: string): Promise<void> {
+    const data = await this.readTasksFile()
+    const index = data.tasks.findIndex((t) => t.id === taskId)
+    if (index === -1) {
+      return // Task may have been deleted; silently ignore
+    }
+    data.tasks[index].lastFiredAt = timestamp
     await this.writeTasksFile(data)
   }
 
