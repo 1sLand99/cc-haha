@@ -9,6 +9,7 @@
 import type { ServerWebSocket } from 'bun'
 import type { ClientMessage, ServerMessage, WebSocketSession } from './events.js'
 import { conversationService } from '../services/conversationService.js'
+import { sessionService } from '../services/sessionService.js'
 
 export type WebSocketData = {
   sessionId: string
@@ -94,7 +95,16 @@ async function handleUserMessage(
   // 启动 CLI 子进程（如果还没有）
   if (!conversationService.hasSession(sessionId)) {
     try {
-      const workDir = process.cwd()
+      // Resolve the session's actual project directory from persisted data
+      let workDir = process.cwd() // fallback
+      try {
+        const sessionInfo = await sessionService.findSessionFile(sessionId)
+        if (sessionInfo) {
+          workDir = sessionService.desanitizePath(sessionInfo.projectDir)
+        }
+      } catch {
+        // fallback to cwd if session file not found
+      }
       await conversationService.startSession(sessionId, workDir)
 
       // 注册 CLI stdout → WebSocket 转发

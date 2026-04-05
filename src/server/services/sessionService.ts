@@ -263,10 +263,22 @@ export class SessionService {
   }
 
   /**
+   * Convert a sanitized directory name back to the original absolute path.
+   * Reverses sanitizePath(): `-Users-nanmi-workspace` → `/Users/nanmi/workspace`.
+   */
+  desanitizePath(sanitized: string): string {
+    // The sanitized form replaces all '/' (and '\') with '-'.
+    // On POSIX the original path starts with '/', so the sanitized form starts with '-'.
+    // We restore by replacing every '-' with '/' (the platform separator).
+    // On Windows the leading character would be a drive letter, but we handle POSIX here.
+    return sanitized.replace(/-/g, path.sep)
+  }
+
+  /**
    * Find the .jsonl file for a given session ID.
    * Searches across all project directories since sessions may belong to any project.
    */
-  private async findSessionFile(
+  async findSessionFile(
     sessionId: string
   ): Promise<{ filePath: string; projectDir: string } | null> {
     // Validate sessionId format to prevent path traversal

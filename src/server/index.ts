@@ -16,6 +16,14 @@ const PORT = parseInt(process.env.SERVER_PORT || '3456', 10)
 const HOST = process.env.SERVER_HOST || '127.0.0.1'
 
 export function startServer(port = PORT, host = HOST) {
+  /**
+   * Auth is required when explicitly opted in or when bound to a non-localhost address.
+   * - Default localhost dev: no auth needed (tests pass as-is).
+   * - Production / non-localhost (e.g. 0.0.0.0): auth enforced automatically.
+   * - Explicit opt-in: SERVER_AUTH_REQUIRED=1 forces auth even on localhost.
+   */
+  const authRequired = process.env.SERVER_AUTH_REQUIRED === '1' || host !== '127.0.0.1'
+
   const server = Bun.serve<WebSocketData>({
     port,
     hostname: host,
@@ -32,6 +40,18 @@ export function startServer(port = PORT, host = HOST) {
 
       // WebSocket upgrade
       if (url.pathname.startsWith('/ws/')) {
+        // Enforce authentication when required
+        if (authRequired) {
+          const authError = requireAuth(req)
+          if (authError) {
+            const headers = new Headers(authError.headers)
+            for (const [key, value] of Object.entries(corsHeaders(origin))) {
+              headers.set(key, value)
+            }
+            return new Response(authError.body, { status: authError.status, headers })
+          }
+        }
+
         // Validate session ID format
         const sessionId = url.pathname.split('/').pop() || ''
         if (!sessionId || !/^[0-9a-zA-Z_-]{1,64}$/.test(sessionId)) {
@@ -49,6 +69,18 @@ export function startServer(port = PORT, host = HOST) {
 
       // REST API
       if (url.pathname.startsWith('/api/')) {
+        // Enforce authentication when required
+        if (authRequired) {
+          const authError = requireAuth(req)
+          if (authError) {
+            const headers = new Headers(authError.headers)
+            for (const [key, value] of Object.entries(corsHeaders(origin))) {
+              headers.set(key, value)
+            }
+            return new Response(authError.body, { status: authError.status, headers })
+          }
+        }
+
         try {
           const response = await handleApiRequest(req, url)
           // Add CORS headers to all responses

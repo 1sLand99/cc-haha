@@ -21,7 +21,7 @@ const AVAILABLE_MODELS = [
     context: '200k',
   },
   {
-    id: 'claude-opus-4-6-20250610',
+    id: 'claude-opus-4-6-20250610:1m',
     name: 'Opus 4.6 1M',
     description: 'Most capable for ambitious work',
     context: '1m',
@@ -86,13 +86,19 @@ export async function handleModelsApi(
 async function handleCurrentModel(req: Request): Promise<Response> {
   if (req.method === 'GET') {
     const settings = await settingsService.getUserSettings()
-    const modelId = (settings.model as string) || DEFAULT_MODEL
-    const model = AVAILABLE_MODELS.find((m) => m.id === modelId) || {
-      id: modelId,
-      name: modelId,
-      description: 'Custom model',
-      context: 'unknown',
-    }
+    const baseModelId = (settings.model as string) || DEFAULT_MODEL
+    const contextTier = (settings.modelContext as string) || undefined
+
+    // Reconstruct composite ID for lookup (e.g. 'claude-opus-4-6-20250610:1m')
+    const lookupId = contextTier ? `${baseModelId}:${contextTier}` : baseModelId
+    const model = AVAILABLE_MODELS.find((m) => m.id === lookupId)
+      || AVAILABLE_MODELS.find((m) => m.id === baseModelId)
+      || {
+        id: baseModelId,
+        name: baseModelId,
+        description: 'Custom model',
+        context: 'unknown',
+      }
     return Response.json({ model })
   }
 
@@ -102,7 +108,21 @@ async function handleCurrentModel(req: Request): Promise<Response> {
     if (typeof modelId !== 'string' || !modelId) {
       throw ApiError.badRequest('Missing or invalid "modelId" in request body')
     }
-    await settingsService.updateUserSettings({ model: modelId })
+
+    // Parse composite IDs like 'claude-opus-4-6-20250610:1m'
+    // Persist the base model ID for CLI compatibility and context tier separately
+    const colonIdx = modelId.indexOf(':')
+    const baseId = colonIdx !== -1 ? modelId.slice(0, colonIdx) : modelId
+    const contextTier = colonIdx !== -1 ? modelId.slice(colonIdx + 1) : undefined
+
+    const updates: Record<string, unknown> = { model: baseId }
+    if (contextTier) {
+      updates.modelContext = contextTier
+    } else {
+      // Clear context tier when switching to a non-composite model
+      updates.modelContext = undefined
+    }
+    await settingsService.updateUserSettings(updates)
     return Response.json({ ok: true, model: modelId })
   }
 

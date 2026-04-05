@@ -274,7 +274,12 @@ export class CronScheduler {
 
     const inputPayload = JSON.stringify({
       type: 'user',
-      content: task.prompt,
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: task.prompt }],
+      },
+      parent_tool_use_id: null,
+      session_id: '',
     }) + '\n'
 
     const proc = Bun.spawn(
@@ -282,6 +287,7 @@ export class CronScheduler {
         'bun',
         cliPath,
         '--print',
+        '--verbose',
         '--input-format',
         'stream-json',
         '--output-format',
