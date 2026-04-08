@@ -100,10 +100,10 @@ export function TaskRow({ task, showLogs, onToggleLogs }: Props) {
             {/* Run Now */}
             <div className="relative" ref={confirmAction === 'run' ? confirmRef : undefined}>
               <button
-                onClick={() => isRunning ? undefined : setConfirmAction(confirmAction === 'run' ? null : 'run')}
-                disabled={isRunning}
-                className={`${iconBtn} text-[var(--color-brand)] hover:bg-[var(--color-surface-selected)] disabled:opacity-50`}
-                title={t('tasks.runNow')}
+                onClick={() => isRunning || !task.enabled ? undefined : setConfirmAction(confirmAction === 'run' ? null : 'run')}
+                disabled={isRunning || !task.enabled}
+                className={`${iconBtn} ${task.enabled ? 'text-[var(--color-brand)] hover:bg-[var(--color-surface-selected)]' : 'text-[var(--color-text-tertiary)] cursor-not-allowed'} disabled:opacity-50`}
+                title={task.enabled ? t('tasks.runNow') : undefined}
               >
                 <span className={`material-symbols-outlined text-[18px] ${isRunning ? 'animate-spin' : ''}`}>
                   {isRunning ? 'sync' : 'play_arrow'}
