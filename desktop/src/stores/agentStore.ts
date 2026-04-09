@@ -2,26 +2,28 @@ import { create } from 'zustand'
 import { agentsApi, type AgentDefinition } from '../api/agents'
 
 type AgentStore = {
-  agents: AgentDefinition[]
+  activeAgents: AgentDefinition[]
+  allAgents: AgentDefinition[]
   isLoading: boolean
   error: string | null
   selectedAgent: AgentDefinition | null
 
-  fetchAgents: () => Promise<void>
+  fetchAgents: (cwd?: string) => Promise<void>
   selectAgent: (agent: AgentDefinition | null) => void
 }
 
 export const useAgentStore = create<AgentStore>((set) => ({
-  agents: [],
+  activeAgents: [],
+  allAgents: [],
   isLoading: false,
   error: null,
   selectedAgent: null,
 
-  fetchAgents: async () => {
+  fetchAgents: async (cwd) => {
     set({ isLoading: true, error: null })
     try {
-      const { agents } = await agentsApi.list()
-      set({ agents, isLoading: false })
+      const { activeAgents, allAgents } = await agentsApi.list(cwd)
+      set({ activeAgents, allAgents, isLoading: false })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load agents'
       set({ isLoading: false, error: message })

@@ -211,9 +211,12 @@ describe('Business Flow: Agent Management', () => {
     await fs.rm(tmpDir, { recursive: true, force: true })
   })
 
-  it('should start with no agents', async () => {
+  it('should start with shared active/all agent payload', async () => {
     const { data } = await api('GET', '/api/agents')
-    expect(data.agents).toEqual([])
+    expect(Array.isArray(data.activeAgents)).toBe(true)
+    expect(Array.isArray(data.allAgents)).toBe(true)
+    expect(data.activeAgents.length).toBeGreaterThan(0)
+    expect(data.activeAgents.some((agent: any) => agent.source === 'built-in')).toBe(true)
   })
 
   it('should create a new agent with full config', async () => {
@@ -238,12 +241,17 @@ describe('Business Flow: Agent Management', () => {
     expect(status).toBe(201)
   })
 
-  it('should list both agents', async () => {
+  it('should list both created agents in CRUD detail endpoint while shared list stays source-based', async () => {
     const { data } = await api('GET', '/api/agents')
-    expect(data.agents.length).toBe(2)
-    const names = data.agents.map((a: any) => a.name)
-    expect(names).toContain('security-auditor')
-    expect(names).toContain('test-writer')
+    expect(data.activeAgents.length).toBeGreaterThan(0)
+    expect(data.activeAgents.some((agent: any) => agent.source === 'built-in')).toBe(true)
+    expect(data.activeAgents.some((agent: any) => agent.agentType === 'security-auditor')).toBe(false)
+    expect(data.activeAgents.some((agent: any) => agent.agentType === 'test-writer')).toBe(false)
+
+    const securityAuditor = await api('GET', '/api/agents/security-auditor')
+    const testWriter = await api('GET', '/api/agents/test-writer')
+    expect(securityAuditor.data.agent.name).toBe('security-auditor')
+    expect(testWriter.data.agent.name).toBe('test-writer')
   })
 
   it('should get agent details', async () => {
@@ -279,12 +287,16 @@ describe('Business Flow: Agent Management', () => {
     expect(status).toBe(404)
   })
 
-  it('should delete an agent', async () => {
+  it('should keep deleted agent out of shared active list while built-ins remain', async () => {
     const { status } = await api('DELETE', '/api/agents/test-writer')
     expect([200, 204]).toContain(status)
 
     const { data } = await api('GET', '/api/agents')
-    expect(data.agents.length).toBe(1)
+    expect(data.activeAgents.some((agent: any) => agent.agentType === 'test-writer')).toBe(false)
+    expect(data.activeAgents.some((agent: any) => agent.source === 'built-in')).toBe(true)
+
+    const deleted = await api('GET', '/api/agents/test-writer')
+    expect(deleted.status).toBe(404)
   })
 
   it('should persist agent to YAML file on disk', async () => {

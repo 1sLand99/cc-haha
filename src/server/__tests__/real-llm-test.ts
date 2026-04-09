@@ -411,7 +411,7 @@ async function testAgentsApi() {
   const res = await fetch(`${BASE_URL}/api/agents`)
   if (res.status !== 200) throw new Error(`Agents failed: ${res.status}`)
   const body = await res.json()
-  console.log(`   Agents: ${body.agents?.length ?? 0}`)
+  console.log(`   Active agents: ${body.activeAgents?.length ?? body.agents?.length ?? 0}`)
   console.log('✅ Agents API works')
 }
 

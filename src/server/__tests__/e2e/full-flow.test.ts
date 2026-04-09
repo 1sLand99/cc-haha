@@ -244,9 +244,12 @@ describe('E2E: Full Flow', () => {
   // 7. Agents
   // =============================================
 
-  it('should start with empty agent list', async () => {
+  it('should start with shared active/all agent payload', async () => {
     const { data } = await api('GET', '/api/agents')
-    expect(data.agents).toEqual([])
+    expect(Array.isArray(data.activeAgents)).toBe(true)
+    expect(Array.isArray(data.allAgents)).toBe(true)
+    expect(data.activeAgents.length).toBeGreaterThan(0)
+    expect(data.activeAgents.some((agent: any) => agent.source === 'built-in')).toBe(true)
   })
 
   it('should create an agent', async () => {
@@ -258,10 +261,13 @@ describe('E2E: Full Flow', () => {
     expect(status).toBe(201)
   })
 
-  it('should list the created agent', async () => {
+  it('should expose shared active/all agent payload independent of CRUD storage', async () => {
     const { data } = await api('GET', '/api/agents')
-    expect(data.agents.length).toBe(1)
-    expect(data.agents[0].name).toBe('test-agent')
+    expect(Array.isArray(data.activeAgents)).toBe(true)
+    expect(Array.isArray(data.allAgents)).toBe(true)
+    expect(data.activeAgents.length).toBeGreaterThan(0)
+    expect(data.activeAgents.some((agent: any) => agent.source === 'built-in')).toBe(true)
+    expect(data.activeAgents.some((agent: any) => agent.agentType === 'test-agent')).toBe(false)
   })
 
   it('should delete an agent', async () => {

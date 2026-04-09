@@ -6,11 +6,12 @@ import { Settings } from '../pages/Settings'
 import { useAgentStore } from '../stores/agentStore'
 import { useSkillStore } from '../stores/skillStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useSessionStore } from '../stores/sessionStore'
+import { SETTINGS_TAB_ID, useTabStore } from '../stores/tabStore'
 
-// Mock the API module so no real HTTP calls are made
 vi.mock('../api/agents', () => ({
   agentsApi: {
-    list: vi.fn().mockResolvedValue({ agents: [] }),
+    list: vi.fn().mockResolvedValue({ activeAgents: [], allAgents: [] }),
   },
 }))
 
@@ -42,26 +43,41 @@ vi.mock('../components/chat/CodeViewer', () => ({
 
 const MOCK_AGENTS = [
   {
-    name: 'code-reviewer',
+    agentType: 'code-reviewer',
     description: 'Reviews code for quality and security',
     model: 'claude-sonnet-4-6',
+    modelDisplay: 'claude-sonnet-4-6',
     tools: ['Read', 'Grep', 'Glob'],
     systemPrompt: '# Code Reviewer\n\nYou are an expert code reviewer.',
     color: 'blue',
+    source: 'userSettings' as const,
+    baseDir: '~/.claude/agents',
+    isActive: true,
   },
   {
-    name: 'doc-writer',
+    agentType: 'doc-writer',
     description: 'Writes technical documentation',
     model: 'claude-haiku-4-5-20251001',
+    modelDisplay: 'claude-haiku-4-5-20251001',
+    tools: ['Read'],
     systemPrompt: 'You write clear and concise docs.',
     color: 'green',
+    source: 'built-in' as const,
+    baseDir: 'built-in',
+    isActive: true,
   },
   {
-    name: 'plain-agent',
+    agentType: 'plain-agent',
     description: undefined,
     model: undefined,
+    modelDisplay: 'inherit',
+    tools: undefined,
     systemPrompt: undefined,
     color: undefined,
+    source: 'projectSettings' as const,
+    baseDir: '/workspace/project/.claude/agents',
+    isActive: false,
+    overriddenBy: 'userSettings' as const,
   },
 ]
 
@@ -112,12 +128,44 @@ function switchToSkillsTab() {
 describe('Settings > Agents tab', () => {
   beforeEach(() => {
     useSettingsStore.setState({ locale: 'en' })
+    useTabStore.setState({
+      activeTabId: 'session-1',
+      tabs: [{ sessionId: 'session-1', title: 'Test', type: 'session', status: 'idle' }],
+    })
+    useSessionStore.setState({
+      sessions: [
+        {
+          id: 'session-1',
+          title: 'Test Session',
+          createdAt: '',
+          modifiedAt: '',
+          messageCount: 0,
+          projectPath: '/workspace/project',
+          workDir: '/workspace/project',
+          workDirExists: true,
+        },
+      ],
+      activeSessionId: 'session-1',
+      isLoading: false,
+      error: null,
+      selectedProjects: [],
+      availableProjects: [],
+      fetchSessions: noopFetch,
+      createSession: vi.fn(),
+      deleteSession: vi.fn(),
+      renameSession: vi.fn(),
+      updateSessionTitle: vi.fn(),
+      setActiveSession: vi.fn(),
+      setSelectedProjects: vi.fn(),
+    })
     useAgentStore.setState({
-      agents: [],
+      activeAgents: [],
+      allAgents: [],
       isLoading: false,
       error: null,
       selectedAgent: null,
       fetchAgents: noopFetch,
+      selectAgent: (agent) => useAgentStore.setState({ selectedAgent: agent }),
     })
     useSkillStore.setState({
       skills: [],
@@ -137,26 +185,35 @@ describe('Settings > Agents tab', () => {
   })
 
   it('shows loading spinner when fetching agents', () => {
-    useAgentStore.setState({ isLoading: true, agents: [], fetchAgents: noopFetch })
+    useAgentStore.setState({ isLoading: true, allAgents: [], activeAgents: [], fetchAgents: noopFetch })
     render(<Settings />)
     switchToAgentsTab()
 
-    expect(screen.getByText('Installed Agents')).toBeInTheDocument()
     const spinner = document.querySelector('.animate-spin')
     expect(spinner).toBeInTheDocument()
   })
 
-  it('shows empty state when no agents installed', () => {
-    useAgentStore.setState({ agents: [], isLoading: false, fetchAgents: noopFetch })
+  it('uses the active session workDir even when settings tab is focused', async () => {
+    const fetchAgents = vi.fn()
+    useAgentStore.setState({
+      allAgents: [],
+      activeAgents: [],
+      isLoading: false,
+      fetchAgents,
+    })
+    useTabStore.setState({
+      activeTabId: SETTINGS_TAB_ID,
+      tabs: [{ sessionId: SETTINGS_TAB_ID, title: 'Settings', type: 'settings', status: 'idle' }],
+    })
+
     render(<Settings />)
     switchToAgentsTab()
 
-    expect(screen.getByText('No agents installed yet.')).toBeInTheDocument()
-    expect(screen.getByText(/Create .md or .yaml files/)).toBeInTheDocument()
+    expect(fetchAgents).toHaveBeenCalledWith('/workspace/project')
   })
 
   it('shows error state with retry button when API fails', () => {
-    useAgentStore.setState({ agents: [], isLoading: false, error: 'Network error', fetchAgents: noopFetch })
+    useAgentStore.setState({ allAgents: [], activeAgents: [], isLoading: false, error: 'Network error', fetchAgents: noopFetch })
     render(<Settings />)
     switchToAgentsTab()
 
@@ -164,77 +221,75 @@ describe('Settings > Agents tab', () => {
     expect(screen.getByText('Retry')).toBeInTheDocument()
   })
 
-  it('renders agent list with names and descriptions', () => {
-    useAgentStore.setState({ agents: MOCK_AGENTS, isLoading: false, fetchAgents: noopFetch })
+  it('renders grouped agent browser with source sections', () => {
+    useAgentStore.setState({
+      allAgents: MOCK_AGENTS,
+      activeAgents: MOCK_AGENTS.filter((agent) => agent.isActive),
+      isLoading: false,
+      fetchAgents: noopFetch,
+    })
     render(<Settings />)
     switchToAgentsTab()
 
+    expect(screen.getByText('Browse installed agents')).toBeInTheDocument()
+    expect(screen.getByText('Agent Browser')).toBeInTheDocument()
+    expect(screen.getAllByText('User').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Built-in').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Project').length).toBeGreaterThan(0)
     expect(screen.getByText('code-reviewer')).toBeInTheDocument()
-    expect(screen.getByText('Reviews code for quality and security')).toBeInTheDocument()
-    expect(screen.getByText('doc-writer')).toBeInTheDocument()
     expect(screen.getByText('Writes technical documentation')).toBeInTheDocument()
-    expect(screen.getByText('3 agents')).toBeInTheDocument()
+    expect(screen.getByText('Overridden by User')).toBeInTheDocument()
   })
 
-  it('shows model badge for agents with model defined', () => {
-    useAgentStore.setState({ agents: MOCK_AGENTS, isLoading: false, fetchAgents: noopFetch })
-    render(<Settings />)
-    switchToAgentsTab()
-
-    expect(screen.getByText('claude-sonnet-4-6')).toBeInTheDocument()
-    expect(screen.getByText('claude-haiku-4-5-20251001')).toBeInTheDocument()
-  })
-
-  it('shows "No description" for agents without description', () => {
-    useAgentStore.setState({ agents: MOCK_AGENTS, isLoading: false, fetchAgents: noopFetch })
-    render(<Settings />)
-    switchToAgentsTab()
-
-    expect(screen.getByText('No description')).toBeInTheDocument()
-  })
-
-  it('navigates to agent detail view when clicking an agent', () => {
-    useAgentStore.setState({ agents: MOCK_AGENTS, isLoading: false, fetchAgents: noopFetch })
+  it('opens agent detail with metadata cards and document prompt', () => {
+    useAgentStore.setState({
+      allAgents: MOCK_AGENTS,
+      activeAgents: MOCK_AGENTS.filter((agent) => agent.isActive),
+      isLoading: false,
+      fetchAgents: noopFetch,
+    })
     render(<Settings />)
     switchToAgentsTab()
 
     fireEvent.click(screen.getByText('code-reviewer'))
 
     expect(screen.getByText('Back to list')).toBeInTheDocument()
-    expect(screen.getByText('Reviews code for quality and security')).toBeInTheDocument()
-    expect(screen.getByText(/claude-sonnet-4-6/)).toBeInTheDocument()
-    expect(screen.getByText(/Read, Grep, Glob/)).toBeInTheDocument()
-  })
-
-  it('renders system prompt as Markdown in detail view', () => {
-    useAgentStore.setState({ agents: MOCK_AGENTS, isLoading: false, fetchAgents: noopFetch })
-    render(<Settings />)
-    switchToAgentsTab()
-
-    fireEvent.click(screen.getByText('code-reviewer'))
-
+    expect(screen.getByText('Agent Profile')).toBeInTheDocument()
+    expect(screen.getAllByText('claude-sonnet-4-6')[0]).toBeInTheDocument()
+    expect(screen.getByText('Read')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Code Reviewer' })).toBeInTheDocument()
-    expect(screen.getByText('You are an expert code reviewer.')).toBeInTheDocument()
+
+    const rendererRoot = screen.getByRole('heading', { name: 'Code Reviewer' }).closest('div[class*="prose"]')
+    expect(rendererRoot?.className).toContain('max-w-[72ch]')
   })
 
-  it('shows "no system prompt" message when agent has no prompt', () => {
-    useAgentStore.setState({ agents: MOCK_AGENTS, isLoading: false, fetchAgents: noopFetch })
+  it('shows no system prompt state when agent has no prompt', () => {
+    useAgentStore.setState({
+      allAgents: MOCK_AGENTS,
+      activeAgents: MOCK_AGENTS.filter((agent) => agent.isActive),
+      isLoading: false,
+      fetchAgents: noopFetch,
+    })
     render(<Settings />)
     switchToAgentsTab()
 
     fireEvent.click(screen.getByText('plain-agent'))
 
     expect(screen.getByText('No system prompt defined.')).toBeInTheDocument()
+    expect(screen.getByText('shadowed by User')).toBeInTheDocument()
   })
 
   it('navigates back to list from detail view', () => {
-    useAgentStore.setState({ agents: MOCK_AGENTS, isLoading: false, fetchAgents: noopFetch })
+    useAgentStore.setState({
+      allAgents: MOCK_AGENTS,
+      activeAgents: MOCK_AGENTS.filter((agent) => agent.isActive),
+      isLoading: false,
+      fetchAgents: noopFetch,
+    })
     render(<Settings />)
     switchToAgentsTab()
 
     fireEvent.click(screen.getByText('code-reviewer'))
-    expect(screen.getByText('Back to list')).toBeInTheDocument()
-
     fireEvent.click(screen.getByText('Back to list'))
 
     expect(screen.getByText('code-reviewer')).toBeInTheDocument()

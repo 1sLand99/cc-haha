@@ -14,12 +14,23 @@
 import { AgentService } from '../services/agentService.js'
 import { taskService } from '../services/taskService.js'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
+import {
+  resolveAgentModelDisplay,
+  resolveAgentOverrides,
+  type ResolvedAgent,
+} from '../../tools/AgentTool/agentDisplay.js'
+import {
+  clearAgentDefinitionsCache,
+  getAgentDefinitionsWithOverrides,
+  type AgentDefinition as SharedAgentDefinition,
+} from '../../tools/AgentTool/loadAgentsDir.js'
+import { getCwd } from '../../utils/cwd.js'
 
 const agentService = new AgentService()
 
 export async function handleAgentsApi(
   req: Request,
-  _url: URL,
+  url: URL,
   segments: string[],
 ): Promise<Response> {
   try {
@@ -29,7 +40,7 @@ export async function handleAgentsApi(
       return await handleTasksApi(req, segments)
     }
 
-    return await handleAgents(req, segments)
+    return await handleAgents(req, url, segments)
   } catch (error) {
     return errorResponse(error)
   }
@@ -39,6 +50,7 @@ export async function handleAgentsApi(
 
 async function handleAgents(
   req: Request,
+  url: URL,
   segments: string[],
 ): Promise<Response> {
   const method = req.method
@@ -46,8 +58,14 @@ async function handleAgents(
 
   // ── GET /api/agents ──────────────────────────────────────────────────
   if (method === 'GET' && !agentName) {
-    const agents = await agentService.listAgents()
-    return Response.json({ agents })
+    const cwd = url.searchParams.get('cwd') || getCwd()
+    const { activeAgents, allAgents } = await getAgentDefinitionsWithOverrides(cwd)
+    const resolvedAgents = resolveAgentOverrides(allAgents, activeAgents)
+
+    return Response.json({
+      activeAgents: activeAgents.map(agent => serializeActiveAgent(agent, true)),
+      allAgents: resolvedAgents.map(serializeResolvedAgent),
+    })
   }
 
   // ── GET /api/agents/:name ────────────────────────────────────────────
@@ -73,6 +91,7 @@ async function handleAgents(
       systemPrompt: body.systemPrompt as string | undefined,
       color: body.color as string | undefined,
     })
+    clearAgentDefinitionsCache()
     return Response.json({ ok: true }, { status: 201 })
   }
 
@@ -80,6 +99,7 @@ async function handleAgents(
   if (method === 'PUT' && agentName) {
     const body = await parseJsonBody(req)
     await agentService.updateAgent(agentName, body as Record<string, unknown>)
+    clearAgentDefinitionsCache()
     const updated = await agentService.getAgent(agentName)
     return Response.json({ agent: updated })
   }
@@ -87,6 +107,7 @@ async function handleAgents(
   // ── DELETE /api/agents/:name ─────────────────────────────────────────
   if (method === 'DELETE' && agentName) {
     await agentService.deleteAgent(agentName)
+    clearAgentDefinitionsCache()
     return Response.json({ ok: true })
   }
 
@@ -153,5 +174,47 @@ async function parseJsonBody(req: Request): Promise<Record<string, unknown>> {
     return (await req.json()) as Record<string, unknown>
   } catch {
     throw ApiError.badRequest('Invalid JSON body')
+  }
+}
+
+type ApiAgentDefinition = {
+  agentType: string
+  description?: string
+  model?: string
+  modelDisplay?: string
+  tools?: string[]
+  systemPrompt?: string
+  color?: string
+  source: SharedAgentDefinition['source']
+  baseDir?: string
+  isActive: boolean
+}
+
+type ApiResolvedAgentDefinition = ApiAgentDefinition & {
+  overriddenBy?: SharedAgentDefinition['source']
+}
+
+function serializeActiveAgent(
+  agent: SharedAgentDefinition,
+  isActive: boolean,
+): ApiAgentDefinition {
+  return {
+    agentType: agent.agentType,
+    description: agent.whenToUse,
+    model: agent.model,
+    modelDisplay: resolveAgentModelDisplay(agent),
+    tools: agent.tools,
+    systemPrompt: agent.getSystemPrompt.length === 0 ? agent.getSystemPrompt() : undefined,
+    color: agent.color,
+    source: agent.source,
+    baseDir: agent.baseDir,
+    isActive,
+  }
+}
+
+function serializeResolvedAgent(agent: ResolvedAgent): ApiResolvedAgentDefinition {
+  return {
+    ...serializeActiveAgent(agent, !agent.overriddenBy),
+    overriddenBy: agent.overriddenBy,
   }
 }

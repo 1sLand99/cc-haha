@@ -8,7 +8,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 
 vi.mock('../api/agents', () => ({
   agentsApi: {
-    list: vi.fn().mockResolvedValue({ agents: [] }),
+    list: vi.fn().mockResolvedValue({ activeAgents: [], allAgents: [] }),
   },
 }))
 
@@ -34,7 +34,8 @@ vi.mock('../pages/AdapterSettings', () => ({
 
 vi.mock('../stores/agentStore', () => ({
   useAgentStore: () => ({
-    agents: [],
+    activeAgents: [],
+    allAgents: [],
     isLoading: false,
     error: null,
     selectedAgent: null,
