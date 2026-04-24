@@ -34,6 +34,7 @@ export type SettingsTab =
   | 'general'
   | 'adapters'
   | 'install'
+  | 'terminal'
   | 'mcp'
   | 'agents'
   | 'skills'

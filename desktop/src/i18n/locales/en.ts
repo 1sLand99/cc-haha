@@ -51,9 +51,25 @@ export const en = {
   'settings.tab.permissions': 'Permissions',
   'settings.tab.general': 'General',
   'settings.tab.install': 'Install',
+  'settings.tab.terminal': 'Terminal',
   'settings.tab.skills': 'Skills',
   'settings.tab.mcp': 'MCP',
   'settings.tab.plugins': 'Plugins',
+
+  // Settings > Terminal
+  'settings.terminal.title': 'Terminal',
+  'settings.terminal.description': 'Run host-machine commands for plugin, skill, and MCP setup without leaving the desktop app.',
+  'settings.terminal.clear': 'Clear',
+  'settings.terminal.restart': 'Restart',
+  'settings.terminal.windowTitle': 'Host shell',
+  'settings.terminal.unavailableTitle': 'Desktop runtime required',
+  'settings.terminal.unavailableBody': 'Open this page in the packaged desktop app to start an interactive terminal.',
+  'settings.terminal.status.idle': 'Idle',
+  'settings.terminal.status.starting': 'Starting',
+  'settings.terminal.status.running': 'Running',
+  'settings.terminal.status.exited': 'Exited',
+  'settings.terminal.status.error': 'Error',
+  'settings.terminal.status.unavailable': 'Unavailable',
 
   // Settings > Claude Official Login
   'settings.claudeOfficialLogin.intro': 'Using official Claude models requires signing in to your Claude.ai account. Click the button below to open the official Claude login page in your browser; you\'ll be returned here after authorizing.',
