@@ -14,6 +14,7 @@ import { validateElectronIpcPayload } from '../../../electron/ipc/capabilities'
 
 export type ElectronHostBridge = {
   invoke<T>(channel: ElectronIpcChannel, payload?: unknown): Promise<T>
+  getPathForFile?(file: File): string
   subscribe<T>(
     channel: ElectronEventChannel,
     handler: (payload: T) => void,
@@ -86,6 +87,14 @@ export function createElectronHost(bridge: ElectronHostBridge): DesktopHost {
     clipboard: {
       readText: () => invoke(ELECTRON_IPC_CHANNELS.clipboardReadText),
       writeText: text => invoke(ELECTRON_IPC_CHANNELS.clipboardWriteText, text),
+    },
+    files: {
+      getPathForFile(file) {
+        const nativePath = bridge.getPathForFile?.(file)
+        if (nativePath) return nativePath
+        const legacyPath = (file as File & { path?: unknown }).path
+        return typeof legacyPath === 'string' ? legacyPath : ''
+      },
     },
     events: {
       listen: (_eventName, handler) => subscribe(ELECTRON_EVENT_CHANNELS.event, handler),

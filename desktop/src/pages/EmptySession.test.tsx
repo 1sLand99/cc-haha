@@ -149,6 +149,7 @@ import { useTabStore } from '../stores/tabStore'
 import { useUIStore } from '../stores/uiStore'
 import { usePluginStore } from '../stores/pluginStore'
 import type { RepositoryContextResult } from '../api/sessions'
+import { browserHost } from '../lib/desktopHost/browserHost'
 
 function okRepositoryContext(overrides: Partial<RepositoryContextResult> = {}): RepositoryContextResult {
   return {
@@ -719,6 +720,62 @@ describe('EmptySession', () => {
           type: 'file',
           name: 'session-context.log',
           path: '/Users/nanmi/drop/session-context.log',
+          data: undefined,
+        }),
+      ],
+    })
+  })
+
+  it('pastes copied desktop files into a new-session draft as path attachments', async () => {
+    mocks.isTauriRuntime = true
+    const copiedFile = new File(['{\"name\":\"cc-haha\"}'], 'ignored-name.json', {
+      type: 'application/json',
+    })
+    Object.defineProperty(copiedFile, 'path', {
+      configurable: true,
+      value: 'C:\\Users\\Nanmi\\Desktop\\project-context.json',
+    })
+    window.desktopHost = {
+      ...browserHost,
+      kind: 'electron',
+      isDesktop: true,
+      webview: {
+        ...browserHost.webview,
+        onDragDropEvent: vi.fn().mockResolvedValue(mocks.webviewUnlisten),
+      },
+    }
+
+    render(<EmptySession />)
+
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: {
+        files: [],
+        items: [{
+          kind: 'file',
+          type: 'application/json',
+          getAsFile: () => copiedFile,
+        }],
+      },
+    })
+
+    expect(await screen.findByText('project-context.json')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'use this context', selectionStart: 'use this context'.length },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Run/i }))
+
+    await waitFor(() => {
+      expect(mocks.createSession).toHaveBeenCalledWith({ permissionMode: 'default' })
+    })
+    expect(mocks.wsSend).toHaveBeenCalledWith('draft-session', {
+      type: 'user_message',
+      content: 'use this context',
+      attachments: [
+        expect.objectContaining({
+          type: 'file',
+          name: 'project-context.json',
+          path: 'C:\\Users\\Nanmi\\Desktop\\project-context.json',
           data: undefined,
         }),
       ],

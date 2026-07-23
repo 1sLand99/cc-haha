@@ -72,6 +72,12 @@ export const browserHost: DesktopHost = {
       unsupported('Writing clipboard text')
     },
   },
+  files: {
+    getPathForFile(file) {
+      const legacyPath = (file as File & { path?: unknown }).path
+      return typeof legacyPath === 'string' ? legacyPath : ''
+    },
+  },
   events: {
     async listen() {
       return noopUnlisten

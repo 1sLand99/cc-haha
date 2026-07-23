@@ -1292,7 +1292,53 @@ describe('ChatInput file mentions', () => {
     })
   })
 
-  it('ignores pasted images that finish loading after the prompt was sent', async () => {
+  it('pastes copied desktop files into the active session as path-only attachments', async () => {
+    installElectronFileHost()
+    const copiedFile = new File(['# Project notes'], 'ignored-name.md', { type: 'text/markdown' })
+    Object.defineProperty(copiedFile, 'path', {
+      configurable: true,
+      value: 'C:\\Users\\Nanmi\\Desktop\\project-notes.md',
+    })
+
+    render(<ChatInput compact />)
+
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.paste(input, {
+      clipboardData: {
+        files: [],
+        items: [{
+          kind: 'file',
+          type: 'text/markdown',
+          getAsFile: () => copiedFile,
+        }],
+      },
+    })
+
+    expect(await screen.findByText('project-notes.md')).toBeInTheDocument()
+
+    fireEvent.change(input, {
+      target: {
+        value: 'review this document',
+        selectionStart: 'review this document'.length,
+      },
+    })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(mocks.wsSend).toHaveBeenCalledWith(sessionId, {
+      type: 'user_message',
+      content: 'review this document',
+      attachments: [
+        expect.objectContaining({
+          type: 'file',
+          name: 'project-notes.md',
+          path: 'C:\\Users\\Nanmi\\Desktop\\project-notes.md',
+          data: undefined,
+        }),
+      ],
+    })
+  })
+
+  it('ignores pasted files that finish loading after the prompt was sent', async () => {
     class DeferredFileReader {
       result: string | ArrayBuffer | null = null
       onload: ((event: ProgressEvent<FileReader>) => void) | null = null
@@ -1311,7 +1357,9 @@ describe('ChatInput file mentions', () => {
 
     fireEvent.paste(input, {
       clipboardData: {
+        files: [],
         items: [{
+          kind: 'file',
           type: 'image/png',
           getAsFile: () => file,
         }],

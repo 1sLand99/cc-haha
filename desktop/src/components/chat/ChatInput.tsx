@@ -38,6 +38,7 @@ import { useMobileViewport } from '../../hooks/useMobileViewport'
 import { isDesktopRuntime } from '../../lib/desktopRuntime'
 import {
   filesToComposerAttachments,
+  getDataTransferFiles,
   selectNativeFileAttachments,
   type ComposerAttachment,
 } from '../../lib/composerAttachments'
@@ -835,42 +836,22 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
 
   const handlePaste = (event: React.ClipboardEvent) => {
     if (isMemberSession) return
-    const items = event.clipboardData?.items
-    if (!items) return
+    const files = getDataTransferFiles(event.clipboardData)
+    if (files.length === 0) return
 
-    let hasImage = false
-    for (let i = 0; i < items.length; i += 1) {
-      const item = items[i]
-      if (!item || !item.type.startsWith('image/')) continue
-
-      hasImage = true
-      event.preventDefault()
-      const file = item.getAsFile()
-      if (!file) continue
-
-      const id = `att-${Date.now()}-${Math.random().toString(36).slice(2)}`
-      const pasteGeneration = pasteGenerationRef.current
-      const pastedSessionId = activeTabId
-      const reader = new FileReader()
-      reader.onload = () => {
+    event.preventDefault()
+    const pasteGeneration = pasteGenerationRef.current
+    const pastedSessionId = activeTabId
+    void filesToComposerAttachments(files)
+      .then((nextAttachments) => {
         if (pasteGeneration !== pasteGenerationRef.current) return
         if (pastedSessionId !== useTabStore.getState().activeTabId) return
-        setComposerAttachments((prev) => [
-          ...prev,
-          {
-            id,
-            name: `pasted-image-${Date.now()}.png`,
-            type: 'image',
-            mimeType: file.type || 'image/png',
-            previewUrl: reader.result as string,
-            data: reader.result as string,
-          },
-        ])
-      }
-      reader.readAsDataURL(file)
-    }
-
-    if (!hasImage) return
+        if (nextAttachments.length === 0) return
+        setComposerAttachments((prev) => [...prev, ...nextAttachments])
+      })
+      .catch((error) => {
+        console.warn('[attachments] Failed to read pasted files', error)
+      })
   }
 
   const appendFiles = useCallback((files: FileList | File[]) => {

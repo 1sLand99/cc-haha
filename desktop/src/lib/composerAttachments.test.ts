@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { browserHost } from './desktopHost/browserHost'
-import { pathToComposerAttachment, selectNativeFileAttachments } from './composerAttachments'
+import {
+  filesToComposerAttachments,
+  getDataTransferFiles,
+  pathToComposerAttachment,
+  selectNativeFileAttachments,
+} from './composerAttachments'
 
 describe('composer attachment payloads', () => {
   afterEach(() => {
@@ -60,5 +65,62 @@ describe('composer attachment payloads', () => {
       '/workspace/a.txt',
       '/workspace/b.log',
     ])
+  })
+
+  it('keeps pasted desktop files as native path attachments across common file types', async () => {
+    const nativePaths = new Map<File, string>()
+    const files = [
+      new File(['# Notes'], 'notes.md', { type: 'text/markdown' }),
+      new File(['pdf'], 'brief.pdf', { type: 'application/pdf' }),
+      new File(['docx'], 'proposal.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      }),
+    ]
+    nativePaths.set(files[0]!, 'C:\\Users\\Nanmi\\Desktop\\notes.md')
+    nativePaths.set(files[1]!, 'C:\\Users\\Nanmi\\Desktop\\brief.pdf')
+    nativePaths.set(files[2]!, 'C:\\Users\\Nanmi\\Desktop\\proposal.docx')
+    window.desktopHost = {
+      ...browserHost,
+      kind: 'electron',
+      isDesktop: true,
+      files: {
+        getPathForFile: file => nativePaths.get(file) ?? '',
+      },
+    }
+
+    const attachments = await filesToComposerAttachments(files)
+
+    expect(attachments.map(({ name, path, data }) => ({ name, path, data }))).toEqual([
+      { name: 'notes.md', path: 'C:\\Users\\Nanmi\\Desktop\\notes.md', data: undefined },
+      { name: 'brief.pdf', path: 'C:\\Users\\Nanmi\\Desktop\\brief.pdf', data: undefined },
+      { name: 'proposal.docx', path: 'C:\\Users\\Nanmi\\Desktop\\proposal.docx', data: undefined },
+    ])
+  })
+
+  it('reads clipboard files from DataTransfer items when the files list is empty', () => {
+    const markdown = new File(['# Notes'], 'notes.md', { type: 'text/markdown' })
+    const dataTransfer = {
+      files: [],
+      items: [
+        { kind: 'string', getAsFile: () => null },
+        { kind: 'file', getAsFile: () => markdown },
+      ],
+    } as unknown as DataTransfer
+
+    expect(getDataTransferFiles(dataTransfer)).toEqual([markdown])
+  })
+
+  it('keeps every clipboard item when the browser files list is incomplete', () => {
+    const markdown = new File(['# Notes'], 'notes.md', { type: 'text/markdown' })
+    const spreadsheet = new File(['name,total'], 'budget.csv', { type: 'text/csv' })
+    const dataTransfer = {
+      files: [markdown],
+      items: [
+        { kind: 'file', getAsFile: () => markdown },
+        { kind: 'file', getAsFile: () => spreadsheet },
+      ],
+    } as unknown as DataTransfer
+
+    expect(getDataTransferFiles(dataTransfer)).toEqual([markdown, spreadsheet])
   })
 })

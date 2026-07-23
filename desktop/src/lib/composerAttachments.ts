@@ -44,11 +44,26 @@ export function pathsToComposerAttachments(filePaths: string[]): ComposerAttachm
 
 export function dataTransferHasFiles(dataTransfer: DataTransfer): boolean {
   const types = Array.from(dataTransfer.types ?? [])
-  return types.includes('Files') || dataTransfer.files.length > 0
+  const items = Array.from(dataTransfer.items ?? [])
+  return (
+    types.includes('Files') ||
+    dataTransfer.files.length > 0 ||
+    items.some((item) => item.kind === 'file')
+  )
+}
+
+export function getDataTransferFiles(dataTransfer: DataTransfer): File[] {
+  const files = Array.from(dataTransfer.files ?? [])
+  const itemFiles = Array.from(dataTransfer.items ?? []).flatMap((item) => {
+    if (item.kind !== 'file') return []
+    const file = item.getAsFile()
+    return file ? [file] : []
+  })
+  return itemFiles.length > files.length ? itemFiles : files
 }
 
 export async function dataTransferToComposerAttachments(dataTransfer: DataTransfer): Promise<ComposerAttachment[]> {
-  return filesToComposerAttachments(dataTransfer.files)
+  return filesToComposerAttachments(getDataTransferFiles(dataTransfer))
 }
 
 export async function selectNativeFileAttachments(): Promise<ComposerAttachment[] | null> {
@@ -81,8 +96,8 @@ function normalizeDialogSelection(selected: string | string[] | null): string[] 
 }
 
 function getNativeFilePath(file: File): string | undefined {
-  const path = (file as File & { path?: unknown }).path
-  return typeof path === 'string' && path.length > 0 ? path : undefined
+  const path = getDesktopHost().files.getPathForFile(file)
+  return path.length > 0 ? path : undefined
 }
 
 async function fileToComposerAttachment(file: File): Promise<ComposerAttachment | null> {

@@ -212,6 +212,9 @@ export type DesktopHost = {
     readText(): Promise<string>
     writeText(text: string): Promise<void>
   }
+  files: {
+    getPathForFile(file: File): string
+  }
   events: {
     listen<T>(eventName: string, handler: (payload: T) => void): Promise<DesktopHostUnlisten>
   }
