@@ -588,8 +588,31 @@ export function spawnSidecar(plan: SidecarPlan, deps: SpawnSidecarDeps = {}): Si
 
 export type KillSidecarDeps = {
   platform?: NodeJS.Platform
+  env?: NodeJS.ProcessEnv
   spawnAsync?: typeof spawn
   spawnSyncFn?: typeof spawnSync
+}
+
+function getWindowsEnv(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const normalizedName = name.toLowerCase()
+  return Object.entries(env)
+    .find(([key, value]) => key.toLowerCase() === normalizedName && value)?.[1]
+}
+
+export function resolveWindowsTaskkillExecutable(env: NodeJS.ProcessEnv = process.env): string {
+  const systemRoot = getWindowsEnv(env, 'SystemRoot') ?? getWindowsEnv(env, 'windir')
+  return systemRoot
+    ? path.win32.join(systemRoot, 'System32', 'taskkill.exe')
+    : 'taskkill.exe'
+}
+
+function fallbackToDirectSidecarKill(child: SidecarChild, error: unknown) {
+  console.error('[desktop] taskkill failed; falling back to direct sidecar termination', error)
+  try {
+    child.kill()
+  } catch (fallbackError) {
+    console.error('[desktop] direct sidecar termination failed', fallbackError)
+  }
 }
 
 /**
@@ -601,10 +624,24 @@ export type KillSidecarDeps = {
 export function killSidecar(child: SidecarChild, sync = false, deps: KillSidecarDeps = {}) {
   const platform = deps.platform ?? process.platform
   if (platform === 'win32' && child.pid) {
+    const command = resolveWindowsTaskkillExecutable(deps.env)
     const args = ['/F', '/T', '/PID', String(child.pid)]
     const options = { stdio: 'ignore', windowsHide: true } as const
-    if (sync) (deps.spawnSyncFn ?? spawnSync)('taskkill', args, options)
-    else (deps.spawnAsync ?? spawn)('taskkill', args, options)
+    if (sync) {
+      try {
+        const result = (deps.spawnSyncFn ?? spawnSync)(command, args, options)
+        if (result.error) fallbackToDirectSidecarKill(child, result.error)
+      } catch (error) {
+        fallbackToDirectSidecarKill(child, error)
+      }
+    } else {
+      try {
+        const killer = (deps.spawnAsync ?? spawn)(command, args, options)
+        killer.once('error', error => fallbackToDirectSidecarKill(child, error))
+      } catch (error) {
+        fallbackToDirectSidecarKill(child, error)
+      }
+    }
     return
   }
   child.kill()
