@@ -318,11 +318,13 @@ describe('Electron pet window service', () => {
   })
 
   it.each([
-    ['left', { x: -100, y: 220 }, { x: -136, y: 160 }],
-    ['right', { x: 1_000, y: 220 }, { x: 552, y: 160 }],
+    ['darwin', 'left', { x: -100, y: 220 }, { x: -136, y: 160 }],
+    ['darwin', 'right', { x: 1_000, y: 220 }, { x: 552, y: 160 }],
+    ['win32', 'left', { x: -100, y: 220 }, { x: -136, y: 160 }],
+    ['win32', 'right', { x: 1_000, y: 220 }, { x: 552, y: 160 }],
   ] as const)(
-    'lets the mascot reach the %s display edge through transparent window padding',
-    async (_edge, pointerEnd, expectedPosition) => {
+    'lets the %s mascot reach the %s display edge through transparent window padding',
+    async (platform, _edge, pointerEnd, expectedPosition) => {
       const petWindow = createFakeWindow({
         x: 100,
         y: 120,
@@ -334,7 +336,7 @@ describe('Electron pet window service', () => {
         getCurrentWorkArea: () => ({ x: 0, y: 25, width: 800, height: 575 }),
         getWorkAreaForPoint: () => ({ x: 0, y: 25, width: 800, height: 575 }),
         load: vi.fn().mockResolvedValue(undefined),
-        platform: 'darwin',
+        platform,
         preloadPath: '/app/electron-dist/preload.cjs',
       })
       await controller.show()
@@ -348,6 +350,43 @@ describe('Electron pet window service', () => {
       expect(lastDragBounds(petWindow)).toEqual(draggedTo(expectedPosition))
     },
   )
+
+  it('clamps dragging against the mascot measured in the real content box', async () => {
+    // The renderer measures the mascot against the live viewport, so a content
+    // area taller than the nominal height puts the mascot below the constant.
+    // Clamping the drag region to the constant would trim the mascot's bottom
+    // and stop it short of the work area floor.
+    const contentHeight = PET_WINDOW_HEIGHT + 40
+    const petWindow = createFakeWindow({
+      x: 100,
+      y: 120,
+      width: PET_WINDOW_WIDTH,
+      height: contentHeight,
+    })
+    const controller = new PetWindowController({
+      createWindow: vi.fn(() => petWindow) as never,
+      getCurrentWorkArea: () => ({ x: 0, y: 25, width: 800, height: 575 }),
+      getWorkAreaForPoint: () => ({ x: 0, y: 25, width: 800, height: 575 }),
+      load: vi.fn().mockResolvedValue(undefined),
+      platform: 'win32',
+      preloadPath: '/app/electron-dist/preload.cjs',
+    })
+    await controller.show()
+    controller.setInteractiveRegions(petWindow as never, [
+      { x: 136, y: contentHeight - 160, width: 112, height: 128 },
+    ])
+
+    controller.dragWindow(petWindow as never, { phase: 'start', x: 150, y: 180 })
+    controller.dragWindow(petWindow as never, { phase: 'end', x: 150, y: 2_000 })
+
+    expect(lastDragBounds(petWindow)).toEqual({
+      x: 100,
+      // Mascot bottom (y + 128) lands exactly on the work area floor.
+      y: 25 + 575 - (contentHeight - 160) - 128,
+      width: PET_WINDOW_WIDTH,
+      height: contentHeight,
+    })
+  })
 
   it('restores an edge position after the renderer reports the visible mascot region', async () => {
     let petWindow: ReturnType<typeof createFakeWindow> | undefined

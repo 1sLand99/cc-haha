@@ -137,9 +137,9 @@ export function clampPetWindowPosition(
 
 type PetWindowExtent = { width: number; height: number }
 
-// Renderer regions are measured against the live viewport, so the shape has to
-// be clamped to the real content box. Clamping to the nominal constants slices
-// off whatever sits below it once the content area is taller than expected.
+// Renderer regions are measured against the live viewport, so they have to be
+// clamped to the real content box. Clamping to the nominal constants slices off
+// whatever sits below it once the content area is taller than expected.
 function petWindowContentExtent(window: PetWindow): PetWindowExtent {
   const contentBounds = window.getContentBounds?.()
   const width = contentBounds?.width
@@ -150,11 +150,11 @@ function petWindowContentExtent(window: PetWindow): PetWindowExtent {
   }
 }
 
-function normalizePetWindowRegion(region: Rectangle): Rectangle {
-  const x = Math.max(0, Math.min(PET_WINDOW_WIDTH - 1, Math.round(region.x)))
-  const y = Math.max(0, Math.min(PET_WINDOW_HEIGHT - 1, Math.round(region.y)))
-  const right = Math.max(x + 1, Math.min(PET_WINDOW_WIDTH, Math.round(region.x + region.width)))
-  const bottom = Math.max(y + 1, Math.min(PET_WINDOW_HEIGHT, Math.round(region.y + region.height)))
+function normalizePetWindowRegion(region: Rectangle, extent: PetWindowExtent): Rectangle {
+  const x = Math.max(0, Math.min(extent.width - 1, Math.round(region.x)))
+  const y = Math.max(0, Math.min(extent.height - 1, Math.round(region.y)))
+  const right = Math.max(x + 1, Math.min(extent.width, Math.round(region.x + region.width)))
+  const bottom = Math.max(y + 1, Math.min(extent.height, Math.round(region.y + region.height)))
   return { x, y, width: right - x, height: bottom - y }
 }
 
@@ -361,22 +361,26 @@ export class PetWindowController {
       throw new Error('Pet window IPC sender does not own the companion window')
     }
     const platform = this.options.platform ?? process.platform
+    const extent = petWindowContentExtent(window)
     const primaryRegion = regions[0]
-    if (platform === 'darwin' && primaryRegion) {
-      this.visibleDragRegion = normalizePetWindowRegion(primaryRegion)
+    // The window is mostly transparent padding around the mascot, so dragging
+    // has to clamp against the mascot on every platform. Clamping against the
+    // whole window stops the mascot short of the display edges.
+    const dragRegion = primaryRegion
+      ? normalizePetWindowRegion(primaryRegion, extent)
+      : null
+    if (dragRegion) this.visibleDragRegion = dragRegion
+
+    if (platform === 'darwin' && dragRegion) {
       const requestedPosition = this.pendingRestoredPosition ?? window.getBounds()
       this.pendingRestoredPosition = null
       const anchor = {
-        x: requestedPosition.x + this.visibleDragRegion.x + Math.floor(this.visibleDragRegion.width / 2),
-        y: requestedPosition.y + this.visibleDragRegion.y + Math.floor(this.visibleDragRegion.height / 2),
+        x: requestedPosition.x + dragRegion.x + Math.floor(dragRegion.width / 2),
+        y: requestedPosition.y + dragRegion.y + Math.floor(dragRegion.height / 2),
       }
       const workArea = this.options.getWorkAreaForPoint?.(anchor)
         ?? this.options.getCurrentWorkArea()
-      const nextPosition = clampPetWindowPosition(
-        requestedPosition,
-        workArea,
-        this.visibleDragRegion,
-      )
+      const nextPosition = clampPetWindowPosition(requestedPosition, workArea, dragRegion)
       const bounds = window.getBounds()
       if (nextPosition.x !== bounds.x || nextPosition.y !== bounds.y) {
         window.setPosition(nextPosition.x, nextPosition.y, false)
@@ -385,18 +389,12 @@ export class PetWindowController {
 
     if (platform === 'darwin') return
 
-    const extent = petWindowContentExtent(window)
-    const shape = regions.flatMap((region) => {
-      const requestedLeft = Math.round(region.x) - PET_WINDOW_SHAPE_PADDING
-      const requestedTop = Math.round(region.y) - PET_WINDOW_SHAPE_PADDING
-      const requestedRight = Math.round(region.x + region.width) + PET_WINDOW_SHAPE_PADDING
-      const requestedBottom = Math.round(region.y + region.height) + PET_WINDOW_SHAPE_PADDING
-      const x = Math.max(0, Math.min(extent.width - 1, requestedLeft))
-      const y = Math.max(0, Math.min(extent.height - 1, requestedTop))
-      const right = Math.max(x + 1, Math.min(extent.width, requestedRight))
-      const bottom = Math.max(y + 1, Math.min(extent.height, requestedBottom))
-      return [{ x, y, width: right - x, height: bottom - y }]
-    })
+    const shape = regions.map((region) => normalizePetWindowRegion({
+      x: region.x - PET_WINDOW_SHAPE_PADDING,
+      y: region.y - PET_WINDOW_SHAPE_PADDING,
+      width: region.width + PET_WINDOW_SHAPE_PADDING * 2,
+      height: region.height + PET_WINDOW_SHAPE_PADDING * 2,
+    }, extent))
     if (shape.length > 0) window.setShape(shape)
   }
 
