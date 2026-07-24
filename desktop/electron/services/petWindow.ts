@@ -135,6 +135,21 @@ export function clampPetWindowPosition(
   }
 }
 
+type PetWindowExtent = { width: number; height: number }
+
+// Renderer regions are measured against the live viewport, so the shape has to
+// be clamped to the real content box. Clamping to the nominal constants slices
+// off whatever sits below it once the content area is taller than expected.
+function petWindowContentExtent(window: PetWindow): PetWindowExtent {
+  const contentBounds = window.getContentBounds?.()
+  const width = contentBounds?.width
+  const height = contentBounds?.height
+  return {
+    width: typeof width === 'number' && width > 0 ? Math.round(width) : PET_WINDOW_WIDTH,
+    height: typeof height === 'number' && height > 0 ? Math.round(height) : PET_WINDOW_HEIGHT,
+  }
+}
+
 function normalizePetWindowRegion(region: Rectangle): Rectangle {
   const x = Math.max(0, Math.min(PET_WINDOW_WIDTH - 1, Math.round(region.x)))
   const y = Math.max(0, Math.min(PET_WINDOW_HEIGHT - 1, Math.round(region.y)))
@@ -234,6 +249,7 @@ export class PetWindowController {
     window: PetWindow
     pointerStart: PetWindowPosition
     windowStart: PetWindowPosition
+    size: PetWindowExtent
     lastPosition: PetWindowPosition
   } | null = null
   private dragTimer: ReturnType<typeof setInterval> | null = null
@@ -369,15 +385,16 @@ export class PetWindowController {
 
     if (platform === 'darwin') return
 
+    const extent = petWindowContentExtent(window)
     const shape = regions.flatMap((region) => {
       const requestedLeft = Math.round(region.x) - PET_WINDOW_SHAPE_PADDING
       const requestedTop = Math.round(region.y) - PET_WINDOW_SHAPE_PADDING
       const requestedRight = Math.round(region.x + region.width) + PET_WINDOW_SHAPE_PADDING
       const requestedBottom = Math.round(region.y + region.height) + PET_WINDOW_SHAPE_PADDING
-      const x = Math.max(0, Math.min(PET_WINDOW_WIDTH - 1, requestedLeft))
-      const y = Math.max(0, Math.min(PET_WINDOW_HEIGHT - 1, requestedTop))
-      const right = Math.max(x + 1, Math.min(PET_WINDOW_WIDTH, requestedRight))
-      const bottom = Math.max(y + 1, Math.min(PET_WINDOW_HEIGHT, requestedBottom))
+      const x = Math.max(0, Math.min(extent.width - 1, requestedLeft))
+      const y = Math.max(0, Math.min(extent.height - 1, requestedTop))
+      const right = Math.max(x + 1, Math.min(extent.width, requestedRight))
+      const bottom = Math.max(y + 1, Math.min(extent.height, requestedBottom))
       return [{ x, y, width: right - x, height: bottom - y }]
     })
     if (shape.length > 0) window.setShape(shape)
@@ -402,6 +419,7 @@ export class PetWindowController {
         window,
         pointerStart: { x: pointerStart.x, y: pointerStart.y },
         windowStart: { x: bounds.x, y: bounds.y },
+        size: { width: bounds.width, height: bounds.height },
         lastPosition: { x: bounds.x, y: bounds.y },
       }
       if (this.options.getCursorScreenPoint) {
@@ -463,7 +481,15 @@ export class PetWindowController {
       && nextPosition.y === drag.lastPosition.y
     ) return
 
-    drag.window.setPosition(nextPosition.x, nextPosition.y, false)
+    // Windows implements setPosition as getSize() + setBounds(), and that DIP
+    // round trip grows the window a pixel at a time on fractional display
+    // scaling. Restating the size every tick keeps the drag size-neutral.
+    drag.window.setBounds({
+      x: nextPosition.x,
+      y: nextPosition.y,
+      width: drag.size.width,
+      height: drag.size.height,
+    })
     drag.lastPosition = nextPosition
   }
 

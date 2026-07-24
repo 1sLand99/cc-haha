@@ -6,6 +6,7 @@ import {
   PET_WINDOW_HEIGHT,
   PET_WINDOW_WIDTH,
   PetWindowController,
+  type PetWindowPosition,
   clampPetWindowPosition,
   getPetWindowBounds,
   petWindowStatePath,
@@ -20,12 +21,17 @@ const desktopRoot = existsSync(path.resolve(process.cwd(), 'electron', 'main.ts'
 const mainSource = readFileSync(path.join(desktopRoot, 'electron', 'main.ts'), 'utf8')
   .replace(/\r\n/g, '\n')
 
-function createFakeWindow(initialBounds = {
-  x: 100,
-  y: 100,
-  width: PET_WINDOW_WIDTH,
-  height: PET_WINDOW_HEIGHT,
-}) {
+function createFakeWindow(
+  initialBounds = {
+    x: 100,
+    y: 100,
+    width: PET_WINDOW_WIDTH,
+    height: PET_WINDOW_HEIGHT,
+  },
+  // Windows resolves setPosition as getSize() + setBounds(), and that DIP round
+  // trip grows the window by a pixel per call on fractional display scaling.
+  { positionDriftPx = 0 }: { positionDriftPx?: number } = {},
+) {
   const handlers = new Map<string, () => void>()
   let visible = false
   let destroyed = false
@@ -49,13 +55,26 @@ function createFakeWindow(initialBounds = {
     setIgnoreMouseEvents: vi.fn(),
     setShape: vi.fn(),
     getBounds: vi.fn(() => ({ ...bounds })),
+    getContentBounds: vi.fn(() => ({ ...bounds })),
+    setBounds: vi.fn((next: Partial<typeof bounds>) => {
+      bounds = { ...bounds, ...next }
+    }),
     setPosition: vi.fn((x: number, y: number) => {
-      bounds = { ...bounds, x, y }
+      bounds = { ...bounds, x, y, height: bounds.height + positionDriftPx }
     }),
     on: vi.fn((event: string, handler: () => void) => {
       handlers.set(event, handler)
     }),
   }
+}
+
+// Dragging moves the window with setBounds so the size is restated every tick.
+function lastDragBounds(window: ReturnType<typeof createFakeWindow>) {
+  return window.setBounds.mock.calls.at(-1)?.[0]
+}
+
+function draggedTo(position: PetWindowPosition) {
+  return { ...position, width: PET_WINDOW_WIDTH, height: PET_WINDOW_HEIGHT }
 }
 
 describe('Electron pet window service', () => {
@@ -283,15 +302,14 @@ describe('Electron pet window service', () => {
 
     controller.dragWindow(petWindow as never, { phase: 'start', x: 150, y: 180 })
     controller.dragWindow(petWindow as never, { phase: 'move', x: 190, y: 220 })
-    expect(petWindow.setPosition).toHaveBeenLastCalledWith(140, 160, false)
+    expect(lastDragBounds(petWindow)).toEqual(draggedTo({ x: 140, y: 160 }))
 
     controller.dragWindow(petWindow as never, { phase: 'end', x: 1_000, y: 900 })
     expect(getWorkAreaForPoint).toHaveBeenLastCalledWith({ x: 1_000, y: 900 })
-    expect(petWindow.setPosition).toHaveBeenLastCalledWith(
-      800 - PET_WINDOW_WIDTH,
-      25 + 575 - PET_WINDOW_HEIGHT,
-      false,
-    )
+    expect(lastDragBounds(petWindow)).toEqual(draggedTo({
+      x: 800 - PET_WINDOW_WIDTH,
+      y: 25 + 575 - PET_WINDOW_HEIGHT,
+    }))
     expect(writePosition).toHaveBeenCalledOnce()
     expect(writePosition).toHaveBeenCalledWith({
       x: 800 - PET_WINDOW_WIDTH,
@@ -327,11 +345,7 @@ describe('Electron pet window service', () => {
       controller.dragWindow(petWindow as never, { phase: 'start', x: 150, y: 180 })
       controller.dragWindow(petWindow as never, { phase: 'end', ...pointerEnd })
 
-      expect(petWindow.setPosition).toHaveBeenLastCalledWith(
-        expectedPosition.x,
-        expectedPosition.y,
-        false,
-      )
+      expect(lastDragBounds(petWindow)).toEqual(draggedTo(expectedPosition))
     },
   )
 
@@ -392,7 +406,7 @@ describe('Electron pet window service', () => {
       cursor = { x: 203, y: 227 }
       vi.advanceTimersByTime(16)
 
-      expect(petWindow.setPosition).toHaveBeenLastCalledWith(153, 167, false)
+      expect(lastDragBounds(petWindow)).toEqual(draggedTo({ x: 153, y: 167 }))
       expect(writePosition).not.toHaveBeenCalled()
 
       controller.dragWindow(petWindow as never, { phase: 'end', x: 203, y: 227 })
@@ -400,10 +414,10 @@ describe('Electron pet window service', () => {
       expect(writePosition).toHaveBeenCalledWith({ x: 153, y: 167 })
       expect(vi.getTimerCount()).toBe(0)
 
-      const setPositionCalls = petWindow.setPosition.mock.calls.length
+      const setBoundsCalls = petWindow.setBounds.mock.calls.length
       cursor = { x: 260, y: 280 }
       vi.advanceTimersByTime(32)
-      expect(petWindow.setPosition).toHaveBeenCalledTimes(setPositionCalls)
+      expect(petWindow.setBounds).toHaveBeenCalledTimes(setBoundsCalls)
     } finally {
       vi.useRealTimers()
     }
@@ -437,7 +451,7 @@ describe('Electron pet window service', () => {
         expect(vi.getTimerCount()).toBe(1)
         cursor = { x: 180, y: 200 }
         vi.advanceTimersByTime(16)
-        expect(petWindow.setPosition).toHaveBeenLastCalledWith(130, 140, false)
+        expect(lastDragBounds(petWindow)).toEqual(draggedTo({ x: 130, y: 140 }))
 
         if (action === 'hide') controller.hide()
         if (action === 'closed') petWindow.handlers.get('closed')?.()
@@ -446,10 +460,10 @@ describe('Electron pet window service', () => {
         expect(vi.getTimerCount()).toBe(0)
         expect(writePosition).toHaveBeenCalledOnce()
         expect(writePosition).toHaveBeenCalledWith({ x: 130, y: 140 })
-        const setPositionCalls = petWindow.setPosition.mock.calls.length
+        const setBoundsCalls = petWindow.setBounds.mock.calls.length
         cursor = { x: 260, y: 280 }
         vi.advanceTimersByTime(32)
-        expect(petWindow.setPosition).toHaveBeenCalledTimes(setPositionCalls)
+        expect(petWindow.setBounds).toHaveBeenCalledTimes(setBoundsCalls)
       } finally {
         vi.useRealTimers()
       }
@@ -533,6 +547,68 @@ describe('Electron pet window service', () => {
     expect(() => controller.setInteractiveRegions(otherWindow as never, [
       { x: 0, y: 0, width: 10, height: 10 },
     ])).toThrow('does not own')
+  })
+
+  it('shapes the Windows pet against the real content size, not the nominal height', async () => {
+    // A Windows content area can end up taller than the nominal height (DPI
+    // rounding, invisible frame). The mascot sits flush with the viewport
+    // bottom, so clamping the shape to the constant would slice its legs off.
+    const contentHeight = PET_WINDOW_HEIGHT + 40
+    const petWindow = createFakeWindow({
+      x: 100,
+      y: 120,
+      width: PET_WINDOW_WIDTH,
+      height: contentHeight,
+    })
+    const controller = new PetWindowController({
+      createWindow: vi.fn(() => petWindow) as never,
+      getCurrentWorkArea: () => ({ x: 0, y: 0, width: 1440, height: 900 }),
+      load: vi.fn().mockResolvedValue(undefined),
+      platform: 'win32',
+      preloadPath: '/app/electron-dist/preload.cjs',
+    })
+
+    await controller.show()
+    controller.setInteractiveRegions(petWindow as never, [
+      { x: 144, y: contentHeight - 114, width: 96, height: 104 },
+    ])
+
+    expect(petWindow.setShape).toHaveBeenLastCalledWith([
+      { x: 132, y: contentHeight - 126, width: 120, height: 126 },
+    ])
+  })
+
+  it('keeps the window size fixed across drag ticks so DIP rounding cannot grow it', async () => {
+    vi.useFakeTimers()
+    try {
+      const petWindow = createFakeWindow(
+        { x: 100, y: 120, width: PET_WINDOW_WIDTH, height: PET_WINDOW_HEIGHT },
+        { positionDriftPx: 1 },
+      )
+      let cursor = { x: 150, y: 180 }
+      const controller = new PetWindowController({
+        createWindow: vi.fn(() => petWindow) as never,
+        getCursorScreenPoint: () => cursor,
+        getCurrentWorkArea: () => ({ x: 0, y: 0, width: 1_600, height: 1_000 }),
+        getWorkAreaForPoint: () => ({ x: 0, y: 0, width: 1_600, height: 1_000 }),
+        load: vi.fn().mockResolvedValue(undefined),
+        platform: 'win32',
+        preloadPath: '/app/electron-dist/preload.cjs',
+      })
+      await controller.show()
+
+      controller.dragWindow(petWindow as never, { phase: 'start', x: 150, y: 180 })
+      for (let tick = 0; tick < 60; tick += 1) {
+        cursor = { x: cursor.x + 2, y: cursor.y + 2 }
+        vi.advanceTimersByTime(16)
+      }
+      controller.dragWindow(petWindow as never, { phase: 'end', ...cursor })
+
+      expect(petWindow.getBounds().width).toBe(PET_WINDOW_WIDTH)
+      expect(petWindow.getBounds().height).toBe(PET_WINDOW_HEIGHT)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('returns whether the native pet context menu close item was selected', async () => {
