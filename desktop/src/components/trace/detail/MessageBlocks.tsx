@@ -5,6 +5,11 @@ import type { NormalizedBlock, NormalizedMessage } from '../../../lib/trace/type
 import { MarkdownRenderer } from '../../markdown/MarkdownRenderer'
 import { CopyButton } from '../../shared/CopyButton'
 import { CodeViewer } from '../../chat/CodeViewer'
+import { Alert } from '../../ui/alert'
+import { Badge } from '../../ui/badge'
+import { Button } from '../../ui/button'
+import { Card } from '../../ui/card'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../../ui/collapsible'
 
 const LONG_TEXT_CHARS = 2000
 
@@ -28,21 +33,22 @@ const ROLE_STYLES: Record<NormalizedMessage['role'], { badge: string; container:
 }
 
 export function MessageBlocks({ message }: { message: NormalizedMessage }) {
+  const t = useTranslation()
   const styles = ROLE_STYLES[message.role]
   return (
-    <div
+    <Card
       className={`trace-message-cv rounded-[var(--radius-md)] border-l-2 px-3 py-2 ${styles.container}`}
       data-testid={`trace-message-${message.role}`}
     >
-      <div className={`text-[10px] font-semibold uppercase tracking-[0.12em] ${styles.badge}`}>
-        {message.role}
-      </div>
+      <Badge variant="outline" className={`min-h-4 rounded-[var(--radius-sm)] border-transparent bg-transparent px-0 py-0 text-[10px] font-semibold uppercase tracking-[0.12em] ${styles.badge}`}>
+        {messageRoleLabel(message.role, t)}
+      </Badge>
       <div className="mt-1.5 flex flex-col gap-2">
         {message.content.map((block, index) => (
           <BlockView key={index} block={block} />
         ))}
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -87,21 +93,18 @@ function ThinkingBlock({ thinking }: { thinking: string }) {
   const t = useTranslation()
   const [open, setOpen] = useState(false)
   return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)]"
-      >
-        {t('trace.detail.thinking')} · {t('trace.detail.chars', { count: thinking.length })}
-      </button>
-      {open ? (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button variant="outline" size="sm" className="h-6 rounded-[var(--radius-sm)] px-1.5 font-mono text-[10px] text-[var(--color-text-tertiary)]">
+          {t('trace.detail.thinking')} · {t('trace.detail.chars', { count: thinking.length })}
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
         <pre className="mt-1.5 max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words text-[11px] italic leading-5 text-[var(--color-text-tertiary)]">
           {thinking}
         </pre>
-      ) : null}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -123,8 +126,8 @@ function ToolUseBlock({ id, name, input }: { id?: string; name: string; input: u
 function ToolResultBlock({ toolUseId, content, isError }: { toolUseId?: string; content: unknown; isError?: boolean }) {
   const t = useTranslation()
   const text = extractPlainText(content)
-  return (
-    <div className={`min-w-0 ${isError ? 'rounded-[var(--radius-sm)] border border-[var(--color-error)]/40 p-1.5' : ''}`}>
+  const contentView = (
+    <>
       <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold text-[var(--color-text-secondary)]">
         <span className={isError ? 'text-[var(--color-error)]' : ''}>
           {isError ? t('trace.toolError') : t('trace.toolResult')}
@@ -138,8 +141,11 @@ function ToolResultBlock({ toolUseId, content, isError }: { toolUseId?: string; 
           ? <TextResult text={text} />
           : <CodeViewer code={safeJson(content)} language="json" maxLines={24} showLineNumbers />}
       </div>
-    </div>
+    </>
   )
+  return isError
+    ? <Alert variant="destructive" className="min-w-0 p-2">{contentView}</Alert>
+    : <div className="min-w-0">{contentView}</div>
 }
 
 function TextResult({ text }: { text: string }) {
@@ -153,10 +159,10 @@ function TextResult({ text }: { text: string }) {
 
 function ImageChip({ mediaType }: { mediaType?: string }) {
   return (
-    <span className="inline-flex w-fit items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-tertiary)]">
+    <Badge variant="outline" className="w-fit rounded-[var(--radius-sm)] px-1.5 py-0 font-mono text-[10px] text-[var(--color-text-tertiary)]">
       [image]
       {mediaType ? <span>{mediaType}</span> : null}
-    </span>
+    </Badge>
   )
 }
 
@@ -185,5 +191,17 @@ function safeJson(value: unknown): string {
     return JSON.stringify(value, null, 2) ?? 'null'
   } catch {
     return String(value)
+  }
+}
+
+function messageRoleLabel(
+  role: NormalizedMessage['role'],
+  t: ReturnType<typeof useTranslation>,
+): string {
+  switch (role) {
+    case 'assistant': return t('trace.message.assistant')
+    case 'system': return t('trace.message.system')
+    case 'tool': return t('trace.message.toolResult')
+    default: return t('trace.message.user')
   }
 }

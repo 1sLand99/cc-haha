@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
+import { Image, Maximize2 } from 'lucide-react'
 import { ImageGalleryModal } from './ImageGalleryModal'
 import { getBaseUrl } from '../../api/client'
 import { extractAssistantOutputTargets } from '../../lib/assistantOutputTargets'
 import { previewFsUrl } from '../../lib/handlePreviewLink'
 import { getServerBaseUrl } from '../../lib/desktopRuntime'
+import { Button } from '../ui/button'
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|bmp|avif|ico)$/i
 
@@ -105,16 +107,16 @@ export function InlineImageGallery({ text, sessionId, workDir }: Props) {
     <>
       <div className="mt-3 space-y-2">
         <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-outline)]">
-          <span className="material-symbols-outlined text-[12px]">image</span>
+          <Image aria-hidden className="size-3" />
           {images.length === 1 ? '1 image' : `${images.length} images`}
         </div>
         <div className={`grid gap-2 ${images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
           {images.map((img, i) => (
-            <button
+            <Button
               key={img.src}
-              type="button"
+              variant="ghost"
               onClick={() => setActiveIndex(i)}
-              className="group/image relative overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] text-left shadow-sm transition-all hover:shadow-md hover:border-[var(--color-brand)]/40"
+              className="group/image relative h-auto overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-0 text-left shadow-sm transition-all hover:border-[var(--color-brand)]/40 hover:shadow-md"
             >
               <img
                 src={img.src}
@@ -128,8 +130,8 @@ export function InlineImageGallery({ text, sessionId, workDir }: Props) {
                 }}
               />
               <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all group-hover/image:bg-black/20 group-hover/image:opacity-100">
-                <span className="material-symbols-outlined rounded-full bg-white/90 p-2 text-[20px] text-[var(--color-text-primary)] shadow-lg">
-                  fullscreen
+                <span className="rounded-full bg-white/90 p-2 text-[var(--color-text-primary)] shadow-lg">
+                  <Maximize2 aria-hidden className="size-5" />
                 </span>
               </div>
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-2.5 pb-2 pt-6">
@@ -137,7 +139,7 @@ export function InlineImageGallery({ text, sessionId, workDir }: Props) {
                   {img.name}
                 </span>
               </div>
-            </button>
+            </Button>
           ))}
         </div>
       </div>

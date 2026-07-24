@@ -20,7 +20,9 @@ const MODELS: ModelInfo[] = [
 
 async function clickByRole(name: RegExp | string) {
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name }))
+    const target = screen.queryByRole('button', { name })
+      ?? screen.getByRole('option', { name })
+    fireEvent.click(target)
     await Promise.resolve()
   })
 }
@@ -75,10 +77,10 @@ describe('ModelSelector', () => {
 
     await clickByRole(/Opus 4\.7/i)
 
-    expect(screen.getByRole('button', { name: /Fable 5/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Opus 4\.8/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Sonnet 5/ })).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /Opus 4\.7/ }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('option', { name: /Fable 5/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Opus 4\.8/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Sonnet 5/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Opus 4\.7/ })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('does not query official OAuth status when mounted', () => {
@@ -184,6 +186,22 @@ describe('ModelSelector', () => {
     expect(onChange).toHaveBeenCalledWith('beta')
   })
 
+  it('focuses the first model option when the current value is not in the menu', async () => {
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: MODELS,
+      currentModel: MODELS[0],
+    })
+
+    render(<ModelSelector value="missing-model" onChange={vi.fn()} />)
+
+    await clickByRole('Select model')
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /Alpha/ })).toHaveFocus()
+    })
+  })
+
   it('routes uncontrolled model changes through settings actions', async () => {
     const setModel = vi.fn(async () => {})
     useSettingsStore.setState({
@@ -236,7 +254,7 @@ describe('ModelSelector', () => {
 
     await clickByRole(/provider-main/i)
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /provider-fast/ }))
+      fireEvent.click(screen.getByRole('option', { name: /provider-fast/ }))
       await Promise.resolve()
     })
 
@@ -290,11 +308,9 @@ describe('ModelSelector', () => {
       await Promise.resolve()
     })
 
-    const flashOption = screen
-      .getAllByRole('button', { name: /deepseek-v4-flash/i })
-      .find((button) => button.textContent?.includes('Main Model'))
-    expect(flashOption).toBeDefined()
-    expect(flashOption?.className).toContain('border-[var(--color-model-option-selected-border)]')
+    const flashOption = screen.getByRole('option', { name: /deepseek-v4-flash/i })
+    expect(flashOption).toHaveAttribute('aria-selected', 'true')
+    expect(flashOption).toHaveClass('border-[var(--color-model-option-selected-border)]')
   })
 
   it('keeps runtime effort scoped to the selected session', async () => {
@@ -401,7 +417,7 @@ describe('ModelSelector', () => {
 
     await clickByRole(/GPT-5\.3 Codex/i)
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /GPT-5\.5/ }))
+      fireEvent.click(screen.getByRole('option', { name: /GPT-5\.5/ }))
       await Promise.resolve()
     })
 
@@ -470,9 +486,16 @@ describe('ModelSelector', () => {
     await clickByRole('Effort: Max')
     expect(screen.getByRole('slider', { name: 'Effort' })).toHaveAttribute('aria-valuemax', '4')
     expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(5)
-    fireEvent.keyDown(screen.getByRole('slider', { name: 'Effort' }), { key: 'Escape' })
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole('slider', { name: 'Effort' }), { key: 'Escape' })
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
 
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Effort: Max' })).toHaveFocus()
+    })
     await clickByRole(/GPT-5\.6-Sol/i)
+    expect(screen.getByTestId('model-selector-dropdown')).toBeInTheDocument()
     await clickByRole(/GPT-5\.5/)
 
     expect(useSessionRuntimeStore.getState().selections['session-openai-effort']).toEqual({
@@ -482,6 +505,9 @@ describe('ModelSelector', () => {
     })
 
     expect(screen.getByRole('button', { name: 'Effort: Medium' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /GPT-5\.5, ChatGPT Official/i })).toHaveFocus()
+    })
     await clickByRole('Effort: Medium')
     expect(screen.getByRole('slider', { name: 'Effort' })).toHaveAttribute('aria-valuemax', '3')
     fireEvent.keyDown(screen.getByRole('slider', { name: 'Effort' }), { key: 'End' })
@@ -522,7 +548,7 @@ describe('ModelSelector', () => {
     render(<ModelSelector runtimeKey="session-grok" />)
     await clickByRole(/Grok 4\.5/i)
     await act(async () => {
-      fireEvent.click(screen.getAllByRole('button', { name: /Grok 4\.5/i })[1]!)
+      fireEvent.click(screen.getByRole('option', { name: /Grok 4\.5/i }))
       await Promise.resolve()
     })
 
@@ -617,7 +643,7 @@ describe('ModelSelector', () => {
     expect(dropdown.textContent).toContain('Provider A')
   })
 
-  it('portals the dropdown outside clipping containers and positions it below the trigger', async () => {
+  it('uses the shadcn popover portal outside clipping containers', async () => {
     useSettingsStore.setState({
       locale: 'en',
       availableModels: MODELS,
@@ -654,9 +680,9 @@ describe('ModelSelector', () => {
     const dropdown = screen.getByTestId('model-selector-dropdown')
     expect(container.contains(dropdown)).toBe(false)
     expect(document.body.contains(dropdown)).toBe(true)
-    expect(dropdown.className).toContain('fixed')
-    expect(dropdown.style.top).toBe('158px')
-    expect(dropdown.style.left).toBe('160px')
-    expect(dropdown.style.width).toBe('360px')
+    expect(dropdown).toHaveAttribute('data-slot', 'popover-content')
+    expect(dropdown).toHaveClass('w-[360px]')
+    expect(dropdown.parentElement).toHaveStyle({ position: 'fixed' })
+    expect(screen.getByRole('listbox', { name: 'Model Configuration' })).toBeInTheDocument()
   })
 })

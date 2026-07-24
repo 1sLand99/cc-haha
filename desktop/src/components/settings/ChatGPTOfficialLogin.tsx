@@ -6,6 +6,11 @@ import { useHahaOpenAIOAuthStore } from '../../stores/hahaOpenAIOAuthStore'
 import { useTranslation } from '../../i18n'
 import { copyTextToClipboard } from '../chat/clipboard'
 import { getDesktopHost } from '../../lib/desktopHost'
+import { Alert, AlertDescription } from '../ui/alert'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { LoadingButton } from '../ui/custom/loading-button'
+import { Skeleton } from '../ui/skeleton'
 
 export function ChatGPTOfficialLogin() {
   const t = useTranslation()
@@ -67,30 +72,33 @@ export function ChatGPTOfficialLogin() {
   }
 
   const manualAuthorizeButton = manualAuthorizeUrl ? (
-    <button
-      type="button"
+    <Button
+      variant="secondary"
+      size="sm"
       onClick={handleCopyAuthorizeUrl}
-      className="inline-flex items-center gap-1.5 self-start rounded-md border border-[var(--color-border-separator)] bg-[var(--color-surface)] px-3 py-1.5 text-xs transition-colors hover:bg-[var(--color-surface-hover)]"
+      className="self-start"
     >
       <Copy className="h-3.5 w-3.5" aria-hidden="true" />
       {t('settings.chatgptOfficialLogin.copyAuthorizeUrl')}
-    </button>
+    </Button>
   ) : null
 
   if (status === null) {
     if (error) {
       return (
         <div data-testid="chatgpt-official-login" className="flex flex-col gap-2">
-          <div className="text-xs text-[var(--color-error)]">
-            {t('settings.chatgptOfficialLogin.errorPrefix')}{error}
-          </div>
+          <Alert variant="destructive" className="py-2">
+            <AlertDescription className="text-[var(--color-error)]">
+              {t('settings.chatgptOfficialLogin.errorPrefix')}{error}
+            </AlertDescription>
+          </Alert>
           {manualAuthorizeButton}
         </div>
       )
     }
     return (
-      <div data-testid="chatgpt-official-login" className="text-xs text-[var(--color-text-tertiary)]">
-        {t('common.loading')}
+      <div data-testid="chatgpt-official-login" role="status" aria-label={t('common.loading')}>
+        <Skeleton className="h-5 w-32" />
       </div>
     )
   }
@@ -98,21 +106,21 @@ export function ChatGPTOfficialLogin() {
   if (status.loggedIn) {
     const accountLabel = status.email || status.accountId || t('settings.chatgptOfficialLogin.accountUnknown')
     return (
-      <div data-testid="chatgpt-official-login" className="flex items-center gap-3 text-sm">
-        <span className="text-[var(--color-success)]">
+      <div data-testid="chatgpt-official-login" className="flex flex-wrap items-center gap-3 text-sm">
+        <Badge variant="outline" className="border-[var(--color-success)]/35 text-[var(--color-success)]">
           {t('settings.chatgptOfficialLogin.loggedInPrefix')} {accountLabel}
-        </span>
-        <button
-          type="button"
+        </Badge>
+        <LoadingButton
+          variant="secondary"
+          size="sm"
           onClick={logout}
-          disabled={isLoading}
-          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border-separator)] bg-[var(--color-surface)] px-3 py-1 text-xs transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+          loading={isLoading}
         >
           <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
           {isLoading
             ? t('settings.chatgptOfficialLogin.logoutProcessing')
             : t('settings.chatgptOfficialLogin.logoutButton')}
-        </button>
+        </LoadingButton>
       </div>
     )
   }
@@ -122,21 +130,22 @@ export function ChatGPTOfficialLogin() {
       <div className="text-sm text-[var(--color-text-secondary)]">
         {t('settings.chatgptOfficialLogin.intro')}
       </div>
-      <button
-        type="button"
+      <LoadingButton
+        className="self-start"
         onClick={handleLogin}
-        disabled={isLoading}
-        className="inline-flex items-center gap-2 self-start rounded-md bg-[image:var(--gradient-btn-primary)] px-4 py-2 text-sm text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)] transition-opacity hover:brightness-105 disabled:opacity-50"
+        loading={isLoading}
       >
         <LogIn className="h-4 w-4" aria-hidden="true" />
         {isLoading
           ? t('settings.chatgptOfficialLogin.loginStarting')
           : t('settings.chatgptOfficialLogin.loginButton')}
-      </button>
+      </LoadingButton>
       {error && (
-        <div className="text-xs text-[var(--color-error)]">
-          {t('settings.chatgptOfficialLogin.errorPrefix')}{error}
-        </div>
+        <Alert variant="destructive" className="py-2">
+          <AlertDescription className="text-[var(--color-error)]">
+            {t('settings.chatgptOfficialLogin.errorPrefix')}{error}
+          </AlertDescription>
+        </Alert>
       )}
       {manualAuthorizeButton}
     </div>

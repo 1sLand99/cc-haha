@@ -1,9 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useMemo } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { TargetIcon } from '../common/TargetIcon'
+import { Button } from '../ui/button'
+import { IconButton } from '../ui/custom/icon-button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
 
 type Props = {
   path: string | null | undefined
@@ -15,38 +22,11 @@ export function OpenProjectMenu({ path }: Props) {
   const primaryTargetId = useOpenTargetStore((state) => state.primaryTargetId)
   const ensureTargets = useOpenTargetStore((state) => state.ensureTargets)
   const openTarget = useOpenTargetStore((state) => state.openTarget)
-  const [open, setOpen] = useState(false)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!path) {
-      setOpen(false)
-      return
-    }
+    if (!path) return
     void ensureTargets()
   }, [ensureTargets, path])
-
-  useEffect(() => {
-    if (!open) return
-
-    const handleDocumentMouseDown = (event: MouseEvent) => {
-      const target = event.target as Node
-      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return
-      setOpen(false)
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-
-    document.addEventListener('mousedown', handleDocumentMouseDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleDocumentMouseDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [open])
 
   const primaryTarget = useMemo(
     () => targets.find((target) => target.id === primaryTargetId) ?? targets[0] ?? null,
@@ -60,8 +40,6 @@ export function OpenProjectMenu({ path }: Props) {
       await openTarget(targetId, path)
     } catch {
       // Store state already records the failure; keep the control responsive.
-    } finally {
-      setOpen(false)
     }
   }
 
@@ -71,58 +49,46 @@ export function OpenProjectMenu({ path }: Props) {
     ? t('openProject.openProject')
     : t('openProject.openIn', { target: primaryTarget.label })
 
-  const rect = buttonRef.current?.getBoundingClientRect()
-
-  return (
-    <div className="relative flex items-center">
-      <button
-        ref={buttonRef}
-        type="button"
-        aria-label={buttonLabel}
-        aria-haspopup={hasMenu ? 'menu' : undefined}
-        aria-expanded={hasMenu ? open : undefined}
-        title={buttonLabel}
-        onClick={() => {
-          if (hasMenu) {
-            setOpen((value) => !value)
-            return
-          }
-          void handleOpenTarget(primaryTarget.id)
-        }}
-        className={`inline-flex h-8 items-center justify-center gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] text-[var(--color-text-tertiary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${
-          hasMenu
-            ? 'min-w-[2.75rem] px-2 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]'
-            : 'w-8 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]'
-        }`}
+  if (!hasMenu) {
+    return (
+      <IconButton
+        label={buttonLabel}
+        variant="outline"
+        size="icon-sm"
+        onClick={() => void handleOpenTarget(primaryTarget.id)}
       >
         <TargetIcon target={primaryTarget} />
-        {hasMenu && <ChevronDown size={14} strokeWidth={1.9} />}
-      </button>
+      </IconButton>
+    )
+  }
 
-      {open && hasMenu && rect ? createPortal(
-        <div
-          ref={menuRef}
-          role="menu"
-          className="fixed z-50 min-w-[220px] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-dropdown)]"
-          style={{ top: rect.bottom + 6, right: Math.max(12, window.innerWidth - rect.right) }}
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          aria-label={buttonLabel}
+          className="min-w-11 gap-1 px-2 text-[var(--color-text-tertiary)]"
         >
-          {targets.map((target) => (
-            <button
-              key={target.id}
-              type="button"
-              role="menuitem"
-              onClick={() => void handleOpenTarget(target.id)}
-              className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm font-medium text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:bg-[var(--color-surface-hover)]"
-            >
-              <span className="flex h-7 w-7 items-center justify-center text-[var(--color-text-secondary)]">
-                <TargetIcon target={target} size={24} />
-              </span>
-              <span className="min-w-0 truncate">{target.label}</span>
-            </button>
-          ))}
-        </div>,
-        document.body,
-      ) : null}
-    </div>
+          <TargetIcon target={primaryTarget} />
+          <ChevronDown className="size-3.5" aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[220px]">
+        {targets.map((target) => (
+          <DropdownMenuItem
+            key={target.id}
+            onSelect={() => void handleOpenTarget(target.id)}
+            className="gap-3 py-2.5 font-medium"
+          >
+            <span className="flex size-7 items-center justify-center text-[var(--color-text-secondary)]">
+              <TargetIcon target={target} size={24} />
+            </span>
+            <span className="min-w-0 truncate">{target.label}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, ChevronUp, Search, X } from 'lucide-react'
+import { FindInPageBar } from '@/components/ui/custom/find-in-page-bar'
 import {
   getConversationFindController,
   getConversationFindRevision,
@@ -39,6 +39,8 @@ export function FindInPageModal({ open, onClose }: Props) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [auxiliaryRevision, setAuxiliaryRevision] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
+  const wasOpenRef = useRef(false)
   const rangesRef = useRef<Range[]>([])
   const conversationControllerRef = useRef<ConversationFindController | null>(null)
   const lastSearchQueryRef = useRef('')
@@ -63,8 +65,19 @@ export function FindInPageModal({ open, onClose }: Props) {
       setDebouncedQuery('')
       setCount(0)
       setActiveIndex(0)
+      if (wasOpenRef.current) {
+        openerRef.current?.focus()
+        openerRef.current = null
+      }
+      wasOpenRef.current = false
       return
     }
+    if (!wasOpenRef.current) {
+      openerRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+    }
+    wasOpenRef.current = true
     setQuery('')
     setDebouncedQuery('')
     setCount(0)
@@ -198,56 +211,22 @@ export function FindInPageModal({ open, onClose }: Props) {
   if (!open) return null
 
   return createPortal(
-    <div className="fixed right-3 top-3 z-50" data-find-bar>
+    <div className="fixed right-3 top-3 z-[70]">
       <style>{`
         ::highlight(${RESULTS_HL}) { background-color: rgba(250, 204, 21, 0.45); color: inherit; }
         ::highlight(${ACTIVE_HL}) { background-color: rgba(249, 115, 22, 0.9); color: #fff; }
       `}</style>
-      <div
-        className="glass-panel flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-2 py-1.5 shadow-lg"
-        role="dialog"
-        aria-label="Find in page"
-      >
-        <Search className="h-4 w-4 shrink-0 text-[var(--color-text-tertiary)]" aria-hidden="true" />
-        <input
-          ref={inputRef}
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Find"
-          className="w-52 bg-transparent text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-        />
-        <span className="min-w-[48px] shrink-0 px-1 text-center text-[11px] tabular-nums text-[var(--color-text-tertiary)]">
-          {count > 0 ? `${activeIndex + 1} / ${count}` : (debouncedQuery.trim() ? '0' : '')}
-        </span>
-        <button
-          type="button"
-          onClick={() => step(false)}
-          disabled={count === 0}
-          aria-label="Previous match"
-          className="flex h-6 w-6 items-center justify-center rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40"
-        >
-          <ChevronUp className="h-4 w-4" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          onClick={() => step(true)}
-          disabled={count === 0}
-          aria-label="Next match"
-          className="flex h-6 w-6 items-center justify-center rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40"
-        >
-          <ChevronDown className="h-4 w-4" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close find bar"
-          className="flex h-6 w-6 items-center justify-center rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
-        >
-          <X className="h-4 w-4" aria-hidden="true" />
-        </button>
-      </div>
+      <FindInPageBar
+        ref={inputRef}
+        query={query}
+        resultLabel={count > 0 ? `${activeIndex + 1} / ${count}` : (debouncedQuery.trim() ? '0' : '')}
+        count={count}
+        onQueryChange={(event) => setQuery(event.target.value)}
+        onInputKeyDown={onKeyDown}
+        onPrevious={() => step(false)}
+        onNext={() => step(true)}
+        onClose={onClose}
+      />
     </div>,
     document.body,
   )
@@ -326,7 +305,7 @@ function paint(ranges: Range[], activeIndex: number) {
 }
 
 function clearHighlights() {
-  const highlights = (CSS as any).highlights as Map<string, unknown> | undefined
+  const highlights = (globalThis as any).CSS?.highlights as Map<string, unknown> | undefined
   highlights?.delete(RESULTS_HL)
   highlights?.delete(ACTIVE_HL)
 }

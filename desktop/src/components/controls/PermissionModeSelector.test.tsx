@@ -83,6 +83,16 @@ function makeChatSession(chatState: PerSessionState['chatState']): PerSessionSta
   }
 }
 
+function openPermissionMenu(name = 'Ask permissions') {
+  const trigger = screen.getByRole('button', { name })
+  fireEvent.keyDown(trigger, { key: 'Enter' })
+  return trigger
+}
+
+function getPermissionItem(name: RegExp | string) {
+  return screen.getByRole('menuitemradio', { name })
+}
+
 describe('PermissionModeSelector', () => {
   beforeEach(() => {
     viewportMocks.isMobile = false
@@ -134,8 +144,8 @@ describe('PermissionModeSelector', () => {
 
     render(<PermissionModeSelector />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Auto accept edits/ }))
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Auto accept edits/))
 
     expect(setGlobalPermissionMode).not.toHaveBeenCalled()
     expect(setSessionPermissionMode).toHaveBeenCalledWith('current-tab', 'acceptEdits')
@@ -148,16 +158,16 @@ describe('PermissionModeSelector', () => {
 
     const trigger = screen.getByRole('button', { name: 'Ask permissions' })
     expect(trigger).toHaveClass('h-11', 'w-11')
-    expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+    expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
 
     fireEvent.click(trigger)
 
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
-    expect(trigger).toHaveAttribute('aria-controls', 'permission-mode-menu')
+    expect(trigger.getAttribute('aria-controls')).toMatch(/^permission-mode-menu-/)
     expect(screen.getByRole('dialog', { name: 'Execution Permissions' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: /Auto accept edits/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Auto accept edits' })).toBeInTheDocument()
   })
 
   it('uses the active tab workspace when showing the bypass confirmation path', () => {
@@ -195,10 +205,10 @@ describe('PermissionModeSelector', () => {
 
     render(<PermissionModeSelector compact />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Bypass permissions/ }))
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Bypass permissions/))
 
-    expect(screen.getByRole('dialog', { name: 'Enable bypass mode' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Enable bypass mode' })).toBeInTheDocument()
     expect(screen.getByText('C:\\Users\\LinTan\\MyScript\\test5')).toBeInTheDocument()
     expect(screen.queryByText('C:\\Users\\LinTan')).not.toBeInTheDocument()
   })
@@ -259,8 +269,8 @@ describe('PermissionModeSelector', () => {
     render(<PermissionModeSelector />)
 
     const trigger = screen.getByRole('button', { name: 'Ask permissions' })
-    fireEvent.click(trigger)
-    expect(screen.getByRole('menuitem', { name: /Auto accept edits/ })).toBeInTheDocument()
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+    expect(getPermissionItem(/Auto accept edits/)).toBeInTheDocument()
 
     act(() => {
       useChatStore.setState({
@@ -271,7 +281,7 @@ describe('PermissionModeSelector', () => {
     })
 
     expect(trigger).toBeDisabled()
-    expect(screen.queryByRole('menuitem', { name: /Auto accept edits/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitemradio', { name: /Auto accept edits/ })).not.toBeInTheDocument()
   })
 
   it('closes an open bypass confirmation when the session turn starts', () => {
@@ -287,9 +297,9 @@ describe('PermissionModeSelector', () => {
 
     render(<PermissionModeSelector />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Bypass permissions/ }))
-    expect(screen.getByRole('dialog', { name: 'Enable bypass mode' })).toBeInTheDocument()
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Bypass permissions/))
+    expect(screen.getByRole('alertdialog', { name: 'Enable bypass mode' })).toBeInTheDocument()
 
     act(() => {
       useChatStore.setState({
@@ -299,7 +309,7 @@ describe('PermissionModeSelector', () => {
       })
     })
 
-    expect(screen.queryByRole('dialog', { name: 'Enable bypass mode' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: 'Enable bypass mode' })).not.toBeInTheDocument()
   })
 
   it('rejects a stale menu action when the turn starts before click dispatch', () => {
@@ -316,8 +326,8 @@ describe('PermissionModeSelector', () => {
     })
 
     render(<PermissionModeSelector />)
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    const menuItem = screen.getByRole('menuitem', { name: /Auto accept edits/ })
+    openPermissionMenu()
+    const menuItem = getPermissionItem(/Auto accept edits/)
 
     act(() => {
       useChatStore.setState({
@@ -345,8 +355,8 @@ describe('PermissionModeSelector', () => {
     })
 
     render(<PermissionModeSelector />)
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Bypass permissions/ }))
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Bypass permissions/))
     const confirmButton = screen.getByRole('button', { name: 'Enable bypass' })
 
     act(() => {
@@ -376,8 +386,8 @@ describe('PermissionModeSelector', () => {
     })
 
     render(<PermissionModeSelector />)
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    const menuItem = screen.getByRole('menuitem', { name: /Auto accept edits/ })
+    openPermissionMenu()
+    const menuItem = getPermissionItem(/Auto accept edits/)
 
     act(() => {
       useTabStore.setState({
@@ -405,8 +415,8 @@ describe('PermissionModeSelector', () => {
     })
 
     render(<PermissionModeSelector />)
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Bypass permissions/ }))
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Bypass permissions/))
     const confirmButton = screen.getByRole('button', { name: 'Enable bypass' })
 
     act(() => {
@@ -418,7 +428,7 @@ describe('PermissionModeSelector', () => {
     })
 
     expect(setSessionPermissionMode).not.toHaveBeenCalled()
-    expect(screen.queryByRole('dialog', { name: 'Enable bypass mode' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: 'Enable bypass mode' })).not.toBeInTheDocument()
   })
 
   it('reports controlled permission changes through onChange', () => {
@@ -426,8 +436,8 @@ describe('PermissionModeSelector', () => {
 
     render(<PermissionModeSelector value="default" onChange={onChange} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Auto accept edits/ }))
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Auto accept edits/))
 
     expect(onChange).toHaveBeenCalledWith('acceptEdits')
   })
@@ -435,9 +445,9 @@ describe('PermissionModeSelector', () => {
   it('shows Auto beside the existing permission modes', () => {
     render(<PermissionModeSelector value="default" onChange={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
+    openPermissionMenu()
 
-    expect(screen.getByRole('menuitem', { name: /Auto mode/ })).toBeInTheDocument()
+    expect(getPermissionItem(/Auto mode/)).toBeInTheDocument()
   })
 
   it('uses the automatic-execution glyph for Auto mode', () => {
@@ -445,14 +455,14 @@ describe('PermissionModeSelector', () => {
       <PermissionModeSelector value="default" onChange={vi.fn()} />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    const autoItem = screen.getByRole('menuitem', { name: /Auto mode/ })
-    expect(autoItem.querySelector('.material-symbols-outlined')).toHaveTextContent('autoplay')
-    expect(autoItem.querySelector('.material-symbols-outlined')).not.toHaveTextContent('auto_awesome')
+    openPermissionMenu()
+    const autoItem = getPermissionItem(/Auto mode/)
+    expect(autoItem.querySelector('.lucide-bot')).toBeInTheDocument()
+    expect(autoItem.querySelector('.material-symbols-outlined')).not.toBeInTheDocument()
 
     rerender(<PermissionModeSelector value="auto" onChange={vi.fn()} />)
-    expect(screen.getByRole('button', { name: 'Auto mode' }))
-      .toHaveTextContent('autoplay')
+    expect(screen.getByRole('button', { name: 'Auto mode' }).querySelector('.lucide-bot'))
+      .toBeInTheDocument()
   })
 
   it('renders the visually larger Auto glyph at a reduced size', () => {
@@ -460,17 +470,17 @@ describe('PermissionModeSelector', () => {
       <PermissionModeSelector value="default" onChange={vi.fn()} />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
+    openPermissionMenu()
     const autoIcon = screen
-      .getByRole('menuitem', { name: /Auto mode/ })
-      .querySelector('.material-symbols-outlined')
-    expect(autoIcon).toHaveClass('text-[18px]')
+      .getByRole('menuitemradio', { name: /Auto mode/ })
+      .querySelector('.lucide-bot')
+    expect(autoIcon).toHaveClass('size-5')
 
     rerender(<PermissionModeSelector value="auto" onChange={vi.fn()} />)
     const triggerIcon = screen
       .getByRole('button', { name: 'Auto mode' })
-      .querySelector('.material-symbols-outlined')
-    expect(triggerIcon).toHaveClass('text-[12px]')
+      .querySelector('.lucide-bot')
+    expect(triggerIcon).toHaveClass('size-3.5')
   })
 
   it('does not change mode when first-use Auto confirmation is cancelled', () => {
@@ -479,14 +489,14 @@ describe('PermissionModeSelector', () => {
 
     render(<PermissionModeSelector value="default" onChange={onChange} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Auto mode/ }))
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Auto mode/))
 
-    expect(screen.getByRole('dialog', { name: 'Enable Auto mode?' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Enable Auto mode?' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
     expect(onChange).not.toHaveBeenCalled()
-    expect(screen.queryByRole('dialog', { name: 'Enable Auto mode?' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: 'Enable Auto mode?' })).not.toBeInTheDocument()
   })
 
   it('persists first-use consent before selecting Auto', async () => {
@@ -499,8 +509,8 @@ describe('PermissionModeSelector', () => {
 
     render(<PermissionModeSelector value="default" onChange={onChange} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Auto mode/ }))
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Auto mode/))
     fireEvent.click(screen.getByRole('button', { name: 'Enable Auto mode' }))
 
     await waitFor(() => {
@@ -519,11 +529,11 @@ describe('PermissionModeSelector', () => {
 
     render(<PermissionModeSelector value="default" onChange={onChange} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Auto mode/ }))
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Auto mode/))
 
     expect(onChange).not.toHaveBeenCalled()
-    expect(screen.getByRole('dialog', { name: 'Enable Auto mode?' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Enable Auto mode?' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Enable Auto mode' }))
 
@@ -551,8 +561,8 @@ describe('PermissionModeSelector', () => {
 
     render(<PermissionModeSelector />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Auto mode/ }))
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Auto mode/))
     fireEvent.click(screen.getByRole('button', { name: 'Enable Auto mode' }))
 
     await waitFor(() => {
@@ -577,8 +587,8 @@ describe('PermissionModeSelector', () => {
 
     render(<PermissionModeSelector value="default" onChange={onChange} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Auto mode/ }))
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Auto mode/))
     fireEvent.click(screen.getByRole('button', { name: 'Enable Auto mode' }))
     act(() => {
       useTabStore.setState({
@@ -602,8 +612,8 @@ describe('PermissionModeSelector', () => {
 
     render(<PermissionModeSelector value="default" onChange={onChange} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Auto mode/ }))
+    openPermissionMenu()
+    fireEvent.click(getPermissionItem(/Auto mode/))
     fireEvent.click(screen.getByRole('button', { name: 'Enable Auto mode' }))
 
     await waitFor(() => {
@@ -612,7 +622,7 @@ describe('PermissionModeSelector', () => {
         message: 'Could not save Auto consent',
       })
     })
-    expect(screen.getByRole('dialog', { name: 'Enable Auto mode?' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Enable Auto mode?' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Enable Auto mode' })).toBeEnabled()
     expect(onChange).not.toHaveBeenCalled()
   })
@@ -636,7 +646,7 @@ describe('PermissionModeSelector', () => {
     const trigger = screen.getByRole('button', { name: 'Ask permissions' })
     expect(trigger).toBeDisabled()
     fireEvent.click(trigger)
-    expect(screen.queryByRole('menuitem', { name: /Auto mode/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitemradio', { name: /Auto mode/ })).not.toBeInTheDocument()
     expect(setSessionPermissionMode).not.toHaveBeenCalled()
   })
 
@@ -644,12 +654,12 @@ describe('PermissionModeSelector', () => {
     render(<PermissionModeSelector />)
 
     const trigger = screen.getByRole('button', { name: 'Ask permissions' })
-    fireEvent.click(trigger)
-    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.keyDown(trigger, { key: 'Enter' })
+    expect(getPermissionItem(/Ask permissions/)).toBeInTheDocument()
 
-    fireEvent.click(trigger)
+    fireEvent.keyDown(trigger, { key: 'Enter' })
 
-    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('menuitemradio')).not.toBeInTheDocument()
   })
 
   it('closes the permission menu when the active tab changes', () => {
@@ -665,7 +675,7 @@ describe('PermissionModeSelector', () => {
     })
 
     render(<PermissionModeSelector />)
-    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
+    openPermissionMenu()
 
     act(() => {
       useTabStore.setState({
@@ -681,16 +691,16 @@ describe('PermissionModeSelector', () => {
     render(<PermissionModeSelector />)
 
     const openDialog = () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
-      fireEvent.click(screen.getByRole('menuitem', { name: /Bypass permissions/ }))
+      openPermissionMenu()
+      fireEvent.click(getPermissionItem(/Bypass permissions/))
     }
 
     openDialog()
-    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }))
-    expect(screen.queryByRole('dialog', { name: 'Enable bypass mode' })).not.toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole('alertdialog', { name: 'Enable bypass mode' }), { key: 'Escape' })
+    expect(screen.queryByRole('alertdialog', { name: 'Enable bypass mode' })).not.toBeInTheDocument()
 
     openDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(screen.queryByRole('dialog', { name: 'Enable bypass mode' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: 'Enable bypass mode' })).not.toBeInTheDocument()
   })
 })

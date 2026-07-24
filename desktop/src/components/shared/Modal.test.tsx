@@ -60,18 +60,18 @@ describe('Modal', () => {
     await waitFor(() => expect(document.activeElement).toBe(close))
 
     last.focus()
-    fireEvent.keyDown(document, { key: 'Tab' })
+    fireEvent.keyDown(last, { key: 'Tab' })
     expect(document.activeElement).toBe(close)
 
     close.focus()
-    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })
     expect(document.activeElement).toBe(last)
 
     rerender(view(false))
     await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
 
-  it('keeps a busy confirmation open for Escape, backdrop, and close-button attempts', async () => {
+  it('keeps a busy confirmation open for Escape and backdrop attempts', async () => {
     const onClose = vi.fn()
     const view = (open: boolean) => (
       <>
@@ -92,10 +92,9 @@ describe('Modal', () => {
     screen.getByRole('button', { name: 'Start rebuild' }).focus()
     rerender(view(true))
 
-    const dialog = await screen.findByRole('dialog', { name: 'Rebuild local index' })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Rebuild local index' })
     fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.click(dialog.previousElementSibling!)
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }))
 
     expect(onClose).not.toHaveBeenCalled()
     expect(document.body.contains(dialog)).toBe(true)

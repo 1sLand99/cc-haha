@@ -1,5 +1,6 @@
 import { useEffect, useState, type PointerEventHandler, type ReactNode } from 'react'
 import { copyTextToClipboard } from '../chat/clipboard'
+import { Button } from '../ui/button'
 
 type Props = {
   text: string
@@ -47,8 +48,9 @@ export function CopyButton({
     : (displayLabel ?? label)
 
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={handleCopy}
       onPointerUp={onPointerUp}
       className={className}
@@ -56,6 +58,6 @@ export function CopyButton({
       title={currentLabel}
     >
       {buttonText}
-    </button>
+    </Button>
   )
 }

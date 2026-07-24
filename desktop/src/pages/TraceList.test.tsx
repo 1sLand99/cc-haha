@@ -102,10 +102,14 @@ describe('TraceList', () => {
   })
 
   it('renders rows with title, model chips, failure count and metrics', async () => {
-    render(<TraceList />)
+    const { container } = render(<TraceList />)
 
     const row = await findTraceRow(/Debug stuck agent/)
     expect(tracesApi.list).toHaveBeenCalledWith({ limit: 50, offset: 0, query: '' })
+    expect(container.querySelector('[data-slot="input"]')).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-slot="card"]').length).toBeGreaterThan(0)
+    expect(within(row).getAllByRole('button')[0]).toHaveAttribute('data-slot', 'button')
+    expect(within(row).getByText('sonnet-4-5')).toHaveAttribute('data-slot', 'badge')
 
     // header: storage dir + collection badge + aggregate chips
     expect(screen.getByText('/tmp/cc-haha/traces')).toBeInTheDocument()
@@ -174,7 +178,7 @@ describe('TraceList', () => {
     expect(tracesApi.deleteSession).not.toHaveBeenCalled()
     expect(screen.getByText('Delete trace data for "Debug stuck agent"? Chat history is not deleted.')).toBeInTheDocument()
 
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Delete trace session' })).getByRole('button', { name: 'Delete' }))
+    fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Delete trace session' })).getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => {
       expect(tracesApi.deleteSession).toHaveBeenCalledWith('session-trace-list')
@@ -184,6 +188,44 @@ describe('TraceList', () => {
     })
     expect(tracesApi.list).toHaveBeenNthCalledWith(2, { limit: 50, offset: 0, query: '' })
     expect(useTabStore.getState().activeTabId).toBeNull()
+  })
+
+  it('keeps delete failures inside the shadcn alert dialog and restores trigger focus on cancel', async () => {
+    vi.mocked(tracesApi.deleteSession).mockRejectedValueOnce(new Error('trace file is busy'))
+
+    render(<TraceList />)
+
+    const row = await findTraceRow(/Debug stuck agent/)
+    const deleteButton = within(row).getByRole('button', { name: 'Delete trace' })
+    fireEvent.click(deleteButton)
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Delete trace session' })
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus())
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+    expect(await within(dialog).findByText('trace file is busy')).toBeInTheDocument()
+    expect(screen.getByText('Debug stuck agent')).toBeInTheDocument()
+    expect(dialog.querySelector('[data-slot="alert"]')).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(deleteButton).toHaveFocus())
+  })
+
+  it('shows a destructive shadcn alert and retries an initial list failure', async () => {
+    vi.mocked(tracesApi.list)
+      .mockRejectedValueOnce(new Error('trace index unavailable'))
+      .mockResolvedValueOnce(traceList)
+
+    render(<TraceList />)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveAttribute('data-slot', 'alert')
+    expect(within(alert).getByText('trace index unavailable')).toBeInTheDocument()
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+
+    expect(await screen.findByText('Debug stuck agent')).toBeInTheDocument()
+    expect(tracesApi.list).toHaveBeenCalledTimes(2)
   })
 
   it('opens General settings from the trace settings button', async () => {

@@ -1437,11 +1437,13 @@ export class ConversationService {
         cleanEnv.ANTHROPIC_MODEL,
     )
 
-    const cliDiagnosticsPath = diagnosticsService.getCliDiagnosticsPath()
+    let cliDiagnosticsPath: string | undefined
     try {
-      fs.mkdirSync(path.dirname(cliDiagnosticsPath), { recursive: true })
+      await diagnosticsService.prepareCliDiagnosticsStorage()
+      cliDiagnosticsPath = diagnosticsService.getCliDiagnosticsPath()
     } catch {
-      // Diagnostics must never block session startup.
+      // Diagnostics must never block session startup or point the child at an
+      // unsafe path when private storage could not be prepared.
     }
 
     return {
@@ -1478,7 +1480,7 @@ export class ConversationService {
       // forever while the UI shows "running" (#766). It can also double-run
       // tools (upstream inc-4258).
       CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: cleanEnv.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK || '1',
-      CLAUDE_CODE_DIAGNOSTICS_FILE: cliDiagnosticsPath,
+      ...(cliDiagnosticsPath ? { CLAUDE_CODE_DIAGNOSTICS_FILE: cliDiagnosticsPath } : {}),
       CLAUDE_COWORK_MEMORY_PATH_OVERRIDE: this.resolveDesktopAutoMemoryPath(workDir),
       CALLER_DIR: workDir,
       PWD: workDir,

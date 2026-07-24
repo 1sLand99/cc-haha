@@ -35,6 +35,42 @@ describe('Electron IPC capabilities', () => {
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalWrite, { sessionId: '1', data: 'pwd\n' })).toBe(false)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: 80, rows: 24, cwd: '/tmp' })).toBe(true)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: '80', rows: 24 })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: 80, rows: 24, shell: '/bin/sh' })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: Number.NaN, rows: 24 })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: 80.5, rows: 24 })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: 1_001, rows: 24 })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: 80, rows: Number.POSITIVE_INFINITY })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: 80, rows: 24, cwd: 'x'.repeat(4_097) })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalWrite, { sessionId: 0, data: 'pwd\n' })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalWrite, { sessionId: 1.5, data: 'pwd\n' })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalWrite, {
+      sessionId: Number.MAX_SAFE_INTEGER + 1,
+      data: 'pwd\n',
+    })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalWrite, {
+      sessionId: 1,
+      data: 'x'.repeat(1_048_577),
+    })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalWrite, {
+      sessionId: 1,
+      data: 'pwd\n',
+      extra: true,
+    })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalResize, {
+      sessionId: 1,
+      cols: 80,
+      rows: 24,
+    })).toBe(true)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalResize, {
+      sessionId: 1,
+      cols: Number.NaN,
+      rows: 24,
+    })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalKill, { sessionId: -1 })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalKill, {
+      sessionId: 1,
+      extra: true,
+    })).toBe(false)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.updateCheck, { proxy: 'http://127.0.0.1:7890' })).toBe(true)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.updateCheck, { proxy: '' })).toBe(false)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.updateCheck, { proxy: 'http://127.0.0.1:7890', extra: true })).toBe(false)

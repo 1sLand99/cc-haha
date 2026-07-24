@@ -1,15 +1,37 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import {
+  AlertCircle,
+  ArrowLeft,
+  Bot,
+  ChevronRight,
+  Network,
+  Sparkles,
+  Zap,
+} from 'lucide-react'
 import { usePluginStore } from '../../stores/pluginStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useTranslation } from '../../i18n'
 import { useUIStore } from '../../stores/uiStore'
-import { Button } from '../shared/Button'
-import { ConfirmDialog } from '../shared/ConfirmDialog'
 import type { PluginCapabilityKey } from '../../types/plugin'
 import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
 import { useSkillStore } from '../../stores/skillStore'
 import { useAgentStore } from '../../stores/agentStore'
 import { useMcpStore } from '../../stores/mcpStore'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog'
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
+import { LoadingButton } from '../ui/custom/loading-button'
+import { Skeleton } from '../ui/skeleton'
 
 const CAPABILITY_ORDER: PluginCapabilityKey[] = [
   'lspServers',
@@ -38,9 +60,40 @@ export function PluginDetail() {
   const t = useTranslation()
   const [actionKey, setActionKey] = useState<string | null>(null)
   const [showUninstallDialog, setShowUninstallDialog] = useState(false)
+  const [uninstallError, setUninstallError] = useState<string | null>(null)
+  const uninstallTriggerRef = useRef<HTMLButtonElement>(null)
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const currentWorkDir = activeSession?.workDir || undefined
+
+  const addRuntimeAwareToast = (
+    successMessage: string,
+    successType: 'success' | 'warning' = 'success',
+  ) => {
+    const { lastSessionReload: sessionReload, refreshWarning } =
+      usePluginStore.getState()
+    if (refreshWarning) {
+      addToast({
+        type: 'warning',
+        message: t('settings.plugins.refreshAfterMutationFailed', {
+          error: refreshWarning,
+        }),
+      })
+      return
+    }
+    if (activeSessionId && sessionReload && !sessionReload.applied) {
+      addToast({
+        type: 'warning',
+        message: t(
+          sessionReload.reason === 'not_running'
+            ? 'settings.plugins.runtimeNotRunning'
+            : 'settings.plugins.runtimeApplyFailed',
+        ),
+      })
+      return
+    }
+    addToast({ type: successType, message: successMessage })
+  }
 
   const otherCapabilityItems = useMemo(
     () =>
@@ -53,9 +106,14 @@ export function PluginDetail() {
 
   if (isDetailLoading) {
     return (
-      <div className="flex justify-center py-12">
-        <div className="animate-spin w-5 h-5 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
-      </div>
+      <Card data-testid="plugin-detail-skeleton" aria-busy="true">
+        <CardContent className="grid gap-4 p-6">
+          <Skeleton className="h-7 w-28" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-10 w-80 max-w-full" />
+          <Skeleton className="h-64 w-full" />
+        </CardContent>
+      </Card>
     )
   }
 
@@ -68,7 +126,7 @@ export function PluginDetail() {
     setActionKey(key)
     try {
       const message = await fn()
-      addToast({ type: 'success', message })
+      addRuntimeAwareToast(message)
     } catch (err) {
       addToast({
         type: 'error',
@@ -83,14 +141,14 @@ export function PluginDetail() {
     setActionKey('reload')
     try {
       const summary = await reloadPlugins(currentWorkDir, activeSessionId || undefined)
-      addToast({
-        type: summary.errors > 0 ? 'warning' : 'success',
-        message: t('settings.plugins.reloadToast', {
+      addRuntimeAwareToast(
+        t('settings.plugins.reloadToast', {
           enabled: String(summary.enabled),
           skills: String(summary.skills),
           errors: String(summary.errors),
         }),
-      })
+        summary.errors > 0 ? 'warning' : 'success',
+      )
     } catch (err) {
       addToast({
         type: 'error',
@@ -175,17 +233,18 @@ export function PluginDetail() {
   return (
     <div className="flex flex-col gap-4 min-w-0">
       <div>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={clearSelection}
-          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
         >
-          <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+          <ArrowLeft aria-hidden="true" />
           {t('settings.plugins.back')}
-        </button>
+        </Button>
       </div>
 
-      <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] overflow-hidden">
-        <div className="grid gap-4 px-5 py-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.9fr)] lg:items-start">
+      <Card className="overflow-hidden">
+        <CardContent className="grid gap-4 px-5 py-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.9fr)] lg:items-start">
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-tertiary)] mb-2">
               {t('settings.plugins.entryEyebrow')}
@@ -219,76 +278,83 @@ export function PluginDetail() {
             <DetailStat
               label={t('settings.plugins.summary.skills')}
               value={String(selectedPlugin.componentCounts.skills)}
-              icon="auto_awesome"
+              icon={Sparkles}
             />
             <DetailStat
               label={t('settings.plugins.summary.agents')}
               value={String(selectedPlugin.componentCounts.agents)}
-              icon="smart_toy"
+              icon={Bot}
             />
             <DetailStat
               label={t('settings.plugins.summary.mcp')}
               value={String(selectedPlugin.componentCounts.mcpServers)}
-              icon="hub"
+              icon={Network}
             />
             <DetailStat
               label={t('settings.plugins.summary.hooks')}
               value={String(selectedPlugin.componentCounts.hooks)}
-              icon="bolt"
+              icon={Zap}
             />
           </div>
-        </div>
-      </section>
+        </CardContent>
+      </Card>
 
-      <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4">
+      <Card className="bg-[var(--color-surface)]">
+        <CardContent className="px-5 py-4">
         <div className="flex flex-wrap gap-2">
           {canMutate && (
             selectedPlugin.enabled ? (
-              <Button
+              <LoadingButton
                 variant="secondary"
                 size="sm"
                 loading={isApplying && actionKey === 'disable'}
+                disabled={isApplying && actionKey !== 'disable'}
                 onClick={() => void runAction('disable', () => disablePlugin(selectedPlugin.id, selectedPlugin.scope, currentWorkDir, activeSessionId || undefined))}
               >
                 {t('settings.plugins.disable')}
-              </Button>
+              </LoadingButton>
             ) : (
-              <Button
+              <LoadingButton
                 size="sm"
                 loading={isApplying && actionKey === 'enable'}
+                disabled={isApplying && actionKey !== 'enable'}
                 onClick={() => void runAction('enable', () => enablePlugin(selectedPlugin.id, selectedPlugin.scope, currentWorkDir, activeSessionId || undefined))}
               >
                 {t('settings.plugins.enable')}
-              </Button>
+              </LoadingButton>
             )
           )}
 
           {canMutate && (
-            <Button
+            <LoadingButton
               variant="secondary"
               size="sm"
               loading={isApplying && actionKey === 'update'}
+              disabled={isApplying && actionKey !== 'update'}
               onClick={() => void runAction('update', () => updatePlugin(selectedPlugin.id, selectedPlugin.scope, currentWorkDir, activeSessionId || undefined))}
             >
               {t('settings.plugins.update')}
-            </Button>
+            </LoadingButton>
           )}
 
-          <Button
+          <LoadingButton
             variant="secondary"
             size="sm"
             loading={isApplying && actionKey === 'reload'}
+            disabled={isApplying && actionKey !== 'reload'}
             onClick={() => void handleReload()}
           >
             {t('settings.plugins.apply')}
-          </Button>
+          </LoadingButton>
 
           {canMutate && (
             <Button
-              variant="danger"
+              ref={uninstallTriggerRef}
+              variant="destructive"
               size="sm"
-              loading={isApplying && actionKey === 'uninstall'}
+              disabled={isApplying}
               onClick={() => {
+                setUninstallError(null)
                 setShowUninstallDialog(true)
               }}
             >
@@ -308,19 +374,18 @@ export function PluginDetail() {
         <p className="mt-3 text-xs text-[var(--color-text-tertiary)]">
           {t('settings.plugins.applyHint')}
         </p>
-      </section>
+        </CardContent>
+      </Card>
 
       {selectedPlugin.errors.length > 0 && (
-        <section className="rounded-2xl border border-[var(--color-error)]/20 bg-[var(--color-error)]/6 px-5 py-4">
+        <Alert variant="destructive" className="px-5 py-4">
           <div className="flex items-center gap-2 mb-3">
-            <span className="material-symbols-outlined text-[18px] text-[var(--color-error)]">
-              error
-            </span>
-            <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
+            <AlertCircle className="size-[18px]" aria-hidden="true" />
+            <AlertTitle>
               {t('settings.plugins.errorsTitle')}
-            </h4>
+            </AlertTitle>
           </div>
-          <div className="flex flex-col gap-2">
+          <AlertDescription className="flex flex-col gap-2">
             {selectedPlugin.errors.map((error) => (
               <div
                 key={error}
@@ -329,20 +394,20 @@ export function PluginDetail() {
                 {error}
               </div>
             ))}
-          </div>
-        </section>
+          </AlertDescription>
+        </Alert>
       )}
 
-      <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
-        <div className="px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
-          <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
+      <Card className="overflow-hidden bg-[var(--color-surface)]">
+        <CardHeader className="gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-5 py-4">
+          <CardTitle className="text-sm">
             {t('settings.plugins.capabilitiesTitle')}
-          </h4>
-          <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+          </CardTitle>
+          <CardDescription className="text-xs">
             {t('settings.plugins.capabilitiesHint')}
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 p-4">
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 p-4">
           <CapabilityPreviewSection
             title={t('settings.plugins.capabilityLabel.skills')}
             count={selectedPlugin.skillEntries.length}
@@ -448,27 +513,29 @@ export function PluginDetail() {
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {otherCapabilityItems.map(({ key, items }) => (
-              <div
+              <Card
                 key={key}
-                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3"
+                className="bg-[var(--color-surface-container-low)]"
               >
+                <CardContent className="px-4 py-3">
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <div className="text-sm font-semibold text-[var(--color-text-primary)]">
                     {t(`settings.plugins.capabilityLabel.${key}`)}
                   </div>
-                  <span className="text-[11px] text-[var(--color-text-tertiary)]">
+                  <Badge variant="secondary">
                     {items.length}
-                  </span>
+                  </Badge>
                 </div>
                 {items.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {items.map((item) => (
-                      <span
+                      <Badge
                         key={item}
-                        className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[11px] text-[var(--color-text-secondary)] break-all"
+                        variant="outline"
+                        className="break-all bg-[var(--color-surface)] text-[11px]"
                       >
                         {item}
-                      </span>
+                      </Badge>
                     ))}
                   </div>
                 ) : (
@@ -476,29 +543,77 @@ export function PluginDetail() {
                     {t('settings.plugins.capabilityEmpty')}
                   </div>
                 )}
-              </div>
+                </CardContent>
+              </Card>
             ))}
           </div>
-        </div>
-      </section>
+        </CardContent>
+      </Card>
 
-      <ConfirmDialog
+      <AlertDialog
         open={showUninstallDialog}
-        onClose={() => {
-          if (isApplying && actionKey === 'uninstall') return
-          setShowUninstallDialog(false)
+        onOpenChange={(open) => {
+          if (!open && !(isApplying && actionKey === 'uninstall')) {
+            setShowUninstallDialog(false)
+            setUninstallError(null)
+          }
         }}
-        onConfirm={async () => {
-          setShowUninstallDialog(false)
-          await runAction('uninstall', () => uninstallPlugin(selectedPlugin.id, selectedPlugin.scope, false, currentWorkDir, activeSessionId || undefined))
-        }}
-        title={t('settings.plugins.uninstall')}
-        body={t('settings.plugins.confirmUninstall', { name: selectedPlugin.name })}
-        confirmLabel={t('settings.plugins.uninstall')}
-        cancelLabel={t('common.cancel')}
-        confirmVariant="danger"
-        loading={isApplying && actionKey === 'uninstall'}
-      />
+      >
+        <AlertDialogContent
+          onEscapeKeyDown={(event) => {
+            if (isApplying && actionKey === 'uninstall') event.preventDefault()
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            uninstallTriggerRef.current?.focus()
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('settings.plugins.uninstall')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('settings.plugins.confirmUninstall', { name: selectedPlugin.name })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {uninstallError && (
+            <Alert variant="destructive">
+              <AlertDescription className="break-words">{uninstallError}</AlertDescription>
+            </Alert>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isApplying && actionKey === 'uninstall'}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <LoadingButton
+              variant="destructive"
+              loading={isApplying && actionKey === 'uninstall'}
+              onClick={async () => {
+                if (isApplying) return
+                setActionKey('uninstall')
+                setUninstallError(null)
+                try {
+                  const message = await uninstallPlugin(
+                    selectedPlugin.id,
+                    selectedPlugin.scope,
+                    false,
+                    currentWorkDir,
+                    activeSessionId || undefined,
+                  )
+                  addRuntimeAwareToast(message)
+                  setShowUninstallDialog(false)
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err)
+                  setUninstallError(message)
+                  addToast({ type: 'error', message })
+                } finally {
+                  setActionKey(null)
+                }
+              }}
+            >
+              {t('settings.plugins.uninstall')}
+            </LoadingButton>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -517,20 +632,20 @@ function CapabilityPreviewSection({
   hint?: string
 }) {
   return (
-    <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3">
-        <div className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</div>
-        <div className="text-[11px] text-[var(--color-text-tertiary)]">{count}</div>
-      </div>
-      <div className="p-4">
+    <Card className="overflow-hidden">
+      <CardHeader className="flex-row items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3">
+        <CardTitle className="text-sm">{title}</CardTitle>
+        <Badge variant="secondary">{count}</Badge>
+      </CardHeader>
+      <CardContent className="p-4">
         {hint && count > 0 && (
           <div className="mb-3 text-xs text-[var(--color-text-tertiary)]">{hint}</div>
         )}
         {count > 0 ? children : (
           <div className="text-xs text-[var(--color-text-tertiary)]">{emptyLabel}</div>
         )}
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -553,31 +668,32 @@ function SkillPreviewCard({
   const slashName = rawName || name
 
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={onClick}
       disabled={disabled}
-      className="group rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] disabled:cursor-default disabled:opacity-70 disabled:hover:border-[var(--color-border)] disabled:hover:bg-[var(--color-surface)]"
+      className="group h-auto w-full items-stretch justify-start whitespace-normal rounded-xl bg-[var(--color-surface)] px-4 py-3 text-left disabled:cursor-default disabled:opacity-70"
     >
+      <div className="w-full">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 flex-wrap min-w-0">
           <span className="text-sm font-semibold text-[var(--color-text-primary)] break-all">{name}</span>
           {version && (
-            <span className="rounded-full bg-[var(--color-surface-container-high)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-tertiary)]">
+            <Badge variant="secondary" className="min-h-4 px-2 py-0 text-[10px]">
               v{version}
-            </span>
+            </Badge>
           )}
-          <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-tertiary)]">
+          <Badge variant="outline" className="min-h-4 px-2 py-0 text-[10px]">
             {t('settings.skills.slashCommand')}
-          </span>
+          </Badge>
         </div>
-        <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)] transition-transform group-hover:translate-x-0.5">
-          chevron_right
-        </span>
+        <ChevronRight className="size-[18px] text-[var(--color-text-tertiary)] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
       </div>
       <div className="mt-1 text-[11px] text-[var(--color-text-tertiary)] break-all">/{slashName}</div>
       <div className="mt-2 text-xs leading-5 text-[var(--color-text-secondary)] break-words">{description}</div>
-    </button>
+      </div>
+    </Button>
   )
 }
 
@@ -589,10 +705,12 @@ function CommandPreviewCard({
   description: string
 }) {
   return (
-    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
-      <div className="text-sm font-semibold text-[var(--color-text-primary)] break-all">/{name}</div>
-      <div className="mt-2 text-xs leading-5 text-[var(--color-text-secondary)] break-words">{description}</div>
-    </div>
+    <Card className="bg-[var(--color-surface)]">
+      <CardContent className="px-4 py-3">
+        <div className="break-all text-sm font-semibold text-[var(--color-text-primary)]">/{name}</div>
+        <div className="mt-2 break-words text-xs leading-5 text-[var(--color-text-secondary)]">{description}</div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -608,22 +726,21 @@ function AgentPreviewCard({
   disabled?: boolean
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={onClick}
       disabled={disabled}
-      className="group rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] disabled:cursor-default disabled:opacity-70 disabled:hover:border-[var(--color-border)] disabled:hover:bg-[var(--color-surface)]"
+      className="group h-auto w-full items-stretch justify-start whitespace-normal rounded-xl bg-[var(--color-surface)] px-4 py-3 text-left disabled:cursor-default disabled:opacity-70"
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex w-full items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-[var(--color-text-primary)] break-all">{name}</div>
           <div className="mt-2 text-xs leading-5 text-[var(--color-text-secondary)] break-words">{description}</div>
         </div>
-        <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)] transition-transform group-hover:translate-x-0.5">
-          chevron_right
-        </span>
+        <ChevronRight className="size-[18px] text-[var(--color-text-tertiary)] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
       </div>
-    </button>
+    </Button>
   )
 }
 
@@ -641,27 +758,26 @@ function McpPreviewCard({
   disabled?: boolean
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={onClick}
       disabled={disabled}
-      className="group rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] disabled:cursor-default disabled:opacity-70 disabled:hover:border-[var(--color-border)] disabled:hover:bg-[var(--color-surface)]"
+      className="group h-auto w-full items-stretch justify-start whitespace-normal rounded-xl bg-[var(--color-surface)] px-4 py-3 text-left disabled:cursor-default disabled:opacity-70"
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex w-full items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-[var(--color-text-primary)] break-all">{name}</span>
-            <span className="rounded-full bg-[var(--color-surface-container-high)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-text-tertiary)]">
+            <Badge variant="secondary" className="min-h-4 px-2 py-0 text-[10px] uppercase tracking-[0.12em]">
               {transport}
-            </span>
+            </Badge>
           </div>
           <div className="mt-2 text-xs leading-5 text-[var(--color-text-secondary)] break-all">{summary}</div>
         </div>
-        <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)] transition-transform group-hover:translate-x-0.5">
-          chevron_right
-        </span>
+        <ChevronRight className="size-[18px] text-[var(--color-text-tertiary)] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
       </div>
-    </button>
+    </Button>
   )
 }
 
@@ -675,34 +791,37 @@ function HookPreviewCard({
   actions: string[]
 }) {
   return (
-    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+    <Card className="bg-[var(--color-surface)]">
+      <CardContent className="px-4 py-3">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-sm font-semibold text-[var(--color-text-primary)] break-all">{event}</span>
         {matcher && (
-          <span className="rounded-full bg-[var(--color-surface-container-high)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-tertiary)] break-all">
+          <Badge variant="secondary" className="min-h-4 break-all px-2 py-0 text-[10px]">
             {matcher}
-          </span>
+          </Badge>
         )}
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
         {actions.map((action) => (
-          <span
+          <Badge
             key={action}
-            className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-2.5 py-1 text-[11px] text-[var(--color-text-secondary)] break-all"
+            variant="outline"
+            className="break-all bg-[var(--color-surface-container-low)] text-[11px]"
           >
             {action}
-          </span>
+          </Badge>
         ))}
       </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
 function MetaPill({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-tertiary)]">
+    <Badge variant="outline" className="bg-[var(--color-surface)] text-[10px] uppercase tracking-[0.12em]">
       {children}
-    </span>
+    </Badge>
   )
 }
 
@@ -713,18 +832,21 @@ function DetailStat({
 }: {
   label: string
   value: string
-  icon: string
+  icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
 }) {
+  const Icon = icon
   return (
-    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3">
+    <Card className="bg-[var(--color-surface)]">
+      <CardContent className="px-3 py-3">
       <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-tertiary)]">
-        <span className="material-symbols-outlined text-[14px]">{icon}</span>
+        <Icon className="size-3.5" aria-hidden="true" />
         <span>{label}</span>
       </div>
       <div className="mt-2 text-base font-semibold text-[var(--color-text-primary)] break-all">
         {value}
       </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -749,8 +871,8 @@ function StatusPill({
       : t('settings.plugins.status.disabled')
 
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${classes}`}>
+    <Badge className={`min-h-4 border-transparent px-2 py-0 text-[10px] ${classes}`}>
       {label}
-    </span>
+    </Badge>
   )
 }

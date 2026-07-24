@@ -33,12 +33,30 @@ function makeRequest(method: string, pathName: string, body?: Record<string, unk
   return { req, url, segments }
 }
 
+function makeRawRequest(method: string, pathName: string, body: string) {
+  const url = new URL(pathName, 'http://localhost:3456')
+  const req = new Request(url.toString(), {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  })
+  return { req, url, segments: url.pathname.split('/').filter(Boolean) }
+}
+
+async function writeRawConfig(config: Record<string, unknown>) {
+  await fs.writeFile(
+    path.join(tmpDir, 'adapters.json'),
+    JSON.stringify(config, null, 2),
+    { mode: 0o600 },
+  )
+}
+
 describe('Adapters API', () => {
   beforeEach(setup)
   afterEach(teardown)
 
   it('masks WeChat bot tokens in GET responses', async () => {
-    const put = makeRequest('PUT', '/api/adapters', {
+    await writeRawConfig({
       wechat: {
         accountId: 'bot-1',
         botToken: 'wechat-secret-token',
@@ -47,7 +65,6 @@ describe('Adapters API', () => {
         pairedUsers: [{ userId: 'wx-user', displayName: 'WeChat User', pairedAt: 1 }],
       },
     })
-    expect((await handleAdaptersApi(put.req, put.url, put.segments)).status).toBe(200)
 
     const get = makeRequest('GET', '/api/adapters')
     const res = await handleAdaptersApi(get.req, get.url, get.segments)
@@ -108,7 +125,7 @@ describe('Adapters API', () => {
   })
 
   it('clears WeChat credentials on unbind', async () => {
-    const put = makeRequest('PUT', '/api/adapters', {
+    await writeRawConfig({
       wechat: {
         accountId: 'bot-1',
         botToken: 'wechat-secret-token',
@@ -117,7 +134,6 @@ describe('Adapters API', () => {
         pairedUsers: [{ userId: 'wx-user', displayName: 'WeChat User', pairedAt: 1 }],
       },
     })
-    await handleAdaptersApi(put.req, put.url, put.segments)
 
     const unbind = makeRequest('POST', '/api/adapters/wechat/unbind')
     const res = await handleAdaptersApi(unbind.req, unbind.url, unbind.segments)
@@ -157,7 +173,7 @@ describe('Adapters API', () => {
     const authDir = path.join(tmpDir, 'whatsapp-auth', 'default')
     await fs.mkdir(authDir, { recursive: true })
     await fs.writeFile(path.join(authDir, 'creds.json'), '{}')
-    const put = makeRequest('PUT', '/api/adapters', {
+    await writeRawConfig({
       whatsapp: {
         accountJid: '15551234567@s.whatsapp.net',
         authDir,
@@ -165,7 +181,6 @@ describe('Adapters API', () => {
         pairedUsers: [{ userId: '15551234567@s.whatsapp.net', displayName: 'WhatsApp User', pairedAt: 1 }],
       },
     })
-    await handleAdaptersApi(put.req, put.url, put.segments)
 
     const get = makeRequest('GET', '/api/adapters')
     const getRes = await handleAdaptersApi(get.req, get.url, get.segments)
@@ -181,5 +196,75 @@ describe('Adapters API', () => {
     expect(json.whatsapp.allowedUsers).toEqual([])
     expect(json.whatsapp.pairedUsers).toEqual([])
     await expect(fs.stat(path.join(authDir, 'creds.json'))).rejects.toThrow()
+  })
+
+  it('rejects malformed and binding-owned config fields', async () => {
+    for (const request of [
+      makeRawRequest('PUT', '/api/adapters', 'null'),
+      makeRawRequest('PUT', '/api/adapters', '[]'),
+      makeRawRequest('PUT', '/api/adapters', '{broken'),
+      makeRequest('PUT', '/api/adapters', { feishu: { streamingCard: 'yes' } }),
+      makeRequest('PUT', '/api/adapters', { telegram: { allowedUsers: [-1] } }),
+      makeRequest('PUT', '/api/adapters', { wechat: { botToken: 'not-allowed' } }),
+      makeRequest('PUT', '/api/adapters', { whatsapp: { authDir: '/tmp/not-allowed' } }),
+    ]) {
+      const response = await handleAdaptersApi(request.req, request.url, request.segments)
+      expect(response.status).toBe(400)
+    }
+    await expect(fs.stat(path.join(tmpDir, 'adapters.json'))).rejects.toThrow()
+  })
+
+  it('rejects malformed QR polling payloads before invoking platform protocols', async () => {
+    for (const request of [
+      makeRawRequest('POST', '/api/adapters/wechat/login/poll', 'null'),
+      makeRawRequest('POST', '/api/adapters/wechat/login/poll', '{broken'),
+      makeRawRequest('POST', '/api/adapters/whatsapp/login/poll', '[]'),
+      makeRequest('POST', '/api/adapters/dingtalk/registration/poll', { deviceCode: '' }),
+    ]) {
+      const response = await handleAdaptersApi(request.req, request.url, request.segments)
+      expect(response.status).toBe(400)
+    }
+  })
+
+  it('never recursively deletes a legacy WhatsApp auth directory outside the managed root', async () => {
+    const externalDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cc-haha-whatsapp-sentinel-'))
+    const sentinel = path.join(externalDir, 'keep.txt')
+    await fs.writeFile(sentinel, 'keep')
+    try {
+      await writeRawConfig({
+        whatsapp: {
+          accountJid: 'legacy@s.whatsapp.net',
+          authDir: externalDir,
+          allowedUsers: [],
+          pairedUsers: [],
+        },
+      })
+
+      const unbind = makeRequest('POST', '/api/adapters/whatsapp/unbind')
+      const response = await handleAdaptersApi(unbind.req, unbind.url, unbind.segments)
+      expect(response.status).toBe(200)
+      expect(await fs.readFile(sentinel, 'utf-8')).toBe('keep')
+    } finally {
+      await fs.rm(externalDir, { recursive: true, force: true })
+    }
+  })
+
+  it('serializes concurrent config patches without losing either update', async () => {
+    const telegram = makeRequest('PUT', '/api/adapters', {
+      telegram: { botToken: 'telegram-token', allowedUsers: [123] },
+    })
+    const feishu = makeRequest('PUT', '/api/adapters', {
+      feishu: { appId: 'cli_test', appSecret: 'feishu-secret', allowedUsers: ['ou_test'] },
+    })
+
+    const responses = await Promise.all([
+      handleAdaptersApi(telegram.req, telegram.url, telegram.segments),
+      handleAdaptersApi(feishu.req, feishu.url, feishu.segments),
+    ])
+    expect(responses.map((response) => response.status)).toEqual([200, 200])
+
+    const raw = JSON.parse(await fs.readFile(path.join(tmpDir, 'adapters.json'), 'utf-8')) as any
+    expect(raw.telegram).toMatchObject({ botToken: 'telegram-token', allowedUsers: [123] })
+    expect(raw.feishu).toMatchObject({ appId: 'cli_test', appSecret: 'feishu-secret', allowedUsers: ['ou_test'] })
   })
 })

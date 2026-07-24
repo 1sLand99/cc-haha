@@ -18,6 +18,7 @@ import { getSkillDirCommands } from '../../skills/loadSkillsDir.js'
 import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
 import type { LoadedPlugin } from '../../types/plugin.js'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
+import { readMarketMeta } from '../services/market/marketService.js'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -511,20 +512,11 @@ async function getSkillDetail(url: URL): Promise<Response> {
   }
 
   const { tree, files } = await buildFileTree(skillDir)
-  const marketMeta = await loadMarketMeta(skillDir)
+  const marketMeta = source === 'user'
+    ? await readMarketMeta(name) ?? undefined
+    : undefined
 
   return Response.json({
     detail: { meta, tree, files, skillRoot: skillDir, marketMeta },
   })
-}
-
-/** Marker written by the Skills Market installer — enables uninstall from the local detail view. */
-async function loadMarketMeta(skillDir: string): Promise<Record<string, unknown> | undefined> {
-  try {
-    const raw = await fs.readFile(path.join(skillDir, '.market-meta.json'), 'utf-8')
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    return typeof parsed === 'object' && parsed !== null ? parsed : undefined
-  } catch {
-    return undefined
-  }
 }

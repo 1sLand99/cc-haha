@@ -1,9 +1,18 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
 
 const STORAGE_KEY = 'trace.treeWidth'
 const DEFAULT_WIDTH = 380
 const MIN_WIDTH = 280
 const MAX_WIDTH = 560
+const KEYBOARD_STEP = 24
 
 function clampWidth(width: number): number {
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(width)))
@@ -23,15 +32,29 @@ function persistWidth(width: number) {
   try {
     window.localStorage.setItem(STORAGE_KEY, String(width))
   } catch {
-    // localStorage unavailable (private mode); keep the in-memory width.
+    // localStorage may be unavailable; the in-memory width still works.
   }
 }
 
-export function TraceSplitLayout({ tree, detail }: { tree: ReactNode; detail: ReactNode }) {
+function TraceSplitPane({
+  tree,
+  detail,
+  separatorLabel,
+}: {
+  tree: ReactNode
+  detail: ReactNode
+  separatorLabel: string
+}) {
   const [width, setWidth] = useState(readStoredWidth)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const widthRef = useRef(width)
   widthRef.current = width
+
+  const commitWidth = useCallback((nextWidth: number) => {
+    const clamped = clampWidth(nextWidth)
+    setWidth(clamped)
+    persistWidth(clamped)
+  }, [])
 
   const onPointerMove = useCallback((event: MouseEvent) => {
     const drag = dragRef.current
@@ -58,12 +81,21 @@ export function TraceSplitLayout({ tree, detail }: { tree: ReactNode; detail: Re
     window.addEventListener('mouseup', onPointerUp)
   }, [onPointerMove, onPointerUp])
 
-  const onDividerDoubleClick = useCallback(() => {
-    setWidth(DEFAULT_WIDTH)
-    persistWidth(DEFAULT_WIDTH)
-  }, [])
+  const onDividerKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    let nextWidth: number | null = null
+    if (event.key === 'ArrowLeft') nextWidth = widthRef.current - KEYBOARD_STEP
+    if (event.key === 'ArrowRight') nextWidth = widthRef.current + KEYBOARD_STEP
+    if (event.key === 'Home') nextWidth = MIN_WIDTH
+    if (event.key === 'End') nextWidth = MAX_WIDTH
+    if (nextWidth === null) return
+    event.preventDefault()
+    commitWidth(nextWidth)
+  }, [commitWidth])
 
   useEffect(() => () => {
+    dragRef.current = null
+    document.body.style.removeProperty('cursor')
+    document.body.style.removeProperty('user-select')
     window.removeEventListener('mousemove', onPointerMove)
     window.removeEventListener('mouseup', onPointerUp)
   }, [onPointerMove, onPointerUp])
@@ -72,6 +104,7 @@ export function TraceSplitLayout({ tree, detail }: { tree: ReactNode; detail: Re
     <div
       className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row"
       style={{ '--trace-tree-width': `${width}px` } as CSSProperties}
+      data-slot="trace-split-pane"
       data-testid="trace-split-layout"
     >
       <div className="flex h-[40vh] min-h-0 shrink-0 flex-col overflow-hidden lg:h-auto lg:w-[var(--trace-tree-width)]">
@@ -79,13 +112,20 @@ export function TraceSplitLayout({ tree, detail }: { tree: ReactNode; detail: Re
       </div>
       <div
         role="separator"
+        aria-label={separatorLabel}
         aria-orientation="vertical"
+        aria-valuemin={MIN_WIDTH}
+        aria-valuemax={MAX_WIDTH}
+        aria-valuenow={width}
+        tabIndex={0}
+        data-slot="trace-split-separator"
         data-testid="trace-split-divider"
         onMouseDown={onDividerMouseDown}
-        onDoubleClick={onDividerDoubleClick}
-        className="group relative hidden w-px shrink-0 cursor-col-resize bg-[var(--color-border)] lg:block"
+        onDoubleClick={() => commitWidth(DEFAULT_WIDTH)}
+        onKeyDown={onDividerKeyDown}
+        className="group relative hidden w-px shrink-0 cursor-col-resize bg-[var(--color-border)] outline-none focus-visible:bg-[var(--color-border-focus)] focus-visible:shadow-[var(--shadow-focus-ring)] lg:block"
       >
-        <div className="absolute inset-y-0 -left-[2px] w-[5px] transition-colors group-hover:bg-[var(--color-brand)]/25" />
+        <div className="absolute inset-y-0 -left-[3px] w-[7px] transition-colors group-hover:bg-[var(--color-brand)]/25" />
       </div>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-t border-[var(--color-border)] lg:border-t-0">
         {detail}
@@ -93,3 +133,5 @@ export function TraceSplitLayout({ tree, detail }: { tree: ReactNode; detail: Re
     </div>
   )
 }
+
+export { TraceSplitPane }

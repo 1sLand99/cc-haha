@@ -1,11 +1,29 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type WheelEvent } from 'react'
-import { Info } from 'lucide-react'
+import { Eraser, ExternalLink, FolderOpen, Info, Monitor, Plus, RotateCcw, X } from 'lucide-react'
 import { useTranslation, type TranslationKey } from '../i18n'
 import { terminalApi } from '../api/terminal'
 import { useSettingsStore } from '../stores/settingsStore'
-import { Dropdown } from '../components/shared/Dropdown'
-import { Input } from '../components/shared/Input'
-import { Button } from '../components/shared/Button'
+import { Alert, AlertDescription } from '../components/ui/alert'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
+import { IconButton } from '../components/ui/custom/icon-button'
+import { LoadingButton } from '../components/ui/custom/loading-button'
+import { SettingField } from '../components/ui/custom/setting-field'
+import { TerminalStatusBadge } from '../components/ui/custom/terminal-status-badge'
+import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from '../components/ui/select'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../components/ui/tooltip'
 import type { DesktopTerminalStartupShell } from '../types/settings'
 import { getDesktopHost } from '../lib/desktopHost'
 import {
@@ -27,6 +45,41 @@ const STATUS_LABEL_KEYS: Record<TerminalStatus, TranslationKey> = {
   exited: 'settings.terminal.status.exited',
   error: 'settings.terminal.status.error',
   unavailable: 'settings.terminal.status.unavailable',
+}
+
+const MAX_PENDING_TERMINAL_OUTPUT = 64 * 1024
+
+type PendingTerminalEvent =
+  | { type: 'output'; data: string }
+  | { type: 'exit'; code: number; signal?: string | null }
+
+function readTerminalTheme(host: HTMLElement) {
+  const styles = window.getComputedStyle(host)
+  const color = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback
+  const foreground = color('--color-terminal-fg', '#d7d2d0')
+
+  return {
+    background: color('--color-terminal-bg', '#121212'),
+    foreground,
+    cursor: foreground,
+    selectionBackground: color('--color-selection-bg', '#5f4a40'),
+    black: color('--color-terminal-border', '#1f1f1f'),
+    red: color('--color-terminal-danger', '#ff6d67'),
+    green: color('--color-terminal-accent', '#7ef18a'),
+    yellow: color('--color-terminal-warning', '#f8c55f'),
+    blue: '#77a8ff',
+    magenta: '#d699ff',
+    cyan: '#61d6d6',
+    white: foreground,
+    brightBlack: color('--color-terminal-muted', '#8f8683'),
+    brightRed: '#ff8a85',
+    brightGreen: '#9ff7a7',
+    brightYellow: '#ffdd7a',
+    brightBlue: '#a6c5ff',
+    brightMagenta: '#e3b8ff',
+    brightCyan: '#8ceeee',
+    brightWhite: '#ffffff',
+  }
 }
 
 function findScrollableAncestor(element: HTMLElement, deltaY: number): HTMLElement | null {
@@ -95,6 +148,10 @@ export function TerminalSettings({
   const [preferencesError, setPreferencesError] = useState<string | null>(null)
   const [preferencesSaved, setPreferencesSaved] = useState(false)
   const [preferencesSaving, setPreferencesSaving] = useState(false)
+  const preferencesSavingRef = useRef(false)
+  const restartButtonRef = useRef<HTMLButtonElement | null>(null)
+  const restoreRestartFocusRef = useRef(false)
+  const startupShellId = useId()
   const isWindows = typeof navigator !== 'undefined' && /Win/i.test(navigator.platform || navigator.userAgent)
 
   useEffect(() => {
@@ -217,6 +274,32 @@ export function TerminalSettings({
       let fit: import('@xterm/addon-fit').FitAddon | null = null
       let outputUnlisten: (() => void) | null = null
       let exitUnlisten: (() => void) | null = null
+      const pendingEvents = new Map<number, PendingTerminalEvent[]>()
+      const pendingOutputSizes = new Map<number, number>()
+
+      const appendPendingEvent = (sessionId: number, event: PendingTerminalEvent) => {
+        const events = pendingEvents.get(sessionId) ?? []
+        if (event.type === 'output') {
+          const currentSize = pendingOutputSizes.get(sessionId) ?? 0
+          const remaining = MAX_PENDING_TERMINAL_OUTPUT - currentSize
+          if (remaining <= 0) return
+          const data = event.data.slice(0, remaining)
+          events.push({ type: 'output', data })
+          pendingOutputSizes.set(sessionId, currentSize + data.length)
+        } else {
+          events.push(event)
+        }
+        pendingEvents.set(sessionId, events)
+      }
+
+      const writeExit = (
+        activeTerminal: import('@xterm/xterm').Terminal,
+        payload: { code: number; signal?: string | null },
+      ) => {
+        updateTerminalRuntime(runtime, { status: 'exited', nativeSessionId: null })
+        const signal = payload.signal ? `, ${payload.signal}` : ''
+        activeTerminal.writeln(`\r\n[process exited: ${payload.code}${signal}]`)
+      }
 
       try {
         terminal = new TerminalModule.Terminal({
@@ -226,28 +309,7 @@ export function TerminalSettings({
           fontSize: 12,
           lineHeight: 1.25,
           scrollback: 4000,
-          theme: {
-            background: '#121212',
-            foreground: '#d7d2d0',
-            cursor: '#ffb59f',
-            selectionBackground: '#5f4a40',
-            black: '#1f1f1f',
-            red: '#ff6d67',
-            green: '#7ef18a',
-            yellow: '#f8c55f',
-            blue: '#77a8ff',
-            magenta: '#d699ff',
-            cyan: '#61d6d6',
-            white: '#d7d2d0',
-            brightBlack: '#8f8683',
-            brightRed: '#ff8a85',
-            brightGreen: '#9ff7a7',
-            brightYellow: '#ffdd7a',
-            brightBlue: '#a6c5ff',
-            brightMagenta: '#e3b8ff',
-            brightCyan: '#8ceeee',
-            brightWhite: '#ffffff',
-          },
+          theme: readTerminalTheme(host),
         })
         fit = new FitAddonModule.FitAddon()
         const activeTerminal = terminal
@@ -264,14 +326,20 @@ export function TerminalSettings({
         outputUnlisten = await terminalApi.onOutput((payload) => {
           if (payload.session_id === runtime.nativeSessionId) {
             activeTerminal.write(payload.data)
+          } else if (runtime.nativeSessionId === null && runtime.status === 'starting') {
+            appendPendingEvent(payload.session_id, { type: 'output', data: payload.data })
           }
         })
         exitUnlisten = await terminalApi.onExit((payload) => {
-          if (payload.session_id !== runtime.nativeSessionId) return
-          updateTerminalRuntime(runtime, { status: 'exited' })
-          const signal = payload.signal ? `, ${payload.signal}` : ''
-          activeTerminal.writeln(`\r\n[process exited: ${payload.code}${signal}]`)
-          updateTerminalRuntime(runtime, { nativeSessionId: null })
+          if (payload.session_id === runtime.nativeSessionId) {
+            writeExit(activeTerminal, payload)
+          } else if (runtime.nativeSessionId === null && runtime.status === 'starting') {
+            appendPendingEvent(payload.session_id, {
+              type: 'exit',
+              code: payload.code,
+              ...(payload.signal ? { signal: payload.signal } : {}),
+            })
+          }
         })
         if (!isCurrentStart()) {
           outputUnlisten()
@@ -305,11 +373,22 @@ export function TerminalSettings({
           activeTerminal.dispose()
           return
         }
+        const replayEvents = pendingEvents.get(result.session_id) ?? []
+        const earlyExit = replayEvents.findLast((event) => event.type === 'exit')
         updateTerminalRuntime(runtime, {
-          nativeSessionId: result.session_id,
+          nativeSessionId: earlyExit ? null : result.session_id,
           shellInfo: { shell: result.shell, cwd: result.cwd },
-          status: 'running',
+          status: earlyExit ? 'exited' : 'running',
         })
+        replayEvents.forEach((event) => {
+          if (event.type === 'output') {
+            activeTerminal.write(event.data)
+          } else {
+            writeExit(activeTerminal, event)
+          }
+        })
+        pendingEvents.clear()
+        pendingOutputSizes.clear()
         resizeSession()
       } catch (err) {
         outputUnlisten?.()
@@ -376,8 +455,19 @@ export function TerminalSettings({
     }
   }, [active, resizeSession])
 
+  useEffect(() => {
+    if (!restoreRestartFocusRef.current || status === 'starting') return
+    restoreRestartFocusRef.current = false
+    restartButtonRef.current?.focus()
+  }, [status])
+
   const clearTerminal = () => {
     runtime.terminal?.clear()
+  }
+
+  const restartTerminal = async () => {
+    restoreRestartFocusRef.current = true
+    await startTerminal()
   }
 
   const handleTerminalWheelCapture = useCallback((event: WheelEvent<HTMLDivElement>) => {
@@ -411,6 +501,7 @@ export function TerminalSettings({
   }, [runtime])
 
   const savePreferences = async () => {
+    if (preferencesSavingRef.current) return
     setPreferencesError(null)
     setPreferencesSaved(false)
 
@@ -426,6 +517,7 @@ export function TerminalSettings({
       }
     }
 
+    preferencesSavingRef.current = true
     setPreferencesSaving(true)
     try {
       await setDesktopTerminal({
@@ -436,6 +528,7 @@ export function TerminalSettings({
     } catch (err) {
       setPreferencesError(err instanceof Error ? err.message : String(err))
     } finally {
+      preferencesSavingRef.current = false
       setPreferencesSaving(false)
     }
   }
@@ -460,7 +553,7 @@ export function TerminalSettings({
             {t('settings.terminal.title')}
           </h2>
           <TerminalHelpHint compact={docked} />
-          <StatusPill status={status} label={t(STATUS_LABEL_KEYS[status])} compact={docked} />
+          <TerminalStatusBadge status={status} label={t(STATUS_LABEL_KEYS[status])} compact={docked} />
           {shellInfo && (
             <div className="flex min-w-0 items-center gap-1.5 text-xs text-[var(--color-text-tertiary)]">
               <span className="shrink-0 font-mono">{shellInfo.shell}</span>
@@ -472,145 +565,168 @@ export function TerminalSettings({
 
         <div className="flex shrink-0 items-center gap-1.5">
           {onOpenInTab && (
-            <button
-              type="button"
+            <Button
+              variant="outline"
+              size="sm"
               onClick={onOpenInTab}
-              className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+              className="h-8"
             >
-              <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+              <ExternalLink aria-hidden="true" />
               {t('terminal.openInTab')}
-            </button>
+            </Button>
           )}
           {onNewTerminal && (
-            <button
-              type="button"
+            <Button
+              variant="outline"
+              size="sm"
               onClick={onNewTerminal}
-              className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+              className="h-8"
             >
-              <span className="material-symbols-outlined text-[16px]">add</span>
+              <Plus aria-hidden="true" />
               {t('terminal.newTab')}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="sm"
             onClick={clearTerminal}
             disabled={!runtime.terminal}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-8"
           >
-            <span className="material-symbols-outlined text-[16px]">mop</span>
+            <Eraser aria-hidden="true" />
             {t('settings.terminal.clear')}
-          </button>
-          <button
-            type="button"
-            onClick={() => void startTerminal()}
-            disabled={status === 'starting'}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-text-primary)] px-2.5 text-xs font-medium text-[var(--color-surface)] transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] disabled:cursor-not-allowed disabled:opacity-50"
+          </Button>
+          <LoadingButton
+            ref={restartButtonRef}
+            size="sm"
+            onClick={() => {
+              if (status !== 'starting') void restartTerminal()
+            }}
+            loading={status === 'starting'}
+            disableWhileLoading={false}
+            className="h-8"
           >
-            <span className="material-symbols-outlined text-[16px]">restart_alt</span>
+            {status !== 'starting' && <RotateCcw aria-hidden="true" />}
             {t('settings.terminal.restart')}
-          </button>
+          </LoadingButton>
           {onClose && (
-            <button
-              type="button"
+            <IconButton
+              variant="ghost"
+              size="icon-sm"
               onClick={onClose}
-              aria-label={t('terminal.closePanel')}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+              label={t('terminal.closePanel')}
+              className="size-8"
             >
-              <span className="material-symbols-outlined text-[17px]">close</span>
-            </button>
+              <X aria-hidden="true" />
+            </IconButton>
           )}
         </div>
       </div>
 
       {error && (
-        <div className="mb-3 rounded-[var(--radius-md)] border border-[var(--color-error)]/20 bg-[var(--color-error)]/10 px-3 py-2 text-sm text-[var(--color-error)]">
-          {error}
-        </div>
+        <Alert variant="destructive" className="mb-3">
+          <AlertDescription className="text-[var(--color-error)]">{error}</AlertDescription>
+        </Alert>
       )}
 
       {showPreferences && isWindows && (
         <>
-          <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-4">
-            <div className="flex flex-col gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
-                  {t('settings.terminal.preferencesTitle')}
-                </h3>
-                <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-                  {t('settings.terminal.preferencesBody')}
-                </p>
-              </div>
-
+          <Card className="mb-4">
+            <CardHeader>
+              <CardTitle className="text-sm">
+                {t('settings.terminal.preferencesTitle')}
+              </CardTitle>
+              <CardDescription>
+                {t('settings.terminal.preferencesBody')}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 pt-0">
               <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium text-[var(--color-text-primary)]">
+                <Label htmlFor={startupShellId}>
                   {t('settings.terminal.startupShell')}
-                </span>
-                <Dropdown<DesktopTerminalStartupShell>
-                  items={shellItems}
+                </Label>
+                <Select
                   value={startupShell}
-                  onChange={(value) => {
-                    setStartupShell(value)
+                  disabled={preferencesSaving}
+                  onValueChange={(value) => {
+                    setStartupShell(value as DesktopTerminalStartupShell)
                     setPreferencesError(null)
                     setPreferencesSaved(false)
                   }}
-                  width="100%"
-                  trigger={
-                    <button
-                      type="button"
-                      className="flex h-10 w-full items-center justify-between rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text-primary)]"
-                    >
-                      <span>{shellItems.find((item) => item.value === startupShell)?.label ?? startupShell}</span>
-                      <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)]">expand_more</span>
-                    </button>
-                  }
-                />
+                >
+                  <SelectTrigger id={startupShellId}>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate">
+                        {shellItems.find((item) => item.value === startupShell)?.label ?? startupShell}
+                      </span>
+                      <span className="truncate text-xs text-[var(--color-text-tertiary)]">
+                        {shellItems.find((item) => item.value === startupShell)?.description}
+                      </span>
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {shellItems.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        <span className="flex flex-col">
+                          <span>{item.label}</span>
+                          <span className="text-xs text-[var(--color-text-tertiary)]">
+                            {item.description}
+                          </span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {startupShell === 'custom' && (
-                <Input
+                <SettingField
+                  id={`${startupShellId}-custom-path`}
                   label={t('settings.terminal.customPath')}
                   placeholder={t('settings.terminal.customPathPlaceholder')}
                   value={customShellPath}
+                  disabled={preferencesSaving}
+                  aria-invalid={Boolean(preferencesError)}
                   onChange={(event) => {
                     setCustomShellPath(event.target.value)
                     setPreferencesError(null)
                     setPreferencesSaved(false)
                   }}
-                  error={preferencesError ?? undefined}
                 />
               )}
 
-              {preferencesError && startupShell !== 'custom' && (
-                <p className="text-xs text-[var(--color-error)]">{preferencesError}</p>
+              {preferencesError && (
+                <Alert variant="destructive">
+                  <AlertDescription className="text-[var(--color-error)]">
+                    {preferencesError}
+                  </AlertDescription>
+                </Alert>
               )}
 
               <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  type="button"
+                <LoadingButton
                   size="sm"
                   loading={preferencesSaving}
                   onClick={() => void savePreferences()}
                 >
                   {t('settings.terminal.saveShell')}
-                </Button>
+                </LoadingButton>
                 {preferencesSaved && (
-                  <span className="text-xs text-[var(--color-text-secondary)]">
+                  <span role="status" aria-live="polite" className="text-xs text-[var(--color-text-secondary)]">
                     {t('settings.terminal.saveShellSuccess')}
                   </span>
                 )}
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
           <BashPathSettings isTauri={terminalApi.isAvailable()} />
         </>
       )}
 
       {status === 'unavailable' ? (
-        <div className="flex flex-1 items-center justify-center rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-8 text-center">
+        <Card className="flex flex-1 items-center justify-center border-dashed p-8 text-center">
           <div>
-            <span className="material-symbols-outlined mb-3 block text-[32px] text-[var(--color-text-tertiary)]">
-              desktop_windows
-            </span>
+            <Monitor className="mx-auto mb-3 size-8 text-[var(--color-text-tertiary)]" aria-hidden="true" />
             <p className="text-sm font-medium text-[var(--color-text-primary)]">
               {t('settings.terminal.unavailableTitle')}
             </p>
@@ -618,7 +734,7 @@ export function TerminalSettings({
               {t('settings.terminal.unavailableBody')}
             </p>
           </div>
-        </div>
+        </Card>
       ) : (
         <div
           data-testid="settings-terminal-frame"
@@ -717,98 +833,147 @@ function TerminalHelpHint({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false)
 
   return (
-    <span className="group relative inline-flex shrink-0">
-      <button
-        type="button"
-        aria-label={t('settings.terminal.infoLabel')}
-        aria-describedby={tooltipId}
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') setOpen(false)
-        }}
-        className={`${compact ? 'h-6 w-6' : 'h-7 w-7'} inline-flex items-center justify-center rounded-full text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]`}
-      >
-        <Info className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} aria-hidden="true" strokeWidth={2.2} />
-      </button>
-      <span
-        id={tooltipId}
-        role="tooltip"
-        className={`${open ? 'visible opacity-100' : 'invisible opacity-0'} absolute left-0 top-full z-30 mt-2 w-[min(340px,calc(100vw-3rem))] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-high)] px-3 py-2 text-left text-xs leading-5 text-[var(--color-text-secondary)] shadow-[var(--shadow-dropdown)] transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100`}
-      >
-        {t('settings.terminal.description')}
-      </span>
-    </span>
-  )
-}
-
-function StatusPill({ status, label, compact = false }: { status: TerminalStatus; label: string; compact?: boolean }) {
-  const color =
-    status === 'running'
-      ? 'bg-[var(--color-success)]'
-      : status === 'error'
-        ? 'bg-[var(--color-error)]'
-        : status === 'starting'
-          ? 'bg-[var(--color-warning)]'
-          : 'bg-[var(--color-text-tertiary)]'
-
-  return (
-    <span className={`inline-flex ${compact ? 'h-5 px-2 text-[10px]' : 'h-6 px-2.5 text-[11px]'} shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-container-low)] font-medium text-[var(--color-text-secondary)]`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${color}`} />
-      {label}
-    </span>
+    <TooltipProvider delayDuration={250}>
+      <Tooltip open={open} onOpenChange={setOpen}>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('settings.terminal.infoLabel')}
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setOpen(false)
+            }}
+            className={compact ? 'size-6 rounded-full' : 'size-7 rounded-full'}
+          >
+            <Info className={compact ? 'size-3.5' : 'size-4'} aria-hidden="true" strokeWidth={2.2} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent
+          id={tooltipId}
+          side="bottom"
+          align="start"
+          className="max-w-[min(340px,calc(100vw-3rem))] px-3 py-2 leading-5 text-[var(--color-text-secondary)]"
+        >
+          {t('settings.terminal.description')}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 
 function BashPathSettings({ isTauri }: { isTauri: boolean }) {
   const t = useTranslation()
-  const [bashPath, setBashPath] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
+  const inputId = useId()
+  const [bashPath, setBashPath] = useState('')
+  const [loading, setLoading] = useState(isTauri)
+  const [mutation, setMutation] = useState<'save' | 'reset' | null>(null)
   const [saved, setSaved] = useState(false)
-  const [invalid, setInvalid] = useState(false)
+  const [feedback, setFeedback] = useState<string | null>(null)
+  const dirtyRef = useRef(false)
+  const mountedRef = useRef(false)
+  const mutationRef = useRef(false)
+  const savedTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
-    if (!isTauri) return
-    void terminalApi.getBashPath().then((path) => setBashPath(path)).catch(() => {})
-  }, [isTauri])
+    mountedRef.current = true
+    if (!isTauri) {
+      setLoading(false)
+      return () => {
+        mountedRef.current = false
+      }
+    }
+
+    setLoading(true)
+    void terminalApi.getBashPath()
+      .then((path) => {
+        if (mountedRef.current && !dirtyRef.current) {
+          setBashPath(path ?? '')
+        }
+      })
+      .catch(() => {
+        if (mountedRef.current) {
+          setFeedback(t('settings.terminal.bashPathLoadError'))
+        }
+      })
+      .finally(() => {
+        if (mountedRef.current) setLoading(false)
+      })
+
+    return () => {
+      mountedRef.current = false
+      if (savedTimerRef.current !== null) {
+        window.clearTimeout(savedTimerRef.current)
+      }
+    }
+  }, [isTauri, t])
+
+  const showSaved = () => {
+    setSaved(true)
+    if (savedTimerRef.current !== null) {
+      window.clearTimeout(savedTimerRef.current)
+    }
+    savedTimerRef.current = window.setTimeout(() => {
+      if (mountedRef.current) setSaved(false)
+      savedTimerRef.current = null
+    }, 2000)
+  }
 
   const handleSave = async () => {
-    const trimmed = bashPath?.trim() || null
-    setSaving(true)
-    setInvalid(false)
+    if (mutationRef.current) return
+    const trimmed = bashPath.trim() || null
+    mutationRef.current = true
+    setMutation('save')
+    setFeedback(null)
     setSaved(false)
     try {
       await terminalApi.setBashPath(trimmed)
-      setBashPath(trimmed)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      if (!mountedRef.current) return
+      setBashPath(trimmed ?? '')
+      dirtyRef.current = false
+      showSaved()
     } catch {
-      setInvalid(true)
+      if (mountedRef.current) {
+        setFeedback(t('settings.terminal.bashPathInvalid'))
+      }
     } finally {
-      setSaving(false)
+      mutationRef.current = false
+      if (mountedRef.current) setMutation(null)
     }
   }
 
   const handleReset = async () => {
-    setSaving(true)
+    if (mutationRef.current) return
+    mutationRef.current = true
+    setMutation('reset')
     setSaved(false)
-    setInvalid(false)
+    setFeedback(null)
     try {
       await terminalApi.setBashPath(null)
-      setBashPath(null)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      if (!mountedRef.current) return
+      setBashPath('')
+      dirtyRef.current = false
+      showSaved()
     } catch {
-      // ignore
+      if (mountedRef.current) {
+        setFeedback(t('settings.terminal.bashPathResetError'))
+      }
     } finally {
-      setSaving(false)
+      mutationRef.current = false
+      if (mountedRef.current) setMutation(null)
     }
   }
 
   const handleBrowse = async () => {
     if (!isTauri) return
     const host = getDesktopHost()
-    if (!host.capabilities.dialogs) return
+    if (!host.capabilities.dialogs) {
+      setFeedback(t('settings.terminal.bashPathBrowseError'))
+      return
+    }
+    setFeedback(null)
+    setSaved(false)
     try {
       const selected = await host.dialogs.open({
         title: t('settings.terminal.bashPathLabel'),
@@ -820,60 +985,85 @@ function BashPathSettings({ isTauri }: { isTauri: boolean }) {
       })
       if (selected && typeof selected === 'string') {
         setBashPath(selected)
-        setInvalid(false)
+        dirtyRef.current = true
       }
     } catch {
-      // user cancelled
+      if (mountedRef.current) {
+        setFeedback(t('settings.terminal.bashPathBrowseError'))
+      }
     }
   }
 
   if (!isTauri) return null
+  const busy = loading || mutation !== null
 
   return (
-    <div className="mb-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3">
-      <label className="mb-1.5 block text-sm font-medium text-[var(--color-text-primary)]">
-        {t('settings.terminal.bashPathLabel')}
-      </label>
-      <p className="mb-2 text-xs text-[var(--color-text-tertiary)]">
-        {t('settings.terminal.bashPathDescription')}
-      </p>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={bashPath || ''}
-          onChange={(e) => { setBashPath(e.target.value); setInvalid(false); setSaved(false) }}
-          placeholder={t('settings.terminal.bashPathLabel')}
-          className="flex-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm font-mono text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-border-focus)]"
-        />
-        <button
-          type="button"
-          onClick={handleBrowse}
-          className="inline-flex h-8 items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)]"
-        >
-          <span className="material-symbols-outlined text-[16px]">folder_open</span>
-        </button>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="inline-flex h-8 items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-text-primary)] px-3 text-xs font-medium text-[var(--color-surface)] transition-colors hover:opacity-90 disabled:opacity-50"
-        >
-          {saved ? t('settings.terminal.bashPathSaved') : t('settings.terminal.bashPathSave')}
-        </button>
-        <button
-          type="button"
-          onClick={handleReset}
-          disabled={saving || bashPath === null}
-          className="inline-flex h-8 items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
-        >
-          {t('settings.terminal.bashPathReset')}
-        </button>
-      </div>
-      {invalid && (
-        <p className="mt-1.5 text-xs text-[var(--color-error)]">
-          {t('settings.terminal.bashPathInvalid')}
-        </p>
-      )}
-    </div>
+    <Card className="mb-3" aria-busy={busy || undefined}>
+      <CardHeader>
+        <CardTitle className="text-sm">{t('settings.terminal.bashPathLabel')}</CardTitle>
+        <CardDescription>{t('settings.terminal.bashPathDescription')}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 pt-0">
+        <Label htmlFor={inputId} className="sr-only">
+          {t('settings.terminal.bashPathLabel')}
+        </Label>
+        <div className="flex flex-wrap gap-2">
+          <Input
+            id={inputId}
+            type="text"
+            value={bashPath}
+            disabled={busy}
+            onChange={(event) => {
+              dirtyRef.current = true
+              setBashPath(event.target.value)
+              setFeedback(null)
+              setSaved(false)
+            }}
+            placeholder={t('settings.terminal.bashPathLabel')}
+            className="min-w-64 flex-1 font-mono"
+          />
+          <IconButton
+            variant="outline"
+            size="icon"
+            onClick={() => void handleBrowse()}
+            disabled={busy}
+            label={t('settings.terminal.bashPathBrowse')}
+          >
+            <FolderOpen aria-hidden="true" />
+          </IconButton>
+          <LoadingButton
+            size="sm"
+            loading={mutation === 'save'}
+            disabled={busy && mutation !== 'save'}
+            onClick={() => void handleSave()}
+            className="h-10"
+          >
+            {saved ? t('settings.terminal.bashPathSaved') : t('settings.terminal.bashPathSave')}
+          </LoadingButton>
+          <LoadingButton
+            variant="outline"
+            size="sm"
+            loading={mutation === 'reset'}
+            disabled={busy || bashPath.trim() === ''}
+            onClick={() => void handleReset()}
+            className="h-10"
+          >
+            {t('settings.terminal.bashPathReset')}
+          </LoadingButton>
+        </div>
+        {feedback && (
+          <Alert variant="destructive">
+            <AlertDescription className="text-[var(--color-error)]">
+              {feedback}
+            </AlertDescription>
+          </Alert>
+        )}
+        {saved && (
+          <span role="status" aria-live="polite" className="text-xs text-[var(--color-text-secondary)]">
+            {t('settings.terminal.bashPathSaved')}
+          </span>
+        )}
+      </CardContent>
+    </Card>
   )
 }

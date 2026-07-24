@@ -512,17 +512,17 @@ function registerIpcHandlers() {
   registerHandler(ELECTRON_IPC_CHANNELS.windowIsMaximized, event => currentWindow(event).isMaximized())
   registerHandler(ELECTRON_IPC_CHANNELS.terminalSpawn, (event, payload) =>
     getTerminalService().spawn((payload ?? {}) as TerminalSpawnInput, event.sender))
-  registerHandler(ELECTRON_IPC_CHANNELS.terminalWrite, (_event, payload) => {
+  registerHandler(ELECTRON_IPC_CHANNELS.terminalWrite, (event, payload) => {
     const { sessionId, data } = payload as { sessionId: number, data: string }
-    return getTerminalService().write(sessionId, data)
+    return getTerminalService().write(sessionId, data, event.sender)
   })
-  registerHandler(ELECTRON_IPC_CHANNELS.terminalResize, (_event, payload) => {
+  registerHandler(ELECTRON_IPC_CHANNELS.terminalResize, (event, payload) => {
     const { sessionId, cols, rows } = payload as { sessionId: number, cols: number, rows: number }
-    return getTerminalService().resize(sessionId, cols, rows)
+    return getTerminalService().resize(sessionId, cols, rows, event.sender)
   })
-  registerHandler(ELECTRON_IPC_CHANNELS.terminalKill, (_event, payload) => {
+  registerHandler(ELECTRON_IPC_CHANNELS.terminalKill, (event, payload) => {
     const { sessionId } = payload as { sessionId: number }
-    return getTerminalService().kill(sessionId)
+    return getTerminalService().kill(sessionId, event.sender)
   })
   registerHandler(ELECTRON_IPC_CHANNELS.terminalGetBashPath, () => getTerminalService().getBashPath())
   registerHandler(ELECTRON_IPC_CHANNELS.terminalSetBashPath, (_event, payload) => getTerminalService().setBashPath(payload as string | null))

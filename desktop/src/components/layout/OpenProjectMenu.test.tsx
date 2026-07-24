@@ -71,8 +71,12 @@ describe('OpenProjectMenu', () => {
     render(<OpenProjectMenu path="/repo" />)
 
     await waitFor(() => expect(storeMocks.ensureTargets).toHaveBeenCalled())
+    const trigger = screen.getByRole('button', { name: 'Open in Finder' })
+    expect(trigger).toHaveAttribute('data-variant', 'outline')
+    expect(trigger).toHaveAttribute('data-slot', 'tooltip-trigger')
+
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Open in Finder' }))
+      fireEvent.click(trigger)
     })
 
     expect(storeMocks.openTarget).toHaveBeenCalledWith('finder', '/repo')
@@ -89,10 +93,11 @@ describe('OpenProjectMenu', () => {
 
     const { container } = render(<OpenProjectMenu path="/repo" />)
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Open project' }))
-    })
+    const trigger = screen.getByRole('button', { name: 'Open project' })
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
     expect(screen.getByRole('menu')).toBeInTheDocument()
+    expect(screen.getByRole('menu')).toHaveAttribute('data-slot', 'dropdown-menu-content')
+    expect(trigger).toHaveAttribute('data-slot', 'dropdown-menu-trigger')
     expect([
       ...Array.from(container.querySelectorAll('img')),
       ...Array.from(document.body.querySelectorAll('[role="menu"] img')),
@@ -102,6 +107,26 @@ describe('OpenProjectMenu', () => {
     })
 
     expect(storeMocks.openTarget).toHaveBeenCalledWith('finder', '/repo')
+  })
+
+  it('closes the shadcn menu with Escape and restores trigger focus', async () => {
+    storeMocks.state.targets = [
+      { id: 'vscode', kind: 'ide', label: 'VS Code', icon: 'vscode', platform: 'darwin' },
+      { id: 'finder', kind: 'file_manager', label: 'Finder', icon: 'finder', platform: 'darwin' },
+    ]
+    storeMocks.state.primaryTargetId = 'vscode'
+
+    render(<OpenProjectMenu path="/repo" />)
+
+    const trigger = screen.getByRole('button', { name: 'Open project' })
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
+    expect(screen.getByRole('menuitem', { name: 'VS Code' })).toHaveFocus()
+
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    await waitFor(() => expect(trigger).toHaveFocus())
   })
 
   it('does not render without a path', () => {

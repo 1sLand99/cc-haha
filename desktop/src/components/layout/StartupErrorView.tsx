@@ -1,9 +1,12 @@
-import { Copy, RefreshCw } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { CircleAlert, Copy, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from '../../i18n'
-import { Button } from '../shared/Button'
 import { DoctorPanel } from '../doctor/DoctorPanel'
 import { copyTextToClipboard } from '../chat/clipboard'
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
+import { Button } from '../ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
+import { StartupSurface } from '../ui/custom/startup-surface'
 
 const LOG_MARKER = '\n\nRecent server logs:\n'
 
@@ -34,6 +37,11 @@ export function StartupErrorView({ error }: StartupErrorViewProps) {
   const t = useTranslation()
   const { message, logs, diagnostics } = useMemo(() => splitStartupError(error), [error])
   const [copied, setCopied] = useState(false)
+  const headingRef = useRef<HTMLHeadingElement>(null)
+
+  useEffect(() => {
+    headingRef.current?.focus()
+  }, [])
 
   const handleCopy = async () => {
     const ok = await copyTextToClipboard(diagnostics)
@@ -44,62 +52,60 @@ export function StartupErrorView({ error }: StartupErrorViewProps) {
   }
 
   return (
-    <div className="h-screen flex items-center justify-center bg-[var(--color-surface)] px-6">
-      <section className="w-full max-w-3xl rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-6 shadow-[var(--shadow-md)]">
-        <div className="flex flex-col gap-4">
-          <div>
-            <h1 className="text-lg font-semibold text-[var(--color-text-primary)]">
-              {t('app.serverFailed')}
-            </h1>
-            <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-              {t('app.serverFailedHint')}
-            </p>
-          </div>
-
-          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-            <div className="text-xs font-medium uppercase text-[var(--color-text-tertiary)]">
-              {t('app.startupError')}
-            </div>
-            <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-[var(--color-error)]">
+    <StartupSurface
+      title={t('app.serverFailed')}
+      description={t('app.serverFailedHint')}
+      headingRef={headingRef}
+      icon={<CircleAlert aria-hidden="true" />}
+      panelClassName="max-w-3xl"
+      actions={(
+        <>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={handleCopy}
+          >
+            <Copy aria-hidden="true" />
+            <span aria-live="polite">
+              {copied ? t('app.copiedDiagnostics') : t('app.copyDiagnostics')}
+            </span>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => window.location.reload()}
+          >
+            <RefreshCw aria-hidden="true" />
+            {t('common.retry')}
+          </Button>
+        </>
+      )}
+    >
+      <Alert variant="destructive">
+        <AlertTitle>{t('app.startupError')}</AlertTitle>
+        <AlertDescription>
+          <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-[var(--color-error)]">
               {message}
             </pre>
-          </div>
+        </AlertDescription>
+      </Alert>
 
-          {logs ? (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-              <div className="text-xs font-medium uppercase text-[var(--color-text-tertiary)]">
-                {t('app.serverLogs')}
-              </div>
-              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-[var(--color-text-secondary)]">
+      {logs ? (
+        <Card className="bg-[var(--color-surface)] shadow-none">
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-xs uppercase text-[var(--color-text-tertiary)]">
+              {t('app.serverLogs')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 pt-0">
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-[var(--color-text-secondary)]">
                 {logs}
               </pre>
-            </div>
-          ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              icon={<Copy className="h-4 w-4" aria-hidden="true" />}
-              onClick={handleCopy}
-            >
-              {copied ? t('app.copiedDiagnostics') : t('app.copyDiagnostics')}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              icon={<RefreshCw className="h-4 w-4" aria-hidden="true" />}
-              onClick={() => window.location.reload()}
-            >
-              {t('common.retry')}
-            </Button>
-          </div>
-
-          <DoctorPanel compact />
-        </div>
-      </section>
-    </div>
+      <DoctorPanel compact />
+    </StartupSurface>
   )
 }

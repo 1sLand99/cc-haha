@@ -3,6 +3,7 @@ import { sessionsApi, type SessionContextSnapshot } from '../../api/sessions'
 import { useTranslation } from '../../i18n'
 import type { ChatState } from '../../types/chat'
 import { MobileBottomSheet } from '../shared/MobileBottomSheet'
+import { Button } from '../ui/button'
 
 type Props = {
   sessionId?: string
@@ -256,8 +257,9 @@ export function ContextUsageIndicator({
 
   return (
     <div className="group/context relative pointer-events-auto">
-      <button
-        type="button"
+      <Button
+        variant="secondary"
+        size="sm"
         aria-label={ariaLabel}
         onClick={() => {
           if (compact) {
@@ -267,7 +269,7 @@ export function ContextUsageIndicator({
         }}
         title={t('contextIndicator.title')}
         data-testid="context-usage-indicator"
-        className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-container)] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-container-high)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-container-lowest)] ${
+        className={`h-8 shrink-0 gap-1.5 rounded-full border-[var(--color-border)] bg-[var(--color-surface-container)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-container-high)] ${
           compact ? 'px-2' : 'px-2.5'
         }`}
       >
@@ -290,7 +292,7 @@ export function ContextUsageIndicator({
         <span className="font-mono text-[11px] font-semibold tabular-nums">
           {displayPercent}
         </span>
-      </button>
+      </Button>
 
       <div className={`pointer-events-none absolute bottom-full right-0 z-40 mb-2 w-[320px] max-w-[calc(100vw-2rem)] translate-y-1 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] p-4 text-left opacity-0 shadow-[var(--shadow-dropdown)] transition-all duration-150 group-hover/context:translate-y-0 group-hover/context:opacity-100 group-focus-within/context:translate-y-0 group-focus-within/context:opacity-100 ${
         compact ? 'hidden' : ''

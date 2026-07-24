@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { Check, ChevronDown, Clock, Folder, FolderOpen, FolderPlus, GitBranch, LoaderCircle, MoreHorizontal, Pin, PinOff, RefreshCw, RotateCcw, SquarePen, X } from 'lucide-react'
+import { Clock, Folder, FolderOpen, FolderPlus, GitBranch, LoaderCircle, MoreHorizontal, Pin, PinOff, RefreshCw, RotateCcw, SquarePen, X } from 'lucide-react'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useTranslation, type TranslationKey } from '../../i18n'
@@ -15,6 +15,29 @@ import { getDesktopHost } from '../../lib/desktopHost'
 import { publicAssetPath } from '../../lib/publicAsset'
 import { hasRunningBackgroundTasks } from '../../lib/backgroundTasks'
 import { getSessionWorkspaceState } from '../../lib/sessionWorkspace'
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
+import { Button } from '../ui/button'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '../ui/context-menu'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
+import { Input } from '../ui/input'
+import { Skeleton } from '../ui/skeleton'
+import { KeyboardShortcut } from '../ui/custom/keyboard-shortcut'
 
 const desktopHost = getDesktopHost()
 const isDesktopRuntime = desktopHost.isDesktop
@@ -32,8 +55,6 @@ const PROJECT_GROUP_SCROLL_COUNT = 12
 
 type SidebarProjectOrganization = 'project' | 'recentProject' | 'time'
 type SidebarProjectSortBy = 'createdAt' | 'updatedAt'
-type SidebarHeaderMenuType = 'main' | 'organize' | 'sort' | 'create'
-
 type ProjectGroup = {
   key: string
   title: string
@@ -80,10 +101,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
   const chatSessions = useChatStore((s) => s.sessions)
   const closeTab = useTabStore((s) => s.closeTab)
   const disconnectSession = useChatStore((s) => s.disconnectSession)
-  const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null)
-  const [projectContextMenu, setProjectContextMenu] = useState<{ key: string; x: number; y: number } | null>(null)
-  const [projectHeaderMenu, setProjectHeaderMenu] = useState<{ type: SidebarHeaderMenuType; x: number; y: number } | null>(null)
-  const [projectHeaderSubmenu, setProjectHeaderSubmenu] = useState<{ type: 'organize' | 'sort'; x: number; y: number } | null>(null)
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null)
   const [pendingBatchDeleteSessionIds, setPendingBatchDeleteSessionIds] = useState<string[] | null>(null)
   const [isBatchDeleting, setIsBatchDeleting] = useState(false)
@@ -138,24 +155,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
       scrollArea.scrollTop += delta
     }
   }, [sessions])
-
-  useEffect(() => {
-    if (!contextMenu) return
-    if (!sidebarOpen) setContextMenu(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarOpen])
-
-  useEffect(() => {
-    if (!contextMenu && !projectContextMenu && !projectHeaderMenu && !projectHeaderSubmenu) return
-    const close = () => {
-      setContextMenu(null)
-      setProjectContextMenu(null)
-      setProjectHeaderMenu(null)
-      setProjectHeaderSubmenu(null)
-    }
-    document.addEventListener('click', close)
-    return () => document.removeEventListener('click', close)
-  }, [contextMenu, projectContextMenu, projectHeaderMenu, projectHeaderSubmenu])
 
   // Title filtering moved into the global search modal (Cmd+K); the list shows all sessions.
   const filteredSessions = sessions
@@ -272,12 +271,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
     }
   }, [applySidebarProjectPreferences])
 
-  const handleContextMenu = useCallback((e: React.MouseEvent, id: string) => {
-    e.preventDefault()
-    if (isBatchMode) return
-    setContextMenu({ id, x: e.clientX, y: e.clientY })
-  }, [isBatchMode])
-
   const handleProjectDragStart = useCallback((event: React.DragEvent, projectKey: string) => {
     if (isBatchMode) {
       event.preventDefault()
@@ -347,34 +340,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
     }
   }, [addToast, closeMobileDrawer, restoreHiddenProjectForWorkDir, t])
 
-  const openProjectHeaderMenu = useCallback((event: React.MouseEvent, type: SidebarHeaderMenuType) => {
-    event.stopPropagation()
-    const rect = event.currentTarget.getBoundingClientRect()
-    const width = type === 'create' ? 250 : 270
-    setProjectContextMenu(null)
-    setContextMenu(null)
-    setProjectHeaderSubmenu(null)
-    setProjectHeaderMenu({
-      type,
-      x: Math.max(10, Math.min(rect.right - width, window.innerWidth - width - 10)),
-      y: rect.bottom + 8,
-    })
-  }, [])
-
-  const openProjectHeaderSubmenu = useCallback((event: React.MouseEvent, type: 'organize' | 'sort') => {
-    event.stopPropagation()
-    const rect = event.currentTarget.getBoundingClientRect()
-    const width = type === 'sort' ? 230 : 260
-    setProjectHeaderSubmenu({
-      type,
-      x: Math.max(10, Math.min(rect.right + 8, window.innerWidth - width - 10)),
-      y: Math.max(10, Math.min(rect.top - 8, window.innerHeight - 170)),
-    })
-  }, [])
-
   const updateProjectOrganization = useCallback((organization: SidebarProjectOrganization) => {
-    setProjectHeaderMenu(null)
-    setProjectHeaderSubmenu(null)
     setProjectOrganizationState(organization)
     const nextOrder = organization === 'project' || organization === 'time' ? [] : projectOrder
     if (nextOrder !== projectOrder) setProjectOrder(nextOrder)
@@ -388,8 +354,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
   }, [hiddenProjectKeys, persistSidebarProjectPreferences, pinnedProjectKeys, projectOrder, projectSortBy])
 
   const updateProjectSortBy = useCallback((sortBy: SidebarProjectSortBy) => {
-    setProjectHeaderMenu(null)
-    setProjectHeaderSubmenu(null)
     setProjectSortByState(sortBy)
     const nextOrder: string[] = []
     setProjectOrder(nextOrder)
@@ -403,8 +367,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
   }, [hiddenProjectKeys, persistSidebarProjectPreferences, pinnedProjectKeys, projectOrganization])
 
   const createSessionFromExistingFolder = useCallback(async () => {
-    setProjectHeaderMenu(null)
-    setProjectHeaderSubmenu(null)
     if (!canUseNativeDialogs) {
       addToast({
         type: 'error',
@@ -430,7 +392,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
   }, [addToast, createSessionForWorkDir, t])
 
   const togglePinnedProject = useCallback((projectKey: string) => {
-    setProjectContextMenu(null)
     setPinnedProjectKeys((current) => {
       const next = new Set(current)
       if (next.has(projectKey)) {
@@ -444,8 +405,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
   }, [hiddenProjectKeys, persistSidebarProjectPreferences, projectOrder, projectOrganization, projectSortBy])
 
   const restoreAllHiddenProjects = useCallback(() => {
-    setProjectHeaderMenu(null)
-    setProjectHeaderSubmenu(null)
     setHiddenProjectKeys((current) => {
       if (current.size === 0) return current
       const next = new Set<string>()
@@ -462,7 +421,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
 
   const toggleHiddenProject = useCallback((project: ProjectGroup) => {
     const wasHidden = hiddenProjectKeys.has(project.key)
-    setProjectContextMenu(null)
     setHiddenProjectKeys((current) => {
       const next = new Set(current)
       if (next.has(project.key)) {
@@ -482,7 +440,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
   }, [addToast, hiddenProjectKeys, persistSidebarProjectPreferences, pinnedProjectKeys, projectOrder, projectOrganization, projectSortBy, t])
 
   const openProjectInFinder = useCallback(async (project: ProjectGroup) => {
-    setProjectContextMenu(null)
     try {
       if (!project.workDir) {
         throw new Error(t('sidebar.openInFinderUnavailable'))
@@ -505,7 +462,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
   }, [addToast, t])
 
   const handleDelete = useCallback((id: string) => {
-    setContextMenu(null)
     setPendingDeleteSessionId(id)
   }, [])
 
@@ -617,7 +573,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
   }, [])
 
   const handleStartRename = useCallback((id: string, currentTitle: string) => {
-    setContextMenu(null)
     setRenamingId(id)
     setRenameValue(currentTitle)
   }, [])
@@ -685,26 +640,28 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
               <GitHubIcon />
             </a>
             {isMobile ? (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="icon-lg"
                 onClick={closeMobileDrawer}
-                className="sidebar-toggle-button flex h-11 w-11 items-center justify-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-sidebar)]"
+                className="sidebar-toggle-button h-11 w-11 rounded-xl"
                 aria-label={t('sidebar.collapse')}
                 title={t('sidebar.collapse')}
               >
                 <span className="material-symbols-outlined text-[20px]">close</span>
-              </button>
+              </Button>
             ) : (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={toggleSidebar}
                 data-testid={expanded ? 'sidebar-collapse-button' : 'sidebar-expand-button'}
-                className={`sidebar-toggle-button ${expanded ? 'sidebar-toggle-button--open h-8 w-8' : 'sidebar-toggle-button--collapsed h-8 w-8'} flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-sidebar)]`}
+                className={`sidebar-toggle-button ${expanded ? 'sidebar-toggle-button--open' : 'sidebar-toggle-button--collapsed'} h-8 w-8 rounded-full`}
                 aria-label={expanded ? t('sidebar.collapse') : t('sidebar.expand')}
                 title={expanded ? t('sidebar.collapse') : t('sidebar.expand')}
               >
                 <SidebarToggleIcon collapsed={!expanded} />
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -767,10 +724,10 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
             style={{ overflow: 'visible' }}
           >
             <div className="flex items-center gap-1.5">
-              <button
-                type="button"
+              <Button
+                variant="outline"
                 onClick={() => openModal('globalSearch')}
-                className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-[14px] border border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)] pl-3 pr-2 text-left text-[13px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] focus-visible:border-[var(--color-border-focus)] focus-visible:outline-none"
+                className="h-9 min-w-0 flex-1 justify-start gap-2 rounded-[14px] border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)] pl-3 pr-2 text-left text-[13px] font-normal text-[var(--color-text-tertiary)] hover:bg-[var(--color-sidebar-item-hover)]"
                 aria-label={t('search.global.trigger')}
                 title={t('search.global.trigger')}
               >
@@ -778,21 +735,23 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                   <SearchIcon />
                 </span>
                 <span className="min-w-0 flex-1 truncate pl-2">{t('search.global.trigger')}</span>
-                <kbd className="pointer-events-none shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1 font-mono text-[10px] leading-tight text-[var(--color-text-tertiary)]">⌘K</kbd>
-              </button>
-              <button
-                type="button"
+                <KeyboardShortcut>⌘K</KeyboardShortcut>
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
                 onClick={() => void refreshSessionsNow()}
-                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] border border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)] disabled:cursor-default disabled:opacity-65 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+                className="h-9 w-9 rounded-[12px] border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-sidebar-item-hover)]"
                 aria-label={t('sidebar.refreshSessions')}
                 title={t('sidebar.refreshSessions')}
               >
                 <RefreshCw className={`h-4 w-4 ${showRefreshLoading ? 'animate-spin' : ''}`} strokeWidth={1.9} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
                 onClick={isBatchMode ? handleExitBatchMode : enterBatchMode}
-                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${
+                className={`h-9 w-9 rounded-[12px] ${
                   isBatchMode
                     ? 'border-[var(--color-brand)] bg-[var(--color-sidebar-item-active)] text-[var(--color-brand)]'
                     : 'border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)]'
@@ -803,7 +762,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                 <span className="material-symbols-outlined text-[18px]">
                   {isBatchMode ? 'close' : 'delete_sweep'}
                 </span>
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -817,19 +776,21 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                   <span className="min-w-0 text-xs font-medium text-[var(--color-text-primary)]">
                     {t('sidebar.batchSelectedCount', { count: selectedCount })}
                   </span>
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={handleExitBatchMode}
-                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+                    className="flex-shrink-0 rounded-md text-[var(--color-text-tertiary)]"
                     aria-label={t('sidebar.batchExit')}
                     title={t('sidebar.batchExit')}
                   >
                     <span className="material-symbols-outlined text-[17px]">close</span>
-                  </button>
+                  </Button>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => {
                       if (filteredSessionIds.every((id) => selectedSessionIds.has(id))) {
                         deselectSessions(filteredSessionIds)
@@ -838,20 +799,21 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                       }
                     }}
                     disabled={filteredSessionIds.length === 0}
-                    className="rounded-md border border-[var(--color-border)] px-2 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+                    className="rounded-md text-[var(--color-text-secondary)]"
                   >
                     {filteredSessionIds.length > 0 && filteredSessionIds.every((id) => selectedSessionIds.has(id))
                       ? t('sidebar.batchDeselectAll')
                       : t('sidebar.batchSelectAll')}
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
                     onClick={() => requestBatchDelete([...selectedSessionIds])}
                     disabled={selectedCount === 0}
-                    className="rounded-md bg-[var(--color-error)] px-2 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                    className="rounded-md"
                   >
                     {t('sidebar.batchDeleteSelected', { count: selectedCount })}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -885,20 +847,25 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
               className="sidebar-scroll-area min-h-0 flex-1 overflow-y-auto px-3 pb-20"
             >
               {error && (
-                <div className="mx-1 mt-2 rounded-[var(--radius-md)] border border-[var(--color-error)]/20 bg-[var(--color-error)]/5 px-3 py-2">
-                  <div className="text-xs font-medium text-[var(--color-error)]">{t('sidebar.sessionListFailed')}</div>
-                  <div className="mt-1 text-[11px] text-[var(--color-text-secondary)] break-words">{error}</div>
-                  <button
+                <Alert variant="destructive" className="mx-1 mt-2">
+                  <AlertTitle className="text-xs">{t('sidebar.sessionListFailed')}</AlertTitle>
+                  <AlertDescription className="break-words text-[11px] text-[var(--color-text-secondary)]">{error}</AlertDescription>
+                  <Button
+                    variant="link"
+                    size="sm"
                     onClick={() => fetchSessions()}
-                    className="mt-2 text-[11px] font-medium text-[var(--color-brand)] hover:underline"
+                    className="mt-1 h-auto w-fit text-[11px]"
                   >
                     {t('common.retry')}
-                  </button>
-                </div>
+                  </Button>
+                </Alert>
               )}
               {showInitialLoading ? (
-                <div className="px-3 py-4 text-center text-xs text-[var(--color-text-tertiary)]">
-                  {t('common.loading')}
+                <div className="space-y-2 px-3 py-4" aria-label={t('common.loading')}>
+                  <span className="sr-only">{t('common.loading')}</span>
+                  <Skeleton className="h-7 w-full" />
+                  <Skeleton className="h-7 w-5/6" />
+                  <Skeleton className="h-7 w-4/6" />
                 </div>
               ) : filteredSessions.length === 0 && (
                 <div className="px-3 py-4 text-center text-xs text-[var(--color-text-tertiary)]">
@@ -910,8 +877,15 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                   title={t('sidebar.projects')}
                   menuLabel={t('sidebar.projectMenu')}
                   createLabel={t('sidebar.newProject')}
-                  onOpenMenu={(event) => openProjectHeaderMenu(event, 'main')}
-                  onOpenCreate={(event) => openProjectHeaderMenu(event, 'create')}
+                  organization={projectOrganization}
+                  sortBy={projectSortBy}
+                  hiddenProjectCount={hiddenProjectKeys.size}
+                  onSetOrganization={updateProjectOrganization}
+                  onSetSortBy={updateProjectSortBy}
+                  onCreateBlank={() => void createSessionForWorkDir()}
+                  onUseExistingFolder={() => void createSessionFromExistingFolder()}
+                  onRestoreHiddenProjects={restoreAllHiddenProjects}
+                  t={t}
                 />
               )}
               {visibleProjectGroups.map((project) => {
@@ -945,14 +919,14 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                       <div className="pointer-events-none absolute -top-1 left-1 right-1 z-10 h-0.5 rounded-full bg-[var(--color-brand)]" />
                     )}
                     <div className="flex items-center gap-1">
-                      <button
-                        type="button"
+                      <Button
+                        variant="ghost"
                         draggable={!isBatchMode}
                         onDragStart={(event) => handleProjectDragStart(event, project.key)}
                         onDragEnd={clearProjectDragState}
                         onClick={() => toggleProjectCollapsed(project.key)}
                         data-state={projectCollapsed ? 'closed' : 'open'}
-                        className="flex min-w-0 flex-1 cursor-grab items-center gap-2 rounded-xl px-1.5 py-2 text-left transition-[background,color] active:cursor-grabbing hover:bg-[var(--color-sidebar-item-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+                        className="h-auto min-w-0 flex-1 cursor-grab justify-start gap-2 rounded-xl px-1.5 py-2 text-left active:cursor-grabbing hover:bg-[var(--color-sidebar-item-hover)]"
                         aria-expanded={!projectCollapsed}
                         aria-label={t(projectCollapsed ? 'sidebar.expandProject' : 'sidebar.collapseProject', { project: project.title })}
                         title={project.subtitle || project.title}
@@ -982,13 +956,14 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                         {isProjectPinned && (
                           <Pin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--color-text-tertiary)]" strokeWidth={1.8} aria-hidden="true" />
                         )}
-                      </button>
+                      </Button>
                       <div className="flex flex-shrink-0 items-center gap-1">
                         {isBatchMode && (
-                          <button
-                            type="button"
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => toggleGroupSelection(groupIds)}
-                            className={`rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${
+                            className={`h-7 rounded-md px-1.5 text-[11px] ${
                               groupSelectedCount > 0
                                 ? 'text-[var(--color-brand)] hover:bg-[var(--color-brand)]/10'
                                 : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-secondary)]'
@@ -998,35 +973,54 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                             {groupSelectedCount === groupIds.length
                               ? t('sidebar.batchDeselectAll')
                               : t('sidebar.batchSelectAll')}
-                          </button>
+                          </Button>
                         )}
                         {!isBatchMode && (
                           <div className="pointer-events-none flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/project:pointer-events-auto group-hover/project:opacity-100 group-focus-within/project:pointer-events-auto group-focus-within/project:opacity-100">
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                setContextMenu(null)
-                                setProjectContextMenu({ key: project.key, x: event.clientX, y: event.clientY })
-                              }}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-                              aria-label={t('sidebar.projectActions', { project: project.title })}
-                              title={t('sidebar.projectActions', { project: project.title })}
-                            >
-                              <MoreHorizontal className="h-[17px] w-[17px]" strokeWidth={2} aria-hidden="true" />
-                            </button>
-                            <button
-                              type="button"
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-sidebar-item-hover)]"
+                                  aria-label={t('sidebar.projectActions', { project: project.title })}
+                                  title={t('sidebar.projectActions', { project: project.title })}
+                                >
+                                  <MoreHorizontal className="h-[17px] w-[17px]" strokeWidth={2} aria-hidden="true" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="min-w-[230px]">
+                                <DropdownMenuItem onSelect={() => togglePinnedProject(project.key)}>
+                                  {isProjectPinned ? <PinOff aria-hidden="true" /> : <Pin aria-hidden="true" />}
+                                  {t(isProjectPinned ? 'sidebar.unpinProject' : 'sidebar.pinProject')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => void openProjectInFinder(project)}>
+                                  <FolderOpen aria-hidden="true" />
+                                  {t('sidebar.openInFinder')}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onSelect={() => toggleHiddenProject(project)}
+                                  className={!hiddenProjectKeys.has(project.key) ? 'text-[var(--color-error)] focus:bg-[var(--color-error)]/10' : undefined}
+                                >
+                                  {hiddenProjectKeys.has(project.key) ? <RotateCcw aria-hidden="true" /> : <X aria-hidden="true" />}
+                                  {t(hiddenProjectKeys.has(project.key) ? 'sidebar.restoreProjectToSidebar' : 'sidebar.hideProjectFromSidebar')}
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
                               onClick={(event) => {
                                 event.stopPropagation()
                                 void createSessionForWorkDir(project.workDir)
                               }}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+                              className="rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-sidebar-item-hover)]"
                               aria-label={t('sidebar.newSessionInProject', { project: project.title })}
                               title={t('sidebar.newSessionInProject', { project: project.title })}
                             >
                               <SquarePen className="h-[16px] w-[16px]" strokeWidth={2} aria-hidden="true" />
-                            </button>
+                            </Button>
                           </div>
                         )}
                       </div>
@@ -1044,7 +1038,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                               className="relative mb-0.5 last:mb-0"
                             >
                               {renamingId === session.id ? (
-                                <input
+                                <Input
                                   autoFocus
                                   value={renameValue}
                                   onChange={(e) => setRenameValue(e.target.value)}
@@ -1056,80 +1050,98 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                                       setRenameValue('')
                                     }
                                   }}
-                                  className="w-full rounded-[var(--radius-md)] border border-[var(--color-border-focus)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none"
+                                  className="h-9 border-[var(--color-border-focus)]"
                                 />
                               ) : (
-                                <button
-                                  onClick={(event) => {
-                                    if (isBatchMode) {
-                                      handleBatchSessionClick(event, session.id)
-                                      return
-                                    }
-                                    useTabStore.getState().openTab(session.id, session.title)
-                                    useChatStore.getState().connectToSession(session.id)
-                                    closeMobileDrawer()
-                                  }}
-                                  onContextMenu={(e) => handleContextMenu(e, session.id)}
-                                  className={`
-                                    group/session w-full rounded-lg px-2.5 ${isMobile ? 'py-3' : 'py-1.5'} text-left text-[13px] transition-[background,filter,color] duration-200
-                                    ${selectedSessionIds.has(session.id)
-                                      ? 'sidebar-session-row--selected bg-[var(--color-sidebar-item-active)] text-[var(--color-text-primary)]'
-                                      : session.id === activeTabId
-                                      ? 'sidebar-session-row--active bg-[var(--color-sidebar-item-active)] text-[var(--color-text-primary)]'
-                                      : 'sidebar-session-row--idle text-[var(--color-text-secondary)] hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)]'
-                                    }
-                                  `}
-                                  aria-pressed={isBatchMode ? selectedSessionIds.has(session.id) : undefined}
-                                  title={session.title || 'Untitled'}
-                                >
-                                  <span className="flex min-w-0 items-center gap-2">
-                                    {isBatchMode ? (
-                                      <span
-                                        className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[5px] border transition-colors ${
-                                          selectedSessionIds.has(session.id)
-                                            ? 'border-[var(--color-brand)] bg-[var(--color-brand)] text-[var(--color-on-primary)]'
-                                            : 'border-[var(--color-border)] bg-[var(--color-surface)]'
-                                        }`}
-                                        aria-hidden="true"
-                                      >
-                                        {selectedSessionIds.has(session.id) && (
-                                          <span className="material-symbols-outlined text-[12px]">check</span>
+                                <ContextMenu>
+                                  <ContextMenuTrigger asChild disabled={isBatchMode}>
+                                    <Button
+                                      variant="ghost"
+                                      onClick={(event) => {
+                                        if (isBatchMode) {
+                                          handleBatchSessionClick(event, session.id)
+                                          return
+                                        }
+                                        useTabStore.getState().openTab(session.id, session.title)
+                                        useChatStore.getState().connectToSession(session.id)
+                                        closeMobileDrawer()
+                                      }}
+                                      className={`
+                                        group/session h-auto w-full justify-start rounded-lg px-2.5 ${isMobile ? 'py-3' : 'py-1.5'} text-left text-[13px] transition-[background,filter,color] duration-200
+                                        ${selectedSessionIds.has(session.id)
+                                          ? 'sidebar-session-row--selected bg-[var(--color-sidebar-item-active)] text-[var(--color-text-primary)]'
+                                          : session.id === activeTabId
+                                          ? 'sidebar-session-row--active bg-[var(--color-sidebar-item-active)] text-[var(--color-text-primary)]'
+                                          : 'sidebar-session-row--idle text-[var(--color-text-secondary)] hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)]'
+                                        }
+                                      `}
+                                      aria-pressed={isBatchMode ? selectedSessionIds.has(session.id) : undefined}
+                                      title={session.title || 'Untitled'}
+                                    >
+                                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                                        {isBatchMode ? (
+                                          <span
+                                            className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[5px] border transition-colors ${
+                                              selectedSessionIds.has(session.id)
+                                                ? 'border-[var(--color-brand)] bg-[var(--color-brand)] text-[var(--color-on-primary)]'
+                                                : 'border-[var(--color-border)] bg-[var(--color-surface)]'
+                                            }`}
+                                            aria-hidden="true"
+                                          >
+                                            {selectedSessionIds.has(session.id) && (
+                                              <span className="material-symbols-outlined text-[12px]">check</span>
+                                            )}
+                                          </span>
+                                        ) : null}
+                                        <span className="min-w-0 flex-1 truncate font-medium tracking-normal">{session.title || 'Untitled'}</span>
+                                        {getSessionWorkspaceState(session) === 'missing' && (
+                                          <span
+                                            className="flex-shrink-0 text-[10px] text-[var(--color-warning)]"
+                                            title={session.workDir ?? ''}
+                                          >
+                                            {t('sidebar.missingDir')}
+                                          </span>
                                         )}
+                                        <SessionRowMeta
+                                          isRunning={runningSessionIds.has(session.id)}
+                                          isWorktree={isWorktreeSession(session)}
+                                          modifiedAt={session.modifiedAt}
+                                          t={t}
+                                        />
                                       </span>
-                                    ) : null}
-                                    <span className="min-w-0 flex-1 truncate font-medium tracking-normal">{session.title || 'Untitled'}</span>
-                                    {getSessionWorkspaceState(session) === 'missing' && (
-                                      <span
-                                        className="flex-shrink-0 text-[10px] text-[var(--color-warning)]"
-                                        title={session.workDir ?? ''}
-                                      >
-                                        {t('sidebar.missingDir')}
-                                      </span>
-                                    )}
-                                    <SessionRowMeta
-                                      isRunning={runningSessionIds.has(session.id)}
-                                      isWorktree={isWorktreeSession(session)}
-                                      modifiedAt={session.modifiedAt}
-                                      t={t}
-                                    />
-                                  </span>
-                                </button>
+                                    </Button>
+                                  </ContextMenuTrigger>
+                                  <ContextMenuContent>
+                                    <ContextMenuItem onSelect={() => handleStartRename(session.id, session.title || '')}>
+                                      <SquarePen aria-hidden="true" />
+                                      {t('common.rename')}
+                                    </ContextMenuItem>
+                                    <ContextMenuSeparator />
+                                    <ContextMenuItem
+                                      onSelect={() => handleDelete(session.id)}
+                                      className="text-[var(--color-error)] focus:bg-[var(--color-error)]/10"
+                                    >
+                                      <X aria-hidden="true" />
+                                      {t('common.delete')}
+                                    </ContextMenuItem>
+                                  </ContextMenuContent>
+                                </ContextMenu>
                               )}
                             </div>
                           ))}
                         </div>
                         {(hiddenCount > 0 || sessionsExpanded) && (
                           <div className="mt-2 flex justify-start px-2.5">
-                            <button
-                              type="button"
+                            <Button
+                              variant="link"
                               onClick={() => toggleProjectSessionExpansion(project.key)}
-                              className="inline-flex items-center justify-start py-1 text-[13px] font-semibold text-[var(--color-text-tertiary)] opacity-75 transition-[color,opacity] hover:text-[var(--color-text-secondary)] hover:opacity-100 focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+                              className="h-auto justify-start py-1 text-[13px] font-semibold text-[var(--color-text-tertiary)] no-underline opacity-75 transition-[color,opacity] hover:text-[var(--color-text-secondary)] hover:no-underline hover:opacity-100"
                               aria-expanded={sessionsExpanded}
                             >
                               {sessionsExpanded
                                 ? t('sidebar.showFewerSessions')
                                 : t('sidebar.showMoreSessions')}
-                            </button>
+                            </Button>
                           </div>
                         )}
                       </div>
@@ -1166,100 +1178,6 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
             {t('sidebar.settings')}
           </NavItem>
         </div>
-      )}
-
-      {contextMenu && (
-        <div
-          className="fixed z-50 min-w-[140px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1"
-          style={{ left: contextMenu.x, top: contextMenu.y, boxShadow: 'var(--shadow-dropdown)' }}
-        >
-          <button
-            onClick={() => {
-              const session = sessions.find((s) => s.id === contextMenu.id)
-              handleStartRename(contextMenu.id, session?.title || '')
-            }}
-            className="w-full px-3 py-1.5 text-left text-xs text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
-          >
-            {t('common.rename')}
-          </button>
-          <button
-            onClick={() => handleDelete(contextMenu.id)}
-            className="w-full px-3 py-1.5 text-left text-xs text-[var(--color-error)] transition-colors hover:bg-[var(--color-surface-hover)]"
-          >
-            {t('common.delete')}
-          </button>
-        </div>
-      )}
-
-      {projectContextMenu && (() => {
-        const project = orderedProjectGroups.find((group) => group.key === projectContextMenu.key)
-        if (!project) return null
-        const pinned = pinnedProjectKeys.has(project.key)
-        const hidden = hiddenProjectKeys.has(project.key)
-        return (
-          <div
-            role="menu"
-            className="fixed z-50 min-w-[230px] overflow-hidden rounded-[18px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[var(--shadow-dropdown)]"
-            style={positionProjectMenu(projectContextMenu.x, projectContextMenu.y)}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <ProjectMenuItem
-              icon={pinned ? <PinOff size={18} aria-hidden="true" /> : <Pin size={18} aria-hidden="true" />}
-              onClick={() => togglePinnedProject(project.key)}
-            >
-              {t(pinned ? 'sidebar.unpinProject' : 'sidebar.pinProject')}
-            </ProjectMenuItem>
-            <ProjectMenuItem
-              icon={<FolderOpen size={18} aria-hidden="true" />}
-              onClick={() => void openProjectInFinder(project)}
-            >
-              {t('sidebar.openInFinder')}
-            </ProjectMenuItem>
-            <ProjectMenuItem
-              icon={hidden ? <RotateCcw size={18} aria-hidden="true" /> : <X size={18} aria-hidden="true" />}
-              onClick={() => toggleHiddenProject(project)}
-              danger={!hidden}
-            >
-              {t(hidden ? 'sidebar.restoreProjectToSidebar' : 'sidebar.hideProjectFromSidebar')}
-            </ProjectMenuItem>
-          </div>
-        )
-      })()}
-
-      {projectHeaderMenu && (
-        <ProjectHeaderMenu
-          type={projectHeaderMenu.type}
-          x={projectHeaderMenu.x}
-          y={projectHeaderMenu.y}
-          organization={projectOrganization}
-          sortBy={projectSortBy}
-          onOpenSubmenu={openProjectHeaderSubmenu}
-          onSetOrganization={updateProjectOrganization}
-          onSetSortBy={updateProjectSortBy}
-          onCreateBlank={() => void createSessionForWorkDir()}
-          onUseExistingFolder={() => void createSessionFromExistingFolder()}
-          onRestoreHiddenProjects={restoreAllHiddenProjects}
-          hiddenProjectCount={hiddenProjectKeys.size}
-          t={t}
-        />
-      )}
-
-      {projectHeaderSubmenu && (
-        <ProjectHeaderMenu
-          type={projectHeaderSubmenu.type}
-          x={projectHeaderSubmenu.x}
-          y={projectHeaderSubmenu.y}
-          organization={projectOrganization}
-          sortBy={projectSortBy}
-          onOpenSubmenu={openProjectHeaderSubmenu}
-          onSetOrganization={updateProjectOrganization}
-          onSetSortBy={updateProjectSortBy}
-          onCreateBlank={() => void createSessionForWorkDir()}
-          onUseExistingFolder={() => void createSessionFromExistingFolder()}
-          onRestoreHiddenProjects={restoreAllHiddenProjects}
-          hiddenProjectCount={hiddenProjectKeys.size}
-          t={t}
-        />
       )}
 
       <ConfirmDialog
@@ -1397,14 +1315,28 @@ function ProjectHeaderActions({
   title,
   menuLabel,
   createLabel,
-  onOpenMenu,
-  onOpenCreate,
+  organization,
+  sortBy,
+  hiddenProjectCount,
+  onSetOrganization,
+  onSetSortBy,
+  onCreateBlank,
+  onUseExistingFolder,
+  onRestoreHiddenProjects,
+  t,
 }: {
   title: string
   menuLabel: string
   createLabel: string
-  onOpenMenu: (event: React.MouseEvent) => void
-  onOpenCreate: (event: React.MouseEvent) => void
+  organization: SidebarProjectOrganization
+  sortBy: SidebarProjectSortBy
+  hiddenProjectCount: number
+  onSetOrganization: (organization: SidebarProjectOrganization) => void
+  onSetSortBy: (sortBy: SidebarProjectSortBy) => void
+  onCreateBlank: () => void
+  onUseExistingFolder: () => void
+  onRestoreHiddenProjects: () => void
+  t: ReturnType<typeof useTranslation>
 }) {
   return (
     <div
@@ -1415,166 +1347,106 @@ function ProjectHeaderActions({
         {title}
       </div>
       <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover/sidebar-projects:opacity-100 focus-within:opacity-100">
-        <button
-          type="button"
-          onClick={onOpenMenu}
-          className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-          aria-label={menuLabel}
-          title={menuLabel}
-        >
-          <MoreHorizontal className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          onClick={onOpenCreate}
-          className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-          aria-label={createLabel}
-          title={createLabel}
-        >
-          <FolderPlus className="h-[18px] w-[18px]" strokeWidth={1.9} aria-hidden="true" />
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="h-8 w-8 rounded-xl text-[var(--color-text-tertiary)] hover:bg-[var(--color-sidebar-item-hover)]"
+              aria-label={menuLabel}
+              title={menuLabel}
+            >
+              <MoreHorizontal className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[270px]">
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Folder aria-hidden="true" />
+                {t('sidebar.organizeSidebar')}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="min-w-[260px]">
+                <DropdownMenuCheckboxItem
+                  checked={organization === 'project'}
+                  onSelect={() => onSetOrganization('project')}
+                >
+                  <Folder aria-hidden="true" />
+                  {t('sidebar.organizeByProject')}
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={organization === 'recentProject'}
+                  onSelect={() => onSetOrganization('recentProject')}
+                >
+                  <FolderOpen aria-hidden="true" />
+                  {t('sidebar.organizeByRecentProject')}
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={organization === 'time'}
+                  onSelect={() => onSetOrganization('time')}
+                >
+                  <Clock aria-hidden="true" />
+                  {t('sidebar.organizeByTime')}
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Clock aria-hidden="true" />
+                {t('sidebar.sortCondition')}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="min-w-[230px]">
+                <DropdownMenuCheckboxItem
+                  checked={sortBy === 'createdAt'}
+                  onSelect={() => onSetSortBy('createdAt')}
+                >
+                  <Clock aria-hidden="true" />
+                  {t('sidebar.sortByCreatedAt')}
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={sortBy === 'updatedAt'}
+                  onSelect={() => onSetSortBy('updatedAt')}
+                >
+                  <RefreshCw aria-hidden="true" />
+                  {t('sidebar.sortByUpdatedAt')}
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            {hiddenProjectCount > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={onRestoreHiddenProjects}>
+                  <RotateCcw aria-hidden="true" />
+                  {t('sidebar.restoreHiddenProjects', { count: hiddenProjectCount })}
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="h-8 w-8 rounded-xl text-[var(--color-text-tertiary)] hover:bg-[var(--color-sidebar-item-hover)]"
+              aria-label={createLabel}
+              title={createLabel}
+            >
+              <FolderPlus className="h-[18px] w-[18px]" strokeWidth={1.9} aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[250px]">
+            <DropdownMenuItem onSelect={onCreateBlank}>
+              <SquarePen aria-hidden="true" />
+              {t('sidebar.newBlankProject')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onUseExistingFolder}>
+              <FolderOpen aria-hidden="true" />
+              {t('sidebar.useExistingFolder')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
-  )
-}
-
-function ProjectHeaderMenu({
-  type,
-  x,
-  y,
-  organization,
-  sortBy,
-  onOpenSubmenu,
-  onSetOrganization,
-  onSetSortBy,
-  onCreateBlank,
-  onUseExistingFolder,
-  onRestoreHiddenProjects,
-  hiddenProjectCount,
-  t,
-}: {
-  type: SidebarHeaderMenuType
-  x: number
-  y: number
-  organization: SidebarProjectOrganization
-  sortBy: SidebarProjectSortBy
-  onOpenSubmenu: (event: React.MouseEvent, type: 'organize' | 'sort') => void
-  onSetOrganization: (organization: SidebarProjectOrganization) => void
-  onSetSortBy: (sortBy: SidebarProjectSortBy) => void
-  onCreateBlank: () => void
-  onUseExistingFolder: () => void
-  onRestoreHiddenProjects: () => void
-  hiddenProjectCount: number
-  t: ReturnType<typeof useTranslation>
-}) {
-  const width = type === 'sort' ? 230 : type === 'create' ? 250 : 270
-  const style: React.CSSProperties = { left: x, top: y, width, boxShadow: 'var(--shadow-dropdown)' }
-  const className = 'fixed z-50 overflow-hidden rounded-[18px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[var(--shadow-dropdown)]'
-
-  if (type === 'create') {
-    return (
-      <div role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
-        <HeaderMenuItem icon={<SquarePen size={18} aria-hidden="true" />} onClick={onCreateBlank}>
-          {t('sidebar.newBlankProject')}
-        </HeaderMenuItem>
-        <HeaderMenuItem icon={<FolderOpen size={18} aria-hidden="true" />} onClick={onUseExistingFolder}>
-          {t('sidebar.useExistingFolder')}
-        </HeaderMenuItem>
-      </div>
-    )
-  }
-
-  if (type === 'organize') {
-    return (
-      <div role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
-        <HeaderMenuItem icon={<Folder size={18} aria-hidden="true" />} checked={organization === 'project'} onClick={() => onSetOrganization('project')}>
-          {t('sidebar.organizeByProject')}
-        </HeaderMenuItem>
-        <HeaderMenuItem icon={<FolderOpen size={18} aria-hidden="true" />} checked={organization === 'recentProject'} onClick={() => onSetOrganization('recentProject')}>
-          {t('sidebar.organizeByRecentProject')}
-        </HeaderMenuItem>
-        <HeaderMenuItem icon={<Clock size={18} aria-hidden="true" />} checked={organization === 'time'} onClick={() => onSetOrganization('time')}>
-          {t('sidebar.organizeByTime')}
-        </HeaderMenuItem>
-      </div>
-    )
-  }
-
-  if (type === 'sort') {
-    return (
-      <div role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
-        <HeaderMenuItem icon={<Clock size={18} aria-hidden="true" />} checked={sortBy === 'createdAt'} onClick={() => onSetSortBy('createdAt')}>
-          {t('sidebar.sortByCreatedAt')}
-        </HeaderMenuItem>
-        <HeaderMenuItem icon={<RefreshCw size={18} aria-hidden="true" />} checked={sortBy === 'updatedAt'} onClick={() => onSetSortBy('updatedAt')}>
-          {t('sidebar.sortByUpdatedAt')}
-        </HeaderMenuItem>
-      </div>
-    )
-  }
-
-  return (
-    <div role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
-      <HeaderMenuItem
-        icon={<Folder size={18} aria-hidden="true" />}
-        trailing
-        onMouseEnter={(event) => onOpenSubmenu(event, 'organize')}
-        onClick={(event) => onOpenSubmenu(event, 'organize')}
-      >
-        {t('sidebar.organizeSidebar')}
-      </HeaderMenuItem>
-      <HeaderMenuItem
-        icon={<Clock size={18} aria-hidden="true" />}
-        trailing
-        onMouseEnter={(event) => onOpenSubmenu(event, 'sort')}
-        onClick={(event) => onOpenSubmenu(event, 'sort')}
-      >
-        {t('sidebar.sortCondition')}
-      </HeaderMenuItem>
-      {hiddenProjectCount > 0 && (
-        <HeaderMenuItem
-          icon={<RotateCcw size={18} aria-hidden="true" />}
-          onClick={onRestoreHiddenProjects}
-        >
-          {t('sidebar.restoreHiddenProjects', { count: hiddenProjectCount })}
-        </HeaderMenuItem>
-      )}
-    </div>
-  )
-}
-
-function HeaderMenuItem({
-  icon,
-  children,
-  onClick,
-  onMouseEnter,
-  checked = false,
-  trailing = false,
-}: {
-  icon: React.ReactNode
-  children: React.ReactNode
-  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void
-  onMouseEnter?: (event: React.MouseEvent<HTMLButtonElement>) => void
-  checked?: boolean
-  trailing?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      onMouseEnter={onMouseEnter}
-      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-semibold text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:bg-[var(--color-surface-hover)]"
-    >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-[var(--color-text-secondary)]">
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1 truncate">{children}</span>
-      {checked && <Check className="h-[17px] w-[17px] text-[var(--color-text-secondary)]" strokeWidth={2} aria-hidden="true" />}
-      {trailing && !checked && (
-        <ChevronDown className="-rotate-90 h-[17px] w-[17px] text-[var(--color-text-tertiary)]" strokeWidth={2} aria-hidden="true" />
-      )}
-    </button>
   )
 }
 
@@ -1899,49 +1771,6 @@ function domSafeProjectKey(projectKey: string): string {
   return projectKey.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown'
 }
 
-function positionProjectMenu(clientX: number, clientY: number): React.CSSProperties {
-  if (typeof window === 'undefined') return { left: clientX, top: clientY }
-  const width = 230
-  const height = 280
-  return {
-    left: Math.max(8, Math.min(clientX, window.innerWidth - width - 8)),
-    top: Math.max(8, Math.min(clientY, window.innerHeight - height - 8)),
-  }
-}
-
-function ProjectMenuItem({
-  icon,
-  children,
-  onClick,
-  disabled = false,
-  danger = false,
-}: {
-  icon: React.ReactNode
-  children: React.ReactNode
-  onClick?: () => void
-  disabled?: boolean
-  danger?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      disabled={disabled}
-      onClick={disabled ? undefined : onClick}
-      className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:bg-[var(--color-surface-hover)] disabled:cursor-default disabled:opacity-45 ${
-        danger
-          ? 'text-[var(--color-error)] enabled:hover:bg-[var(--color-error)]/10'
-          : 'text-[var(--color-text-primary)] enabled:hover:bg-[var(--color-surface-hover)]'
-      }`}
-    >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center text-current">
-        {icon}
-      </span>
-      <span className="min-w-0 truncate">{children}</span>
-    </button>
-  )
-}
-
 function SessionRowMeta({
   isRunning,
   isWorktree,
@@ -2004,13 +1833,14 @@ function NavItem({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
+      variant="ghost"
       onClick={onClick}
       aria-label={label}
       title={collapsed ? label : undefined}
       className={`
-        flex items-center transition-colors duration-200
-        ${collapsed ? 'h-10 w-10 justify-center rounded-[var(--radius-md)] px-0 py-0' : `w-full gap-2.5 rounded-[12px] px-3 ${touchFriendly ? 'py-3' : 'py-2.5'} text-sm`}
+        transition-colors duration-200
+        ${collapsed ? 'h-10 w-10 rounded-[var(--radius-md)] px-0 py-0' : `h-auto w-full justify-start gap-2.5 rounded-[12px] px-3 ${touchFriendly ? 'py-3' : 'py-2.5'} text-sm`}
         ${active
           ? 'bg-[var(--color-sidebar-item-active)] font-medium text-[var(--color-text-primary)]'
           : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)]'
@@ -2023,7 +1853,7 @@ function NavItem({
       <span className={`sidebar-copy ${collapsed ? 'sidebar-copy--hidden' : 'sidebar-copy--visible'}`}>
         {children}
       </span>
-    </button>
+    </Button>
   )
 }
 

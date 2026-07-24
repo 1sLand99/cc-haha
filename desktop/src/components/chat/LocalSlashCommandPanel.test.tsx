@@ -197,4 +197,66 @@ describe('LocalSlashCommandPanel memory context', () => {
     expect(useUIStore.getState().pendingSettingsTab).toBe('skills')
     expect(onClose).toHaveBeenCalled()
   })
+
+  it('uses accessible tabs that support keyboard navigation', async () => {
+    sessionsApiMock.getInspection.mockResolvedValue(inspectionWithContext(baseContext))
+
+    render(
+      <LocalSlashCommandPanel
+        command="status"
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
+    )
+
+    const statusTab = await screen.findByRole('tab', { name: 'Status' })
+    const usageTab = screen.getByRole('tab', { name: 'Usage' })
+    expect(statusTab).toHaveAttribute('aria-selected', 'true')
+
+    statusTab.focus()
+    fireEvent.keyDown(statusTab, { key: 'ArrowRight' })
+
+    await waitFor(() => {
+      expect(usageTab).toHaveAttribute('aria-selected', 'true')
+      expect(usageTab).toHaveFocus()
+    })
+  })
+
+  it('refreshes the session inspection without discarding the visible panel', async () => {
+    const initialInspection: SessionInspectionResponse = {
+      ...inspectionWithContext(baseContext),
+      status: {
+        ...inspectionWithContext(baseContext).status,
+        model: 'Claude Before',
+        mcpServers: [{ name: 'local-tools', status: 'connected' }],
+      },
+    }
+    const refreshedInspection: SessionInspectionResponse = {
+      ...initialInspection,
+      status: {
+        ...initialInspection.status,
+        model: 'Claude After',
+      },
+    }
+    sessionsApiMock.getInspection
+      .mockResolvedValueOnce(initialInspection)
+      .mockResolvedValueOnce(refreshedInspection)
+
+    render(
+      <LocalSlashCommandPanel
+        command="status"
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('Claude Before')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+
+    expect(screen.getByText('Session inspector')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(sessionsApiMock.getInspection).toHaveBeenCalledTimes(2)
+      expect(screen.getByText('Claude After')).toBeInTheDocument()
+    })
+  })
 })

@@ -1,11 +1,32 @@
-import { useState, useRef, useEffect } from 'react'
+import { useId, useRef, useState } from 'react'
+import {
+  EllipsisVertical,
+  FileClock,
+  LoaderCircle,
+  PauseCircle,
+  Pencil,
+  Play,
+  PlayCircle,
+  Trash2,
+} from 'lucide-react'
 import type { CronTask } from '../../types/task'
 import { useTaskStore } from '../../stores/taskStore'
 import { useTranslation } from '../../i18n'
 import { describeCron } from '../../lib/cronDescribe'
 import { TaskRunsPanel } from './TaskRunsPanel'
 import { NewTaskModal } from './NewTaskModal'
-import { ConfirmPopover } from '../shared/ConfirmPopover'
+import { Badge } from '../ui/badge'
+import { Card, CardContent } from '../ui/card'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
+import { IconButton } from '../ui/custom/icon-button'
+import { ScheduledTaskActionDialog } from '../ui/custom/scheduled-task-action-dialog'
 
 type Props = {
   task: CronTask
@@ -13,207 +34,208 @@ type Props = {
   onToggleLogs: () => void
 }
 
-type ConfirmAction = 'run' | 'toggle' | 'delete' | null
+type ConfirmAction = 'run' | 'toggle' | 'delete'
 
 export function TaskRow({ task, showLogs, onToggleLogs }: Props) {
   const { deleteTask, updateTask, runTask } = useTaskStore()
   const t = useTranslation()
   const [showEdit, setShowEdit] = useState(false)
-  const [showMenu, setShowMenu] = useState(false)
-  const [isRunning, setIsRunning] = useState(false)
-  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
+  const [pendingAction, setPendingAction] = useState<ConfirmAction | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [logsRefreshKey, setLogsRefreshKey] = useState(0)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const confirmRef = useRef<HTMLDivElement>(null)
+  const runButtonRef = useRef<HTMLButtonElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const restoreActionRef = useRef<ConfirmAction>('run')
+  const logsPanelId = useId()
 
-  // Close menu / confirm on outside click
-  useEffect(() => {
-    if (!showMenu && !confirmAction) return
-    const handler = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (showMenu && menuRef.current && !menuRef.current.contains(target)) {
-        setShowMenu(false)
-      }
-      if (confirmAction && confirmRef.current && !confirmRef.current.contains(target)) {
-        setConfirmAction(null)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [showMenu, confirmAction])
+  const openConfirmation = (action: ConfirmAction) => {
+    restoreActionRef.current = action
+    setActionError(null)
+    setConfirmAction(action)
+  }
 
-  const handleRunNow = async () => {
+  const closeConfirmation = () => {
+    if (pendingAction) return
     setConfirmAction(null)
-    setIsRunning(true)
-    if (!showLogs) onToggleLogs() // open logs panel (accordion will close others)
+    setActionError(null)
+  }
+
+  const handleConfirm = async () => {
+    const action = confirmAction
+    if (!action || pendingAction) return
+    setPendingAction(action)
+    setActionError(null)
     try {
-      await runTask(task.id)
-      setLogsRefreshKey((k) => k + 1)
-    } catch (err) {
-      console.error('Failed to run task:', err)
+      if (action === 'run') {
+        if (!showLogs) onToggleLogs()
+        await runTask(task.id)
+        setLogsRefreshKey((current) => current + 1)
+      } else if (action === 'toggle') {
+        await updateTask(task.id, { enabled: !task.enabled })
+      } else {
+        await deleteTask(task.id)
+      }
+      setConfirmAction(null)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : t('common.error'))
     } finally {
-      setIsRunning(false)
+      setPendingAction(null)
     }
   }
 
-  const handleToggle = () => {
-    setConfirmAction(null)
-    setShowMenu(false)
-    updateTask(task.id, { enabled: !task.enabled })
-  }
-
-  const handleDelete = () => {
-    setConfirmAction(null)
-    setShowMenu(false)
-    deleteTask(task.id)
-  }
-
-  const iconBtn = 'p-1.5 rounded-[var(--radius-sm)] transition-colors'
-  const menuItem = 'flex items-center gap-2.5 w-full px-3 py-2 text-xs text-left rounded-[var(--radius-sm)] transition-colors'
+  const dialogTitle = confirmAction === 'run'
+    ? t('tasks.confirmRun')
+    : confirmAction === 'toggle'
+      ? task.enabled ? t('tasks.confirmDisable') : t('tasks.confirmEnable')
+      : t('tasks.confirmDelete')
+  const actionLabel = confirmAction === 'run'
+    ? t('tasks.runNow')
+    : confirmAction === 'toggle'
+      ? task.enabled ? t('common.disable') : t('common.enable')
+      : t('common.delete')
 
   return (
-    <div className="border-b border-[var(--color-border-separator)]">
-      <div className="flex items-center justify-between px-4 py-3 hover:bg-[var(--color-surface-hover)] transition-colors group">
-        {/* Left: status + info */}
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${task.enabled ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-tertiary)]'}`} />
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-[var(--color-text-primary)] truncate">{task.name}</div>
-            {task.description && (
-              <div className="text-xs text-[var(--color-text-secondary)] truncate">{task.description}</div>
-            )}
-            <div className="flex items-center gap-3 text-[11px] text-[var(--color-text-tertiary)] mt-0.5">
-              <span>{t('tasks.createdAt')}{new Date(task.createdAt).toLocaleDateString()}</span>
-              {task.lastFiredAt && (
-                <span>{t('tasks.lastRunAt')}{new Date(task.lastFiredAt).toLocaleDateString()}</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right: cron + actions */}
-        <div className="flex items-center gap-3 flex-shrink-0">
-          <span className="text-xs text-[var(--color-text-tertiary)]" title={task.cron}>
-            {describeCron(task.cron, t)}
-          </span>
-
-          <div className="flex items-center gap-0.5">
-            {/* Run Now */}
-            <div className="relative" ref={confirmAction === 'run' ? confirmRef : undefined}>
-              <button
-                onClick={() => isRunning || !task.enabled ? undefined : setConfirmAction(confirmAction === 'run' ? null : 'run')}
-                disabled={isRunning || !task.enabled}
-                className={`${iconBtn} ${task.enabled ? 'text-[var(--color-brand)] hover:bg-[var(--color-surface-selected)]' : 'text-[var(--color-text-tertiary)] cursor-not-allowed'} disabled:opacity-50`}
-                title={task.enabled ? t('tasks.runNow') : undefined}
-              >
-                <span className={`material-symbols-outlined text-[18px] ${isRunning ? 'animate-spin' : ''}`}>
-                  {isRunning ? 'sync' : 'play_arrow'}
+    <Card role="listitem" className="overflow-hidden bg-[var(--color-surface)]">
+      <Collapsible
+        open={showLogs}
+        onOpenChange={(nextOpen) => {
+          if (nextOpen !== showLogs) onToggleLogs()
+        }}
+      >
+        <CardContent className="p-0">
+          <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
+                  {task.name}
                 </span>
-              </button>
-              {confirmAction === 'run' && (
-                <ConfirmPopover
-                  message={t('tasks.confirmRun')}
-                  confirmLabel={t('tasks.runNow')}
-                  onConfirm={handleRunNow}
-                  onCancel={() => setConfirmAction(null)}
-                  cancelLabel={t('common.cancel')}
-                />
-              )}
+                <Badge
+                  variant={task.enabled ? 'default' : 'secondary'}
+                  className={task.enabled
+                    ? 'bg-[var(--color-success)] text-white'
+                    : undefined}
+                >
+                  {task.enabled ? t('tasks.active') : t('tasks.disabled')}
+                </Badge>
+              </div>
+              {task.description ? (
+                <p className="mt-1 truncate text-xs text-[var(--color-text-secondary)]">
+                  {task.description}
+                </p>
+              ) : null}
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-tertiary)]">
+                <span>{t('tasks.createdAt')}{new Date(task.createdAt).toLocaleDateString()}</span>
+                {task.lastFiredAt ? (
+                  <span>{t('tasks.lastRunAt')}{new Date(task.lastFiredAt).toLocaleDateString()}</span>
+                ) : null}
+                <Badge variant="outline" title={task.cron} className="font-normal">
+                  {describeCron(task.cron, t)}
+                </Badge>
+              </div>
             </div>
 
-            {/* View Logs */}
-            <button
-              onClick={onToggleLogs}
-              className={`${iconBtn} ${showLogs ? 'text-[var(--color-brand)] bg-[var(--color-surface-selected)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-selected)]'}`}
-              title={t('tasks.viewLogs')}
-            >
-              <span className="material-symbols-outlined text-[18px]">receipt_long</span>
-            </button>
-
-            {/* More menu */}
-            <div className="relative" ref={menuRef}>
-              <button
-                onClick={() => { setShowMenu(!showMenu); setConfirmAction(null) }}
-                className={`${iconBtn} text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-selected)]`}
+            <div className="flex shrink-0 items-center justify-end gap-1">
+              <IconButton
+                ref={runButtonRef}
+                label={task.enabled ? t('tasks.runNow') : `${t('tasks.runNow')} · ${t('tasks.disabled')}`}
+                variant="ghost"
+                disabled={!task.enabled || pendingAction === 'run'}
+                onClick={() => openConfirmation('run')}
               >
-                <span className="material-symbols-outlined text-[18px]">more_vert</span>
-              </button>
+                {pendingAction === 'run'
+                  ? <LoaderCircle className="animate-spin" aria-hidden="true" />
+                  : <Play aria-hidden="true" />}
+              </IconButton>
 
-              {showMenu && !confirmAction && (
-                <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-lg py-1">
-                  {/* Edit */}
-                  <button
-                    onClick={() => { setShowMenu(false); setShowEdit(true) }}
-                    className={`${menuItem} text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]`}
+              <CollapsibleTrigger asChild>
+                <IconButton
+                  label={t('tasks.viewLogs')}
+                  variant={showLogs ? 'secondary' : 'ghost'}
+                  aria-controls={logsPanelId}
+                  aria-expanded={showLogs}
+                >
+                  <FileClock aria-hidden="true" />
+                </IconButton>
+              </CollapsibleTrigger>
+
+              <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+                <DropdownMenuTrigger asChild>
+                  <IconButton
+                    ref={menuButtonRef}
+                    label={t('tasks.actions')}
+                    variant="ghost"
                   >
-                    <span className="material-symbols-outlined text-[16px] text-[var(--color-text-secondary)]">edit</span>
+                    <EllipsisVertical aria-hidden="true" />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  onCloseAutoFocus={(event) => {
+                    if (confirmAction) event.preventDefault()
+                  }}
+                >
+                  <DropdownMenuItem onSelect={() => setShowEdit(true)}>
+                    <Pencil aria-hidden="true" />
                     {t('tasks.edit')}
-                  </button>
-
-                  {/* Toggle */}
-                  <button
-                    onClick={() => setConfirmAction('toggle')}
-                    className={`${menuItem} text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]`}
-                  >
-                    <span className="material-symbols-outlined text-[16px] text-[var(--color-text-secondary)]">
-                      {task.enabled ? 'pause_circle' : 'play_circle'}
-                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => openConfirmation('toggle')}>
+                    {task.enabled
+                      ? <PauseCircle aria-hidden="true" />
+                      : <PlayCircle aria-hidden="true" />}
                     {task.enabled ? t('common.disable') : t('common.enable')}
-                  </button>
-
-                  <div className="my-1 h-px bg-[var(--color-border-separator)]" />
-
-                  {/* Delete */}
-                  <button
-                    onClick={() => setConfirmAction('delete')}
-                    className={`${menuItem} text-[var(--color-error)] hover:bg-[var(--color-error-container)]/18`}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-[var(--color-error)] focus:bg-[var(--color-error-container)]"
+                    onSelect={() => openConfirmation('delete')}
                   >
-                    <span className="material-symbols-outlined text-[16px]">delete</span>
+                    <Trash2 aria-hidden="true" />
                     {t('common.delete')}
-                  </button>
-                </div>
-              )}
-
-              {/* Confirm popovers for menu actions */}
-              {confirmAction === 'toggle' && (
-                <div ref={confirmRef}>
-                  <ConfirmPopover
-                    message={task.enabled ? t('tasks.confirmDisable') : t('tasks.confirmEnable')}
-                    confirmLabel={task.enabled ? t('common.disable') : t('common.enable')}
-                    onConfirm={handleToggle}
-                    onCancel={() => { setConfirmAction(null); setShowMenu(false) }}
-                    cancelLabel={t('common.cancel')}
-                  />
-                </div>
-              )}
-              {confirmAction === 'delete' && (
-                <div ref={confirmRef}>
-                  <ConfirmPopover
-                    message={t('tasks.confirmDelete')}
-                    confirmLabel={t('common.delete')}
-                    onConfirm={handleDelete}
-                    onCancel={() => { setConfirmAction(null); setShowMenu(false) }}
-                    cancelLabel={t('common.cancel')}
-                    confirmVariant="danger"
-                  />
-                </div>
-              )}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Runs panel */}
-      {showLogs && (
-        <div className="px-4 pb-3">
-          <TaskRunsPanel taskId={task.id} onClose={onToggleLogs} refreshKey={logsRefreshKey} />
-        </div>
-      )}
+          <CollapsibleContent id={logsPanelId}>
+            <div className="border-t border-[var(--color-border-separator)] p-4">
+              <TaskRunsPanel taskId={task.id} onClose={onToggleLogs} refreshKey={logsRefreshKey} />
+            </div>
+          </CollapsibleContent>
+        </CardContent>
+      </Collapsible>
 
-      {/* Edit modal */}
-      {showEdit && (
-        <NewTaskModal open editTask={task} onClose={() => setShowEdit(false)} />
-      )}
-    </div>
+      {showEdit ? (
+        <NewTaskModal
+          open
+          editTask={task}
+          onClose={() => setShowEdit(false)}
+          restoreFocusRef={menuButtonRef}
+        />
+      ) : null}
+
+      <ScheduledTaskActionDialog
+        open={confirmAction !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) closeConfirmation()
+        }}
+        restoreFocusRef={restoreActionRef.current === 'run' ? runButtonRef : menuButtonRef}
+        title={dialogTitle}
+        description={(
+          <span>
+            <strong className="font-medium text-[var(--color-text-primary)]">{task.name}</strong>
+            {task.description ? <span className="mt-1 block">{task.description}</span> : null}
+          </span>
+        )}
+        cancelLabel={t('common.cancel')}
+        actionLabel={actionLabel}
+        onConfirm={handleConfirm}
+        loading={pendingAction !== null}
+        destructive={confirmAction === 'delete'}
+        error={actionError}
+      />
+    </Card>
   )
 }

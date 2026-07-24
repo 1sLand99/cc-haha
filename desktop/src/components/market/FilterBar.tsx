@@ -1,28 +1,54 @@
-import { ChevronDown } from 'lucide-react'
 import { useTranslation } from '../../i18n'
-import { Dropdown } from '../shared/Dropdown'
-import { useMarketStore, type MarketFilters } from '../../stores/marketStore'
+import { useMarketStore } from '../../stores/marketStore'
 import type {
   MarketInstalledFilter,
   MarketSecurityFilter,
   MarketSourceFilter,
 } from '../../types/market'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select'
 
-function FilterTrigger({ label, value, active }: { label: string; value: string; active: boolean }) {
+function MarketFilterMenu<V extends string>({
+  label,
+  value,
+  items,
+  active,
+  onValueChange,
+}: {
+  label: string
+  value: V
+  items: Array<{ value: V; label: string }>
+  active: boolean
+  onValueChange: (value: V) => void
+}) {
   return (
-    <button
-      type="button"
-      aria-haspopup="menu"
-      className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] active:scale-[0.98] ${
-        active
-          ? 'border-[var(--color-brand)]/35 bg-[var(--color-primary-fixed)] text-[var(--color-brand)]'
-          : 'border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)]'
-      }`}
-    >
-      <span className={active ? 'text-[var(--color-brand)]/75' : 'text-[var(--color-text-tertiary)]'}>{label}</span>
-      <span className="font-medium">{value}</span>
-      <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-    </button>
+    <Select value={value} onValueChange={(nextValue) => onValueChange(nextValue as V)}>
+      <SelectTrigger
+        aria-label={label}
+        className={`w-auto min-w-[148px] gap-1.5 text-xs ${
+          active
+            ? 'border-[var(--color-brand)]/35 bg-[var(--color-primary-fixed)] text-[var(--color-brand)]'
+            : 'bg-[var(--color-surface-container-lowest)] text-[var(--color-text-secondary)]'
+        }`}
+      >
+        <span className={active ? 'text-[var(--color-brand)]/75' : 'text-[var(--color-text-tertiary)]'}>
+          {label}
+        </span>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="min-w-[220px]">
+        {items.map((item) => (
+          <SelectItem key={String(item.value)} value={String(item.value)}>
+            {item.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -49,51 +75,28 @@ export function FilterBar({ className = '' }: { className?: string }) {
     { value: 'installable', label: t('market.installedFilter.installable') },
   ]
 
-  const labelFor = <K extends keyof MarketFilters>(
-    items: Array<{ value: MarketFilters[K]; label: string }>,
-    value: MarketFilters[K],
-  ) => items.find((i) => i.value === value)?.label ?? String(value)
-
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className}`} data-testid="market-filter-bar">
-      <Dropdown
+      <MarketFilterMenu
+        label={t('market.filter.source')}
         items={sourceItems}
         value={filters.source}
-        onChange={(value) => setFilter('source', value)}
-        width={220}
-        trigger={
-          <FilterTrigger
-            label={t('market.filter.source')}
-            value={labelFor(sourceItems, filters.source)}
-            active={filters.source !== 'all'}
-          />
-        }
+        active={filters.source !== 'all'}
+        onValueChange={(value) => setFilter('source', value)}
       />
-      <Dropdown
+      <MarketFilterMenu
+        label={t('market.filter.security')}
         items={securityItems}
         value={filters.security}
-        onChange={(value) => setFilter('security', value)}
-        width={220}
-        trigger={
-          <FilterTrigger
-            label={t('market.filter.security')}
-            value={labelFor(securityItems, filters.security)}
-            active={filters.security !== 'all'}
-          />
-        }
+        active={filters.security !== 'all'}
+        onValueChange={(value) => setFilter('security', value)}
       />
-      <Dropdown
+      <MarketFilterMenu
+        label={t('market.filter.installed')}
         items={installedItems}
         value={filters.installed}
-        onChange={(value) => setFilter('installed', value)}
-        width={220}
-        trigger={
-          <FilterTrigger
-            label={t('market.filter.installed')}
-            value={labelFor(installedItems, filters.installed)}
-            active={filters.installed !== 'all'}
-          />
-        }
+        active={filters.installed !== 'all'}
+        onValueChange={(value) => setFilter('installed', value)}
       />
     </div>
   )

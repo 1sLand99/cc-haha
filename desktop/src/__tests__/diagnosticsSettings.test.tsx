@@ -58,6 +58,51 @@ function localIndexStatus(overrides: Partial<{
   }
 }
 
+function diagnosticsStatus() {
+  return {
+    logDir: '/tmp/claude/cc-haha/diagnostics',
+    diagnosticsPath: '/tmp/claude/cc-haha/diagnostics/diagnostics.jsonl',
+    cliDiagnosticsPath: '/tmp/claude/cc-haha/diagnostics/cli-diagnostics.jsonl',
+    runtimeErrorsPath: '/tmp/claude/cc-haha/diagnostics/runtime-errors.log',
+    exportDir: '/tmp/claude/cc-haha/diagnostics/exports',
+    retentionDays: 7,
+    maxBytes: 50 * 1024 * 1024,
+    totalBytes: 4096,
+    eventCount: 600,
+    physicalLineCount: 601,
+    corruptLineCount: 1,
+    storageLimitExceeded: false,
+    recentErrorCount: 1,
+    lastEventAt: '2026-05-02T00:00:00.000Z',
+  }
+}
+
+function diagnosticsEvents() {
+  return {
+    events: [
+      {
+        id: 'event-1',
+        timestamp: '2026-05-02T00:00:00.000Z',
+        type: 'cli_start_failed',
+        severity: 'error' as const,
+        summary: 'CLI exited during startup with code 1',
+        sessionId: 'session-1',
+        details: {
+          exitCode: 1,
+          capturedOutput: 'stderr:\nprovider rejected request',
+        },
+      },
+      ...Array.from({ length: 99 }, (_, index) => ({
+        id: `event-${index + 2}`,
+        timestamp: '2026-05-02T00:00:00.000Z',
+        type: `runtime_event_${index + 2}`,
+        severity: 'info' as const,
+        summary: `Runtime event ${index + 2}`,
+      })),
+    ],
+  }
+}
+
 function doctorReport(path: string) {
   return {
     report: {
@@ -151,48 +196,11 @@ vi.mock('../components/chat/CodeViewer', () => ({
 
 describe('Settings > Diagnostics tab', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    diagnosticsApiMock.getStatus.mockResolvedValue({
-      logDir: '/tmp/claude/cc-haha/diagnostics',
-      diagnosticsPath: '/tmp/claude/cc-haha/diagnostics/diagnostics.jsonl',
-      cliDiagnosticsPath: '/tmp/claude/cc-haha/diagnostics/cli-diagnostics.jsonl',
-      runtimeErrorsPath: '/tmp/claude/cc-haha/diagnostics/runtime-errors.log',
-      exportDir: '/tmp/claude/cc-haha/diagnostics/exports',
-      retentionDays: 7,
-      maxBytes: 50 * 1024 * 1024,
-      totalBytes: 4096,
-      eventCount: 600,
-      physicalLineCount: 601,
-      corruptLineCount: 1,
-      storageLimitExceeded: false,
-      recentErrorCount: 1,
-      lastEventAt: '2026-05-02T00:00:00.000Z',
-    })
+    vi.resetAllMocks()
+    diagnosticsApiMock.getStatus.mockResolvedValue(diagnosticsStatus())
     diagnosticsApiMock.getLocalIndexStatus.mockResolvedValue(localIndexStatus())
     diagnosticsApiMock.rebuildLocalIndex.mockResolvedValue(localIndexStatus())
-    diagnosticsApiMock.getEvents.mockResolvedValue({
-      events: [
-        {
-          id: 'event-1',
-          timestamp: '2026-05-02T00:00:00.000Z',
-          type: 'cli_start_failed',
-          severity: 'error',
-          summary: 'CLI exited during startup with code 1',
-          sessionId: 'session-1',
-          details: {
-            exitCode: 1,
-            capturedOutput: 'stderr:\nprovider rejected request',
-          },
-        },
-        ...Array.from({ length: 99 }, (_, index) => ({
-          id: `event-${index + 2}`,
-          timestamp: '2026-05-02T00:00:00.000Z',
-          type: `runtime_event_${index + 2}`,
-          severity: 'info' as const,
-          summary: `Runtime event ${index + 2}`,
-        })),
-      ],
-    })
+    diagnosticsApiMock.getEvents.mockResolvedValue(diagnosticsEvents())
     diagnosticsApiMock.exportBundle.mockResolvedValue({
       bundle: {
         path: '/tmp/claude/cc-haha/diagnostics/exports/cc-haha-diagnostics.tar.gz',
@@ -257,7 +265,7 @@ describe('Settings > Diagnostics tab', () => {
   })
 
   it('shows diagnostics status, actions, and recent events', async () => {
-    render(<Settings />)
+    const { container } = render(<Settings />)
 
     fireEvent.click(screen.getByText('Diagnostics'))
 
@@ -274,6 +282,11 @@ describe('Settings > Diagnostics tab', () => {
     expect(screen.getAllByText('Event ID:')).toHaveLength(100)
     expect(screen.getByText('event-1')).toBeInTheDocument()
     expect(screen.getByText(/best-effort/i)).toHaveTextContent(/review.*private metadata/i)
+    expect(screen.getByText('Log directory').closest('[data-slot="card"]')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Export Bundle/i })).toHaveAttribute('data-slot', 'button')
+    expect(container.querySelector('[data-slot="alert"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="badge"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="collapsible"]')).toBeInTheDocument()
 
     const eventRow = screen.getByText('cli_start_failed').closest('.grid')
     expect(eventRow).toHaveClass('grid-cols-1', 'md:grid-cols-[120px_92px_1fr]')
@@ -314,9 +327,10 @@ describe('Settings > Diagnostics tab', () => {
 
     render(<Settings />)
     fireEvent.click(screen.getByText('Diagnostics'))
-    fireEvent.click(await screen.findByRole('button', { name: 'Rebuild local index' }))
+    const rebuildTrigger = await screen.findByRole('button', { name: 'Rebuild local index' })
+    fireEvent.click(rebuildTrigger)
 
-    const dialog = await screen.findByRole('dialog', { name: 'Rebuild local index' })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Rebuild local index' })
     expect(within(dialog).getByText(/transcripts and settings are untouched/i)).toBeInTheDocument()
     expect(diagnosticsApiMock.rebuildLocalIndex).not.toHaveBeenCalled()
 
@@ -328,6 +342,7 @@ describe('Settings > Diagnostics tab', () => {
     expect(diagnosticsApiMock.rebuildLocalIndex.mock.calls[0]).toEqual([])
     expect(await screen.findByText('Local index rebuilt. Source history was not deleted.')).toBeInTheDocument()
     expect(useUIStore.getState().toasts.at(-1)?.message).toBe('Local index rebuilt. Source history was not deleted.')
+    await waitFor(() => expect(rebuildTrigger).toHaveFocus())
   })
 
   it('disables duplicate rebuild confirmation while the first request is pending', async () => {
@@ -337,7 +352,7 @@ describe('Settings > Diagnostics tab', () => {
     render(<Settings />)
     fireEvent.click(screen.getByText('Diagnostics'))
     fireEvent.click(await screen.findByRole('button', { name: 'Rebuild local index' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Rebuild local index' })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Rebuild local index' })
     const confirm = within(dialog).getByRole('button', { name: 'Rebuild local index' })
     fireEvent.click(confirm)
 
@@ -369,7 +384,7 @@ describe('Settings > Diagnostics tab', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     fireEvent.click(within(section).getByRole('button', { name: 'Rebuild local index' }))
-    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Rebuild local index' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog', { name: 'Rebuild local index' }))
       .getByRole('button', { name: 'Rebuild local index' }))
     expect(await within(section).findByText('25 / 25')).toBeInTheDocument()
 
@@ -400,7 +415,7 @@ describe('Settings > Diagnostics tab', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Export Bundle' }))
     fireEvent.click(within(section).getByRole('button', { name: 'Rebuild local index' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Rebuild local index' })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Rebuild local index' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Rebuild local index' }))
     expect(within(dialog).getByRole('button', { name: 'Rebuild local index' })).toBeDisabled()
 
@@ -423,12 +438,12 @@ describe('Settings > Diagnostics tab', () => {
       await Promise.resolve()
     })
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rebuild local index' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('alertdialog', { name: 'Rebuild local index' })).not.toBeInTheDocument())
     expect(within(section).getByText('25 / 25')).toBeInTheDocument()
     const rebuildButton = within(section).getByRole('button', { name: 'Rebuild local index' })
     expect(rebuildButton).not.toBeDisabled()
     fireEvent.click(rebuildButton)
-    expect(await screen.findByRole('dialog', { name: 'Rebuild local index' })).toBeInTheDocument()
+    expect(await screen.findByRole('alertdialog', { name: 'Rebuild local index' })).toBeInTheDocument()
     expect(useUIStore.getState().toasts.filter(
       toast => toast.message === 'Local index rebuilt. Source history was not deleted.',
     )).toHaveLength(1)
@@ -563,11 +578,11 @@ describe('Settings > Diagnostics tab', () => {
   it('marks the active settings tab and its decorative icon accessibly', async () => {
     render(<Settings />)
 
-    const diagnosticsTab = screen.getByRole('button', { name: 'Diagnostics' })
+    const diagnosticsTab = screen.getByRole('tab', { name: 'Diagnostics' })
     fireEvent.click(diagnosticsTab)
     await screen.findByText('Log directory')
 
-    expect(diagnosticsTab).toHaveAttribute('aria-current', 'page')
+    expect(diagnosticsTab).toHaveAttribute('aria-selected', 'true')
     expect(diagnosticsTab.querySelector('.material-symbols-outlined')).toHaveAttribute('aria-hidden', 'true')
   })
 
@@ -583,7 +598,7 @@ describe('Settings > Diagnostics tab', () => {
     expect(await screen.findByText('/tmp/claude/cc-haha/diagnostics/exports/cc-haha-diagnostics.tar.gz')).toBeInTheDocument()
   })
 
-  it('asks with the shared confirm dialog before clearing diagnostics', async () => {
+  it('uses an alert dialog with cancel-first focus and precise trigger restoration before clearing diagnostics', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockImplementation(() => {
       throw new Error('window.confirm should not be used')
     })
@@ -592,25 +607,143 @@ describe('Settings > Diagnostics tab', () => {
       render(<Settings />)
 
       fireEvent.click(screen.getByText('Diagnostics'))
-      fireEvent.click(await screen.findByRole('button', { name: /Clear Logs/i }))
+      const trigger = await screen.findByRole('button', { name: /Clear Logs/i })
+      fireEvent.click(trigger)
 
-      const dialog = await screen.findByRole('dialog', { name: 'Clear Logs' })
+      const dialog = await screen.findByRole('alertdialog', { name: 'Clear Logs' })
       expect(within(dialog).getByText('Clear all local diagnostic logs and exported bundles?')).toBeInTheDocument()
+      const cancel = within(dialog).getByRole('button', { name: /Cancel/i })
+      await waitFor(() => expect(cancel).toHaveFocus())
 
-      fireEvent.click(within(dialog).getByRole('button', { name: /Cancel/i }))
+      fireEvent.keyDown(dialog, { key: 'Escape' })
+      await waitFor(() => expect(trigger).toHaveFocus())
       expect(diagnosticsApiMock.clear).not.toHaveBeenCalled()
 
-      fireEvent.click(screen.getByRole('button', { name: /Clear Logs/i }))
-      const confirmDialog = await screen.findByRole('dialog', { name: 'Clear Logs' })
+      fireEvent.click(trigger)
+      const cancelDialog = await screen.findByRole('alertdialog', { name: 'Clear Logs' })
+      fireEvent.click(within(cancelDialog).getByRole('button', { name: /Cancel/i }))
+      await waitFor(() => expect(trigger).toHaveFocus())
+      expect(diagnosticsApiMock.clear).not.toHaveBeenCalled()
+
+      fireEvent.click(trigger)
+      const confirmDialog = await screen.findByRole('alertdialog', { name: 'Clear Logs' })
       fireEvent.click(within(confirmDialog).getByRole('button', { name: /Clear Logs/i }))
 
       await waitFor(() => {
         expect(diagnosticsApiMock.clear).toHaveBeenCalledTimes(1)
       })
+      await waitFor(() => expect(trigger).toHaveFocus())
       expect(confirmSpy).not.toHaveBeenCalled()
     } finally {
       confirmSpy.mockRestore()
     }
+  })
+
+  it('does not let a stale diagnostics load restore events after clear succeeds', async () => {
+    const staleStatus = deferred<Awaited<ReturnType<typeof diagnosticsApiMock.getStatus>>>()
+    const staleEvents = deferred<Awaited<ReturnType<typeof diagnosticsApiMock.getEvents>>>()
+    diagnosticsApiMock.getStatus
+      .mockReturnValueOnce(staleStatus.promise)
+      .mockResolvedValueOnce({
+        logDir: '/tmp/claude/cc-haha/diagnostics',
+        diagnosticsPath: '/tmp/claude/cc-haha/diagnostics/diagnostics.jsonl',
+        cliDiagnosticsPath: '/tmp/claude/cc-haha/diagnostics/cli-diagnostics.jsonl',
+        runtimeErrorsPath: '/tmp/claude/cc-haha/diagnostics/runtime-errors.log',
+        exportDir: '/tmp/claude/cc-haha/diagnostics/exports',
+        retentionDays: 7,
+        maxBytes: 50 * 1024 * 1024,
+        totalBytes: 0,
+        eventCount: 0,
+        physicalLineCount: 0,
+        corruptLineCount: 0,
+        storageLimitExceeded: false,
+        recentErrorCount: 0,
+        lastEventAt: null,
+      })
+    diagnosticsApiMock.getEvents
+      .mockReturnValueOnce(staleEvents.promise)
+      .mockResolvedValueOnce({ events: [] })
+
+    render(<Settings />)
+    fireEvent.click(screen.getByText('Diagnostics'))
+    const clearTrigger = await screen.findByRole('button', { name: /Clear Logs/i })
+    fireEvent.click(clearTrigger)
+    fireEvent.click(within(await screen.findByRole('alertdialog', { name: 'Clear Logs' }))
+      .getByRole('button', { name: /Clear Logs/i }))
+
+    await waitFor(() => expect(diagnosticsApiMock.clear).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByText('No diagnostic events yet.')).toBeInTheDocument())
+
+    await act(async () => {
+      staleStatus.resolve({
+        logDir: '/tmp/claude/cc-haha/diagnostics',
+        diagnosticsPath: '/tmp/claude/cc-haha/diagnostics/diagnostics.jsonl',
+        cliDiagnosticsPath: '/tmp/claude/cc-haha/diagnostics/cli-diagnostics.jsonl',
+        runtimeErrorsPath: '/tmp/claude/cc-haha/diagnostics/runtime-errors.log',
+        exportDir: '/tmp/claude/cc-haha/diagnostics/exports',
+        retentionDays: 7,
+        maxBytes: 50 * 1024 * 1024,
+        totalBytes: 4096,
+        eventCount: 1,
+        physicalLineCount: 1,
+        corruptLineCount: 0,
+        storageLimitExceeded: false,
+        recentErrorCount: 1,
+        lastEventAt: '2026-05-02T00:00:00.000Z',
+      })
+      staleEvents.resolve({
+        events: [{
+          id: 'stale-event',
+          timestamp: '2026-05-02T00:00:00.000Z',
+          type: 'stale_after_clear',
+          severity: 'error',
+          summary: 'must stay cleared',
+        }],
+      })
+      await Promise.resolve()
+    })
+
+    expect(screen.queryByText('stale_after_clear')).not.toBeInTheDocument()
+    expect(screen.getByText('No diagnostic events yet.')).toBeInTheDocument()
+  })
+
+  it('keeps a successful clear committed when the follow-up refresh fails', async () => {
+    diagnosticsApiMock.getStatus
+      .mockResolvedValueOnce(diagnosticsStatus())
+      .mockRejectedValueOnce(new Error('refresh after clear failed'))
+    diagnosticsApiMock.getEvents
+      .mockResolvedValueOnce(diagnosticsEvents())
+      .mockResolvedValueOnce({ events: [] })
+
+    render(<Settings />)
+    fireEvent.click(screen.getByText('Diagnostics'))
+    await screen.findByText('cli_start_failed')
+    fireEvent.click(screen.getByRole('button', { name: /Clear Logs/i }))
+    fireEvent.click(within(await screen.findByRole('alertdialog', { name: 'Clear Logs' }))
+      .getByRole('button', { name: /Clear Logs/i }))
+
+    await waitFor(() => expect(diagnosticsApiMock.clear).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByText('No diagnostic events yet.')).toBeInTheDocument())
+    expect(screen.queryByRole('alertdialog', { name: 'Clear Logs' })).not.toBeInTheDocument()
+    expect(useUIStore.getState().toasts.map((toast) => toast.message)).toContain('Diagnostics cleared.')
+    expect(useUIStore.getState().toasts.map((toast) => toast.message)).toContain('refresh after clear failed')
+  })
+
+  it('releases the stale initial loading state when clear fails', async () => {
+    const staleStatus = deferred<Awaited<ReturnType<typeof diagnosticsApiMock.getStatus>>>()
+    const staleEvents = deferred<Awaited<ReturnType<typeof diagnosticsApiMock.getEvents>>>()
+    diagnosticsApiMock.getStatus.mockReturnValueOnce(staleStatus.promise)
+    diagnosticsApiMock.getEvents.mockReturnValueOnce(staleEvents.promise)
+    diagnosticsApiMock.clear.mockRejectedValueOnce(new Error('clear failed while loading'))
+
+    render(<Settings />)
+    fireEvent.click(screen.getByText('Diagnostics'))
+    fireEvent.click(await screen.findByRole('button', { name: /Clear Logs/i }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Clear Logs' })
+    fireEvent.click(within(dialog).getByRole('button', { name: /Clear Logs/i }))
+
+    expect(await within(dialog).findByText('clear failed while loading')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh', hidden: true })).not.toBeDisabled())
   })
 
   it('copies the recent error summary with the legacy clipboard fallback', async () => {
@@ -777,8 +910,9 @@ describe('Settings > Diagnostics tab', () => {
     expect(screen.getByText(/cc-haha-app-zoom/)).toBeInTheDocument()
     expect(screen.getByText(/cc-haha-ui-zoom/)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /Reset safe UI state/i }))
-    const dialog = await screen.findByRole('dialog', { name: 'Reset safe UI state' })
+    const resetTrigger = screen.getByRole('button', { name: /Reset safe UI state/i })
+    fireEvent.click(resetTrigger)
+    const dialog = await screen.findByRole('alertdialog', { name: 'Reset safe UI state' })
     expect(window.localStorage.getItem('cc-haha-theme')).toBe('cc-haha-theme-value')
     fireEvent.click(within(dialog).getByRole('button', { name: /Reset safe UI state/i }))
 
@@ -790,6 +924,7 @@ describe('Settings > Diagnostics tab', () => {
     }
     expect(window.localStorage.getItem('cc-haha-chat-history')).toBe('keep')
     expect(screen.getByText(/Removed keys:.*cc-haha-app-zoom/)).toBeInTheDocument()
+    await waitFor(() => expect(resetTrigger).toHaveFocus())
   })
 
   it('counts not-configured optional checks separately and excludes them from findings', async () => {
@@ -951,7 +1086,7 @@ describe('Settings > Diagnostics tab', () => {
 
     fireEvent.click(screen.getByText('Diagnostics'))
     fireEvent.click(await screen.findByRole('button', { name: /Reset safe UI state/i }))
-    const dialog = await screen.findByRole('dialog', { name: 'Reset safe UI state' })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Reset safe UI state' })
     fireEvent.click(within(dialog).getByRole('button', { name: /Reset safe UI state/i }))
 
     expect(await screen.findByText(/Removed keys:.*cc-haha-app-zoom/)).toBeInTheDocument()
@@ -992,7 +1127,7 @@ describe('Settings > Diagnostics tab', () => {
 
     fireEvent.click(screen.getByText('Diagnostics'))
     fireEvent.click(await screen.findByRole('button', { name: /Reset safe UI state/i }))
-    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Reset safe UI state' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog', { name: 'Reset safe UI state' }))
       .getByRole('button', { name: /Reset safe UI state/i }))
 
     await act(async () => {

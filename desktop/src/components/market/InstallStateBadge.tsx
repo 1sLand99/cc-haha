@@ -1,6 +1,7 @@
 import { CheckCircle2, CircleSlash2, Download, type LucideIcon } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import type { InstallState } from '../../types/market'
+import { Badge } from '../ui/badge'
 
 const STYLES: Record<InstallState, { icon: LucideIcon; className: string }> = {
   installed: {
@@ -29,12 +30,13 @@ export function InstallStateBadge({ state, className = '' }: { state: InstallSta
   const style = STYLES[state]
   const Icon = style.icon
   return (
-    <span
+    <Badge
+      variant="outline"
       data-testid={`install-badge-${state}`}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-medium ${style.className} ${className}`}
+      className={`gap-1.5 whitespace-nowrap py-1 text-[11px] ${style.className} ${className}`}
     >
       <Icon className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
       {t(LABEL_KEYS[state])}
-    </span>
+    </Badge>
   )
 }

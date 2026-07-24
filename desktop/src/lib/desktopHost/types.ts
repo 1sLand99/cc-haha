@@ -89,7 +89,6 @@ export type DesktopUpdateCheckOptions = {
 
 export type TerminalSpawnOptions = {
   cwd?: string
-  shell?: string
   cols: number
   rows: number
 }

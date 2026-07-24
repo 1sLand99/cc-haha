@@ -272,7 +272,7 @@ describe('ChatInput file mentions', () => {
     expect(screen.getByTestId('diff-comment-card')).toHaveTextContent('src/a.ts · new L11-L12')
     expect(screen.getByTestId('diff-comment-card')).toHaveTextContent('Use a shared helper')
 
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+    fireEvent.keyDown(getComposer(), { key: 'Enter' })
 
     await waitFor(() => {
       expect(useWorkspaceChatContextStore.getState().referencesBySession[sessionId]).toEqual([])
@@ -359,7 +359,7 @@ describe('ChatInput file mentions', () => {
 
     render(<ChatInput variant="hero" />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: { value: 'new tab draft', selectionStart: 13 },
     })
@@ -443,7 +443,7 @@ describe('ChatInput file mentions', () => {
 
     render(<ChatInput variant="hero" />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: { value: 'draft before switching project', selectionStart: 30 },
     })
@@ -464,7 +464,7 @@ describe('ChatInput file mentions', () => {
   it('restores an unsent composer draft after the composer unmounts', async () => {
     const { unmount } = render(<ChatInput compact />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: { value: 'keep this prompt while I inspect another tab', selectionStart: 43 },
     })
@@ -474,14 +474,14 @@ describe('ChatInput file mentions', () => {
     render(<ChatInput compact />)
 
     await waitFor(() => {
-      expect(screen.getByRole('textbox')).toHaveValue('keep this prompt while I inspect another tab')
+      expect(getComposer()).toHaveValue('keep this prompt while I inspect another tab')
     })
   })
 
   it('appends a delayed browser screenshot without clearing an unsent draft after remount', async () => {
     const { unmount } = render(<ChatInput compact />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: { value: 'draft written while the agent is still running', selectionStart: 44 },
     })
@@ -505,7 +505,7 @@ describe('ChatInput file mentions', () => {
     render(<ChatInput compact />)
 
     await waitFor(() => {
-      expect(screen.getByRole('textbox')).toHaveValue('draft written while the agent is still running')
+      expect(getComposer()).toHaveValue('draft written while the agent is still running')
       expect(screen.getByAltText('screenshot-full.png')).toBeInTheDocument()
     })
   })
@@ -571,7 +571,7 @@ describe('ChatInput file mentions', () => {
 
     render(<ChatInput compact />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: { value: 'please adjust the current direction', selectionStart: 35 },
     })
@@ -641,7 +641,7 @@ describe('ChatInput file mentions', () => {
 
     render(<ChatInput compact />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: { value: 'first queued draft', selectionStart: 18 },
     })
@@ -662,6 +662,54 @@ describe('ChatInput file mentions', () => {
     expect(mocks.wsSend).not.toHaveBeenCalledWith(sessionId, expect.objectContaining({
       type: 'user_message',
     }))
+  })
+
+  it('does not save a queued-message edit while an IME composition is active', async () => {
+    useChatStore.setState({
+      sessions: {
+        [sessionId]: {
+          messages: [{ id: 'assistant-stream', type: 'assistant_text', content: 'working', timestamp: 1 }],
+          chatState: 'streaming',
+          connectionState: 'connected',
+          streamingText: '',
+          streamingToolInput: '',
+          activeToolUseId: null,
+          activeToolName: null,
+          activeThinkingId: null,
+          pendingPermission: null,
+          pendingComputerUsePermission: null,
+          tokenUsage: { input_tokens: 0, output_tokens: 0 },
+          streamingResponseChars: 0,
+          elapsedSeconds: 12,
+          statusVerb: '',
+          slashCommands: [],
+          agentTaskNotifications: {},
+          elapsedTimer: null,
+        },
+      },
+    })
+
+    render(<ChatInput compact />)
+
+    fireEvent.change(getComposer(), {
+      target: { value: 'first queued draft', selectionStart: 18 },
+    })
+    fireEvent.keyDown(getComposer(), { key: 'Enter' })
+    fireEvent.click(screen.getByRole('button', { name: /Edit queued message/i }))
+
+    const editInput = screen.getByLabelText('Queued message text')
+    fireEvent.compositionStart(editInput)
+    fireEvent.change(editInput, { target: { value: '正在输入中文' } })
+    fireEvent.keyDown(editInput, { key: 'Enter', keyCode: 229 })
+
+    expect(screen.getByLabelText('Queued message text')).toHaveValue('正在输入中文')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+
+    fireEvent.compositionEnd(editInput)
+    fireEvent.keyDown(editInput, { key: 'Enter' })
+
+    expect(screen.getByTestId('pending-user-message')).toHaveTextContent('正在输入中文')
+    expect(screen.queryByLabelText('Queued message text')).not.toBeInTheDocument()
   })
 
   it('sends a queued prompt as the next tail message when the running turn completes', async () => {
@@ -691,7 +739,7 @@ describe('ChatInput file mentions', () => {
 
     render(<ChatInput compact />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: { value: 'continue after completion', selectionStart: 25 },
     })
@@ -861,7 +909,7 @@ describe('ChatInput file mentions', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Select branch: main/ }))
     fireEvent.click(await screen.findByRole('option', { name: /feature\/a/ }))
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, { target: { value: 'run on feature branch', selectionStart: 21 } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
@@ -923,7 +971,7 @@ describe('ChatInput file mentions', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Select branch: main/ }))
     fireEvent.click(await screen.findByRole('option', { name: /feature\/a/ }))
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, { target: { value: 'run with preserved permissions', selectionStart: 30 } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
@@ -986,12 +1034,17 @@ describe('ChatInput file mentions', () => {
 
     render(<ChatInput variant="hero" />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /Select branch: main/ }))
+    const branchTrigger = await screen.findByRole('button', { name: /Select branch: main/ })
+    fireEvent.click(branchTrigger)
     fireEvent.click(await screen.findByRole('option', { name: /feature\/a/ }))
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox', { name: 'Select branch' })).not.toBeInTheDocument()
+      expect(branchTrigger).toHaveFocus()
+    })
     fireEvent.click(screen.getByRole('button', { name: /Select worktree mode: Current worktree/ }))
     fireEvent.click(await screen.findByRole('option', { name: 'Isolated worktree' }))
     expect(screen.getByText('Isolated worktree')).toBeInTheDocument()
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, { target: { value: 'run in a worktree', selectionStart: 17 } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
@@ -1023,7 +1076,7 @@ describe('ChatInput file mentions', () => {
 
     render(<ChatInput compact />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     const mention = '@backend/src/conditions.py'
     fireEvent.change(input, {
       target: {
@@ -1067,7 +1120,7 @@ describe('ChatInput file mentions', () => {
   it('inserts queued inline workspace citations at the current cursor and keeps file context attached', async () => {
     render(<ChatInput compact />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: {
         value: '请看实现',
@@ -1139,7 +1192,7 @@ describe('ChatInput file mentions', () => {
 
     render(<ChatInput compact />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: {
         value: '@backend 讲一下这个目录。',
@@ -1152,8 +1205,9 @@ describe('ChatInput file mentions', () => {
     await waitFor(() => {
       expect(input.value).toBe('讲一下这个目录。')
     })
-    expect(screen.getByText('backend/')).toBeInTheDocument()
-    expect(screen.getByText('folder')).toBeInTheDocument()
+    const attachmentCard = screen.getByText('backend/').closest('[data-slot="card"]')
+    expect(attachmentCard).toBeInTheDocument()
+    expect(attachmentCard?.querySelector('[data-file-icon="folder"]')).toBeInTheDocument()
 
     fireEvent.keyDown(input, { key: 'Enter' })
 
@@ -1189,13 +1243,14 @@ describe('ChatInput file mentions', () => {
 
     render(<ChatInput compact />)
 
-    fireEvent.click(screen.getByLabelText('Open composer tools'))
-    fireEvent.click(screen.getByText('Add files or photos'))
+    const toolsTrigger = screen.getByLabelText('Open composer tools')
+    fireEvent.keyDown(toolsTrigger, { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Add files or photos' }))
 
     expect(await screen.findByText('large-a.log')).toBeInTheDocument()
     expect(await screen.findByText('large-b.zip')).toBeInTheDocument()
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: {
         value: 'analyze these',
@@ -1269,7 +1324,7 @@ describe('ChatInput file mentions', () => {
     expect(await screen.findByText('large-a.log')).toBeInTheDocument()
     expect(screen.queryByTestId('chat-input-drop-overlay')).not.toBeInTheDocument()
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: {
         value: 'analyze dropped file',
@@ -1306,7 +1361,7 @@ describe('ChatInput file mentions', () => {
 
     render(<ChatInput compact />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     const file = new File(['image'], 'late.png', { type: 'image/png' })
 
     fireEvent.paste(input, {
@@ -1356,7 +1411,7 @@ describe('ChatInput file mentions', () => {
     render(<ChatInput compact />)
 
     const panel = screen.getByTestId('chat-input-panel')
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
 
     fireEvent.change(input, {
       target: {
@@ -1396,7 +1451,7 @@ describe('ChatInput file mentions', () => {
       expect(mocks.getGitInfo).toHaveBeenCalledWith(sessionId)
     })
 
-    fireEvent.change(screen.getByRole('textbox'), {
+    fireEvent.change(getComposer(), {
       target: { value: 'ship it', selectionStart: 7 },
     })
 
@@ -1411,7 +1466,7 @@ describe('ChatInput file mentions', () => {
     expect(screen.getByTestId('chat-input-toolbar-trailing')).toHaveClass('min-w-0', 'flex-1', 'justify-end', 'gap-1')
     expect(screen.getByTestId('model-selector-shell')).toHaveClass('min-w-0', 'flex-1')
 
-    fireEvent.change(screen.getByRole('textbox'), {
+    fireEvent.change(getComposer(), {
       target: { value: '@cond', selectionStart: 5 },
     })
 
@@ -1429,7 +1484,7 @@ describe('ChatInput file mentions', () => {
       expect(mocks.getGitInfo).toHaveBeenCalledWith(sessionId)
     })
 
-    const input = screen.getByRole('textbox')
+    const input = getComposer()
     const toolbar = screen.getByTestId('chat-input-toolbar')
 
     expect(toolbar).not.toHaveClass('absolute')
@@ -1449,7 +1504,7 @@ describe('ChatInput file mentions', () => {
       expect(mocks.getGitInfo).toHaveBeenCalledWith(sessionId)
     })
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: {
         value: 'avoid accidental sends',
@@ -1479,7 +1534,7 @@ describe('ChatInput file mentions', () => {
       expect(mocks.getGitInfo).toHaveBeenCalledWith(sessionId)
     })
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: {
         value: '/model',
@@ -1523,15 +1578,16 @@ describe('ChatInput file mentions', () => {
       expect(mocks.getGitInfo).toHaveBeenCalledWith(sessionId)
     })
 
-    fireEvent.change(screen.getByRole('textbox'), {
+    fireEvent.change(getComposer(), {
       target: { value: '/su', selectionStart: 3 },
     })
 
     await waitFor(() => {
-      const commandButtons = screen
-        .getAllByRole('button')
-        .filter((button) => button.textContent?.startsWith('/'))
-      expect(commandButtons[0]).toHaveTextContent('/superpowers:brainstorming')
+      const selectedOption = screen.getAllByRole('option')[0]!
+      expect(selectedOption).toHaveTextContent('/superpowers:brainstorming')
+      expect(selectedOption).toHaveAttribute('aria-selected', 'true')
+      expect(getComposer()).toHaveAttribute('aria-activedescendant', selectedOption.id)
+      expect(getComposer()).toHaveAttribute('aria-expanded', 'true')
     })
   })
 
@@ -1555,7 +1611,7 @@ describe('ChatInput file mentions', () => {
       expect(mocks.listAgents).toHaveBeenCalledWith('/repo')
     })
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: { value: '/debug', selectionStart: 6 },
     })
@@ -1589,7 +1645,7 @@ describe('ChatInput file mentions', () => {
       expect(mocks.listAgents).toHaveBeenCalledWith('/repo')
     })
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = getComposer()
     fireEvent.change(input, {
       target: { value: '/agent', selectionStart: 6 },
     })
@@ -1616,3 +1672,6 @@ describe('ChatInput file mentions', () => {
     })
   })
 })
+function getComposer() {
+  return screen.getByRole('combobox') as HTMLTextAreaElement
+}

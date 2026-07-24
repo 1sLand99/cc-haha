@@ -34,6 +34,30 @@ import {
 import { WorkspaceFileOpenWith } from './WorkspaceFileOpenWith'
 import { getFileIdentity, getWorkspaceStatusLabel, type WorkspaceFileIdentity } from './fileIdentity'
 import type { WorkspaceDiffHighlightToken } from './workspaceDiffHighlighter'
+import { FloatingSelectionAction } from '../ui/custom/floating-selection-action'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
+import { PointerDropdownMenu } from '../ui/custom/pointer-dropdown-menu'
+import { Button } from '../ui/button'
+import { IconButton } from '../ui/custom/icon-button'
+import { InlineState as PanelMessage } from '../ui/custom/inline-state'
+import { Input } from '../ui/input'
+import { Textarea } from '../ui/textarea'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs'
+import { Alert, AlertDescription } from '../ui/alert'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '../ui/context-menu'
 
 type WorkspacePanelProps = {
   sessionId: string
@@ -70,6 +94,7 @@ type FileContextMenuState = {
   isDirectory: boolean
   x: number
   y: number
+  triggerEl: HTMLElement
 }
 
 const FILE_STATUS_META: Record<WorkspaceFileStatus, { label: string; className: string }> = {
@@ -363,48 +388,14 @@ function FloatingSelectionMenu({
   if (!selection) return null
 
   return (
-    <button
+    <FloatingSelectionAction
       ref={popoverRef}
-      type="button"
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onAdd}
-      className="fixed z-50 inline-flex h-11 items-center gap-2 rounded-full border border-[var(--color-border)]/70 bg-[var(--color-surface-container-lowest)] px-5 text-[15px] font-semibold text-[var(--color-text-primary)] shadow-[0_10px_28px_rgba(15,23,42,0.14),0_2px_8px_rgba(15,23,42,0.08)] transition-colors hover:bg-[var(--color-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35"
-      style={{ left: selection.x, top: selection.y }}
-    >
-      <MessageCircle size={21} strokeWidth={2.15} className="shrink-0 text-[var(--color-text-primary)]" aria-hidden="true" />
-      <span>{t('workspace.addSelectionToChat')}</span>
-    </button>
-  )
-}
-
-function PanelMessage({
-  icon,
-  message,
-  tone = 'muted',
-  compact = false,
-  announce = true,
-}: {
-  icon: string
-  message: string
-  tone?: 'muted' | 'error'
-  compact?: boolean
-  announce?: boolean
-}) {
-  const toneClass =
-    tone === 'error'
-      ? 'text-[var(--color-error)]'
-      : 'text-[var(--color-text-tertiary)]'
-
-  return (
-    <div
-      className={`flex items-center gap-2 px-4 ${compact ? 'py-2 text-[11px]' : 'py-8 text-xs'} ${toneClass}`}
-      role={announce ? tone === 'error' ? 'alert' : 'status' : undefined}
-    >
-      <span className={`material-symbols-outlined shrink-0 text-[16px] ${icon === 'progress_activity' ? 'animate-spin' : ''}`}>
-        {icon}
-      </span>
-      <span className="min-w-0 leading-relaxed">{message}</span>
-    </div>
+      x={selection.x}
+      y={selection.y}
+      label={t('workspace.addSelectionToChat')}
+      icon={<MessageCircle size={21} strokeWidth={2.15} className="shrink-0 text-[var(--color-text-primary)]" aria-hidden="true" />}
+      onSelect={onAdd}
+    />
   )
 }
 
@@ -418,14 +409,15 @@ function ToolbarIconButton({
   onClick: () => void
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
+    <IconButton
+      label={label}
+      variant="ghost"
+      size="icon-sm"
       onClick={onClick}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-info)]/30"
+      className="h-8 w-8 rounded-[8px]"
     >
       <Icon size={16} strokeWidth={1.9} aria-hidden="true" />
-    </button>
+    </IconButton>
   )
 }
 
@@ -455,7 +447,7 @@ function WorkspaceFilterInput({
     <div className="shrink-0 border-b border-[var(--color-text-primary)]/10 px-3 pb-2.5 pt-2.5">
       <div className="flex h-9 items-center gap-2 rounded-[7px] bg-[var(--color-surface-container-low)] px-2.5 text-[var(--color-text-tertiary)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-text-primary)_8%,transparent)] transition-[background-color,box-shadow] duration-200 ease-out focus-within:bg-[var(--color-surface)] focus-within:shadow-[inset_0_0_0_1px_var(--color-info),0_0_0_3px_color-mix(in_srgb,var(--color-info)_12%,transparent)]">
         <Search size={15} strokeWidth={1.9} aria-hidden="true" className="shrink-0" />
-        <input
+        <Input
           ref={inputRef}
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -470,23 +462,28 @@ function WorkspaceFilterInput({
           }}
           aria-label={placeholder}
           placeholder={placeholder}
-          className="min-w-0 flex-1 bg-transparent text-[13px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+          className="h-auto min-w-0 flex-1 border-0 bg-transparent px-0 text-[13px] shadow-none focus-visible:border-0 focus-visible:shadow-none"
         />
         {loading && (
-          <RefreshCw size={13} aria-hidden="true" className="shrink-0 animate-spin" />
+          <RefreshCw
+            size={13}
+            aria-hidden="true"
+            className="shrink-0 motion-safe:animate-spin motion-reduce:animate-none"
+          />
         )}
         {value.length > 0 && (
-          <button
-            type="button"
-            aria-label={t('workspace.clearFilter')}
+          <IconButton
+            label={t('workspace.clearFilter')}
+            variant="ghost"
+            size="icon-sm"
             onClick={() => {
               onChange('')
               inputRef.current?.focus()
             }}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+            className="h-7 w-7 rounded-[6px]"
           >
             <X size={13} strokeWidth={2} aria-hidden="true" />
-          </button>
+          </IconButton>
         )}
       </div>
       {summary && (
@@ -638,33 +635,34 @@ function CodeSurface({
                 : t('workspace.commentLineRangeTarget', { start: commentLineStart, end: commentLineEnd })}
             </span>
           </div>
-          <textarea
+          <Textarea
             value={commentDraft}
             onChange={(event) => setCommentDraft(event.target.value)}
             autoFocus
             rows={3}
             placeholder={t('workspace.commentPlaceholder')}
-            className="block w-full resize-none bg-transparent px-3 py-3 text-[13px] leading-6 text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+            className="block min-h-0 w-full resize-none rounded-none border-0 bg-transparent px-3 py-3 text-[13px] leading-6 shadow-none focus-visible:border-0 focus-visible:shadow-none"
           />
           <div className="flex justify-end gap-2 px-3 pb-3">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setCommentRange(null)
                 setCommentDraft('')
               }}
-              className="rounded-[7px] px-2.5 py-1 text-[12px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+              className="rounded-[7px] px-2.5 text-[12px]"
             >
               {t('common.cancel')}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              size="sm"
               onClick={submitLineComment}
               disabled={!commentDraft.trim()}
-              className="rounded-[7px] bg-[var(--color-text-primary)] px-2.5 py-1 text-[12px] font-medium text-[var(--color-surface)] disabled:cursor-not-allowed disabled:opacity-45"
+              className="rounded-[7px] bg-[var(--color-text-primary)] px-2.5 text-[12px] text-[var(--color-surface)]"
             >
               {t('workspace.addCommentToChat')}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -689,8 +687,9 @@ function CodeSurface({
   const renderLineNumberButton = (lineNumber: number) => {
     const selected = isCommentLineSelected(lineNumber)
     return (
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="sm"
         aria-label={t('workspace.commentLine', { line: lineNumber })}
         aria-pressed={selected}
         onClick={(event) => {
@@ -700,14 +699,14 @@ function CodeSurface({
             : { anchorLine: lineNumber, focusLine: lineNumber })
           if (!extendRange) setCommentDraft('')
         }}
-        className={`select-none text-right text-[11px] transition-colors focus-visible:outline-none ${
+        className={`h-auto w-full justify-end rounded-none border-0 bg-transparent p-0 text-right text-[11px] transition-colors ${
           selected
             ? 'font-semibold text-[var(--color-info)]'
             : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-brand)] focus-visible:text-[var(--color-brand)]'
         }`}
       >
         {lineNumber}
-      </button>
+      </Button>
     )
   }
 
@@ -825,13 +824,14 @@ function CodeSurface({
                 ? t('workspace.previewAllLines', { total: lines.length })
                 : t('workspace.previewLineLimit', { count: visibleLines.length, total: lines.length })}
             </span>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setShowAllLines((current) => !current)}
-              className="ml-auto rounded-[6px] px-2 py-1 text-[12px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+              className="ml-auto rounded-[6px] px-2 text-[12px]"
             >
               {showAllLines ? t('workspace.collapsePreview') : t('workspace.showAllLoadedLines')}
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -946,16 +946,16 @@ function ChangedFileRow({
   const fileName = file.path.replace(/\\/g, '/').split('/').pop() || file.path
 
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onClick}
       onContextMenu={(event) => onContextMenu(event, file.path)}
       aria-current={active ? 'true' : undefined}
       data-workspace-file-row=""
       data-workspace-file-path={file.path}
       title={file.path}
-      className={`group mx-2 flex w-[calc(100%-16px)] items-center gap-1.5 rounded-[5px] px-2 text-left transition-[background-color,transform] duration-150 ease-out active:scale-[0.99] ${
-        file.oldPath ? 'min-h-11 py-1' : 'h-[30px]'
+      className={`group mx-2 w-[calc(100%-16px)] justify-start gap-1.5 rounded-[5px] px-2 text-left transition-[background-color,transform] duration-150 ease-out active:scale-[0.99] ${
+        file.oldPath ? 'h-auto min-h-11 py-1' : 'h-[30px]'
       } ${
         active
           ? 'bg-[var(--color-info-container)] shadow-[inset_3px_0_0_var(--color-info)]'
@@ -987,7 +987,7 @@ function ChangedFileRow({
         <span className="ml-1 text-[var(--color-error)]">-{file.deletions}</span>
       </div>
       <FileStatusBadge status={file.status} />
-    </button>
+    </Button>
   )
 }
 
@@ -1031,8 +1031,8 @@ function WorkspaceSearchResultRow({
 
   return (
     <div role="listitem">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         data-workspace-search-result=""
         data-workspace-file-path={entry.path}
         aria-current={active ? 'true' : undefined}
@@ -1058,7 +1058,7 @@ function WorkspaceSearchResultRow({
             onClearSearch()
           }
         }}
-        className={`group mx-2 flex min-h-12 w-[calc(100%-16px)] items-start gap-2 rounded-[7px] px-2.5 py-2 text-left transition-[background-color,transform] duration-150 ease-out active:scale-[0.99] ${
+        className={`group mx-2 min-h-12 w-[calc(100%-16px)] items-start justify-start gap-2 rounded-[7px] px-2.5 py-2 text-left transition-[background-color,transform] duration-150 ease-out active:scale-[0.99] ${
           active
             ? 'bg-[var(--color-info-container)] shadow-[inset_3px_0_0_var(--color-info)]'
             : 'hover:bg-[var(--color-surface-hover)]'
@@ -1073,7 +1073,7 @@ function WorkspaceSearchResultRow({
             {parentPath}
           </span>
         </span>
-      </button>
+      </Button>
     </div>
   )
 }
@@ -1103,12 +1103,12 @@ function TreeNode({
   if (!entry.isDirectory) {
     const isActive = entry.path === activePath
     return (
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => onOpenFile(entry.path)}
         onContextMenu={(event) => onFileContextMenu(event, entry.path, false)}
         aria-current={isActive ? 'true' : undefined}
-        className={`group mx-2 flex h-8 w-[calc(100%-16px)] items-center gap-2 rounded-[7px] pr-2 text-left transition-colors ${
+        className={`group mx-2 h-8 w-[calc(100%-16px)] justify-start gap-2 rounded-[7px] pr-2 text-left transition-colors ${
           isActive
             ? 'bg-[var(--color-surface-selected)] shadow-[inset_0_0_0_1.5px_var(--color-border-focus)]'
             : 'hover:bg-[var(--color-surface-hover)]'
@@ -1117,25 +1117,25 @@ function TreeNode({
       >
         <FileTypeBadge name={entry.name} subtle={!isActive} />
         <span className="min-w-0 truncate text-[14px] font-medium text-[var(--color-text-primary)]">{entry.name}</span>
-      </button>
+      </Button>
     )
   }
 
   return (
     <div>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => onToggle(entry.path)}
         onContextMenu={(event) => onFileContextMenu(event, entry.path, true)}
         aria-expanded={isVisuallyExpanded}
-        className="group mx-2 flex h-8 w-[calc(100%-16px)] items-center gap-2 rounded-[7px] pr-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
+        className="group mx-2 h-8 w-[calc(100%-16px)] justify-start gap-2 rounded-[7px] pr-2 text-left transition-colors"
         style={{ paddingLeft: indent }}
       >
         <span aria-hidden="true" className="material-symbols-outlined shrink-0 text-[18px] text-[var(--color-text-tertiary)] transition-colors group-hover:text-[var(--color-text-primary)]">
           {isVisuallyExpanded ? 'expand_more' : 'chevron_right'}
         </span>
         <span className="min-w-0 truncate text-[15px] font-medium text-[var(--color-text-primary)]">{entry.name}</span>
-      </button>
+      </Button>
 
       {isVisuallyExpanded && (
         <div className="relative">
@@ -1210,7 +1210,6 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
   const [workspaceSearchRevision, setWorkspaceSearchRevision] = useState(0)
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false)
   const [isNavigatorOpen, setIsNavigatorOpen] = useState(forceVisible)
-  const [previewTabContextMenu, setPreviewTabContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
   const [fileContextMenu, setFileContextMenu] = useState<FileContextMenuState | null>(null)
   const width = useWorkspacePanelStore((state) => state.width)
   const isOpen = useWorkspacePanelStore((state) => state.isPanelOpen(sessionId))
@@ -1247,6 +1246,7 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
   const workspaceSearchRequestIdRef = useRef(0)
   const filterInputRef = useRef<HTMLInputElement>(null)
   const previewHeaderRef = useRef<HTMLDivElement>(null)
+  const previewTabRefs = useRef(new Map<string, HTMLButtonElement>())
 
   const rootTree = treeByPath['']
   const rootTreeKey = makeTreeStateKey(sessionId, '')
@@ -1363,16 +1363,6 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
       window.clearTimeout(timer)
     }
   }, [filterQuery, navigatorView, normalizedFilterQuery, sessionId, shouldRender, t, workspaceSearchRevision])
-
-  useEffect(() => {
-    if (!previewTabContextMenu && !fileContextMenu) return
-    const close = () => {
-      setPreviewTabContextMenu(null)
-      setFileContextMenu(null)
-    }
-    document.addEventListener('click', close)
-    return () => document.removeEventListener('click', close)
-  }, [fileContextMenu, previewTabContextMenu])
 
   useEffect(() => {
     if (!hasPreviewTabs && isNavigatorOpen) {
@@ -1502,24 +1492,49 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
     setIsViewMenuOpen(false)
   }
 
-  const handlePreviewTabContextMenu = (event: MouseEvent, tabId: string) => {
-    event.preventDefault()
-    event.stopPropagation()
-    setFileContextMenu(null)
-    setPreviewTabContextMenu({ tabId, x: event.clientX, y: event.clientY })
-  }
-
   const handleFileContextMenu = (event: MouseEvent, path: string, isDirectory = false) => {
     event.preventDefault()
     event.stopPropagation()
-    setPreviewTabContextMenu(null)
-    setFileContextMenu({ path, isDirectory, x: event.clientX, y: event.clientY })
+    setFileContextMenu({
+      path,
+      isDirectory,
+      x: event.clientX,
+      y: event.clientY,
+      triggerEl: event.currentTarget as HTMLElement,
+    })
   }
 
-  const handleClosePreviewTabs = (scope: WorkspacePreviewCloseScope) => {
-    if (!previewTabContextMenu) return
-    closePreviewTabs(sessionId, previewTabContextMenu.tabId, scope)
-    setPreviewTabContextMenu(null)
+  const focusAfterPreviewClose = (tabId: string, scope: WorkspacePreviewCloseScope) => {
+    const closingIndex = previewTabs.findIndex((tab) => tab.id === tabId)
+    const targetTabId = scope === 'all'
+      ? null
+      : scope === 'current'
+        ? activePreviewTab?.id === tabId
+          ? previewTabs[closingIndex + 1]?.id ?? previewTabs[closingIndex - 1]?.id ?? null
+          : activePreviewTab?.id ?? null
+        : tabId
+
+    window.requestAnimationFrame(() => {
+      if (targetTabId && previewTabRefs.current.get(targetTabId)?.isConnected) {
+        previewTabRefs.current.get(targetTabId)?.focus()
+        return
+      }
+      if (previewHeaderRef.current?.isConnected) {
+        previewHeaderRef.current.focus()
+        return
+      }
+      filterInputRef.current?.focus()
+    })
+  }
+
+  const handleClosePreview = (tabId: string) => {
+    closePreview(sessionId, tabId)
+    focusAfterPreviewClose(tabId, 'current')
+  }
+
+  const handleClosePreviewTabs = (tabId: string, scope: WorkspacePreviewCloseScope) => {
+    closePreviewTabs(sessionId, tabId, scope)
+    focusAfterPreviewClose(tabId, scope)
   }
 
   const copyWorkspacePath = async (path: string, mode: 'relative' | 'absolute' = 'relative') => {
@@ -1599,19 +1614,20 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
       }
       if (workspaceSearchError && !displayedWorkspaceSearch) {
         return (
-          <div role="alert" className="mx-3 my-3 rounded-[8px] border border-[var(--color-error)]/20 bg-[var(--color-error)]/6 p-3 text-[12px] text-[var(--color-error)]">
-            <div className="flex items-start gap-2">
+          <Alert variant="destructive" className="mx-3 my-3 w-auto rounded-[8px] p-3 text-[12px]">
+            <AlertDescription className="flex items-start gap-2 text-[var(--color-error)]">
               <CircleAlert size={15} aria-hidden="true" className="mt-0.5 shrink-0" />
               <span className="min-w-0 flex-1 leading-5">{workspaceSearchError}</span>
-            </div>
-            <button
-              type="button"
+            </AlertDescription>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setWorkspaceSearchRevision((revision) => revision + 1)}
-              className="mt-2 rounded-[6px] border border-[var(--color-error)]/30 px-2 py-1 font-medium hover:bg-[var(--color-error)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-error)]/25"
+              className="mt-2 rounded-[6px] border-[var(--color-error)]/30 px-2 text-[12px] text-[var(--color-error)] hover:bg-[var(--color-error)]/10"
             >
               {t('common.retry')}
-            </button>
-          </div>
+            </Button>
+          </Alert>
         )
       }
       if (!displayedWorkspaceSearch) {
@@ -1630,17 +1646,20 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
           className="space-y-0.5 py-1"
         >
           {workspaceSearchError && (
-            <div role="alert" className="mx-3 mb-2 flex items-center gap-2 rounded-[7px] bg-[var(--color-error)]/6 px-2.5 py-2 text-[11px] text-[var(--color-error)]">
-              <CircleAlert size={14} aria-hidden="true" className="shrink-0" />
-              <span className="min-w-0 flex-1 truncate">{workspaceSearchError}</span>
-              <button
-                type="button"
-                onClick={() => setWorkspaceSearchRevision((revision) => revision + 1)}
-                className="shrink-0 rounded-[5px] px-1.5 py-1 font-medium hover:bg-[var(--color-error)]/10"
-              >
-                {t('common.retry')}
-              </button>
-            </div>
+            <Alert variant="destructive" className="mx-3 mb-2 w-auto rounded-[7px] border-0 px-2.5 py-2 text-[11px]">
+              <AlertDescription className="flex items-center gap-2 text-[var(--color-error)]">
+                <CircleAlert size={14} aria-hidden="true" className="shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{workspaceSearchError}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setWorkspaceSearchRevision((revision) => revision + 1)}
+                  className="shrink-0 rounded-[5px] px-1.5 text-[11px] text-[var(--color-error)] hover:bg-[var(--color-error)]/10"
+                >
+                  {t('common.retry')}
+                </Button>
+              </AlertDescription>
+            </Alert>
           )}
           {displayedWorkspaceSearch.entries.map((entry) => (
             <WorkspaceSearchResultRow
@@ -1743,15 +1762,16 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
             </span>
           )}
           <div className="ml-auto flex shrink-0 items-center gap-0.5">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               aria-label={t('workspace.addToChat')}
               onClick={() => addWorkspacePathToChat(activePreviewTab.path)}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[7px] px-2 text-[11px] font-medium text-[var(--color-text-secondary)] transition-[color,background-color,transform] duration-200 ease-out hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.98]"
+              className="h-8 rounded-[7px] px-2 text-[11px]"
             >
               <MessageCircle size={14} strokeWidth={1.8} aria-hidden="true" />
               <span className="hidden min-[960px]:inline">{t('workspace.addToChat')}</span>
-            </button>
+            </Button>
             <ToolbarIconButton Icon={RefreshCw} label={t('workspace.refresh')} onClick={handleRefresh} />
             <ToolbarIconButton
               Icon={isNavigatorVisible ? PanelRightClose : PanelRightOpen}
@@ -1766,7 +1786,7 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
               <ToolbarIconButton
                 Icon={X}
                 label={`${t('workspace.closeTab')} ${activePreviewTab.title} ${getPreviewKindLabel(t, activePreviewTab.kind)}`}
-                onClick={() => closePreview(sessionId, activePreviewTab.id)}
+                onClick={() => handleClosePreview(activePreviewTab.id)}
               />
             )}
             {!embedded && (
@@ -1775,7 +1795,7 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
             {activePreviewLoading && state === 'ok' && (
               <RefreshCw
                 size={13}
-                className="mx-1 shrink-0 animate-spin text-[var(--color-text-tertiary)]"
+                className="mx-1 shrink-0 text-[var(--color-text-tertiary)] motion-safe:animate-spin motion-reduce:animate-none"
                 aria-hidden="true"
               />
             )}
@@ -1783,22 +1803,22 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
         </div>
 
         {state === 'ok' && refreshErrorMessage && !activePreviewLoading && (
-          <div
-            role="alert"
-            className="flex shrink-0 items-center gap-2 border-b border-[var(--color-error)]/20 bg-[var(--color-error)]/6 px-3 py-2 text-[11px] text-[var(--color-error)]"
-          >
-            <CircleAlert size={15} className="shrink-0" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate">{refreshErrorMessage}</span>
-            <button
-              type="button"
-              onClick={() => {
-                void openPreview(sessionId, activePreviewTab.path, activePreviewTab.kind)
-              }}
-              className="shrink-0 rounded-[6px] border border-[var(--color-error)]/30 px-2 py-1 font-medium hover:bg-[var(--color-error)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-error)]/25"
-            >
-              {t('common.retry')}
-            </button>
-          </div>
+          <Alert variant="destructive" className="shrink-0 rounded-none border-x-0 border-t-0 px-3 py-2 text-[11px]">
+            <AlertDescription className="flex items-center gap-2 text-[var(--color-error)]">
+              <CircleAlert size={15} className="shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate">{refreshErrorMessage}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void openPreview(sessionId, activePreviewTab.path, activePreviewTab.kind)
+                }}
+                className="shrink-0 rounded-[6px] border-[var(--color-error)]/30 px-2 text-[11px] text-[var(--color-error)] hover:bg-[var(--color-error)]/10"
+              >
+                {t('common.retry')}
+              </Button>
+            </AlertDescription>
+          </Alert>
         )}
 
         {state === 'loading' || (activePreviewLoading && state !== 'ok') ? (
@@ -1838,10 +1858,16 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
   }
 
   const renderPreviewTabs = () => (
-    <>
+    <Tabs
+      value={activePreviewTab?.id}
+      onValueChange={(tabId) => {
+        const tab = previewTabs.find((item) => item.id === tabId)
+        if (tab) void openPreview(sessionId, tab.path, tab.kind)
+      }}
+      className="flex min-h-0 flex-1 flex-col gap-0"
+    >
       <div className="flex h-9 shrink-0 items-end border-b border-[var(--color-text-primary)]/10 bg-[var(--color-surface)] px-3">
-        <div
-          role="tablist"
+        <TabsList
           aria-label={t('workspace.previewTabs')}
           className="flex min-w-0 flex-1 items-end gap-3 overflow-x-auto bg-[var(--color-surface)]"
         >
@@ -1856,99 +1882,85 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
               const isActive = tab.id === activePreviewTab?.id
 
               return (
-                <div
-                  key={tab.id}
-                  onContextMenu={(event) => handlePreviewTabContextMenu(event, tab.id)}
-                  className={`group relative flex h-9 min-w-[96px] max-w-[220px] shrink-0 items-center gap-2 px-1 text-left text-[12px] transition-colors ${
-                    isActive
-                      ? 'text-[var(--color-text-primary)] after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-[var(--color-info)]'
-                      : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                  }`}
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-                    onClick={() => {
-                      void openPreview(sessionId, tab.path, tab.kind)
+                <ContextMenu key={tab.id}>
+                  <ContextMenuTrigger asChild>
+                    <div
+                      className={`group relative flex h-9 min-w-[96px] max-w-[220px] shrink-0 items-center gap-2 px-1 text-left text-[12px] transition-colors ${
+                        isActive
+                          ? 'text-[var(--color-text-primary)] after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-[var(--color-info)]'
+                          : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                      }`}
+                    >
+                      <TabsTrigger
+                        ref={(element) => {
+                          if (element) previewTabRefs.current.set(tab.id, element)
+                          else previewTabRefs.current.delete(tab.id)
+                        }}
+                        value={tab.id}
+                        className="min-w-0 flex-1 justify-start rounded-none bg-transparent p-0 text-left text-[12px] hover:bg-transparent data-[state=active]:bg-transparent"
+                      >
+                        {tab.kind === 'diff' ? (
+                          <span className="material-symbols-outlined shrink-0 text-[15px] text-[var(--color-text-tertiary)]">difference</span>
+                        ) : (
+                          <FileTypeBadge name={tab.title} subtle={!isActive} />
+                        )}
+                        <span className="min-w-0 flex-1 truncate">{tab.title}</span>
+                      </TabsTrigger>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`${t('workspace.closeTab')} ${tab.title} ${kindLabel}`}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleClosePreview(tab.id)
+                        }}
+                        className="h-5 w-5 shrink-0 rounded-[5px] p-0 opacity-0 text-[var(--color-text-tertiary)] transition-[background-color,opacity,color] group-hover:opacity-100 hover:text-[var(--color-text-primary)] focus-visible:opacity-100"
+                      >
+                        <X size={13} aria-hidden="true" />
+                      </Button>
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent
+                    className="min-w-[156px] text-[12px]"
+                    onCloseAutoFocus={(event) => {
+                      event.preventDefault()
+                      window.requestAnimationFrame(() => {
+                        previewTabRefs.current.get(tab.id)?.focus()
+                      })
                     }}
-                    className="min-w-0 flex flex-1 items-center gap-2 text-left"
                   >
-                    {tab.kind === 'diff' ? (
-                      <span className="material-symbols-outlined shrink-0 text-[15px] text-[var(--color-text-tertiary)]">difference</span>
-                    ) : (
-                      <FileTypeBadge name={tab.title} subtle={!isActive} />
-                    )}
-                    <span className="min-w-0 flex-1 truncate">{tab.title}</span>
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`${t('workspace.closeTab')} ${tab.title} ${kindLabel}`}
-                    onClick={() => {
-                      closePreview(sessionId, tab.id)
-                    }}
-                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] text-[var(--color-text-tertiary)] opacity-0 transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] group-hover:opacity-100 focus-visible:opacity-100"
-                  >
-                    <span className="material-symbols-outlined text-[13px] leading-none">close</span>
-                  </button>
-                </div>
+                    <ContextMenuItem onSelect={() => handleClosePreviewTabs(tab.id, 'current')}>
+                      {t('tabs.close')}
+                    </ContextMenuItem>
+                    <ContextMenuItem onSelect={() => handleClosePreviewTabs(tab.id, 'others')}>
+                      {t('tabs.closeOthers')}
+                    </ContextMenuItem>
+                    <ContextMenuItem onSelect={() => handleClosePreviewTabs(tab.id, 'left')}>
+                      {t('tabs.closeLeft')}
+                    </ContextMenuItem>
+                    <ContextMenuItem onSelect={() => handleClosePreviewTabs(tab.id, 'right')}>
+                      {t('tabs.closeRight')}
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onSelect={() => handleClosePreviewTabs(tab.id, 'all')}>
+                      {t('tabs.closeAll')}
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               )
             })
           )}
-        </div>
+        </TabsList>
       </div>
-
-      {previewTabContextMenu && (
-        <div
-          role="menu"
-          className="fixed z-50 min-w-[156px] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 text-[12px] shadow-[var(--shadow-dropdown)]"
-          style={{ left: previewTabContextMenu.x, top: previewTabContextMenu.y }}
-          onClick={(event) => event.stopPropagation()}
+      {activePreviewTab && (
+        <TabsContent
+          value={activePreviewTab.id}
+          className="m-0 flex min-h-0 flex-1 flex-col"
         >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => handleClosePreviewTabs('current')}
-            className="block w-full px-3 py-1.5 text-left text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
-          >
-            {t('tabs.close')}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => handleClosePreviewTabs('others')}
-            className="block w-full px-3 py-1.5 text-left text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
-          >
-            {t('tabs.closeOthers')}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => handleClosePreviewTabs('left')}
-            className="block w-full px-3 py-1.5 text-left text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
-          >
-            {t('tabs.closeLeft')}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => handleClosePreviewTabs('right')}
-            className="block w-full px-3 py-1.5 text-left text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
-          >
-            {t('tabs.closeRight')}
-          </button>
-          <div className="my-1 border-t border-[var(--color-border)]" />
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => handleClosePreviewTabs('all')}
-            className="block w-full px-3 py-1.5 text-left text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
-          >
-            {t('tabs.closeAll')}
-          </button>
-        </div>
+          {renderPreviewContent()}
+        </TabsContent>
       )}
-    </>
+    </Tabs>
   )
 
   return (
@@ -1967,63 +1979,56 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
       >
         {hasPreviewTabs && (
           <div data-testid="workspace-preview-column" className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--color-surface)]">
-            {previewTabs.length > 1 ? renderPreviewTabs() : null}
-            {renderPreviewContent()}
+            {previewTabs.length > 1 ? renderPreviewTabs() : renderPreviewContent()}
           </div>
         )}
 
         {isNavigatorVisible && (
           <div
             data-testid="workspace-file-navigator"
+            aria-busy={statusLoading}
             className={`${hasPreviewTabs ? 'border-l border-[var(--color-text-primary)]/10' : ''} ${hasPreviewTabs && !forceVisible ? 'absolute inset-y-0 right-0 z-20 w-[min(280px,100%)] shadow-[-12px_0_28px_rgba(15,23,42,0.08)]' : ''} flex min-h-0 flex-col bg-[var(--color-surface)]`}
           >
             <header
               data-testid="workspace-file-navigator-header"
               className="flex h-10 shrink-0 items-center gap-1.5 border-b border-[var(--color-text-primary)]/10 px-3"
             >
-              <div className="relative min-w-0">
-              <button
-                type="button"
-                aria-label={activeView === 'changed' ? t('workspace.changedFiles') : t('workspace.allFiles')}
-                aria-haspopup="menu"
-                aria-expanded={isViewMenuOpen}
-                onClick={() => setIsViewMenuOpen((open) => !open)}
-                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-[7px] px-1 py-1 text-[14px] font-semibold leading-5 text-[var(--color-text-primary)] transition-colors hover:text-[var(--color-text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-info)]/30"
-              >
-                <span className="truncate">
-                  {activeView === 'changed' ? t('workspace.changedFiles') : t('workspace.allFiles')}
-                </span>
-                <span aria-hidden="true" className="material-symbols-outlined shrink-0 text-[15px] font-normal text-[var(--color-text-tertiary)]">expand_more</span>
-              </button>
-              {isViewMenuOpen && (
-                <div
-                  role="menu"
-                  className="absolute left-0 top-[calc(100%+4px)] z-30 min-w-[124px] overflow-hidden rounded-[9px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 shadow-[var(--shadow-dropdown)]"
-                >
-                  {(['changed', 'all'] as const).map((view) => {
-                    const selected = activeView === view
-                    return (
-                      <button
+              <DropdownMenu open={isViewMenuOpen} onOpenChange={setIsViewMenuOpen}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={activeView === 'changed' ? t('workspace.changedFiles') : t('workspace.allFiles')}
+                    onClick={() => {
+                      if (!isViewMenuOpen) setIsViewMenuOpen(true)
+                    }}
+                    className="min-w-0 max-w-full gap-1 rounded-[7px] px-1 text-[14px] font-semibold leading-5 text-[var(--color-text-primary)]"
+                  >
+                    <span className="truncate">
+                      {activeView === 'changed' ? t('workspace.changedFiles') : t('workspace.allFiles')}
+                    </span>
+                    <span aria-hidden="true" className="material-symbols-outlined shrink-0 text-[15px] font-normal text-[var(--color-text-tertiary)]">expand_more</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-[124px] rounded-[9px] text-[12px]">
+                  <DropdownMenuRadioGroup
+                    value={activeView}
+                    onValueChange={(value) => handleSetActiveView(value as 'changed' | 'all')}
+                  >
+                    {(['changed', 'all'] as const).map((view) => (
+                      <DropdownMenuRadioItem
                         key={view}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => handleSetActiveView(view)}
-                        className={`flex h-7 w-full items-center gap-2 px-2.5 text-left text-[12px] transition-colors ${
-                          selected ? 'bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
-                        }`}
+                        value={view}
+                        className="h-7 text-[12px]"
                       >
                         <span className="min-w-0 flex-1 truncate">
                           {view === 'changed' ? t('workspace.changedFiles') : t('workspace.allFiles')}
                         </span>
-                        {selected && (
-                          <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-[var(--color-brand)]">check</span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-              </div>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
               {!hasPreviewTabs && (
                 <div className="ml-auto flex shrink-0 items-center gap-0.5">
                   <ToolbarIconButton Icon={RefreshCw} label={t('workspace.refresh')} onClick={handleRefresh} />
@@ -2052,49 +2057,50 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
       </div>
 
       {fileContextMenu && (
-        <div
-          role="menu"
-          className="fixed z-50 min-w-[156px] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 text-[12px] shadow-[var(--shadow-dropdown)]"
-          style={{ left: fileContextMenu.x, top: fileContextMenu.y }}
-          onClick={(event) => event.stopPropagation()}
+        <PointerDropdownMenu
+          open
+          anchor={{
+            top: fileContextMenu.y,
+            bottom: fileContextMenu.y,
+            left: fileContextMenu.x,
+            right: fileContextMenu.x,
+          }}
+          triggerEl={fileContextMenu.triggerEl}
+          onOpenChange={(open) => {
+            if (!open) setFileContextMenu(null)
+          }}
+          className="min-w-[156px] rounded-[10px] text-[12px]"
         >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
+          <DropdownMenuItem
+            onSelect={() => {
               addWorkspacePathToChat(fileContextMenu.path, fileContextMenu.isDirectory)
-              setFileContextMenu(null)
             }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
+            className="gap-2 px-3 py-1.5 text-[var(--color-text-primary)]"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-[var(--color-text-tertiary)]">person_add</span>
             <span>{t('workspace.addToChat')}</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => void copyWorkspacePath(fileContextMenu.path)}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => void copyWorkspacePath(fileContextMenu.path)}
+            className="gap-2 px-3 py-1.5 text-[var(--color-text-primary)]"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-[var(--color-text-tertiary)]">content_copy</span>
             <span>{t('workspace.copyPath')}</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => void copyWorkspacePath(fileContextMenu.path, 'absolute')}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => void copyWorkspacePath(fileContextMenu.path, 'absolute')}
+            className="gap-2 px-3 py-1.5 text-[var(--color-text-primary)]"
           >
             <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-[var(--color-text-tertiary)]">file_copy</span>
             <span>{t('workspace.copyAbsolutePath')}</span>
-          </button>
+          </DropdownMenuItem>
           <WorkspaceFileOpenWith
             absolutePath={resolveWorkspaceAttachmentPath(status?.workDir, fileContextMenu.path)}
             sessionId={sessionId}
             workspacePath={fileContextMenu.isDirectory ? undefined : fileContextMenu.path}
             onAfterSelect={() => setFileContextMenu(null)}
           />
-        </div>
+        </PointerDropdownMenu>
       )}
     </aside>
   )

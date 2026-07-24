@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import type { ModelUsage } from '../../../entrypoints/agentSdkTypes.js'
 import {
+  countUtcCalendarDaysInclusive,
   processedStatsToClaudeCodeStats,
   resolveStatsDateRange,
   type ClaudeCodeStats,
@@ -135,7 +136,7 @@ function freshAllTimeBounds(now: Date): {
 } {
   const today = now.toISOString().slice(0, 10)
   const previous = new Date(now)
-  previous.setDate(previous.getDate() - 1)
+  previous.setUTCDate(previous.getUTCDate() - 1)
   return {
     today,
     yesterday: previous.toISOString().slice(0, 10),
@@ -648,13 +649,10 @@ export function createActivityIndex(
               : latest,
             null,
           ) ?? dailyActivity.at(-1)?.date ?? null
-          result.totalDays = result.firstSessionDate && result.lastSessionDate
-            ? Math.ceil(
-                (new Date(result.lastSessionDate).getTime() -
-                  new Date(result.firstSessionDate).getTime()) /
-                  (1000 * 60 * 60 * 24),
-              ) + 1
-            : 0
+          result.totalDays = countUtcCalendarDaysInclusive(
+            result.firstSessionDate,
+            result.lastSessionDate,
+          )
         }
         if (
           shotStatsEnabled &&

@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
+import '@testing-library/jest-dom'
 import { describe, expect, it } from 'vitest'
 import { CodeViewer } from './CodeViewer'
 
@@ -32,5 +33,17 @@ describe('CodeViewer', () => {
     expect(contentWrapper).toBeTruthy()
     expect(contentWrapper?.style.whiteSpace).toBe('pre-wrap')
     expect(contentWrapper?.style.wordBreak).toBe('break-word')
+  })
+
+  it('uses the shared button for truncation and exposes expansion state', () => {
+    render(<CodeViewer code={'one\ntwo\nthree'} maxLines={1} />)
+
+    const trigger = screen.getByRole('button', { name: 'Show 2 more lines' })
+    expect(trigger).toHaveAttribute('data-slot', 'button')
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(trigger)
+    expect(screen.getByRole('button', { name: 'Collapse' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('three')).toBeInTheDocument()
   })
 })

@@ -1,12 +1,17 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
+import { useSettingsStore } from '../../stores/settingsStore'
 import { BrowserAddressBar } from './BrowserAddressBar'
 
 const baseProps = {
   url: 'http://localhost:5173/', canGoBack: false, canGoForward: false,
   onNavigate: vi.fn(), onBack: vi.fn(), onForward: vi.fn(), onReload: vi.fn(),
 }
+
+beforeEach(() => {
+  useSettingsStore.setState({ locale: 'zh' })
+})
 
 afterEach(() => {
   cleanup()
@@ -16,6 +21,26 @@ describe('BrowserAddressBar', () => {
   it('shows the current url in the input', () => {
     render(<BrowserAddressBar {...baseProps} />)
     expect(screen.getByRole('textbox')).toHaveValue('http://localhost:5173/')
+  })
+
+  it('composes the address bar from shadcn input and icon buttons', () => {
+    render(<BrowserAddressBar {...baseProps} />)
+
+    expect(screen.getByRole('textbox', { name: '浏览器地址' })).toHaveAttribute('data-slot', 'input')
+    expect(screen.getByRole('button', { name: '后退' })).toHaveAttribute('data-variant', 'ghost')
+    expect(screen.getByRole('button', { name: '前进' })).toHaveAttribute('data-variant', 'ghost')
+    expect(screen.getByRole('button', { name: '刷新' })).toHaveAttribute('data-variant', 'ghost')
+  })
+
+  it('localizes browser controls with the active app locale', () => {
+    useSettingsStore.setState({ locale: 'en' })
+    render(<BrowserAddressBar {...baseProps} />)
+
+    expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Browser address' })).toHaveAttribute(
+      'placeholder',
+      'Enter address…',
+    )
   })
 
   it('submits the edited url via onNavigate', () => {
@@ -85,8 +110,17 @@ describe('BrowserAddressBar', () => {
 
   it('shows the loading progress bar and a busy reload button while loading', () => {
     render(<BrowserAddressBar {...baseProps} loading />)
-    expect(screen.getByTestId('browser-loading-bar')).toBeInTheDocument()
+    const progress = screen.getByTestId('browser-loading-bar')
+    expect(progress).toHaveAttribute('data-slot', 'progress')
+    expect(progress.querySelector('[data-slot="progress-indicator"]')).toHaveClass(
+      'data-[indeterminate=true]:motion-safe:animate-pulse',
+      'data-[indeterminate=true]:motion-reduce:animate-none',
+    )
     expect(screen.getByLabelText('刷新')).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByLabelText('刷新').querySelector('svg')).toHaveClass(
+      'motion-safe:animate-spin',
+      'motion-reduce:animate-none',
+    )
   })
 
   it('hides the loading progress bar when not loading', () => {

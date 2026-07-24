@@ -18,10 +18,10 @@ describe('Settings pet navigation', () => {
   it('opens the dedicated pet settings tab and persists it as active', () => {
     render(<Settings />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Pets' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Pets' }))
 
     expect(screen.getByText('Pet settings content')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Pets' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('tab', { name: 'Pets' })).toHaveAttribute('aria-selected', 'true')
     expect(useUIStore.getState().activeSettingsTab).toBe('pets')
   })
 })

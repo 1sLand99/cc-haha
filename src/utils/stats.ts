@@ -683,14 +683,7 @@ function cacheToStats(
         )[0]
       : null
 
-  const totalDays =
-    firstSessionDate && lastSessionDate
-      ? Math.ceil(
-          (new Date(lastSessionDate).getTime() -
-            new Date(firstSessionDate).getTime()) /
-            (1000 * 60 * 60 * 24),
-        ) + 1
-      : 0
+  const totalDays = countUtcCalendarDaysInclusive(firstSessionDate, lastSessionDate)
 
   const totalSpeculationTimeSavedMs =
     cache.totalSpeculationTimeSavedMs +
@@ -824,6 +817,30 @@ export type ResolvedStatsDateRange = {
   toDate?: string
 }
 
+const UTC_DAY_MS = 24 * 60 * 60 * 1000
+
+export function countUtcCalendarDaysInclusive(
+  first: string | null,
+  last: string | null,
+): number {
+  if (!first || !last) return 0
+  const firstDate = new Date(first)
+  const lastDate = new Date(last)
+  if (Number.isNaN(firstDate.getTime()) || Number.isNaN(lastDate.getTime())) return 0
+  const firstDay = Date.UTC(
+    firstDate.getUTCFullYear(),
+    firstDate.getUTCMonth(),
+    firstDate.getUTCDate(),
+  )
+  const lastDay = Date.UTC(
+    lastDate.getUTCFullYear(),
+    lastDate.getUTCMonth(),
+    lastDate.getUTCDate(),
+  )
+  if (lastDay < firstDay) return 0
+  return Math.floor((lastDay - firstDay) / UTC_DAY_MS) + 1
+}
+
 export function resolveStatsDateRange(
   range: StatsDateRange,
   now: Date = new Date(),
@@ -831,7 +848,7 @@ export function resolveStatsDateRange(
   if (range === 'all') return {}
   const daysBack = range === '7d' ? 7 : 30
   const fromDate = new Date(now)
-  fromDate.setDate(now.getDate() - daysBack + 1)
+  fromDate.setUTCDate(now.getUTCDate() - daysBack + 1)
   return {
     fromDate: toDateString(fromDate),
     toDate: toDateString(now),
@@ -930,14 +947,7 @@ export function processedStatsToClaudeCodeStats(
       : null
 
   // Total days in range
-  const totalDays =
-    firstSessionDate && lastSessionDate
-      ? Math.ceil(
-          (new Date(lastSessionDate).getTime() -
-            new Date(firstSessionDate).getTime()) /
-            (1000 * 60 * 60 * 24),
-        ) + 1
-      : 0
+  const totalDays = countUtcCalendarDaysInclusive(firstSessionDate, lastSessionDate)
 
   const result: ClaudeCodeStats = {
     totalSessions: stats.sessionStats.length,
@@ -981,8 +991,8 @@ export function processedStatsToClaudeCodeStats(
  * Get the next day after a given date string (YYYY-MM-DD format).
  */
 function getNextDay(dateStr: string): string {
-  const date = new Date(dateStr)
-  date.setDate(date.getDate() + 1)
+  const date = new Date(`${dateStr}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + 1)
   return toDateString(date)
 }
 
@@ -1000,8 +1010,11 @@ function calculateStreaks(
     }
   }
 
-  const today = new Date(now)
-  today.setHours(0, 0, 0, 0)
+  const today = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  ))
 
   // Calculate current streak (working backwards from today)
   let currentStreak = 0
@@ -1018,7 +1031,7 @@ function calculateStreaks(
     }
     currentStreak++
     currentStreakStart = dateStr
-    checkDate.setDate(checkDate.getDate() - 1)
+    checkDate.setUTCDate(checkDate.getUTCDate() - 1)
   }
 
   // Calculate longest streak

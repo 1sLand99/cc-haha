@@ -10,8 +10,12 @@ describe('createPicker', () => {
     picker.enter()
     picker.hover(document.getElementById('t')!)
     picker.select()
+    const host = Array.from(document.documentElement.querySelectorAll('div')).find((element) => element.shadowRoot)
+    const highlight = host?.shadowRoot?.querySelector<HTMLElement>('div')
     expect(picker.current()?.id).toBe('t')
     expect(onSelect).toHaveBeenCalledWith(document.getElementById('t'))
+    expect(host?.style.getPropertyValue('--cc-haha-color-brand')).toBe('#8F482F')
+    expect(highlight?.style.border).toBe('2px solid var(--cc-haha-color-brand)')
   })
   it('climb/descend move the current selection', () => {
     const picker = createPicker({ onSelect: vi.fn() })

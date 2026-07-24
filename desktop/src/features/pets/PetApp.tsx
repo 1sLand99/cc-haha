@@ -13,6 +13,8 @@ import {
   type DesktopPetPreferences,
 } from '../../api/desktopUiPreferences'
 import { sessionsApi, type PetSessionRuntimeStatus } from '../../api/sessions'
+import { Alert, AlertDescription } from '../../components/ui/alert'
+import { PetWindowButton } from '../../components/ui/custom/pet-window-button'
 import { useTranslation } from '../../i18n'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { initializeDesktopServerUrl } from '../../lib/desktopRuntime'
@@ -436,7 +438,9 @@ export function PetApp() {
   if (startupError) {
     return (
       <main className="pet-window-root">
-        <div role="alert" className="pet-error-card">{startupError}</div>
+        <Alert variant="destructive" className="pet-error-card">
+          <AlertDescription className="text-inherit">{startupError}</AlertDescription>
+        </Alert>
       </main>
     )
   }
@@ -472,10 +476,9 @@ export function PetApp() {
         }}
       >
         <div className="pet-mascot-wrap">
-          <button
+          <PetWindowButton
             ref={mascotRef}
-            type="button"
-            className="pet-mascot-button"
+            surface="mascot"
             data-dragging={isMascotDragging ? 'true' : 'false'}
             data-drag-direction={dragDirection ?? undefined}
             aria-label={t('pet.window.interact')}
@@ -571,19 +574,18 @@ export function PetApp() {
                 ? lookDirection
                 : undefined}
             />
-          </button>
+          </PetWindowButton>
           {activities.length > 0 && !showActivityCard && (
-            <button
+            <PetWindowButton
               ref={taskBadgeRef}
-              type="button"
-              className="pet-task-badge"
+              surface="taskBadge"
               aria-label={t('pet.window.expandTasks', { count: activities.length })}
               onMouseEnter={() => void getDesktopHost().pets.setIgnoreMouseEvents(false)}
               onMouseLeave={(event) => releasePointerPassthrough(event.relatedTarget)}
               onClick={() => void persistPreferences({ showTaskPanel: true })}
             >
               {activities.length}
-            </button>
+            </PetWindowButton>
           )}
         </div>
 
@@ -597,9 +599,9 @@ export function PetApp() {
             onMouseLeave={(event) => releasePointerPassthrough(event.relatedTarget)}
           >
             {actionError && (
-              <p role="alert" className="mx-3 mt-2 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
-                {actionError}
-              </p>
+              <Alert variant="destructive" className="mx-3 mt-2 px-3 py-2">
+                <AlertDescription className="text-inherit">{actionError}</AlertDescription>
+              </Alert>
             )}
 
             <div
@@ -617,9 +619,8 @@ export function PetApp() {
                     role="listitem"
                     key={activity.session.id}
                   >
-                    <button
-                      type="button"
-                      className="pet-session-row"
+                    <PetWindowButton
+                      surface="session"
                       aria-label={`${title}, ${status}`}
                       onClick={() => void getDesktopHost().pets.focusSession(activity.session.id)}
                     >
@@ -628,16 +629,15 @@ export function PetApp() {
                         <span className="pet-session-status">{status}</span>
                       </span>
                       <span className={`pet-session-indicator ${statusDotClass(activity.status)}`} />
-                    </button>
+                    </PetWindowButton>
                   </div>
                 )
               })}
             </div>
 
-            <button
+            <PetWindowButton
               ref={panelToggleRef}
-              type="button"
-              className="pet-panel-toggle"
+              surface="panelToggle"
               data-expanded={expanded ? 'true' : 'false'}
               aria-label={t('pet.window.hideTasks', { count: activities.length })}
               onClick={() => {
@@ -646,7 +646,7 @@ export function PetApp() {
               }}
             >
               <ChevronDown size={16} aria-hidden="true" />
-            </button>
+            </PetWindowButton>
           </section>
         )}
       </div>

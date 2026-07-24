@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   Check,
   ChevronDown,
   GitBranch,
   GitFork,
-  Loader2,
   Search,
 } from 'lucide-react'
 import {
@@ -19,6 +17,13 @@ import { DirectoryPicker } from './DirectoryPicker'
 import { useMobileViewport } from '../../hooks/useMobileViewport'
 import { isDesktopRuntime } from '../../lib/desktopRuntime'
 import { MobileBottomSheet } from './MobileBottomSheet'
+import { Alert, AlertDescription } from '../ui/alert'
+import { Button } from '../ui/button'
+import { Input } from '../ui/input'
+import { Label } from '../ui/label'
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover'
+import { Separator } from '../ui/separator'
+import { Skeleton } from '../ui/skeleton'
 
 type Props = {
   workDir: string
@@ -31,12 +36,6 @@ type Props = {
   disabled?: boolean
   placement?: 'standalone' | 'composer'
 }
-
-const BRANCH_MENU_HEIGHT = 360
-const BRANCH_MENU_WIDTH = 390
-const WORKTREE_MENU_HEIGHT = 126
-const WORKTREE_MENU_WIDTH = 226
-const VIEWPORT_GUTTER = 12
 
 function stateMessage(context: RepositoryContextResult | null, error: string | null) {
   if (error) return error
@@ -67,47 +66,18 @@ export function RepositoryLaunchControls({
   const [branchMenuOpen, setBranchMenuOpen] = useState(false)
   const [branchFilter, setBranchFilter] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
-  const [menuPos, setMenuPos] = useState<{ top: number; left: number; direction: 'up' | 'down' } | null>(null)
   const [worktreeMenuOpen, setWorktreeMenuOpen] = useState(false)
-  const [worktreeMenuPos, setWorktreeMenuPos] = useState<{ top: number; left: number; direction: 'up' | 'down' } | null>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
   const branchButtonRef = useRef<HTMLButtonElement>(null)
   const worktreeButtonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const worktreeMenuRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const currentWorktreeOptionRef = useRef<HTMLButtonElement>(null)
+  const isolatedWorktreeOptionRef = useRef<HTMLButtonElement>(null)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const searchInputId = useId()
   const listboxId = useId()
   const worktreeListboxId = useId()
-
-  const updateMenuPos = useCallback(() => {
-    if (!branchButtonRef.current) return
-    const rect = branchButtonRef.current.getBoundingClientRect()
-    const spaceAbove = rect.top
-    const spaceBelow = window.innerHeight - rect.bottom
-    const direction = spaceBelow >= BRANCH_MENU_HEIGHT || spaceBelow >= spaceAbove ? 'down' : 'up'
-    const maxLeft = Math.max(VIEWPORT_GUTTER, window.innerWidth - BRANCH_MENU_WIDTH - VIEWPORT_GUTTER)
-    setMenuPos({
-      top: direction === 'down' ? rect.bottom + 6 : rect.top - 6,
-      left: Math.min(Math.max(rect.left, VIEWPORT_GUTTER), maxLeft),
-      direction,
-    })
-  }, [])
-
-  const updateWorktreeMenuPos = useCallback(() => {
-    if (!worktreeButtonRef.current) return
-    const rect = worktreeButtonRef.current.getBoundingClientRect()
-    const spaceAbove = rect.top
-    const spaceBelow = window.innerHeight - rect.bottom
-    const direction = spaceBelow >= WORKTREE_MENU_HEIGHT || spaceBelow >= spaceAbove ? 'down' : 'up'
-    const maxLeft = Math.max(VIEWPORT_GUTTER, window.innerWidth - WORKTREE_MENU_WIDTH - VIEWPORT_GUTTER)
-    setWorktreeMenuPos({
-      top: direction === 'down' ? rect.bottom + 6 : rect.top - 6,
-      left: Math.min(Math.max(rect.left, VIEWPORT_GUTTER), maxLeft),
-      direction,
-    })
-  }, [])
 
   useEffect(() => {
     if (!workDir) {
@@ -159,51 +129,9 @@ export function RepositoryLaunchControls({
   }, [branch, context, onBranchChange])
 
   useEffect(() => {
-    if (!branchMenuOpen && !worktreeMenuOpen) return
-    const handleClick = (event: MouseEvent) => {
-      const target = event.target as Node
-      if (rootRef.current?.contains(target)) return
-      if (menuRef.current?.contains(target)) return
-      if (worktreeMenuRef.current?.contains(target)) return
-      setBranchMenuOpen(false)
-      setWorktreeMenuOpen(false)
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      setBranchMenuOpen(false)
-      setWorktreeMenuOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleClick)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [branchMenuOpen, worktreeMenuOpen])
-
-  useEffect(() => {
     if (!branchMenuOpen) return
-    updateMenuPos()
-    window.addEventListener('scroll', updateMenuPos, true)
-    window.addEventListener('resize', updateMenuPos)
-    requestAnimationFrame(() => searchRef.current?.focus())
-    return () => {
-      window.removeEventListener('scroll', updateMenuPos, true)
-      window.removeEventListener('resize', updateMenuPos)
-    }
-  }, [branchMenuOpen, updateMenuPos])
-
-  useEffect(() => {
-    if (!worktreeMenuOpen) return
-    updateWorktreeMenuPos()
-    window.addEventListener('scroll', updateWorktreeMenuPos, true)
-    window.addEventListener('resize', updateWorktreeMenuPos)
-    return () => {
-      window.removeEventListener('scroll', updateWorktreeMenuPos, true)
-      window.removeEventListener('resize', updateWorktreeMenuPos)
-    }
-  }, [worktreeMenuOpen, updateWorktreeMenuPos])
+    if (isMobileBrowser) requestAnimationFrame(() => searchRef.current?.focus())
+  }, [branchMenuOpen, isMobileBrowser])
 
   useEffect(() => {
     setSelectedIndex(0)
@@ -292,49 +220,174 @@ export function RepositoryLaunchControls({
   }, [isLaunchReady, onLaunchReadyChange])
 
   const worktreeLabel = useWorktree ? t('repoLaunch.worktreeIsolated') : t('repoLaunch.worktreeCurrent')
-  const workbarButtonClassName = 'group inline-flex h-9 min-w-0 items-center gap-1.5 rounded-[7px] border border-transparent px-2.5 text-[13px] font-medium leading-none text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-container-lowest)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35 disabled:cursor-not-allowed disabled:opacity-50'
+  const workbarButtonClassName = 'h-9 min-w-0 justify-start gap-1.5 rounded-[7px] border-transparent px-2.5 text-[13px] leading-none text-[var(--color-text-secondary)]'
 
-  const branchMenuClassName = isMobileBrowser
-    ? 'max-h-[72dvh] overflow-hidden rounded-t-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[0_-18px_48px_rgba(54,35,28,0.2)]'
-    : 'w-[390px] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-dropdown)]'
-  const branchMenuStyle = isMobileBrowser
-    ? {
-        position: 'fixed' as const,
-        left: 12,
-        right: 12,
-        bottom: 'calc(env(safe-area-inset-bottom) + 84px)',
-        zIndex: 9999,
-      }
-    : {
-        position: 'fixed' as const,
-        left: menuPos?.left,
-        ...(menuPos?.direction === 'down'
-          ? { top: menuPos.top }
-          : { bottom: window.innerHeight - (menuPos?.top ?? 0) }),
-        zIndex: 9999,
-      }
-  const worktreeMenuClassName = isMobileBrowser
-    ? 'overflow-hidden rounded-t-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[0_-18px_48px_rgba(54,35,28,0.2)]'
-    : 'w-[226px] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 shadow-[var(--shadow-dropdown)]'
-  const worktreeMenuStyle = isMobileBrowser
-    ? {
-        position: 'fixed' as const,
-        left: 12,
-        right: 12,
-        bottom: 'calc(env(safe-area-inset-bottom) + 84px)',
-        zIndex: 9999,
-      }
-    : {
-        position: 'fixed' as const,
-        left: worktreeMenuPos?.left,
-        ...(worktreeMenuPos?.direction === 'down'
-          ? { top: worktreeMenuPos.top }
-          : { bottom: window.innerHeight - (worktreeMenuPos?.top ?? 0) }),
-        zIndex: 9999,
-      }
+  const branchSearch = (
+    <div className="relative">
+      <Search
+        className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-text-tertiary)]"
+        aria-hidden="true"
+      />
+      <Input
+        id={searchInputId}
+        ref={searchRef}
+        value={branchFilter}
+        onChange={(event) => setBranchFilter(event.target.value)}
+        onKeyDown={handleBranchKeyDown}
+        aria-label={t('repoLaunch.searchBranch')}
+        aria-controls={listboxId}
+        aria-activedescendant={filteredBranches[selectedIndex] ? `${listboxId}-option-${selectedIndex}` : undefined}
+        placeholder={t('repoLaunch.searchBranch')}
+        className="h-9 bg-[var(--color-surface-container-low)] pl-9"
+      />
+    </div>
+  )
+
+  const branchOptions = (mobile: boolean) => (
+    <div
+      id={listboxId}
+      role="listbox"
+      aria-label={t('repoLaunch.selectBranch')}
+      className={`${mobile ? '' : 'max-h-[280px]'} overflow-y-auto py-1`}
+    >
+      {filteredBranches.length === 0 ? (
+        <div className="px-4 py-8 text-center text-xs text-[var(--color-text-tertiary)]">
+          {t('repoLaunch.noBranchMatch')}
+        </div>
+      ) : filteredBranches.map((candidate, index) => {
+        const isSelected = candidate.name === selectedBranch?.name
+        return (
+          <Button
+            key={candidate.name}
+            id={`${listboxId}-option-${index}`}
+            ref={(element) => { itemRefs.current[index] = element }}
+            type="button"
+            variant="ghost"
+            role="option"
+            aria-selected={isSelected}
+            onMouseEnter={() => setSelectedIndex(index)}
+            onClick={() => selectBranch(candidate)}
+            className={`h-auto w-full justify-start gap-3 rounded-none px-4 text-left ${
+              mobile ? 'min-h-[56px] py-3' : 'py-3'
+            } ${
+              index === selectedIndex || isSelected ? 'bg-[var(--color-surface-hover)]' : ''
+            }`}
+          >
+            <span className={`h-8 w-1 shrink-0 rounded-full ${isSelected ? 'bg-[var(--color-brand)]' : 'bg-transparent'}`} />
+            <GitBranch className="size-[17px] text-[var(--color-text-secondary)]" aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-[var(--color-text-primary)]">
+                {candidate.name}
+              </span>
+              <span className="block truncate text-[11px] text-[var(--color-text-tertiary)]">
+                {candidate.current
+                  ? t('repoLaunch.currentBranch')
+                  : candidate.checkedOut
+                    ? t('repoLaunch.checkedOut')
+                    : candidate.remote && !candidate.local
+                      ? candidate.remoteRef || t('repoLaunch.remoteBranch')
+                      : t('repoLaunch.localBranch')}
+              </span>
+            </span>
+            {isSelected && <Check className="size-[17px] text-[var(--color-brand)]" aria-hidden="true" />}
+          </Button>
+        )
+      })}
+    </div>
+  )
+
+  const worktreeOptions = (mobile: boolean) => (
+    <div id={worktreeListboxId} role="listbox" aria-label={t('repoLaunch.selectWorktree')}>
+      <Button
+        ref={currentWorktreeOptionRef}
+        type="button"
+        variant="ghost"
+        role="option"
+        aria-selected={!useWorktree}
+        onClick={() => selectWorktreeMode(false)}
+        className={`h-auto w-full justify-start gap-2.5 rounded-none text-left ${
+          mobile ? 'min-h-[52px] px-4 py-3' : 'px-3 py-2.5'
+        } ${!useWorktree ? 'bg-[var(--color-surface-hover)]' : ''}`}
+      >
+        <GitFork className="size-4 text-[var(--color-text-tertiary)]" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--color-text-primary)]">
+          {t('repoLaunch.worktreeCurrent')}
+        </span>
+        {!useWorktree && <Check className="size-4 text-[var(--color-brand)]" aria-hidden="true" />}
+      </Button>
+
+      <Button
+        ref={isolatedWorktreeOptionRef}
+        type="button"
+        variant="ghost"
+        role="option"
+        aria-selected={useWorktree}
+        onClick={() => selectWorktreeMode(true)}
+        className={`h-auto w-full justify-start gap-2.5 rounded-none text-left ${
+          mobile ? 'min-h-[52px] px-4 py-3' : 'px-3 py-2.5'
+        } ${useWorktree ? 'bg-[var(--color-surface-hover)]' : ''}`}
+      >
+        <GitFork className="size-4 text-[var(--color-text-tertiary)]" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--color-text-primary)]">
+          {t('repoLaunch.worktreeIsolated')}
+        </span>
+        {useWorktree && <Check className="size-4 text-[var(--color-brand)]" aria-hidden="true" />}
+      </Button>
+    </div>
+  )
+
+  const branchTrigger = (
+    <Button
+      ref={branchButtonRef}
+      type="button"
+      variant="ghost"
+      disabled={disabled || loading || context?.state !== 'ok' || context.branches.length === 0}
+      aria-expanded={branchMenuOpen}
+      aria-label={`${t('repoLaunch.selectBranch')}: ${selectedBranch?.name || t('repoLaunch.noBranch')}`}
+      title={selectedBranch?.name || t('repoLaunch.noBranch')}
+      onClick={isMobileBrowser ? () => {
+        setBranchMenuOpen((open) => !open)
+        setWorktreeMenuOpen(false)
+        setBranchFilter('')
+      } : undefined}
+      className={`${workbarButtonClassName} ${isMobileBrowser ? 'max-w-[160px] shrink-0 bg-[var(--color-surface-container)]' : 'max-w-[260px] shrink'}`}
+    >
+      <GitBranch className="size-[17px] text-[var(--color-text-tertiary)]" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-[var(--color-text-primary)]">
+        {selectedBranch?.name || t('repoLaunch.noBranch')}
+      </span>
+      <ChevronDown className="size-4 text-[var(--color-text-tertiary)]" aria-hidden="true" />
+    </Button>
+  )
+
+  const worktreeTrigger = (
+    <Button
+      ref={worktreeButtonRef}
+      type="button"
+      variant="ghost"
+      disabled={disabled}
+      aria-expanded={worktreeMenuOpen}
+      aria-controls={worktreeMenuOpen ? worktreeListboxId : undefined}
+      aria-label={`${t('repoLaunch.selectWorktree')}: ${worktreeLabel}`}
+      title={worktreeLabel}
+      onClick={isMobileBrowser ? () => {
+        setWorktreeMenuOpen((open) => !open)
+        setBranchMenuOpen(false)
+      } : undefined}
+      className={`${workbarButtonClassName} shrink-0 ${isMobileBrowser ? 'bg-[var(--color-surface-container)]' : ''} ${
+        useWorktree
+          ? 'bg-[var(--color-surface-container-lowest)] text-[var(--color-text-primary)]'
+          : ''
+      }`}
+    >
+      <GitFork className="size-[17px] text-[var(--color-text-tertiary)]" aria-hidden="true" />
+      <span className="min-w-0 truncate">{worktreeLabel}</span>
+      <ChevronDown className="size-4 text-[var(--color-text-tertiary)]" aria-hidden="true" />
+    </Button>
+  )
 
   return (
-    <div ref={rootRef} className={`flex min-w-0 flex-col ${isMobileBrowser ? 'gap-0' : isComposerPlacement ? 'gap-1' : 'gap-2'}`}>
+    <div className={`flex min-w-0 flex-col ${isMobileBrowser ? 'gap-0' : isComposerPlacement ? 'gap-1' : 'gap-2'}`}>
       <div className={`flex min-w-0 items-center justify-start gap-x-1.5 gap-y-1 overflow-hidden border-t border-[var(--color-border-separator)] ${
         isMobileBrowser
           ? 'min-h-[52px] flex-wrap rounded-none bg-[var(--color-surface-container-lowest)] px-3 py-2 shadow-none'
@@ -345,319 +398,117 @@ export function RepositoryLaunchControls({
         <DirectoryPicker value={workDir} onChange={onWorkDirChange} variant="workbar" isGitProject={isGitReady} />
 
         {loading && workDir && !isMobileBrowser && (
-          <div className="inline-flex h-9 items-center gap-1.5 rounded-[7px] px-2.5 text-[13px] text-[var(--color-text-secondary)]">
-            <Loader2 size={14} className="shrink-0 animate-spin" />
-            <span>{t('common.loading')}</span>
-          </div>
+          <Skeleton className="h-9 w-24" aria-label={t('common.loading')} />
         )}
 
         {isGitReady && (
           <>
-            <span className="hidden h-4 w-px shrink-0 bg-[var(--color-border-separator)] opacity-70 sm:block" aria-hidden="true" />
-            <button
-              ref={branchButtonRef}
-              type="button"
-              disabled={disabled || loading || context.branches.length === 0}
-              aria-haspopup="listbox"
-              aria-expanded={branchMenuOpen}
-              aria-label={`${t('repoLaunch.selectBranch')}: ${selectedBranch?.name || t('repoLaunch.noBranch')}`}
-              title={selectedBranch?.name || t('repoLaunch.noBranch')}
-              onClick={() => {
-                setBranchMenuOpen((prev) => !prev)
-                setWorktreeMenuOpen(false)
-                setBranchFilter('')
-              }}
-              className={`${workbarButtonClassName} ${isMobileBrowser ? 'max-w-[160px] shrink-0 bg-[var(--color-surface-container)]' : 'max-w-[260px] shrink'}`}
-            >
-              <GitBranch size={17} className="shrink-0 text-[var(--color-text-tertiary)] group-hover:text-[var(--color-text-secondary)]" />
-              <span className="min-w-0 flex-1 truncate text-[var(--color-text-primary)]">
-                {selectedBranch?.name || t('repoLaunch.noBranch')}
-              </span>
-              <ChevronDown size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
-            </button>
+            <Separator orientation="vertical" className="hidden h-4 opacity-70 sm:block" />
+            {isMobileBrowser ? branchTrigger : (
+              <Popover
+                open={branchMenuOpen}
+                onOpenChange={(open) => {
+                  setBranchMenuOpen(open)
+                  if (open) {
+                    setWorktreeMenuOpen(false)
+                    setBranchFilter('')
+                  }
+                }}
+              >
+                <PopoverTrigger asChild>{branchTrigger}</PopoverTrigger>
+                <PopoverContent
+                  ref={menuRef}
+                  align="start"
+                  collisionPadding={12}
+                  className="w-[390px] overflow-hidden p-0"
+                  onOpenAutoFocus={(event) => {
+                    event.preventDefault()
+                    searchRef.current?.focus()
+                  }}
+                >
+                  <div className="space-y-2 border-b border-[var(--color-border)] p-3">
+                    <Label htmlFor={searchInputId} className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-outline)]">
+                      {t('repoLaunch.selectBranch')}
+                    </Label>
+                    {branchSearch}
+                  </div>
+                  {branchOptions(false)}
+                </PopoverContent>
+              </Popover>
+            )}
 
-            <button
-              ref={worktreeButtonRef}
-              type="button"
-              disabled={disabled}
-              aria-haspopup="listbox"
-              aria-expanded={worktreeMenuOpen}
-              aria-controls={worktreeMenuOpen ? worktreeListboxId : undefined}
-              aria-label={`${t('repoLaunch.selectWorktree')}: ${worktreeLabel}`}
-              title={worktreeLabel}
-              onClick={() => {
-                setWorktreeMenuOpen((prev) => !prev)
-                setBranchMenuOpen(false)
-              }}
-              className={`${workbarButtonClassName} shrink-0 ${isMobileBrowser ? 'bg-[var(--color-surface-container)]' : ''} ${
-                useWorktree
-                  ? 'bg-[var(--color-surface-container-lowest)] text-[var(--color-text-primary)]'
-                  : ''
-              }`}
-            >
-              <GitFork size={17} className="shrink-0 text-[var(--color-text-tertiary)]" />
-              <span className="min-w-0 truncate">
-                {worktreeLabel}
-              </span>
-              <ChevronDown size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
-            </button>
+            {isMobileBrowser ? worktreeTrigger : (
+              <Popover
+                open={worktreeMenuOpen}
+                onOpenChange={(open) => {
+                  setWorktreeMenuOpen(open)
+                  if (open) setBranchMenuOpen(false)
+                }}
+              >
+                <PopoverTrigger asChild>{worktreeTrigger}</PopoverTrigger>
+                <PopoverContent
+                  ref={worktreeMenuRef}
+                  align="start"
+                  collisionPadding={12}
+                  className="w-[226px] overflow-hidden p-0 py-1"
+                  onOpenAutoFocus={(event) => {
+                    event.preventDefault()
+                    const selectedOption = useWorktree
+                      ? isolatedWorktreeOptionRef.current
+                      : currentWorktreeOptionRef.current
+                    selectedOption?.focus()
+                  }}
+                >
+                  {worktreeOptions(false)}
+                </PopoverContent>
+              </Popover>
+            )}
           </>
         )}
       </div>
 
       {message && workDir && (
-        <div className="flex items-center gap-2 px-1 text-[11px] text-[var(--color-text-tertiary)]">
-          <AlertCircle size={13} className="shrink-0" />
-          <span>
+        <Alert variant="destructive" className="flex items-center gap-2 px-2 py-1.5 text-[11px]">
+          <AlertCircle className="size-[13px] shrink-0" aria-hidden="true" />
+          <AlertDescription className="text-current">
             {message === 'missing'
-                ? t('repoLaunch.missingWorkdir')
-                : message}
-          </span>
-        </div>
+              ? t('repoLaunch.missingWorkdir')
+              : message}
+          </AlertDescription>
+        </Alert>
       )}
 
       {warningMessage && (
-        <div className="flex items-center gap-2 px-1 text-[11px] text-[var(--color-warning)]">
-          <AlertCircle size={13} className="shrink-0" />
-          <span>{warningMessage}</span>
-        </div>
+        <Alert className="flex items-center gap-2 border-[var(--color-warning)]/35 bg-[var(--color-warning-container)] px-2 py-1.5 text-[11px] text-[var(--color-warning)]">
+          <AlertCircle className="size-[13px] shrink-0" aria-hidden="true" />
+          <AlertDescription className="text-current">{warningMessage}</AlertDescription>
+        </Alert>
       )}
 
-      {branchMenuOpen && menuPos && (
-        isMobileBrowser ? (
-          <MobileBottomSheet
-            open={branchMenuOpen}
-            onClose={() => setBranchMenuOpen(false)}
-            title={t('repoLaunch.selectBranch')}
-            closeLabel={t('tabs.close')}
-            panelRef={menuRef}
-            headerExtra={(
-              <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-2">
-                <Search size={15} className="shrink-0 text-[var(--color-text-tertiary)]" />
-                <input
-                  id={searchInputId}
-                  ref={searchRef}
-                  value={branchFilter}
-                  onChange={(event) => setBranchFilter(event.target.value)}
-                  onKeyDown={handleBranchKeyDown}
-                  aria-controls={listboxId}
-                  aria-activedescendant={filteredBranches[selectedIndex] ? `${listboxId}-option-${selectedIndex}` : undefined}
-                  placeholder={t('repoLaunch.searchBranch')}
-                  className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-                />
-              </div>
-            )}
-          >
-            <div id={listboxId} role="listbox" aria-label={t('repoLaunch.selectBranch')} className="py-1">
-              {filteredBranches.length === 0 ? (
-                <div className="px-4 py-8 text-center text-xs text-[var(--color-text-tertiary)]">
-                  {t('repoLaunch.noBranchMatch')}
-                </div>
-              ) : filteredBranches.map((candidate, index) => {
-                const isSelected = candidate.name === selectedBranch?.name
-                return (
-                  <button
-                    key={candidate.name}
-                    id={`${listboxId}-option-${index}`}
-                    ref={(el) => { itemRefs.current[index] = el }}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    onMouseEnter={() => setSelectedIndex(index)}
-                    onClick={() => selectBranch(candidate)}
-                    className={`flex min-h-[56px] w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 ${
-                      index === selectedIndex || isSelected ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
-                    }`}
-                  >
-                    <span className={`h-8 w-1 rounded-full ${isSelected ? 'bg-[var(--color-brand)]' : 'bg-transparent'}`} />
-                    <GitBranch size={17} className="shrink-0 text-[var(--color-text-secondary)]" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-[var(--color-text-primary)]">
-                        {candidate.name}
-                      </span>
-                      <span className="block truncate text-[11px] text-[var(--color-text-tertiary)]">
-                        {candidate.current
-                          ? t('repoLaunch.currentBranch')
-                          : candidate.checkedOut
-                            ? t('repoLaunch.checkedOut')
-                            : candidate.remote && !candidate.local
-                              ? candidate.remoteRef || t('repoLaunch.remoteBranch')
-                              : t('repoLaunch.localBranch')}
-                      </span>
-                    </span>
-                    {isSelected && <Check size={17} className="shrink-0 text-[var(--color-brand)]" />}
-                  </button>
-                )
-              })}
-            </div>
-          </MobileBottomSheet>
-        ) : createPortal(
-          <div
-            ref={menuRef}
-            className={branchMenuClassName}
-            style={branchMenuStyle}
-          >
-            <div className="border-b border-[var(--color-border)] p-3">
-              <label htmlFor={searchInputId} className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[var(--color-outline)]">
-                {t('repoLaunch.selectBranch')}
-              </label>
-              <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-2">
-                <Search size={15} className="shrink-0 text-[var(--color-text-tertiary)]" />
-                <input
-                  id={searchInputId}
-                  ref={searchRef}
-                  value={branchFilter}
-                  onChange={(event) => setBranchFilter(event.target.value)}
-                  onKeyDown={handleBranchKeyDown}
-                  aria-controls={listboxId}
-                  aria-activedescendant={filteredBranches[selectedIndex] ? `${listboxId}-option-${selectedIndex}` : undefined}
-                  placeholder={t('repoLaunch.searchBranch')}
-                  className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-                />
-              </div>
-            </div>
-
-            <div id={listboxId} role="listbox" aria-label={t('repoLaunch.selectBranch')} className="max-h-[280px] overflow-y-auto py-1">
-              {filteredBranches.length === 0 ? (
-                <div className="px-4 py-8 text-center text-xs text-[var(--color-text-tertiary)]">
-                  {t('repoLaunch.noBranchMatch')}
-                </div>
-              ) : filteredBranches.map((candidate, index) => {
-                const isSelected = candidate.name === selectedBranch?.name
-                return (
-                  <button
-                    key={candidate.name}
-                    id={`${listboxId}-option-${index}`}
-                    ref={(el) => { itemRefs.current[index] = el }}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    onMouseEnter={() => setSelectedIndex(index)}
-                    onClick={() => selectBranch(candidate)}
-                    className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 ${
-                      index === selectedIndex || isSelected ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
-                    }`}
-                  >
-                    <span className={`h-8 w-1 rounded-full ${isSelected ? 'bg-[var(--color-brand)]' : 'bg-transparent'}`} />
-                    <GitBranch size={17} className="shrink-0 text-[var(--color-text-secondary)]" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-[var(--color-text-primary)]">
-                        {candidate.name}
-                      </span>
-                      <span className="block truncate text-[11px] text-[var(--color-text-tertiary)]">
-                        {candidate.current
-                          ? t('repoLaunch.currentBranch')
-                          : candidate.checkedOut
-                            ? t('repoLaunch.checkedOut')
-                            : candidate.remote && !candidate.local
-                              ? candidate.remoteRef || t('repoLaunch.remoteBranch')
-                              : t('repoLaunch.localBranch')}
-                      </span>
-                    </span>
-                    {isSelected && <Check size={17} className="shrink-0 text-[var(--color-brand)]" />}
-                  </button>
-                )
-              })}
-            </div>
-          </div>,
-          document.body,
-        )
+      {isMobileBrowser && branchMenuOpen && (
+        <MobileBottomSheet
+          open={branchMenuOpen}
+          onClose={() => setBranchMenuOpen(false)}
+          title={t('repoLaunch.selectBranch')}
+          closeLabel={t('tabs.close')}
+          panelRef={menuRef}
+          headerExtra={branchSearch}
+        >
+          {branchOptions(true)}
+        </MobileBottomSheet>
       )}
 
-      {worktreeMenuOpen && worktreeMenuPos && (
-        isMobileBrowser ? (
-          <MobileBottomSheet
-            open={worktreeMenuOpen}
-            onClose={() => setWorktreeMenuOpen(false)}
-            title={t('repoLaunch.selectWorktree')}
-            closeLabel={t('tabs.close')}
-            panelRef={worktreeMenuRef}
-            contentClassName="py-2"
-          >
-            <div id={worktreeListboxId} role="listbox" aria-label={t('repoLaunch.selectWorktree')}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={!useWorktree}
-                onClick={() => selectWorktreeMode(false)}
-                className={`flex min-h-[52px] w-full items-center gap-2.5 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 disabled:cursor-not-allowed disabled:opacity-45 ${
-                  !useWorktree ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
-                }`}
-              >
-                <GitFork size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium text-[var(--color-text-primary)]">
-                    {t('repoLaunch.worktreeCurrent')}
-                  </span>
-                </span>
-                {!useWorktree && <Check size={16} className="shrink-0 text-[var(--color-brand)]" />}
-              </button>
-
-              <button
-                type="button"
-                role="option"
-                aria-selected={useWorktree}
-                onClick={() => selectWorktreeMode(true)}
-                className={`flex min-h-[52px] w-full items-center gap-2.5 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 ${
-                  useWorktree ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
-                }`}
-              >
-                <GitFork size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium text-[var(--color-text-primary)]">
-                    {t('repoLaunch.worktreeIsolated')}
-                  </span>
-                </span>
-                {useWorktree && <Check size={16} className="shrink-0 text-[var(--color-brand)]" />}
-              </button>
-            </div>
-          </MobileBottomSheet>
-        ) : createPortal(
-          <div
-            ref={worktreeMenuRef}
-            className={worktreeMenuClassName}
-            style={worktreeMenuStyle}
-          >
-          <div id={worktreeListboxId} role="listbox" aria-label={t('repoLaunch.selectWorktree')}>
-            <button
-              type="button"
-              role="option"
-              aria-selected={!useWorktree}
-              onClick={() => selectWorktreeMode(false)}
-              className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 disabled:cursor-not-allowed disabled:opacity-45 ${
-                !useWorktree ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
-              }`}
-            >
-              <GitFork size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium text-[var(--color-text-primary)]">
-                  {t('repoLaunch.worktreeCurrent')}
-                </span>
-              </span>
-              {!useWorktree && <Check size={16} className="shrink-0 text-[var(--color-brand)]" />}
-            </button>
-
-            <button
-              type="button"
-              role="option"
-              aria-selected={useWorktree}
-              onClick={() => selectWorktreeMode(true)}
-              className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 ${
-                useWorktree ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
-              }`}
-            >
-              <GitFork size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium text-[var(--color-text-primary)]">
-                  {t('repoLaunch.worktreeIsolated')}
-                </span>
-              </span>
-              {useWorktree && <Check size={16} className="shrink-0 text-[var(--color-brand)]" />}
-            </button>
-          </div>
-        </div>,
-        document.body,
-        )
+      {isMobileBrowser && worktreeMenuOpen && (
+        <MobileBottomSheet
+          open={worktreeMenuOpen}
+          onClose={() => setWorktreeMenuOpen(false)}
+          title={t('repoLaunch.selectWorktree')}
+          closeLabel={t('tabs.close')}
+          panelRef={worktreeMenuRef}
+          contentClassName="py-2"
+        >
+          {worktreeOptions(true)}
+        </MobileBottomSheet>
       )}
     </div>
   )

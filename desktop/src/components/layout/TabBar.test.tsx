@@ -94,6 +94,9 @@ vi.mock('../../i18n', () => ({
       'tabs.closeAllConfirmMessage': '{count} sessions still running',
       'tabs.closeAllConfirmStop': 'Stop All & Close',
       'tabs.sessionRunning': 'Session running',
+      'tabs.openTabs': 'Open tabs',
+      'tabs.scrollLeft': 'Scroll tabs left',
+      'tabs.scrollRight': 'Scroll tabs right',
       'tabs.openTerminal': 'Open Terminal',
       'tabs.showWorkspace': 'Show Workspace',
       'tabs.hideWorkspace': 'Hide Workspace',
@@ -383,6 +386,8 @@ describe('TabBar', () => {
 
     const button = screen.getByRole('button', { name: /activity/i })
     expect(button).toBeInTheDocument()
+    expect(button).toHaveAttribute('data-slot', 'tooltip-trigger')
+    expect(button).toHaveAttribute('aria-controls', `session-activity-panel-${sessionId}`)
     expect(screen.queryByTestId('session-activity-badge')).not.toBeInTheDocument()
     expect(useActivityPanelStore.getState().isOpen(sessionId)).toBe(false)
     expect(button).toHaveAttribute('aria-expanded', 'false')
@@ -791,10 +796,10 @@ describe('TabBar', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('window-controls')).toBeInTheDocument()
-      expect(screen.getByText('chevron_right').closest('button')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Scroll tabs right' })).toBeInTheDocument()
     })
 
-    const rightButton = screen.getByText('chevron_right').closest('button')
+    const rightButton = screen.getByRole('button', { name: 'Scroll tabs right' })
     expect(rightButton?.nextElementSibling).toBe(screen.getByTestId('window-controls'))
   })
 
@@ -839,6 +844,8 @@ describe('TabBar', () => {
 
     expect(screen.getByTestId('tab-bar')).toHaveAttribute('data-desktop-drag-region')
     expect(screen.getByTestId('tab-bar-scroll-region')).toHaveAttribute('data-desktop-drag-region')
+    expect(screen.getByRole('tablist', { name: 'Open tabs' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /Untitled Session/ })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByTestId('tab-bar-drag-gutter')).toHaveAttribute('data-desktop-drag-region')
     const tab = screen.getByText('Untitled Session').closest('.tab-bar-interactive')
     expect(tab).toBeInTheDocument()
@@ -1218,6 +1225,7 @@ describe('TabBar', () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')
     const { useChatStore } = await import('../../stores/chatStore')
+    const { useBrowserPanelStore } = await import('../../stores/browserPanelStore')
 
     const disconnectSession = vi.fn()
 
@@ -1232,6 +1240,8 @@ describe('TabBar', () => {
       sessions: {},
       disconnectSession,
     } as Partial<ReturnType<typeof useChatStore.getState>>)
+    useBrowserPanelStore.getState().open('tab-1', 'http://localhost/first')
+    useBrowserPanelStore.getState().open('tab-2', 'http://localhost/second')
 
     await act(async () => {
       render(<TabBar />)
@@ -1250,6 +1260,8 @@ describe('TabBar', () => {
     expect(disconnectSession).toHaveBeenCalledWith('tab-1')
     expect(useTabStore.getState().tabs.map((tab) => tab.sessionId)).toEqual(['tab-2'])
     expect(useTabStore.getState().activeTabId).toBe('tab-2')
+    expect(useBrowserPanelStore.getState().bySession['tab-1']).toBeUndefined()
+    expect(useBrowserPanelStore.getState().bySession['tab-2']?.url).toBe('http://localhost/second')
   })
 
   it('closes terminal tabs without disconnecting chat sessions', async () => {
@@ -1583,6 +1595,34 @@ describe('TabBar', () => {
     expect(useActivityPanelStore.getState().isOpen('tab-1')).toBe(false)
   })
 
+  it('activates a custom desktop tab from the keyboard', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+
+    useTabStore.setState({
+      tabs: [
+        { sessionId: 'tab-1', title: 'First Session', type: 'session', status: 'idle' },
+        { sessionId: 'tab-2', title: 'Keyboard Session', type: 'session', status: 'idle' },
+      ],
+      activeTabId: 'tab-1',
+    })
+    useChatStore.setState({
+      sessions: {},
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    const tab = screen.getByRole('tab', { name: 'Keyboard Session' })
+    tab.focus()
+    fireEvent.keyDown(tab, { key: 'Enter' })
+
+    expect(useTabStore.getState().activeTabId).toBe('tab-2')
+  })
+
   it('asks before stopping running sessions when closing all tabs', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')
@@ -1614,10 +1654,12 @@ describe('TabBar', () => {
     })
 
     fireEvent.contextMenu(screen.getByText('Running Session'))
+    expect(screen.getByRole('menu')).toHaveAttribute('data-slot', 'context-menu-content')
+    expect(screen.getByRole('menuitem', { name: 'Close All' })).toHaveAttribute('data-slot', 'context-menu-item')
     fireEvent.click(screen.getByText('Close All'))
 
     expect(screen.getByText('Sessions Running')).toBeInTheDocument()
-    expect(screen.getByRole('dialog', { name: 'Sessions Running' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Sessions Running' })).toBeInTheDocument()
     expect(screen.getByText('2 sessions still running')).toBeInTheDocument()
     expect(useTabStore.getState().tabs.map((tab) => tab.sessionId)).toEqual(['tab-running', 'tab-thinking', 'tab-idle'])
     expect(disconnectSession).not.toHaveBeenCalled()

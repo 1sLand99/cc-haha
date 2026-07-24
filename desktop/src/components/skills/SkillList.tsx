@@ -1,17 +1,45 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
+import {
+  ChevronRight,
+  CircleSlash2,
+  Folder,
+  Layers3,
+  Network,
+  NotebookText,
+  Package,
+  Puzzle,
+  Search,
+  Sparkles,
+  User,
+  X,
+} from 'lucide-react'
 import { useSkillStore } from '../../stores/skillStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useTranslation } from '../../i18n'
 import type { SkillMeta, SkillSource } from '../../types/skill'
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../ui/card'
+import { IconButton } from '../ui/custom/icon-button'
+import { Input } from '../ui/input'
+import { Label } from '../ui/label'
+import { Skeleton } from '../ui/skeleton'
 
 const SOURCE_ORDER: SkillSource[] = ['user', 'project', 'plugin', 'mcp', 'bundled']
 
-const SOURCE_ICONS: Record<SkillSource, string> = {
-  user: 'person',
-  project: 'folder',
-  plugin: 'extension',
-  mcp: 'hub',
-  bundled: 'inventory_2',
+const SOURCE_ICONS: Record<SkillSource, ComponentType<{ className?: string }>> = {
+  user: User,
+  project: Folder,
+  plugin: Puzzle,
+  mcp: Network,
+  bundled: Package,
 }
 
 const SOURCE_ACCENT_CLASSES: Record<SkillSource, string> = {
@@ -26,11 +54,24 @@ function estimateTokens(contentLength: number) {
   return Math.ceil(contentLength / 4)
 }
 
-export function SkillList() {
-  const { skills, isLoading, error, fetchSkills, fetchSkillDetail } =
-    useSkillStore()
-  const sessions = useSessionStore((s) => s.sessions)
-  const activeSessionId = useSessionStore((s) => s.activeSessionId)
+export function getSkillKey(skill: Pick<SkillMeta, 'source' | 'name'>) {
+  return `${skill.source}:${skill.name}`
+}
+
+export function SkillList({
+  onOpenSkill,
+}: {
+  onOpenSkill?: (skillKey: string) => void
+}) {
+  const {
+    skills,
+    isLoading,
+    error,
+    fetchSkills,
+    fetchSkillDetail,
+  } = useSkillStore()
+  const sessions = useSessionStore((state) => state.sessions)
+  const activeSessionId = useSessionStore((state) => state.activeSessionId)
   const t = useTranslation()
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const currentWorkDir = activeSession?.workDir || undefined
@@ -38,7 +79,7 @@ export function SkillList() {
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase()
 
   useEffect(() => {
-    fetchSkills(currentWorkDir)
+    void fetchSkills(currentWorkDir)
   }, [fetchSkills, currentWorkDir])
 
   const filteredSkills = useMemo(() => {
@@ -64,14 +105,17 @@ export function SkillList() {
   const grouped = useMemo(() => {
     const result: Partial<Record<SkillSource, SkillMeta[]>> = {}
     for (const skill of filteredSkills) {
-      const src = skill.source as SkillSource
-      ;(result[src] ??= []).push(skill)
+      const source = skill.source as SkillSource
+      ;(result[source] ??= []).push(skill)
     }
     return result
   }, [filteredSkills])
 
   const totalTokens = useMemo(
-    () => filteredSkills.reduce((sum, skill) => sum + estimateTokens(skill.contentLength), 0),
+    () => filteredSkills.reduce(
+      (sum, skill) => sum + estimateTokens(skill.contentLength),
+      0,
+    ),
     [filteredSkills],
   )
 
@@ -80,77 +124,89 @@ export function SkillList() {
     [grouped],
   )
 
-  if (isLoading) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="animate-spin w-5 h-5 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
-      </div>
-    )
-  }
+  if (isLoading) return <SkillListSkeleton />
 
   if (error) {
-    return <div className="text-sm text-[var(--color-error)] py-4">{error}</div>
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>{t('settings.skills.title')}</AlertTitle>
+        <AlertDescription className="break-words">{error}</AlertDescription>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-2 w-fit"
+          onClick={() => void fetchSkills(currentWorkDir)}
+        >
+          {t('common.retry')}
+        </Button>
+      </Alert>
+    )
   }
 
   if (skills.length === 0) {
     return (
-      <div className="text-center py-12 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6">
-        <span className="material-symbols-outlined text-[40px] text-[var(--color-text-tertiary)] mb-2 block">
-          auto_awesome
-        </span>
-        <p className="text-sm text-[var(--color-text-tertiary)]">
-          {t('settings.skills.empty')}
-        </p>
-        <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-          {t('settings.skills.emptyHint')}
-        </p>
-      </div>
+      <Card className="border-dashed">
+        <CardContent className="px-6 py-12 text-center">
+          <Sparkles className="mx-auto mb-2 h-10 w-10 text-[var(--color-text-tertiary)]" aria-hidden="true" />
+          <p className="text-sm text-[var(--color-text-tertiary)]">
+            {t('settings.skills.empty')}
+          </p>
+          <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+            {t('settings.skills.emptyHint')}
+          </p>
+        </CardContent>
+      </Card>
     )
   }
 
   return (
-    <div className="flex flex-col gap-6 min-w-0">
-      <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] overflow-hidden">
-        <div className="grid gap-4 px-5 py-5 min-w-0 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)] xl:items-end">
+    <div className="flex min-w-0 flex-col gap-6">
+      <Card className="overflow-hidden">
+        <CardContent className="grid min-w-0 gap-4 px-5 py-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)] xl:items-end">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-tertiary)] mb-2">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-tertiary)]">
               {t('settings.skills.browserEyebrow')}
             </div>
-            <div className="flex items-center gap-3 mb-2">
-              <span className="material-symbols-outlined text-[22px] text-[var(--color-brand)]">
-                auto_awesome
-              </span>
+            <div className="mb-2 flex items-center gap-3">
+              <Sparkles className="h-[22px] w-[22px] text-[var(--color-brand)]" aria-hidden="true" />
               <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">
                 {t('settings.skills.browserTitle')}
               </h3>
             </div>
-            <p className="text-sm leading-6 text-[var(--color-text-secondary)] max-w-3xl">
+            <p className="max-w-3xl text-sm leading-6 text-[var(--color-text-secondary)]">
               {t('settings.skills.browserDescription')}
             </p>
             <div className="mt-4 max-w-2xl">
-              <label className="sr-only" htmlFor="settings-skill-search">
+              <Label className="sr-only" htmlFor="settings-skill-search">
                 {t('settings.skills.searchLabel')}
-              </label>
-              <div className="flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 transition-colors focus-within:border-[var(--color-border-focus)] focus-within:ring-2 focus-within:ring-[var(--color-brand)]/20">
-                <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)]">
-                  search
-                </span>
-                <input
+              </Label>
+              <div className="relative">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[var(--color-text-tertiary)]"
+                  aria-hidden="true"
+                />
+                <Input
                   id="settings-skill-search"
+                  data-skill-search
+                  type="search"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder={t('settings.skills.searchPlaceholder')}
-                  className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+                  className="h-11 px-10"
                 />
                 {searchQuery && (
-                  <button
+                  <IconButton
                     type="button"
-                    aria-label={t('settings.skills.clearSearch')}
-                    onClick={() => setSearchQuery('')}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
+                    label={t('settings.skills.clearSearch')}
+                    variant="ghost"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full"
+                    onClick={() => {
+                      setSearchQuery('')
+                      document.querySelector<HTMLInputElement>('[data-skill-search]')?.focus()
+                    }}
                   >
-                    <span className="material-symbols-outlined text-[16px]">close</span>
-                  </button>
+                    <X aria-hidden="true" />
+                  </IconButton>
                 )}
               </div>
               {normalizedSearchQuery && (
@@ -164,42 +220,39 @@ export function SkillList() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 min-w-0 sm:grid-cols-3">
+          <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3">
             <SummaryCard
               label={t('settings.skills.summary.totalSkills')}
               value={String(filteredSkills.length)}
-              icon="auto_awesome"
+              icon={<Sparkles aria-hidden="true" />}
             />
             <SummaryCard
               label={t('settings.skills.summary.sources')}
-              value={String(
-                SOURCE_ORDER.filter((source) => (grouped[source] ?? []).length > 0)
-                  .length,
-              )}
-              icon="layers"
+              value={String(visibleGroupCount)}
+              icon={<Layers3 aria-hidden="true" />}
             />
             <SummaryCard
               label={t('settings.skills.summary.tokens')}
               value={t('settings.skills.tokenEstimateShort', { count: String(totalTokens) })}
-              icon="notes"
+              icon={<NotebookText aria-hidden="true" />}
               className="col-span-2 sm:col-span-1"
             />
           </div>
-        </div>
-      </section>
+        </CardContent>
+      </Card>
 
       {filteredSkills.length === 0 && (
-        <div className="text-center py-12 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6">
-          <span className="material-symbols-outlined text-[40px] text-[var(--color-text-tertiary)] mb-2 block">
-            search_off
-          </span>
-          <p className="text-sm text-[var(--color-text-tertiary)]">
-            {t('settings.skills.noSearchResults')}
-          </p>
-          <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-            {t('settings.skills.noSearchResultsHint')}
-          </p>
-        </div>
+        <Card className="border-dashed">
+          <CardContent className="px-6 py-12 text-center">
+            <CircleSlash2 className="mx-auto mb-2 h-10 w-10 text-[var(--color-text-tertiary)]" aria-hidden="true" />
+            <p className="text-sm text-[var(--color-text-tertiary)]">
+              {t('settings.skills.noSearchResults')}
+            </p>
+            <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+              {t('settings.skills.noSearchResultsHint')}
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       <div className={`grid gap-4 ${visibleGroupCount >= 2 ? 'xl:grid-cols-2' : ''}`}>
@@ -207,6 +260,7 @@ export function SkillList() {
           const group = grouped[source]
           if (!group?.length) return null
 
+          const SourceIcon = SOURCE_ICONS[source]
           const sourceLabel = t(`settings.skills.source.${source}`)
           const sourceTokenCount = group.reduce(
             (sum, skill) => sum + estimateTokens(skill.contentLength),
@@ -214,85 +268,80 @@ export function SkillList() {
           )
 
           return (
-            <section
-              key={source}
-              className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden min-w-0"
-            >
-              <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
+            <Card key={source} className="min-w-0 overflow-hidden bg-[var(--color-surface)]">
+              <CardHeader className="flex-row items-start justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-5 py-4">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="mb-1 flex items-center gap-2">
                     <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${SOURCE_ACCENT_CLASSES[source]}`}>
-                      <span className="material-symbols-outlined text-[16px]">
-                        {SOURCE_ICONS[source]}
-                      </span>
+                      <SourceIcon className="h-4 w-4" aria-hidden="true" />
                     </span>
-                    <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
-                      {sourceLabel}
-                    </h4>
-                    <span className="text-xs text-[var(--color-text-tertiary)]">
-                      {group.length}
-                    </span>
+                    <CardTitle className="text-sm">{sourceLabel}</CardTitle>
+                    <Badge variant="secondary">{group.length}</Badge>
                   </div>
-                  <p className="text-xs leading-5 text-[var(--color-text-tertiary)]">
+                  <CardDescription className="text-xs leading-5">
                     {t('settings.skills.groupHint', {
                       source: sourceLabel,
                       count: String(group.length),
                     })}
-                  </p>
+                  </CardDescription>
                 </div>
-                <div className="text-[11px] text-[var(--color-text-tertiary)] whitespace-nowrap">
+                <Badge variant="outline" className="whitespace-nowrap">
                   {t('settings.skills.tokenEstimateShort', { count: String(sourceTokenCount) })}
-                </div>
-              </div>
+                </Badge>
+              </CardHeader>
 
-              <div className="flex flex-col p-2">
-                {group.map((skill) => (
-                  <button
-                    key={`${skill.source}-${skill.name}`}
-                    onClick={() =>
-                      skill.hasDirectory &&
-                      fetchSkillDetail(skill.source, skill.name, currentWorkDir, 'skills')
-                    }
-                    disabled={!skill.hasDirectory}
-                    className="group rounded-xl border border-transparent px-3 py-3 text-left transition-all hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] disabled:opacity-60 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:border-transparent"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="mt-0.5 material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)]">
-                        auto_awesome
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold text-[var(--color-text-primary)] break-all">
+              <CardContent className="flex flex-col p-2">
+                {group.map((skill) => {
+                  const skillKey = getSkillKey(skill)
+                  return (
+                    <Button
+                      key={skillKey}
+                      variant="ghost"
+                      data-skill-key={skillKey}
+                      disabled={!skill.hasDirectory}
+                      onClick={() => {
+                        onOpenSkill?.(skillKey)
+                        void fetchSkillDetail(
+                          skill.source,
+                          skill.name,
+                          currentWorkDir,
+                          'skills',
+                        )
+                      }}
+                      className="group h-auto min-h-20 w-full justify-start whitespace-normal rounded-xl border border-transparent px-3 py-3 text-left hover:border-[var(--color-border-focus)] disabled:hover:border-transparent"
+                    >
+                      <Sparkles className="mt-0.5 h-[18px] w-[18px] self-start text-[var(--color-text-tertiary)]" aria-hidden="true" />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="break-all text-sm font-semibold text-[var(--color-text-primary)]">
                             {skill.displayName || skill.name}
                           </span>
                           {skill.version && (
-                            <span className="rounded-full bg-[var(--color-surface-container-high)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-tertiary)]">
+                            <Badge variant="secondary" className="font-mono text-[10px]">
                               v{skill.version}
-                            </span>
+                            </Badge>
                           )}
                           {skill.userInvocable && (
-                            <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-tertiary)]">
+                            <Badge variant="outline" className="text-[10px]">
                               {t('settings.skills.slashCommand')}
-                            </span>
+                            </Badge>
                           )}
-                        </div>
-                        <p className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)] break-words">
+                        </span>
+                        <span className="mt-1 block break-words text-xs font-normal leading-5 text-[var(--color-text-secondary)]">
                           {skill.description}
-                        </p>
-                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-tertiary)]">
+                        </span>
+                        <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-normal text-[var(--color-text-tertiary)]">
                           <span>{sourceLabel}</span>
                           <span>{t('settings.skills.tokenEstimateShort', { count: String(estimateTokens(skill.contentLength)) })}</span>
                           <span>{skill.hasDirectory ? t('settings.skills.ready') : t('settings.skills.unavailable')}</span>
-                        </div>
-                      </div>
-                      <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)] opacity-60 transition-transform group-hover:translate-x-0.5 group-hover:opacity-100">
-                        chevron_right
+                        </span>
                       </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
+                      <ChevronRight className="h-[18px] w-[18px] text-[var(--color-text-tertiary)] opacity-60 transition-transform group-hover:translate-x-0.5 group-hover:opacity-100" aria-hidden="true" />
+                    </Button>
+                  )
+                })}
+              </CardContent>
+            </Card>
           )
         })}
       </div>
@@ -308,17 +357,47 @@ function SummaryCard({
 }: {
   label: string
   value: string
-  icon: string
+  icon: ReactNode
   className?: string
 }) {
   return (
-    <div className={`rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3 min-w-0 ${className}`}>
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.12em] text-[var(--color-text-tertiary)] min-w-0">
-        <span className="material-symbols-outlined text-[14px] flex-shrink-0">{icon}</span>
-        <span className="truncate">{label}</span>
-      </div>
-      <div className="mt-2 text-lg font-semibold text-[var(--color-text-primary)] truncate">
-        {value}
+    <Card className={`min-w-0 bg-[var(--color-surface)] ${className}`}>
+      <CardContent className="px-3 py-3">
+        <div className="flex min-w-0 items-center gap-1.5 text-[11px] uppercase tracking-[0.12em] text-[var(--color-text-tertiary)] [&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:shrink-0">
+          {icon}
+          <span className="truncate">{label}</span>
+        </div>
+        <div className="mt-2 truncate text-lg font-semibold text-[var(--color-text-primary)]">
+          {value}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function SkillListSkeleton() {
+  return (
+    <div className="grid gap-4" data-testid="skill-list-skeleton" aria-busy="true">
+      <Card>
+        <CardContent className="grid gap-4 p-5">
+          <Skeleton className="h-5 w-44" />
+          <Skeleton className="h-4 w-full max-w-2xl" />
+          <Skeleton className="h-11 w-full max-w-2xl" />
+        </CardContent>
+      </Card>
+      <div className="grid gap-4 xl:grid-cols-2">
+        {[0, 1].map((group) => (
+          <Card key={group}>
+            <CardHeader>
+              <Skeleton className="h-5 w-28" />
+              <Skeleton className="h-3 w-48" />
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-20 w-full" />
+            </CardContent>
+          </Card>
+        ))}
       </div>
     </div>
   )
