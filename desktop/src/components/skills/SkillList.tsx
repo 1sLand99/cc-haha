@@ -326,6 +326,17 @@ export function SkillList({
                               {t('settings.skills.slashCommand')}
                             </Badge>
                           )}
+                          {/* Only flagged for `.agents`: `.claude` is the norm and
+                              badging it would be noise on every existing skill. */}
+                          {skill.rootFlavor === 'agents' && (
+                            <Badge
+                              variant="secondary"
+                              className="font-mono text-[10px]"
+                              title={t('settings.skills.agentsDirHint')}
+                            >
+                              {t('settings.skills.agentsDirBadge')}
+                            </Badge>
+                          )}
                         </span>
                         <span className="mt-1 block break-words text-xs font-normal leading-5 text-[var(--color-text-secondary)]">
                           {skill.description}

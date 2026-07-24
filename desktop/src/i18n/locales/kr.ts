@@ -1025,7 +1025,7 @@ export const kr: Record<TranslationKey, string> = {
 
   // Settings > Skills
   'settings.skills.title': '설치된 스킬',
-  'settings.skills.description': '스킬은 Claude에 전문 기능을 추가합니다. 스킬은 ~/.claude/skills/에서 관리합니다',
+  'settings.skills.description': '스킬은 Claude에 전문 기능을 추가합니다. 스킬은 ~/.claude/skills/ 또는 ~/.agents/skills/에서 관리합니다',
   'settings.skills.redirectDescription': '스킬은 이제 통합 스킬 센터에서 관리합니다. 마켓과 설치된 스킬을 한 곳에서 볼 수 있습니다.',
   'settings.skills.browserTitle': '설치된 스킬 살펴보기',
   'settings.skills.browserEyebrow': '스킬 브라우저',
@@ -1038,6 +1038,9 @@ export const kr: Record<TranslationKey, string> = {
   'settings.skills.noSearchResultsHint': '다른 키워드를 시도하거나 검색을 지워 모든 스킬을 표시하세요.',
   'settings.skills.entryEyebrow': '스킬 항목',
   'settings.skills.slashCommand': '/slash',
+  'settings.skills.agentsDirBadge': '.agents',
+  'settings.skills.agentsDirHint':
+    'Codex, Cursor, Gemini CLI와 공유되는 ~/.agents/skills/ 개방 표준 디렉터리에서 가져옴',
   'settings.skills.tokenEstimate': '약 {count} 토큰',
   'settings.skills.tokenEstimateShort': '약 {count}',
   'settings.skills.summary.totalSkills': '총 스킬',
@@ -1050,7 +1053,7 @@ export const kr: Record<TranslationKey, string> = {
   'settings.skills.ready': '준비됨',
   'settings.skills.unavailable': '사용 불가',
   'settings.skills.empty': '설치된 스킬이 없습니다',
-  'settings.skills.emptyHint': '~/.claude/skills/에 스킬을 추가하여 시작하세요',
+  'settings.skills.emptyHint': '~/.claude/skills/ 또는 ~/.agents/skills/에 스킬을 추가하여 시작하세요',
   'settings.skills.back': '목록으로 돌아가기',
   'settings.skills.files': '파일',
   'settings.skills.entryFile': '항목 파일',

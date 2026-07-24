@@ -3,6 +3,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import type { Dirent } from 'node:fs'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { AGENT_SKILLS_DIR } from '../../skills/skillRoots.js'
 import { ProvidersIndexSchema } from '../types/provider.js'
 import { diagnosticsService } from './diagnosticsService.js'
 
@@ -185,6 +186,14 @@ export class DoctorService {
         path.join(this.configDir, 'adapter-sessions.json'),
       ),
       this.directoryTarget('user-skills', 'User skills', 'user', path.join(this.configDir, 'skills')),
+      this.directoryTarget(
+        'user-agent-skills',
+        'User skills (.agents)',
+        'user',
+        // Anchored on this.homeDir, not the process home: the doctor's home is
+        // injectable and every other user target already honors it.
+        path.join(this.homeDir, AGENT_SKILLS_DIR, 'skills'),
+      ),
       this.directoryTarget('teams', 'Teams', 'user', path.join(this.configDir, 'teams')),
       this.directoryTarget('plugins', 'Plugins', 'user', path.join(this.configDir, 'plugins')),
       this.directoryTarget(
@@ -222,6 +231,12 @@ export class DoctorService {
           'Project skills',
           'project',
           path.join(this.projectRoot, '.claude', 'skills'),
+        ),
+        this.directoryTarget(
+          'project-agent-skills',
+          'Project skills (.agents)',
+          'project',
+          path.join(this.projectRoot, AGENT_SKILLS_DIR, 'skills'),
         ),
         this.jsonTarget(
           'project-mcp',

@@ -1025,7 +1025,7 @@ export const jp: Record<TranslationKey, string> = {
 
   // Settings > Skills
   'settings.skills.title': 'インストール済みスキル',
-  'settings.skills.description': 'スキルは Claude に専門的な機能を追加します。スキルは ~/.claude/skills/ で管理します',
+  'settings.skills.description': 'スキルは Claude に専門的な機能を追加します。スキルは ~/.claude/skills/ または ~/.agents/skills/ で管理します',
   'settings.skills.redirectDescription': 'スキルは統合されたスキルセンターで管理されます。マーケットとインストール済みスキルを同じ場所で扱えます。',
   'settings.skills.browserTitle': 'インストール済みスキルを閲覧',
   'settings.skills.browserEyebrow': 'スキルブラウザ',
@@ -1038,6 +1038,9 @@ export const jp: Record<TranslationKey, string> = {
   'settings.skills.noSearchResultsHint': '別のキーワードを試すか、検索をクリアしてすべてのスキルを表示してください。',
   'settings.skills.entryEyebrow': 'スキルエントリ',
   'settings.skills.slashCommand': '/slash',
+  'settings.skills.agentsDirBadge': '.agents',
+  'settings.skills.agentsDirHint':
+    'Codex、Cursor、Gemini CLI と共有される ~/.agents/skills/ オープン標準ディレクトリ由来',
   'settings.skills.tokenEstimate': '約 {count} トークン',
   'settings.skills.tokenEstimateShort': '約 {count}',
   'settings.skills.summary.totalSkills': 'スキル総数',
@@ -1050,7 +1053,7 @@ export const jp: Record<TranslationKey, string> = {
   'settings.skills.ready': '準備完了',
   'settings.skills.unavailable': '利用不可',
   'settings.skills.empty': 'スキルがインストールされていません',
-  'settings.skills.emptyHint': '~/.claude/skills/ にスキルを追加して始めましょう',
+  'settings.skills.emptyHint': '~/.claude/skills/ または ~/.agents/skills/ にスキルを追加して始めましょう',
   'settings.skills.back': '一覧に戻る',
   'settings.skills.files': 'ファイル',
   'settings.skills.entryFile': 'エントリファイル',

@@ -437,4 +437,161 @@ describe('Skills API', () => {
       }),
     )
   })
+
+  describe('.agents/skills convention', () => {
+    it('lists user and project skills from .agents, tagged with rootFlavor', async () => {
+      const projectRoot = path.join(tmpHome, 'workspace')
+      await fs.mkdir(path.join(projectRoot, '.git'), { recursive: true })
+
+      await writeSkill(
+        path.join(tmpHome, '.agents', 'skills'),
+        'agents-user-skill',
+        ['---', 'description: Installed by Codex', '---', '', '# Shared'].join('\n'),
+      )
+      await writeSkill(
+        path.join(projectRoot, '.agents', 'skills'),
+        'agents-project-skill',
+        ['---', 'description: Checked into the repo', '---', '', '# Repo'].join('\n'),
+      )
+
+      const { req, url, segments } = makeRequest(
+        `/api/skills?cwd=${encodeURIComponent(projectRoot)}`,
+      )
+      const res = await handleSkillsApi(req, url, segments)
+
+      expect(res.status).toBe(200)
+      const body = await res.json() as {
+        skills: Array<{ name: string; source: string; rootFlavor?: string }>
+      }
+      expect(body.skills).toContainEqual(
+        expect.objectContaining({
+          name: 'agents-user-skill',
+          source: 'user',
+          rootFlavor: 'agents',
+        }),
+      )
+      expect(body.skills).toContainEqual(
+        expect.objectContaining({
+          name: 'agents-project-skill',
+          source: 'project',
+          rootFlavor: 'agents',
+        }),
+      )
+    })
+
+    it('tags .claude skills as the claude flavor', async () => {
+      await writeSkill(
+        path.join(tmpHome, '.claude', 'skills'),
+        'native-skill',
+        ['---', 'description: Native', '---', '', '# Native'].join('\n'),
+      )
+
+      const { req, url, segments } = makeRequest('/api/skills')
+      const res = await handleSkillsApi(req, url, segments)
+      const body = await res.json() as {
+        skills: Array<{ name: string; rootFlavor?: string }>
+      }
+
+      expect(body.skills).toContainEqual(
+        expect.objectContaining({ name: 'native-skill', rootFlavor: 'claude' }),
+      )
+    })
+
+    it('reports a name present in both user conventions once, as .claude', async () => {
+      // A cwd whose own tree holds no skills, so only the user roots contribute
+      // and the two spellings of the user scope are the only candidates.
+      const emptyWorkspace = path.join(tmpHome, 'workspace-without-skills')
+      await fs.mkdir(path.join(emptyWorkspace, '.git'), { recursive: true })
+
+      await writeSkill(
+        path.join(tmpHome, '.claude', 'skills'),
+        'dup',
+        ['---', 'description: The claude one', '---', '', '# Dup'].join('\n'),
+      )
+      await writeSkill(
+        path.join(tmpHome, '.agents', 'skills'),
+        'dup',
+        ['---', 'description: The agents one', '---', '', '# Dup'].join('\n'),
+      )
+
+      const { req, url, segments } = makeRequest(
+        `/api/skills?cwd=${encodeURIComponent(emptyWorkspace)}`,
+      )
+      const res = await handleSkillsApi(req, url, segments)
+      const body = await res.json() as {
+        skills: Array<{ name: string; description: string; rootFlavor?: string }>
+      }
+
+      const matches = body.skills.filter((s) => s.name === 'dup')
+      expect(matches).toHaveLength(1)
+      expect(matches[0]).toEqual(
+        expect.objectContaining({
+          description: 'The claude one',
+          rootFlavor: 'claude',
+        }),
+      )
+    })
+
+    it('serves detail for a skill that only exists under .agents', async () => {
+      await writeSkill(
+        path.join(tmpHome, '.agents', 'skills'),
+        'agents-only',
+        ['---', 'description: Only in agents', '---', '', '# Body'].join('\n'),
+      )
+
+      const { req, url, segments } = makeRequest(
+        '/api/skills/detail?source=user&name=agents-only',
+      )
+      const res = await handleSkillsApi(req, url, segments)
+
+      expect(res.status).toBe(200)
+      const body = await res.json() as {
+        detail: { meta: { name: string; rootFlavor?: string }; skillRoot: string }
+      }
+      expect(body.detail.meta.name).toBe('agents-only')
+      expect(body.detail.skillRoot).toBe(
+        path.join(tmpHome, '.agents', 'skills', 'agents-only'),
+      )
+      // Detail must report the same flavor the listing does, or the badge
+      // flickers when the user opens a skill.
+      expect(body.detail.meta.rootFlavor).toBe('agents')
+    })
+
+    it('reports the claude flavor in detail for a .claude skill', async () => {
+      await writeSkill(
+        path.join(tmpHome, '.claude', 'skills'),
+        'native-only',
+        ['---', 'description: Native', '---', '', '# Body'].join('\n'),
+      )
+
+      const { req, url, segments } = makeRequest(
+        '/api/skills/detail?source=user&name=native-only',
+      )
+      const res = await handleSkillsApi(req, url, segments)
+      const body = await res.json() as {
+        detail: { meta: { rootFlavor?: string } }
+      }
+
+      expect(body.detail.meta.rootFlavor).toBe('claude')
+    })
+
+    it('ignores .agents when the feature is switched off', async () => {
+      process.env.CLAUDE_CODE_DISABLE_AGENT_SKILLS_DIR = '1'
+      try {
+        await writeSkill(
+          path.join(tmpHome, '.agents', 'skills'),
+          'agents-only',
+          ['---', 'description: Only in agents', '---', '', '# Body'].join('\n'),
+        )
+
+        const { req, url, segments } = makeRequest('/api/skills')
+        const res = await handleSkillsApi(req, url, segments)
+        const body = await res.json() as { skills: Array<{ name: string }> }
+
+        expect(body.skills.map((s) => s.name)).not.toContain('agents-only')
+      } finally {
+        delete process.env.CLAUDE_CODE_DISABLE_AGENT_SKILLS_DIR
+      }
+    })
+  })
 })

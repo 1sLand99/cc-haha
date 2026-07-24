@@ -1025,7 +1025,7 @@ export const zh: Record<TranslationKey, string> = {
 
   // Settings > Skills
   'settings.skills.title': '已安裝技能',
-  'settings.skills.description': '技能擴充套件 Claude 的能力。在 ~/.claude/skills/ 中管理技能。',
+  'settings.skills.description': '技能擴充套件 Claude 的能力。在 ~/.claude/skills/ 或 ~/.agents/skills/ 中管理技能。',
   'settings.skills.redirectDescription': '技能現在統一放在技能中心管理，市場和已安裝技能會放在同一個入口裡。',
   'settings.skills.browserTitle': '瀏覽已安裝技能',
   'settings.skills.browserEyebrow': '技能瀏覽器',
@@ -1038,6 +1038,9 @@ export const zh: Record<TranslationKey, string> = {
   'settings.skills.noSearchResultsHint': '換一個關鍵詞，或清空搜尋檢視全部技能。',
   'settings.skills.entryEyebrow': '技能入口',
   'settings.skills.slashCommand': '/斜槓命令',
+  'settings.skills.agentsDirBadge': '.agents',
+  'settings.skills.agentsDirHint':
+    '來自 ~/.agents/skills/ 開放標準目錄，與 Codex、Cursor、Gemini CLI 共享',
   'settings.skills.tokenEstimate': '約 {count} tokens',
   'settings.skills.tokenEstimateShort': '約 {count}',
   'settings.skills.summary.totalSkills': '技能總數',
@@ -1050,7 +1053,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.skills.ready': '可檢視',
   'settings.skills.unavailable': '不可用',
   'settings.skills.empty': '暫無已安裝技能',
-  'settings.skills.emptyHint': '在 ~/.claude/skills/ 中新增技能即可開始',
+  'settings.skills.emptyHint': '在 ~/.claude/skills/ 或 ~/.agents/skills/ 中新增技能即可開始',
   'settings.skills.back': '返回列表',
   'settings.skills.files': '個檔案',
   'settings.skills.entryFile': '入口檔案',

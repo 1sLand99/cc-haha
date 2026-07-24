@@ -1023,7 +1023,7 @@ export const en = {
 
   // Settings > Skills
   'settings.skills.title': 'Installed Skills',
-  'settings.skills.description': 'Skills extend Claude with specialized capabilities. Manage skills in ~/.claude/skills/',
+  'settings.skills.description': 'Skills extend Claude with specialized capabilities. Manage skills in ~/.claude/skills/ or ~/.agents/skills/',
   'settings.skills.redirectDescription': 'Skills now live in the unified Skill Center, where marketplace and installed skills are managed together.',
   'settings.skills.browserTitle': 'Browse installed skills',
   'settings.skills.browserEyebrow': 'Skill Browser',
@@ -1036,6 +1036,9 @@ export const en = {
   'settings.skills.noSearchResultsHint': 'Try another keyword or clear search to show every skill.',
   'settings.skills.entryEyebrow': 'Skill Entry',
   'settings.skills.slashCommand': '/slash',
+  'settings.skills.agentsDirBadge': '.agents',
+  'settings.skills.agentsDirHint':
+    'From the ~/.agents/skills/ open standard directory, shared with Codex, Cursor, and Gemini CLI',
   'settings.skills.tokenEstimate': '~{count} tokens',
   'settings.skills.tokenEstimateShort': '~{count}',
   'settings.skills.summary.totalSkills': 'Total skills',
@@ -1048,7 +1051,7 @@ export const en = {
   'settings.skills.ready': 'Ready',
   'settings.skills.unavailable': 'Unavailable',
   'settings.skills.empty': 'No skills installed',
-  'settings.skills.emptyHint': 'Add skills to ~/.claude/skills/ to get started',
+  'settings.skills.emptyHint': 'Add skills to ~/.claude/skills/ or ~/.agents/skills/ to get started',
   'settings.skills.back': 'Back to list',
   'settings.skills.files': 'files',
   'settings.skills.entryFile': 'entry file',

@@ -99,6 +99,7 @@ describe('DoctorService', () => {
     expect(projectItems.map((item) => item.id)).toEqual([
       'project-settings',
       'project-skills',
+      'project-agent-skills',
       'project-mcp',
     ])
     expect(projectItems.every((item) => item.status === 'not_configured')).toBe(true)

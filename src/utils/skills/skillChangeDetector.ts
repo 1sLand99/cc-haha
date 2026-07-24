@@ -14,6 +14,11 @@ import {
   getSkillsPath,
   onDynamicSkillsLoaded,
 } from '../../skills/loadSkillsDir.js'
+import {
+  AGENT_SKILLS_DIR,
+  getUserAgentSkillsDir,
+  isAgentSkillsDirectoryEnabled,
+} from '../../skills/skillRoots.js'
 import { resetSentSkillNames } from '../attachments.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
@@ -228,6 +233,27 @@ async function getWatchablePaths(): Promise<string[]> {
       paths.push(additionalSkillsPath)
     } catch {
       // Path doesn't exist, skip it
+    }
+  }
+
+  // Cross-client `.agents/skills` roots (user, project, and --add-dir), so a
+  // skill installed by Codex/Cursor shows up without restarting the session.
+  if (isAgentSkillsDirectoryEnabled()) {
+    const agentSkillsPaths = [
+      getUserAgentSkillsDir(),
+      platformPath.resolve(platformPath.join(AGENT_SKILLS_DIR, 'skills')),
+      ...getAdditionalDirectoriesForClaudeMd().map(dir =>
+        platformPath.join(dir, AGENT_SKILLS_DIR, 'skills'),
+      ),
+    ]
+
+    for (const agentSkillsPath of agentSkillsPaths) {
+      try {
+        await fs.stat(agentSkillsPath)
+        paths.push(agentSkillsPath)
+      } catch {
+        // Path doesn't exist, skip it
+      }
     }
   }
 
