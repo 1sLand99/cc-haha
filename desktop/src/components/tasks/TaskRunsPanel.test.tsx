@@ -37,13 +37,52 @@ describe('TaskRunsPanel', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Summary' })).toBeInTheDocument())
+    expect(screen.getByRole('region', { name: 'Execution logs' })).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="card"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="scroll-area"]')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Summary' })).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(screen.getByRole('button', { name: 'Summary' }))
 
+    expect(screen.getByRole('button', { name: 'Hide' })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('1. 2865d50 - UI无障碍改进')).toBeInTheDocument()
     expect(container.querySelector('strong')).toHaveTextContent('1. 2865d50 - UI无障碍改进')
     expect(screen.getByText('添加 theme-color meta 标签')).toBeInTheDocument()
     expect(container.querySelector('li')).toHaveTextContent('添加 theme-color meta 标签')
     expect(container.textContent).not.toContain('**1. 2865d50')
+  })
+
+  it('shows a list failure and retries the summary request', async () => {
+    const fetchTaskRuns = vi.fn()
+      .mockRejectedValueOnce(new Error('list unavailable'))
+      .mockResolvedValueOnce([])
+    useSettingsStore.setState({ locale: 'en' })
+    useTaskStore.setState({
+      fetchTaskRuns,
+    } as Partial<ReturnType<typeof useTaskStore.getState>>)
+
+    render(<TaskRunsPanel taskId="task-1" onClose={vi.fn()} />)
+    expect(await screen.findByText('Error')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(await screen.findByText('No execution logs yet')).toBeInTheDocument()
+    expect(fetchTaskRuns).toHaveBeenCalledTimes(2)
+    expect(fetchTaskRuns).toHaveBeenLastCalledWith('task-1', {
+      limit: 100,
+      summaryOnly: true,
+    })
+  })
+
+  it('exposes an accessible close action', async () => {
+    const onClose = vi.fn()
+    useSettingsStore.setState({ locale: 'en' })
+    useTaskStore.setState({
+      fetchTaskRuns: vi.fn(async () => []),
+    } as Partial<ReturnType<typeof useTaskStore.getState>>)
+
+    render(<TaskRunsPanel taskId="task-1" onClose={onClose} />)
+    await screen.findByText('No execution logs yet')
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('keeps large output out of the list response and loads detail only when expanded', async () => {

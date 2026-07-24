@@ -1,11 +1,27 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type Ref } from 'react'
 import { ArrowLeft, FolderOpen, Grid3X3, ImageIcon, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import {
   desktopUiPreferencesApi,
   type DesktopPetPreferences,
 } from '../../api/desktopUiPreferences'
-import { Button } from '../../components/shared/Button'
-import { Modal } from '../../components/shared/Modal'
+import { Alert, AlertDescription } from '../../components/ui/alert'
+import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
+import { Card, CardContent } from '../../components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog'
+import { Input } from '../../components/ui/input'
+import { Label } from '../../components/ui/label'
+import { Slider } from '../../components/ui/slider'
+import { Switch } from '../../components/ui/switch'
+import { Textarea } from '../../components/ui/textarea'
+import { LoadingButton } from '../../components/ui/custom/loading-button'
 import { useTranslation, type TranslationKey } from '../../i18n'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { BUILTIN_PETS } from './builtinPets'
@@ -51,6 +67,9 @@ export function PetSettings() {
   const preferencesRef = useRef<DesktopPetPreferences | null>(null)
   const preferenceRevisionRef = useRef(0)
   const windowSyncRevisionRef = useRef(0)
+  const createTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const createImageMethodRef = useRef<HTMLButtonElement | null>(null)
+  const createIdInputRef = useRef<HTMLInputElement | null>(null)
   const [customPets, setCustomPets] = useState<CustomPet[]>([])
   const [invalidPetCount, setInvalidPetCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -88,6 +107,15 @@ export function PetSettings() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!createOpen) return
+    const frame = requestAnimationFrame(() => {
+      if (createMethod === null) createImageMethodRef.current?.focus()
+      else createIdInputRef.current?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [createMethod, createOpen])
 
   useEffect(() => {
     let cancelled = false
@@ -277,25 +305,33 @@ export function PetSettings() {
       </header>
 
       {loading ? (
-        <div role="status" className="rounded-xl border border-[var(--color-border)] p-5 text-sm text-[var(--color-text-secondary)]">
-          {t('settings.pets.loading')}
-        </div>
+        <Card role="status" aria-live="polite">
+          <CardContent className="p-5 text-sm text-[var(--color-text-secondary)]">
+            {t('settings.pets.loading')}
+          </CardContent>
+        </Card>
       ) : loadError || !preferences ? (
-        <div role="alert" className="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-error)]/30 bg-[var(--color-error)]/5 p-4">
-          <span className="text-sm text-[var(--color-error)]">{t('settings.pets.loadError')}</span>
-          <Button variant="secondary" size="sm" onClick={() => void load()}>{t('settings.pets.retry')}</Button>
-        </div>
+        <Alert variant="destructive" className="flex items-center justify-between gap-4">
+          <AlertDescription className="text-[var(--color-error)]">
+            {t('settings.pets.loadError')}
+          </AlertDescription>
+          <Button variant="secondary" size="sm" onClick={() => void load()}>
+            {t('settings.pets.retry')}
+          </Button>
+        </Alert>
       ) : (
         <>
-          <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-            <ToggleRow
-              label={t('settings.pets.enableTitle')}
-              description={t('settings.pets.enableDescription')}
-              checked={preferences.enabled}
-              disabled={!desktopAvailable}
-              onChange={(checked) => void updatePreferences({ enabled: checked }, true)}
-            />
-          </section>
+          <Card>
+            <CardContent className="p-5">
+              <ToggleRow
+                label={t('settings.pets.enableTitle')}
+                description={t('settings.pets.enableDescription')}
+                checked={preferences.enabled}
+                disabled={!desktopAvailable}
+                onChange={(checked) => void updatePreferences({ enabled: checked }, true)}
+              />
+            </CardContent>
+          </Card>
 
           <PetCatalog
             title={t('settings.pets.builtInTitle')}
@@ -311,9 +347,9 @@ export function PetSettings() {
               <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('settings.pets.customTitle')}</h2>
               <div className="flex items-center gap-2">
                 <Button
+                  ref={createTriggerRef}
                   variant="secondary"
                   size="sm"
-                  icon={<Plus size={14} aria-hidden="true" />}
                   disabled={!desktopAvailable}
                   onClick={() => {
                     setCreateError(null)
@@ -322,14 +358,15 @@ export function PetSettings() {
                     setCreateOpen(true)
                   }}
                 >
+                  <Plus size={14} aria-hidden="true" />
                   {t('settings.pets.create')}
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
-                  icon={<RefreshCw size={14} aria-hidden="true" />}
                   onClick={() => void load()}
                 >
+                  <RefreshCw size={14} aria-hidden="true" />
                   {t('settings.pets.refresh')}
                 </Button>
               </div>
@@ -343,56 +380,63 @@ export function PetSettings() {
                 onSelect={(id) => void updatePreferences({ selectedPetId: id }, preferences.enabled && desktopAvailable)}
               />
             ) : (
-              <div className="rounded-xl border border-dashed border-[var(--color-border)] p-5 text-sm text-[var(--color-text-secondary)]">
-                {t('settings.pets.customEmpty')}
-              </div>
+              <Card className="border-dashed bg-transparent">
+                <CardContent className="p-5 text-sm text-[var(--color-text-secondary)]">
+                  {t('settings.pets.customEmpty')}
+                </CardContent>
+              </Card>
             )}
             {invalidPetCount > 0 && (
-              <p role="status" className="text-xs text-[var(--color-warning)]">
-                {t('settings.pets.invalidCustom', { count: invalidPetCount })}
-              </p>
+              <Alert role="status" className="border-[var(--color-warning)]/30 bg-[var(--color-warning)]/5">
+                <AlertDescription className="text-[var(--color-warning)]">
+                  {t('settings.pets.invalidCustom', { count: invalidPetCount })}
+                </AlertDescription>
+              </Alert>
             )}
           </section>
 
-          <section className="space-y-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('settings.pets.appearanceTitle')}</h2>
-            <label className="block">
-              <span className="flex items-center justify-between gap-3 text-sm font-medium text-[var(--color-text-primary)]">
-                <span>{t('settings.pets.size')}</span>
-                <output htmlFor="pet-size">{preferences.size}px</output>
-              </span>
-              <span className="mt-0.5 block text-xs text-[var(--color-text-secondary)]">{t('settings.pets.sizeDescription')}</span>
-              <input
-                id="pet-size"
-                aria-label={t('settings.pets.size')}
-                className="mt-3 w-full accent-[var(--color-brand)]"
-                type="range"
-                min={PET_SIZE_MIN}
-                max={PET_SIZE_MAX}
-                step={8}
-                value={preferences.size}
-                onChange={(event) => void updatePreferences({ size: Number(event.target.value) })}
-              />
-            </label>
-            <div className="border-t border-[var(--color-border)]/70 pt-4">
-              <ToggleRow
-                label={t('settings.pets.motion')}
-                description={t('settings.pets.motionDescription')}
-                checked={preferences.motionEnabled}
-                onChange={(checked) => void updatePreferences({ motionEnabled: checked })}
-              />
-            </div>
-            <div className="border-t border-[var(--color-border)]/70 pt-4">
-              <ToggleRow
-                label={t('settings.pets.showTaskPanel')}
-                description={t('settings.pets.showTaskPanelDescription')}
-                checked={preferences.showTaskPanel}
-                onChange={(checked) => void updatePreferences({ showTaskPanel: checked })}
-              />
-            </div>
-          </section>
+          <Card>
+            <CardContent className="space-y-4 p-5">
+              <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('settings.pets.appearanceTitle')}</h2>
+              <div>
+                <Label htmlFor="pet-size" className="flex items-center justify-between gap-3">
+                  <span>{t('settings.pets.size')}</span>
+                  <output htmlFor="pet-size">{preferences.size}px</output>
+                </Label>
+                <span className="mt-0.5 block text-xs text-[var(--color-text-secondary)]">{t('settings.pets.sizeDescription')}</span>
+                <Slider
+                  id="pet-size"
+                  aria-label={t('settings.pets.size')}
+                  className="mt-3"
+                  min={PET_SIZE_MIN}
+                  max={PET_SIZE_MAX}
+                  step={8}
+                  value={[preferences.size]}
+                  onValueChange={([size]) => {
+                    if (typeof size === 'number') void updatePreferences({ size })
+                  }}
+                />
+              </div>
+              <div className="border-t border-[var(--color-border)]/70 pt-4">
+                <ToggleRow
+                  label={t('settings.pets.motion')}
+                  description={t('settings.pets.motionDescription')}
+                  checked={preferences.motionEnabled}
+                  onChange={(checked) => void updatePreferences({ motionEnabled: checked })}
+                />
+              </div>
+              <div className="border-t border-[var(--color-border)]/70 pt-4">
+                <ToggleRow
+                  label={t('settings.pets.showTaskPanel')}
+                  description={t('settings.pets.showTaskPanelDescription')}
+                  checked={preferences.showTaskPanel}
+                  onChange={(checked) => void updatePreferences({ showTaskPanel: checked })}
+                />
+              </div>
+            </CardContent>
+          </Card>
 
-          <section className="flex items-center justify-between gap-5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+          <Card className="flex items-center justify-between gap-5 p-5">
             <div className="min-w-0">
               <h2 className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.pets.folderTitle')}</h2>
               <p className="mt-1 break-all font-mono text-xs text-[var(--color-text-secondary)]">
@@ -402,31 +446,139 @@ export function PetSettings() {
             <Button
               variant="secondary"
               size="sm"
-              icon={<FolderOpen size={15} aria-hidden="true" />}
               disabled={!desktopAvailable}
               onClick={() => void handleOpenFolder()}
             >
+              <FolderOpen size={15} aria-hidden="true" />
               {t('settings.pets.openFolder')}
             </Button>
-          </section>
+          </Card>
         </>
       )}
 
-      {saveError && <p role="alert" className="text-sm text-[var(--color-error)]">{saveError}</p>}
+      {saveError && (
+        <Alert variant="destructive">
+          <AlertDescription className="text-[var(--color-error)]">{saveError}</AlertDescription>
+        </Alert>
+      )}
 
-      <Modal
+      <Dialog
         open={createOpen}
-        title={t('settings.pets.createTitle')}
-        onClose={() => {
-          if (!createBusy) resetCreateDialog()
+        onOpenChange={(open) => {
+          if (!open && !createBusy) resetCreateDialog()
         }}
-        footer={(
-          <>
+      >
+        <DialogContent
+          aria-busy={createBusy}
+          onEscapeKeyDown={(event) => {
+            if (createBusy) event.preventDefault()
+          }}
+          onPointerDownOutside={(event) => {
+            if (createBusy) event.preventDefault()
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            createTriggerRef.current?.focus()
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{t('settings.pets.createTitle')}</DialogTitle>
+            <DialogDescription>
+              {createMethod === null
+                ? t('settings.pets.createMethodIntro')
+                : createMethod === 'image'
+                  ? t('settings.pets.createImageHint')
+                  : t('settings.pets.createAtlasHint')}
+            </DialogDescription>
+          </DialogHeader>
+          {createMethod === null ? (
+            <div className="space-y-3">
+              <CreationMethodCard
+                buttonRef={createImageMethodRef}
+                icon={<ImageIcon size={20} aria-hidden="true" />}
+                title={t('settings.pets.createImageTitle')}
+                description={t('settings.pets.createImageDescription')}
+                detail={t('settings.pets.createImageDetail')}
+                badge={t('settings.pets.createRecommended')}
+                onClick={() => setCreateMethod('image')}
+              />
+              <CreationMethodCard
+                icon={<Grid3X3 size={20} aria-hidden="true" />}
+                title={t('settings.pets.createAtlasTitle')}
+                description={t('settings.pets.createAtlasDescription')}
+                detail={t('settings.pets.createAtlasDetail')}
+                onClick={() => setCreateMethod('atlas')}
+              />
+              <CreationMethodCard
+                icon={<Sparkles size={20} aria-hidden="true" />}
+                title={t('settings.pets.createAiTitle')}
+                description={t('settings.pets.createAiDescription')}
+                detail={t('settings.pets.createAiUnavailable')}
+                disabled
+              />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="-ml-2"
+                disabled={createBusy}
+                onClick={() => {
+                  setCreateMethod(null)
+                  setCreateError(null)
+                }}
+              >
+                <ArrowLeft size={15} aria-hidden="true" />
+                {t('settings.pets.createBack')}
+              </Button>
+              <div className="space-y-1.5">
+                <Label htmlFor="pet-create-id">{t('settings.pets.createId')}</Label>
+                <Input
+                  ref={createIdInputRef}
+                  id="pet-create-id"
+                  aria-label={t('settings.pets.createId')}
+                  value={createForm.slug}
+                  maxLength={73}
+                  placeholder="moon-cat"
+                  aria-invalid={createForm.slug.length > 0 && !PET_ID_PATTERN.test(createForm.slug)}
+                  onChange={(event) => setCreateForm((current) => ({ ...current, slug: event.target.value }))}
+                />
+                <p className="text-xs text-[var(--color-text-secondary)]">{t('settings.pets.createIdHint')}</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pet-create-name">{t('settings.pets.createName')}</Label>
+                <Input
+                  id="pet-create-name"
+                  aria-label={t('settings.pets.createName')}
+                  value={createForm.displayName}
+                  maxLength={80}
+                  onChange={(event) => setCreateForm((current) => ({ ...current, displayName: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pet-create-description">{t('settings.pets.createDescription')}</Label>
+                <Textarea
+                  id="pet-create-description"
+                  aria-label={t('settings.pets.createDescription')}
+                  value={createForm.description}
+                  maxLength={500}
+                  onChange={(event) => setCreateForm((current) => ({ ...current, description: event.target.value }))}
+                />
+              </div>
+              {createError && (
+                <Alert variant="destructive">
+                  <AlertDescription className="text-[var(--color-error)]">{createError}</AlertDescription>
+                </Alert>
+              )}
+            </div>
+          )}
+          <DialogFooter>
             <Button variant="secondary" disabled={createBusy} onClick={resetCreateDialog}>
               {t('settings.pets.createCancel')}
             </Button>
             {createMethod && (
-              <Button
+              <LoadingButton
                 loading={createBusy}
                 disabled={!createFormValid}
                 onClick={() => void handleCreate()}
@@ -434,106 +586,17 @@ export function PetSettings() {
                 {createMethod === 'image'
                   ? t('settings.pets.createImageSubmit')
                   : t('settings.pets.createAtlasSubmit')}
-              </Button>
+              </LoadingButton>
             )}
-          </>
-        )}
-      >
-        {createMethod === null ? (
-          <div className="space-y-3">
-            <p className="text-sm leading-6 text-[var(--color-text-secondary)]">
-              {t('settings.pets.createMethodIntro')}
-            </p>
-            <CreationMethodCard
-              icon={<ImageIcon size={20} aria-hidden="true" />}
-              title={t('settings.pets.createImageTitle')}
-              description={t('settings.pets.createImageDescription')}
-              detail={t('settings.pets.createImageDetail')}
-              badge={t('settings.pets.createRecommended')}
-              onClick={() => setCreateMethod('image')}
-            />
-            <CreationMethodCard
-              icon={<Grid3X3 size={20} aria-hidden="true" />}
-              title={t('settings.pets.createAtlasTitle')}
-              description={t('settings.pets.createAtlasDescription')}
-              detail={t('settings.pets.createAtlasDetail')}
-              onClick={() => setCreateMethod('atlas')}
-            />
-            <CreationMethodCard
-              icon={<Sparkles size={20} aria-hidden="true" />}
-              title={t('settings.pets.createAiTitle')}
-              description={t('settings.pets.createAiDescription')}
-              detail={t('settings.pets.createAiUnavailable')}
-              disabled
-            />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]/40"
-              disabled={createBusy}
-              onClick={() => {
-                setCreateMethod(null)
-                setCreateError(null)
-              }}
-            >
-              <ArrowLeft size={15} aria-hidden="true" />
-              {t('settings.pets.createBack')}
-            </button>
-            <div className="rounded-lg bg-[var(--color-surface-hover)] px-3.5 py-3">
-              <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
-                {createMethod === 'image'
-                  ? t('settings.pets.createImageTitle')
-                  : t('settings.pets.createAtlasTitle')}
-              </h3>
-              <p className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)]">
-                {createMethod === 'image'
-                  ? t('settings.pets.createImageHint')
-                  : t('settings.pets.createAtlasHint')}
-              </p>
-            </div>
-            <label className="block space-y-1.5 text-sm text-[var(--color-text-primary)]">
-              <span className="font-medium">{t('settings.pets.createId')}</span>
-              <input
-                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 outline-none focus:border-[var(--color-border-focus)]"
-                aria-label={t('settings.pets.createId')}
-                value={createForm.slug}
-                maxLength={73}
-                placeholder="moon-cat"
-                onChange={(event) => setCreateForm((current) => ({ ...current, slug: event.target.value }))}
-              />
-              <span className="block text-xs text-[var(--color-text-secondary)]">{t('settings.pets.createIdHint')}</span>
-            </label>
-            <label className="block space-y-1.5 text-sm text-[var(--color-text-primary)]">
-              <span className="font-medium">{t('settings.pets.createName')}</span>
-              <input
-                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 outline-none focus:border-[var(--color-border-focus)]"
-                aria-label={t('settings.pets.createName')}
-                value={createForm.displayName}
-                maxLength={80}
-                onChange={(event) => setCreateForm((current) => ({ ...current, displayName: event.target.value }))}
-              />
-            </label>
-            <label className="block space-y-1.5 text-sm text-[var(--color-text-primary)]">
-              <span className="font-medium">{t('settings.pets.createDescription')}</span>
-              <textarea
-                className="min-h-24 w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 outline-none focus:border-[var(--color-border-focus)]"
-                aria-label={t('settings.pets.createDescription')}
-                value={createForm.description}
-                maxLength={500}
-                onChange={(event) => setCreateForm((current) => ({ ...current, description: event.target.value }))}
-              />
-            </label>
-            {createError && <p role="alert" className="text-sm text-[var(--color-error)]">{createError}</p>}
-          </div>
-        )}
-      </Modal>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
 
 function CreationMethodCard({
+  buttonRef,
   icon,
   title,
   description,
@@ -542,6 +605,7 @@ function CreationMethodCard({
   disabled = false,
   onClick,
 }: {
+  buttonRef?: Ref<HTMLButtonElement>
   icon: ReactNode
   title: string
   description: string
@@ -551,9 +615,10 @@ function CreationMethodCard({
   onClick?: () => void
 }) {
   return (
-    <button
-      type="button"
-      className="group flex w-full items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-left transition-[border-color,background-color,transform] enabled:hover:-translate-y-0.5 enabled:hover:border-[var(--color-brand)]/60 enabled:hover:bg-[var(--color-surface-hover)] enabled:active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-55"
+    <Button
+      ref={buttonRef}
+      variant="outline"
+      className="group h-auto w-full items-start justify-start gap-3 whitespace-normal rounded-xl p-4 text-left transition-[border-color,background-color,transform] enabled:hover:-translate-y-0.5 enabled:hover:border-[var(--color-brand)]/60 enabled:active:translate-y-0"
       disabled={disabled}
       onClick={onClick}
     >
@@ -564,15 +629,15 @@ function CreationMethodCard({
         <span className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</span>
           {badge && (
-            <span className="rounded-full bg-[var(--color-brand)]/10 px-2 py-0.5 text-[11px] font-medium text-[var(--color-brand)]">
+            <Badge variant="outline" className="border-[var(--color-brand)]/20 bg-[var(--color-brand)]/10 text-[11px] text-[var(--color-brand)]">
               {badge}
-            </span>
+            </Badge>
           )}
         </span>
         <span className="mt-1 block text-xs leading-5 text-[var(--color-text-secondary)]">{description}</span>
         <span className="mt-1 block text-[11px] leading-4 text-[var(--color-text-tertiary)]">{detail}</span>
       </span>
-    </button>
+    </Button>
   )
 }
 
@@ -599,9 +664,8 @@ function PetCatalog({
         {pets.map((pet) => {
           const selected = pet.id === selectedPetId
           return (
-            <article
-              key={pet.id}
-              className={`flex items-center gap-4 rounded-xl border p-4 transition-colors ${
+            <article key={pet.id}>
+              <Card className={`flex items-center gap-4 p-4 transition-colors ${
                 selected
                   ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)]'
                   : 'border-[var(--color-border)] bg-[var(--color-surface)]'
@@ -623,6 +687,7 @@ function PetCatalog({
               >
                 {selected ? selectedLabel : selectLabel}
               </Button>
+              </Card>
             </article>
           )
         })}
@@ -655,24 +720,21 @@ function ToggleRow({
   disabled?: boolean
   onChange: (checked: boolean) => void
 }) {
+  const id = useId()
+
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-6">
+    <div className="flex items-start justify-between gap-6">
       <span>
-        <span className="block text-sm font-medium text-[var(--color-text-primary)]">{label}</span>
+        <Label htmlFor={id} className="block text-sm font-medium text-[var(--color-text-primary)]">{label}</Label>
         <span className="mt-0.5 block text-xs text-[var(--color-text-secondary)]">{description}</span>
       </span>
-      <span className="relative inline-flex h-6 w-11 flex-none items-center">
-        <input
-          className="peer sr-only"
-          type="checkbox"
-          checked={checked}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.checked)}
-          aria-label={label}
-        />
-        <span className="absolute inset-0 rounded-full bg-[var(--color-border)] transition-colors peer-checked:bg-[var(--color-switch-checked-bg)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-border-focus)]/40" />
-        <span className="relative ml-1 h-4 w-4 rounded-full bg-[var(--color-switch-thumb)] shadow-sm transition-transform peer-checked:translate-x-5" />
-      </span>
-    </label>
+      <Switch
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onChange}
+        aria-label={label}
+      />
+    </div>
   )
 }

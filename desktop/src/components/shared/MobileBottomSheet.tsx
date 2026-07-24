@@ -1,5 +1,14 @@
-import { useEffect, type ReactNode, type Ref } from 'react'
-import { createPortal } from 'react-dom'
+import { useRef, type ReactNode, type Ref } from 'react'
+import { X } from 'lucide-react'
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '../ui/sheet'
+import { Button } from '../ui/button'
 
 type Props = {
   open: boolean
@@ -27,68 +36,74 @@ export function MobileBottomSheet({
   headerExtra,
   footer,
   id,
-  role = 'dialog',
   ariaLabel,
   contentClassName = '',
   panelClassName = '',
   panelRef,
   testId,
 }: Props) {
-  useEffect(() => {
-    if (!open) return
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [open, onClose])
+  const returnFocusRef = useRef<HTMLElement | null>(null)
 
-  if (!open) return null
-
-  return createPortal(
-    <div className="fixed inset-0 z-[10000] bg-black/25" onClick={onClose}>
-      <div
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose()
+      }}
+    >
+      <SheetContent
         ref={panelRef}
         id={id}
-        role={role}
-        aria-modal={role === 'dialog' ? true : undefined}
         aria-label={ariaLabel ?? (typeof title === 'string' ? title : undefined)}
         data-testid={testId}
-        className={`absolute inset-x-0 bottom-0 flex max-h-[min(78dvh,640px)] min-h-0 flex-col overflow-hidden rounded-t-2xl border-x-0 border-y border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[0_-18px_48px_rgba(54,35,28,0.22)] ${panelClassName}`}
-        onClick={(event) => event.stopPropagation()}
+        side="bottom"
+        showCloseButton={false}
+        overlayClassName="z-[10000] bg-black/25"
+        className={`z-[10001] max-h-[min(78dvh,640px)] min-h-0 overflow-hidden rounded-t-2xl border-x-0 border-y border-[var(--color-border)] shadow-[0_-18px_48px_rgba(54,35,28,0.22)] ${panelClassName}`}
+        onOpenAutoFocus={() => {
+          returnFocusRef.current = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          returnFocusRef.current?.focus()
+          returnFocusRef.current = null
+        }}
       >
-        <div className="shrink-0 border-b border-[var(--color-border)] px-4 py-3">
+        <SheetHeader className="shrink-0 border-b border-[var(--color-border)] px-4 py-3">
           <div className="flex min-h-10 items-center justify-between gap-3">
-            <div className="min-w-0 text-[11px] font-bold uppercase tracking-widest text-[var(--color-outline)]">
+            <SheetTitle className="min-w-0 text-[11px] font-bold uppercase tracking-widest text-[var(--color-outline)]">
               {title}
-            </div>
-            <button
-              type="button"
-              aria-label={closeLabel}
-              onClick={onClose}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-            >
-              <span className="material-symbols-outlined text-[20px]">close</span>
-            </button>
+            </SheetTitle>
+            <SheetClose asChild>
+              <Button
+                variant="ghost"
+                size="icon-lg"
+                aria-label={closeLabel}
+                className="shrink-0 rounded-full"
+              >
+                <X className="size-5" aria-hidden="true" />
+              </Button>
+            </SheetClose>
           </div>
           {headerExtra && (
             <div className="mt-3">
               {headerExtra}
             </div>
           )}
-        </div>
+        </SheetHeader>
 
         <div className={`min-h-0 flex-1 overflow-y-auto ${contentClassName}`}>
           {children}
         </div>
 
         {footer && (
-          <div className="shrink-0 border-t border-[var(--color-border)]">
+          <SheetFooter className="shrink-0 border-t border-[var(--color-border)] p-0">
             {footer}
-          </div>
+          </SheetFooter>
         )}
-      </div>
-    </div>,
-    document.body,
+      </SheetContent>
+    </Sheet>
   )
 }

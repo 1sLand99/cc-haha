@@ -43,13 +43,18 @@ describe('UpdateChecker', () => {
 
     render(<UpdateChecker />)
 
-    expect(screen.getByText('Update ready')).toBeInTheDocument()
+    const prompt = screen.getByRole('region', { name: 'Update ready' })
+    expect(prompt).toHaveAttribute('data-slot', 'update-ready-prompt')
     expect(screen.getByText('v0.1.5 has been downloaded. Restart when you are ready to use it.')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Claude Code Haha v0.1.5' })).toBeInTheDocument()
+    expect(prompt.querySelector('[data-slot="scroll-area"]')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Install and restart' })).toHaveAttribute('data-slot', 'button')
+    expect(screen.getByRole('button', { name: 'Later' })).toHaveAttribute('data-slot', 'button')
 
     const link = screen.getByRole('link', { name: 'Release notes' })
     expect(link).toHaveAttribute('href', 'https://example.com/releases/v0.1.5')
     expect(link).toHaveAttribute('target', '_blank')
+    expect(link.getAttribute('rel')?.split(/\s+/)).toEqual(expect.arrayContaining(['noopener', 'noreferrer']))
   })
 
   it('renders the update prompt in Electron desktop runtime', () => {
@@ -68,6 +73,36 @@ describe('UpdateChecker', () => {
 
     expect(screen.getByText('Update ready')).toBeInTheDocument()
     expect(screen.getByText('Install and restart')).toBeInTheDocument()
+  })
+
+  it('does not steal focus and restores it after choosing Later', async () => {
+    const opener = document.createElement('button')
+    opener.textContent = 'Continue working'
+    document.body.append(opener)
+    opener.focus()
+    const dismissPrompt = vi.fn()
+    useUpdateStore.setState({
+      status: 'downloaded',
+      dismissPrompt,
+    })
+
+    render(<UpdateChecker />)
+
+    expect(opener).toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: 'Later' }))
+
+    expect(dismissPrompt).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(opener).toHaveFocus())
+    opener.remove()
+  })
+
+  it('does not render the desktop update prompt in the browser runtime', () => {
+    window.desktopHost = browserHost
+    useUpdateStore.setState({ status: 'downloaded' })
+
+    render(<UpdateChecker />)
+
+    expect(screen.queryByRole('region', { name: 'Update ready' })).not.toBeInTheDocument()
   })
 
   it('shows downloaded bytes when the updater does not provide total size', () => {
@@ -117,7 +152,7 @@ describe('UpdateChecker', () => {
     render(<UpdateChecker />)
 
     expect(screen.getByText('Update ready')).toBeInTheDocument()
-    expect(screen.getByText('Update failed: installer failed')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Update failed: installer failed')
     expect(screen.getByText('Install and restart')).toBeInTheDocument()
   })
 

@@ -169,6 +169,63 @@ describe('Skills API', () => {
     )
   })
 
+  it('does not expose a mismatched market marker on a user skill', async () => {
+    const userSkillsRoot = path.join(tmpHome, '.claude', 'skills')
+    const skillDir = path.join(userSkillsRoot, 'skill-a')
+    await writeSkill(
+      userSkillsRoot,
+      'skill-a',
+      ['---', 'description: User skill', '---', '', '# Skill A'].join('\n'),
+    )
+    await fs.writeFile(
+      path.join(skillDir, '.market-meta.json'),
+      JSON.stringify({
+        id: 'clawhub:skill-b',
+        source: 'clawhub',
+        slug: 'skill-b',
+        installedAt: new Date(0).toISOString(),
+        fileCount: 1,
+      }),
+    )
+
+    const { req, url, segments } = makeRequest('/api/skills/detail?source=user&name=skill-a')
+    const res = await handleSkillsApi(req, url, segments)
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { detail: { marketMeta?: unknown } }
+    expect(body.detail.marketMeta).toBeUndefined()
+  })
+
+  it('never exposes a market marker on a project skill', async () => {
+    const projectRoot = path.join(tmpHome, 'workspace')
+    const projectSkillsRoot = path.join(projectRoot, '.claude', 'skills')
+    const skillDir = path.join(projectSkillsRoot, 'project-skill')
+    await writeSkill(
+      projectSkillsRoot,
+      'project-skill',
+      ['---', 'description: Project skill', '---', '', '# Project skill'].join('\n'),
+    )
+    await fs.writeFile(
+      path.join(skillDir, '.market-meta.json'),
+      JSON.stringify({
+        id: 'clawhub:project-skill',
+        source: 'clawhub',
+        slug: 'project-skill',
+        installedAt: new Date(0).toISOString(),
+        fileCount: 1,
+      }),
+    )
+
+    const { req, url, segments } = makeRequest(
+      `/api/skills/detail?source=project&name=project-skill&cwd=${encodeURIComponent(projectRoot)}`,
+    )
+    const res = await handleSkillsApi(req, url, segments)
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { detail: { marketMeta?: unknown } }
+    expect(body.detail.marketMeta).toBeUndefined()
+  })
+
   it('lists plugin skills after reload rereads an external enable toggle', async () => {
     const marketplaceRoot = path.join(tmpHome, 'marketplace-root')
     const pluginRoot = path.join(marketplaceRoot, 'plugins', 'draw')

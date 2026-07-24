@@ -1,4 +1,5 @@
 import { applyEdit, type EditDiff, type EditInput } from './popover'
+import { applyPreviewAgentTheme } from './theme'
 
 export type EditableSnapshot = { text: string; color: string; background: string; opacity: string; fontFamily: string }
 export type EditBubbleChange = EditDiff & { description?: string }
@@ -86,10 +87,11 @@ export function createEditBubble(el: HTMLElement, deps: Deps): { host: HTMLEleme
   const host = document.createElement('div')
   const rect = el.getBoundingClientRect()
   host.style.cssText = 'position:fixed;top:0;left:0;z-index:2147483647;visibility:hidden'
+  applyPreviewAgentTheme(host)
   const shadow = host.attachShadow({ mode: 'open' })
 
   const wrap = document.createElement('div')
-  wrap.setAttribute('style', 'width:340px;box-sizing:border-box;background:#fff;border-radius:14px;box-shadow:0 10px 34px rgba(0,0,0,.2);padding:12px;font:13px/1.45 -apple-system,system-ui,sans-serif;color:#111;display:flex;flex-direction:column;overflow:hidden')
+  wrap.setAttribute('style', 'width:340px;box-sizing:border-box;background:var(--cc-haha-color-surface);border:1px solid var(--cc-haha-color-border);border-radius:var(--cc-haha-radius-lg);box-shadow:var(--cc-haha-shadow-dropdown);padding:12px;font:13px/1.45 Inter,-apple-system,system-ui,sans-serif;color:var(--cc-haha-color-text-primary);display:flex;flex-direction:column;overflow:hidden')
 
   const body = document.createElement('div')
   body.setAttribute('style', 'min-height:0;overflow:auto')
@@ -97,13 +99,13 @@ export function createEditBubble(el: HTMLElement, deps: Deps): { host: HTMLEleme
   const desc = document.createElement('input')
   desc.setAttribute('data-field', 'description')
   desc.placeholder = '描述这些更改…'
-  desc.setAttribute('style', 'width:100%;box-sizing:border-box;border:none;outline:none;font-size:14px;padding:6px 4px')
+  desc.setAttribute('style', 'width:100%;box-sizing:border-box;border:none;outline:none;background:transparent;color:var(--cc-haha-color-text-primary);font-size:14px;padding:6px 4px')
   desc.addEventListener('input', () => { description = desc.value })
   body.appendChild(desc)
 
   const tag = document.createElement('div')
   tag.textContent = el.tagName.toLowerCase()
-  tag.setAttribute('style', 'color:#8a8a8a;border-top:1px solid #eee;margin-top:6px;padding:8px 4px 4px;font-weight:600')
+  tag.setAttribute('style', 'color:var(--cc-haha-color-text-tertiary);border-top:1px solid var(--cc-haha-color-border);margin-top:6px;padding:8px 4px 4px;font-weight:600')
   body.appendChild(tag)
 
   for (const f of FIELDS) {
@@ -111,11 +113,11 @@ export function createEditBubble(el: HTMLElement, deps: Deps): { host: HTMLEleme
     row.setAttribute('style', 'display:flex;align-items:center;gap:10px;padding:5px 4px')
     const lab = document.createElement('span')
     lab.textContent = f.label
-    lab.setAttribute('style', 'width:74px;color:#555;flex:none')
+    lab.setAttribute('style', 'width:74px;color:var(--cc-haha-color-text-secondary);flex:none')
     const inp = document.createElement('input')
     inp.setAttribute('data-field', f.key)
     inp.value = original[f.key]
-    inp.setAttribute('style', 'flex:1;min-width:0;border:1px solid #e2e2e2;border-radius:8px;padding:5px 9px;font:inherit')
+    inp.setAttribute('style', 'flex:1;min-width:0;border:1px solid var(--cc-haha-color-border);border-radius:var(--cc-haha-radius-md);background:var(--cc-haha-color-surface);color:var(--cc-haha-color-text-primary);padding:5px 9px;font:inherit;outline:none')
     const fieldKey = f.key
     inp.addEventListener('input', () => {
       current[fieldKey] = inp.value
@@ -130,13 +132,15 @@ export function createEditBubble(el: HTMLElement, deps: Deps): { host: HTMLEleme
   footer.setAttribute('data-region', 'footer')
   footer.setAttribute('style', 'display:flex;justify-content:space-between;align-items:center;margin-top:12px')
   const cancelBtn = document.createElement('button')
+  cancelBtn.type = 'button'
   cancelBtn.setAttribute('data-action', 'cancel')
   cancelBtn.textContent = '取消'
-  cancelBtn.setAttribute('style', 'border:none;background:#f1f1f1;border-radius:18px;padding:7px 16px;cursor:pointer;font:inherit')
+  cancelBtn.setAttribute('style', 'border:1px solid var(--cc-haha-color-border);background:var(--cc-haha-color-surface);color:var(--cc-haha-color-text-primary);border-radius:var(--cc-haha-radius-md);padding:7px 16px;cursor:pointer;font:inherit')
   const confirmBtn = document.createElement('button')
+  confirmBtn.type = 'button'
   confirmBtn.setAttribute('data-action', 'confirm')
   confirmBtn.textContent = '✓'
-  confirmBtn.setAttribute('style', 'border:none;background:#2f7bff;color:#fff;border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:16px')
+  confirmBtn.setAttribute('style', 'border:1px solid transparent;background:var(--cc-haha-color-brand);color:var(--cc-haha-color-on-brand);border-radius:var(--cc-haha-radius-md);width:34px;height:34px;cursor:pointer;font-size:16px')
 
   cancelBtn.addEventListener('click', () => {
     applyEdit(el, original)

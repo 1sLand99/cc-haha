@@ -4,6 +4,7 @@ import { formatTraceJson } from '../../../lib/traceViewModel'
 import { formatClockTime, formatDurationMs } from '../../../lib/trace/formatters'
 import { CodeViewer } from '../../chat/CodeViewer'
 import { Section } from './Section'
+import { Alert } from '../../ui/alert'
 
 export function ToolDetail({ span }: { span: TraceSpan }) {
   const t = useTranslation()
@@ -20,17 +21,17 @@ export function ToolDetail({ span }: { span: TraceSpan }) {
 
       <Section sectionKey="tool.result" title={t('trace.section.result')} defaultOpen>
         {pending ? (
-          <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-tertiary)]">
+          <Alert className="border-dashed text-xs text-[var(--color-text-tertiary)]">
             {t('trace.waitingForResult')}
-          </div>
+          </Alert>
         ) : outputs.length > 0 ? (
           <div className="flex flex-col gap-2">
             {outputs.map((output, index) => <OutputView key={index} value={output} />)}
           </div>
         ) : (
-          <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-tertiary)]">
+          <Alert className="border-dashed text-xs text-[var(--color-text-tertiary)]">
             {t('trace.noData')}
-          </div>
+          </Alert>
         )}
       </Section>
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from '../i18n'
 import { useMarketStore } from '../stores/marketStore'
 import { useSkillStore } from '../stores/skillStore'
@@ -9,12 +9,36 @@ import { MarketSkillDetail } from '../components/market/MarketSkillDetail'
 import { ConfirmDialog } from '../components/shared/ConfirmDialog'
 import type { NormalizedSkill } from '../types/market'
 
+function focusSkillControl(id: string, preferred: 'action' | 'open' = 'action') {
+  requestAnimationFrame(() => {
+    const action = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-market-skill-action-id]'),
+    ).find((element) => element.dataset.marketSkillActionId === id)
+    const openButton = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-market-skill-open-id]'),
+    ).find((element) => element.dataset.marketSkillOpenId === id)
+    const target =
+      (preferred === 'open' ? openButton ?? action : action ?? openButton) ??
+      document.querySelector<HTMLElement>('[data-testid="market-search-input"]')
+    target?.focus()
+  })
+}
+
 export function Market() {
   const t = useTranslation()
   const selectedId = useMarketStore((s) => s.selectedId)
   const installingIds = useMarketStore((s) => s.installingIds)
   const [confirmInstall, setConfirmInstall] = useState<NormalizedSkill | null>(null)
   const [confirmUninstall, setConfirmUninstall] = useState<NormalizedSkill | null>(null)
+  const lastOpenedIdRef = useRef<string | null>(null)
+  const previousSelectedIdRef = useRef<string | null>(selectedId)
+
+  useEffect(() => {
+    if (previousSelectedIdRef.current && !selectedId && lastOpenedIdRef.current) {
+      focusSkillControl(lastOpenedIdRef.current, 'open')
+    }
+    previousSelectedIdRef.current = selectedId
+  }, [selectedId])
 
   const findSkill = (id: string): NormalizedSkill | null => {
     const state = useMarketStore.getState()
@@ -37,6 +61,7 @@ export function Market() {
     if (!skill) return
     const ok = await useMarketStore.getState().install(skill.id)
     setConfirmInstall(null)
+    focusSkillControl(skill.id)
     if (ok) {
       useUIStore.getState().addToast({
         type: 'success',
@@ -63,6 +88,7 @@ export function Market() {
     if (!skill) return
     const ok = await useMarketStore.getState().uninstall(skill.id)
     setConfirmUninstall(null)
+    focusSkillControl(skill.id)
     if (ok) {
       useUIStore.getState().addToast({
         type: 'success',
@@ -82,7 +108,13 @@ export function Market() {
       {selectedId ? (
         <MarketSkillDetail onRequestInstall={requestInstall} onRequestUninstall={requestUninstall} />
       ) : (
-        <MarketHome onRequestInstall={requestInstall} />
+        <MarketHome
+          onRequestInstall={requestInstall}
+          onOpenSkill={(id) => {
+            lastOpenedIdRef.current = id
+            void useMarketStore.getState().openDetail(id)
+          }}
+        />
       )}
 
       <InstallConfirmDialog
@@ -90,19 +122,27 @@ export function Market() {
         open={confirmInstall !== null}
         installing={confirmInstall !== null && installingIds.has(confirmInstall.id)}
         onConfirm={() => void runInstall()}
-        onClose={() => setConfirmInstall(null)}
+        onClose={() => {
+          const id = confirmInstall?.id
+          setConfirmInstall(null)
+          if (id) focusSkillControl(id)
+        }}
       />
 
       <ConfirmDialog
         open={confirmUninstall !== null}
-        onClose={() => setConfirmUninstall(null)}
+        onClose={() => {
+          const id = confirmUninstall?.id
+          setConfirmUninstall(null)
+          if (id) focusSkillControl(id)
+        }}
         onConfirm={() => void runUninstall()}
         title={t('market.uninstall.confirmTitle')}
         body={
           confirmUninstall
             ? t('market.uninstall.confirmMessage', {
                 name: confirmUninstall.name,
-                path: `~/.claude/skills/${confirmUninstall.slug}/`,
+                path: `…/skills/${confirmUninstall.installedInfo?.dirName ?? confirmUninstall.slug.toLowerCase()}/`,
               })
             : ''
         }

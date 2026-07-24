@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
+import '@testing-library/jest-dom'
 import { FindInPageModal } from './FindInPageModal'
 import {
   notifyConversationFindContentChanged,
@@ -38,8 +40,38 @@ describe('FindInPageModal', () => {
     fireEvent.change(screen.getByPlaceholderText('Find'), { target: { value: 'searchable' } })
 
     await waitFor(() => expect(screen.getByText('1 / 1')).toBeTruthy())
+    expect(screen.getByRole('dialog', { name: 'Find in page' })).toHaveAttribute('data-slot', 'card')
+    expect(screen.getByPlaceholderText('Find')).toHaveAttribute('data-slot', 'input')
+    expect(screen.getByRole('button', { name: 'Previous match' })).toHaveAttribute('data-variant', 'ghost')
+    expect(screen.getByRole('button', { name: 'Next match' })).toHaveAttribute('data-variant', 'ghost')
+    expect(screen.getByRole('button', { name: 'Close find bar' })).toHaveAttribute('data-variant', 'ghost')
     expect(highlights.get('cc-find-active')?.ranges).toHaveLength(1)
     expect(highlights.get('cc-find-active')?.ranges[0]?.startContainer.parentElement?.tagName).toBe('MAIN')
+  })
+
+  it('restores focus to the opener after Escape closes the find bar', async () => {
+    vi.stubGlobal('CSS', { highlights: new Map() })
+
+    function Harness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Open find</button>
+          <FindInPageModal open={open} onClose={() => setOpen(false)} />
+        </>
+      )
+    }
+
+    render(<Harness />)
+    const opener = screen.getByRole('button', { name: 'Open find' })
+    opener.focus()
+    fireEvent.click(opener)
+    const input = await screen.findByPlaceholderText('Find')
+    await waitFor(() => expect(input).toHaveFocus())
+
+    fireEvent.keyDown(input, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Find in page' })).not.toBeInTheDocument())
+    expect(opener).toHaveFocus()
   })
 
   it('prefers visible non-chat content while a conversation controller is mounted', async () => {

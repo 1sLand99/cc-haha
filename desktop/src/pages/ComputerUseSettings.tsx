@@ -1,35 +1,53 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { computerUseApi, type ComputerUseStatus, type SetupResult, type InstalledApp, type AuthorizedApp } from '../api/computerUse'
+import {
+  Check,
+  CircleCheck,
+  Download,
+  ExternalLink,
+  FolderOpen,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Search,
+} from 'lucide-react'
+import {
+  computerUseApi,
+  type AuthorizedApp,
+  type ComputerUseConfig,
+  type ComputerUseStatus,
+  type InstalledApp,
+  type SetupResult,
+} from '../api/computerUse'
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../components/ui/card'
+import { Checkbox } from '../components/ui/checkbox'
+import {
+  ComputerUseStatusRow,
+  StatusIcon,
+} from '../components/ui/custom/computer-use-status-row'
+import { LoadingButton } from '../components/ui/custom/loading-button'
+import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
+import { ScrollArea } from '../components/ui/scroll-area'
+import { Skeleton } from '../components/ui/skeleton'
+import { Switch } from '../components/ui/switch'
 import { useTranslation } from '../i18n'
 import { getDesktopHost } from '../lib/desktopHost'
 
 type CheckState = 'loading' | 'ready' | 'error'
+type ConfigState = 'loading' | 'ready' | 'error'
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 const PYTHON_DOWNLOAD_URLS: Record<string, string> = {
   darwin: 'https://www.python.org/downloads/macos/',
   win32: 'https://www.python.org/downloads/windows/',
-}
-
-function StatusIcon({ ok }: { ok: boolean | null }) {
-  if (ok === null) {
-    return <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)]">help</span>
-  }
-  return ok ? (
-    <span className="material-symbols-outlined text-[18px] text-green-500" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-  ) : (
-    <span className="material-symbols-outlined text-[18px] text-red-400" style={{ fontVariationSettings: "'FILL' 1" }}>cancel</span>
-  )
-}
-
-function StatusRow({ label, ok, detail }: { label: string; ok: boolean | null; detail: string }) {
-  return (
-    <div className="flex items-center gap-3 py-2.5 px-4 rounded-lg bg-[var(--color-surface-container-low)]">
-      <StatusIcon ok={ok} />
-      <div className="flex-1 min-w-0">
-        <span className="text-sm font-medium text-[var(--color-text-primary)]">{label}</span>
-        <span className="ml-2 text-xs text-[var(--color-text-tertiary)]">{detail}</span>
-      </div>
-    </div>
-  )
 }
 
 async function openSystemSettings(pane: 'Privacy_ScreenCapture' | 'Privacy_Accessibility') {
@@ -55,26 +73,46 @@ export function ComputerUseSettings() {
   // App authorization state
   const [installedApps, setInstalledApps] = useState<InstalledApp[]>([])
   const [authorizedBundleIds, setAuthorizedBundleIds] = useState<Set<string>>(new Set())
-  const [authorizedApps, setAuthorizedApps] = useState<AuthorizedApp[]>([])
   const [appsLoading, setAppsLoading] = useState(false)
-  const [appsSaved, setAppsSaved] = useState(false)
+  const [configState, setConfigState] = useState<ConfigState>('loading')
+  const [configSaveState, setConfigSaveState] = useState<SaveState>('idle')
+  const [appsLoadFailed, setAppsLoadFailed] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [computerUseEnabled, setComputerUseEnabled] = useState(true)
-  const [clipboardAccess, setClipboardAccess] = useState(true)
-  const [systemKeys, setSystemKeys] = useState(true)
+  const [computerUseEnabled, setComputerUseEnabled] = useState(false)
+  const [clipboardRead, setClipboardRead] = useState(false)
+  const [clipboardWrite, setClipboardWrite] = useState(false)
+  const [systemKeys, setSystemKeys] = useState(false)
   const [pythonPathDraft, setPythonPathDraft] = useState('')
   const [pythonPathSaved, setPythonPathSaved] = useState('')
   const [pythonPathSaving, setPythonPathSaving] = useState(false)
   const [pythonPathMessage, setPythonPathMessage] = useState<string | null>(null)
+  const [systemSettingsError, setSystemSettingsError] = useState<string | null>(null)
   const configMutationSeqRef = useRef(0)
+  const configSnapshotRef = useRef({
+    enabled: false,
+    authorizedApps: [] as AuthorizedApp[],
+    grantFlags: {
+      clipboardRead: false,
+      clipboardWrite: false,
+      systemKeyCombos: false,
+    },
+  })
+  const statusRequestSeqRef = useRef(0)
+  const appsRequestSeqRef = useRef(0)
+  const configWriteSeqRef = useRef(0)
+  const configWriteQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const saveFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const fetchStatus = useCallback(async () => {
+    const requestSeq = ++statusRequestSeqRef.current
     setCheckState('loading')
     try {
       const s = await computerUseApi.getStatus()
+      if (requestSeq !== statusRequestSeqRef.current) return
       setStatus(s)
       setCheckState('ready')
     } catch {
+      if (requestSeq !== statusRequestSeqRef.current) return
       setCheckState('error')
     }
   }, [])
@@ -84,48 +122,101 @@ export function ComputerUseSettings() {
     requestSeq = configMutationSeqRef.current,
   ) => {
     if (requestSeq !== configMutationSeqRef.current) return
+    configSnapshotRef.current = {
+      enabled: configResult.enabled,
+      authorizedApps: configResult.authorizedApps,
+      grantFlags: configResult.grantFlags,
+    }
     setComputerUseEnabled(configResult.enabled)
-    setAuthorizedApps(configResult.authorizedApps)
     setAuthorizedBundleIds(new Set(configResult.authorizedApps.map(a => a.bundleId)))
-    setClipboardAccess(configResult.grantFlags.clipboardRead)
+    setClipboardRead(configResult.grantFlags.clipboardRead)
+    setClipboardWrite(configResult.grantFlags.clipboardWrite)
     setSystemKeys(configResult.grantFlags.systemKeyCombos)
     setPythonPathDraft(configResult.pythonPath ?? '')
     setPythonPathSaved(configResult.pythonPath ?? '')
+    setConfigState('ready')
   }, [])
 
   const fetchConfig = useCallback(async () => {
     const requestSeq = configMutationSeqRef.current
+    setConfigState('loading')
     try {
       applyConfig(await computerUseApi.getAuthorizedApps(), requestSeq)
     } catch {
-      // API not ready
+      if (requestSeq === configMutationSeqRef.current) setConfigState('error')
     }
   }, [applyConfig])
 
   const fetchApps = useCallback(async () => {
+    const appsRequestSeq = ++appsRequestSeqRef.current
     const requestSeq = configMutationSeqRef.current
     setAppsLoading(true)
+    setAppsLoadFailed(false)
     try {
       const [appsResult, configResult] = await Promise.all([
         computerUseApi.getInstalledApps(),
         computerUseApi.getAuthorizedApps(),
       ])
+      if (appsRequestSeq !== appsRequestSeqRef.current) return
       setInstalledApps(appsResult.apps)
       applyConfig(configResult, requestSeq)
     } catch {
-      // API not ready
+      if (appsRequestSeq !== appsRequestSeqRef.current) return
+      setAppsLoadFailed(true)
     } finally {
-      setAppsLoading(false)
+      if (appsRequestSeq === appsRequestSeqRef.current) setAppsLoading(false)
     }
   }, [applyConfig])
+
+  const persistConfig = useCallback((
+    config: Partial<ComputerUseConfig>,
+    showFeedback = true,
+  ) => {
+    const writeSeq = ++configWriteSeqRef.current
+    if (showFeedback) {
+      if (saveFeedbackTimerRef.current) clearTimeout(saveFeedbackTimerRef.current)
+      setConfigSaveState('saving')
+    }
+
+    const request = configWriteQueueRef.current
+      .catch(() => undefined)
+      .then(() => computerUseApi.setAuthorizedApps(config))
+    configWriteQueueRef.current = request.then(() => undefined, () => undefined)
+
+    void request.then(() => {
+      if (!showFeedback || writeSeq !== configWriteSeqRef.current) return
+      setConfigSaveState('saved')
+      saveFeedbackTimerRef.current = setTimeout(() => {
+        if (writeSeq === configWriteSeqRef.current) setConfigSaveState('idle')
+      }, 1500)
+    }).catch(() => {
+      if (showFeedback && writeSeq === configWriteSeqRef.current) {
+        setConfigSaveState('error')
+        void fetchConfig()
+      }
+    })
+
+    return request
+  }, [fetchConfig])
 
   useEffect(() => {
     fetchStatus()
     fetchConfig()
   }, [fetchStatus, fetchConfig])
 
+  useEffect(() => () => {
+    statusRequestSeqRef.current += 1
+    appsRequestSeqRef.current += 1
+    configWriteSeqRef.current += 1
+    if (saveFeedbackTimerRef.current) clearTimeout(saveFeedbackTimerRef.current)
+  }, [])
+
   // Load apps when environment is ready
-  const envReady = status?.venv.created && status?.dependencies.installed
+  const envReady = Boolean(
+    status?.supported
+    && status.venv.created
+    && status.dependencies.installed,
+  )
   useEffect(() => {
     if (envReady) fetchApps()
   }, [envReady, fetchApps])
@@ -145,56 +236,80 @@ export function ComputerUseSettings() {
     }
   }
 
-  const toggleApp = (app: InstalledApp) => {
+  const toggleApp = (app: InstalledApp, authorized: boolean) => {
     configMutationSeqRef.current += 1
-    const newSet = new Set(authorizedBundleIds)
-    let newAuthorized = [...authorizedApps]
-    if (newSet.has(app.bundleId)) {
-      newSet.delete(app.bundleId)
-      newAuthorized = newAuthorized.filter(a => a.bundleId !== app.bundleId)
-    } else {
-      newSet.add(app.bundleId)
-      newAuthorized.push({
+    const snapshot = configSnapshotRef.current
+    const existing = snapshot.authorizedApps.some(
+      candidate => candidate.bundleId === app.bundleId,
+    )
+    if (existing === authorized) return
+
+    const newAuthorized = authorized
+      ? [
+          ...snapshot.authorizedApps,
+          {
         bundleId: app.bundleId,
         displayName: app.displayName,
         authorizedAt: new Date().toISOString(),
-      })
-    }
-    setAuthorizedBundleIds(newSet)
-    setAuthorizedApps(newAuthorized)
-
-    // Auto-save
-    computerUseApi.setAuthorizedApps({
+          },
+        ]
+      : snapshot.authorizedApps.filter(
+          candidate => candidate.bundleId !== app.bundleId,
+        )
+    configSnapshotRef.current = {
+      ...snapshot,
       authorizedApps: newAuthorized,
-      grantFlags: { clipboardRead: clipboardAccess, clipboardWrite: clipboardAccess, systemKeyCombos: systemKeys },
-    }).then(() => {
-      setAppsSaved(true)
-      setTimeout(() => setAppsSaved(false), 1500)
+    }
+    setAuthorizedBundleIds(new Set(newAuthorized.map(candidate => candidate.bundleId)))
+
+    persistConfig({
+      authorizedApps: newAuthorized,
+      grantFlags: snapshot.grantFlags,
     })
   }
 
-  const toggleFlag = (flag: 'clipboard' | 'systemKeys', value: boolean) => {
+  const toggleFlag = (
+    flag: 'clipboardRead' | 'clipboardWrite' | 'systemKeys',
+    value: boolean,
+  ) => {
     configMutationSeqRef.current += 1
-    if (flag === 'clipboard') setClipboardAccess(value)
+    const snapshot = configSnapshotRef.current
+    const grantFlags = {
+      ...snapshot.grantFlags,
+      ...(flag === 'clipboardRead' ? { clipboardRead: value } : {}),
+      ...(flag === 'clipboardWrite' ? { clipboardWrite: value } : {}),
+      ...(flag === 'systemKeys' ? { systemKeyCombos: value } : {}),
+    }
+    configSnapshotRef.current = { ...snapshot, grantFlags }
+    if (flag === 'clipboardRead') setClipboardRead(value)
+    else if (flag === 'clipboardWrite') setClipboardWrite(value)
     else setSystemKeys(value)
 
-    computerUseApi.setAuthorizedApps({
-      authorizedApps,
-      grantFlags: {
-        clipboardRead: flag === 'clipboard' ? value : clipboardAccess,
-        clipboardWrite: flag === 'clipboard' ? value : clipboardAccess,
-        systemKeyCombos: flag === 'systemKeys' ? value : systemKeys,
-      },
+    persistConfig({
+      authorizedApps: snapshot.authorizedApps,
+      grantFlags,
     })
   }
 
   const toggleComputerUseEnabled = (value: boolean) => {
     configMutationSeqRef.current += 1
+    configSnapshotRef.current = {
+      ...configSnapshotRef.current,
+      enabled: value,
+    }
     setComputerUseEnabled(value)
-    computerUseApi.setAuthorizedApps({ enabled: value }).then(() => {
-      setAppsSaved(true)
-      setTimeout(() => setAppsSaved(false), 1500)
-    })
+    persistConfig({ enabled: value })
+  }
+
+  const handleOpenSystemSettings = async (
+    pane: 'Privacy_ScreenCapture' | 'Privacy_Accessibility',
+  ) => {
+    setSystemSettingsError(null)
+    try {
+      await openSystemSettings(pane)
+    } catch {
+      setSystemSettingsError(t('settings.computerUse.openSettingsFailed'))
+    }
   }
 
   const savePythonPath = async (value = pythonPathDraft) => {
@@ -203,7 +318,7 @@ export function ComputerUseSettings() {
     setPythonPathSaving(true)
     setPythonPathMessage(null)
     try {
-      await computerUseApi.setAuthorizedApps({ pythonPath: normalized || null })
+      await persistConfig({ pythonPath: normalized || null }, false)
       setPythonPathDraft(normalized)
       setPythonPathSaved(normalized)
       setPythonPathMessage(t('settings.computerUse.pythonPathSaved'))
@@ -277,121 +392,152 @@ export function ComputerUseSettings() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      {/* Title */}
       <div>
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
             {t('settings.computerUse.title')}
           </h2>
-          <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2">
+            <Switch
+              id="computer-use-enabled"
               checked={computerUseEnabled}
-              onChange={e => toggleComputerUseEnabled(e.target.checked)}
-              className="rounded border-[var(--color-border)] accent-[var(--color-brand)]"
+              disabled={configState !== 'ready'}
+              onCheckedChange={toggleComputerUseEnabled}
             />
-            {t('settings.computerUse.enabledToggle')}
-          </label>
+            <Label htmlFor="computer-use-enabled" className="cursor-pointer text-[var(--color-text-secondary)]">
+              {t('settings.computerUse.enabledToggle')}
+            </Label>
+          </div>
         </div>
         <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
           {t('settings.computerUse.description')}
         </p>
       </div>
 
-      {!computerUseEnabled && (
-        <div className="px-4 py-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-sm text-yellow-700">
-          {t('settings.computerUse.disabledHint')}
-        </div>
+      {configState === 'error' && (
+        <Alert variant="destructive">
+          <AlertTitle>{t('common.error')}</AlertTitle>
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{t('settings.computerUse.configLoadFailed')}</span>
+            <Button variant="outline" size="sm" onClick={() => void fetchConfig()}>
+              <RefreshCw aria-hidden="true" />
+              {t('common.retry')}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {configState === 'ready' && !computerUseEnabled && (
+        <Alert className="border-yellow-500/30 bg-yellow-500/10">
+          <AlertDescription className="text-yellow-700">
+            {t('settings.computerUse.disabledHint')}
+          </AlertDescription>
+        </Alert>
       )}
 
       {checkState === 'loading' ? (
-        <div className="py-8 text-center text-sm text-[var(--color-text-tertiary)]">
-          {t('common.loading')}
+        <div className="space-y-2" role="status" aria-label={t('common.loading')}>
+          <Skeleton className="h-[54px] w-full" />
+          <Skeleton className="h-[54px] w-full" />
+          <Skeleton className="h-[54px] w-full" />
         </div>
       ) : checkState === 'error' ? (
-        <div className="py-8 text-center text-sm text-red-400">
-          Failed to check status.
-          <button onClick={fetchStatus} className="ml-2 underline">{t('common.retry')}</button>
-        </div>
+        <Alert variant="destructive">
+          <AlertTitle>{t('common.error')}</AlertTitle>
+          <AlertDescription className="flex items-center justify-between gap-3">
+            <span>{t('settings.computerUse.statusCheckFailed')}</span>
+            <Button variant="outline" size="sm" onClick={fetchStatus}>
+              <RefreshCw aria-hidden="true" />
+              {t('common.retry')}
+            </Button>
+          </AlertDescription>
+        </Alert>
       ) : status ? (
         <>
           {!status.supported && (
-            <div className="px-4 py-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-sm text-yellow-600">
-              {t('settings.computerUse.notSupported')}
-            </div>
+            <Alert className="border-yellow-500/30 bg-yellow-500/10">
+              <AlertDescription className="text-yellow-700">
+                {t('settings.computerUse.notSupported')}
+              </AlertDescription>
+            </Alert>
           )}
 
-          {/* Status checks */}
           <div className="space-y-2">
-            <StatusRow
+            <ComputerUseStatusRow
               label={t('settings.computerUse.python')}
               ok={status.python.installed}
               detail={pythonDetail}
             />
-            <StatusRow
+            <ComputerUseStatusRow
               label={t('settings.computerUse.venv')}
               ok={status.venv.created}
               detail={status.venv.created ? `${t('settings.computerUse.venvReady')} — ${status.venv.path}` : t('settings.computerUse.venvNotReady')}
             />
-            <StatusRow
+            <ComputerUseStatusRow
               label={t('settings.computerUse.deps')}
               ok={status.dependencies.installed}
               detail={status.dependencies.installed ? t('settings.computerUse.depsReady') : t('settings.computerUse.depsNotReady')}
             />
           </div>
 
-          <div className="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-4">
-            <label htmlFor="computer-use-python-path" className="block text-sm font-medium text-[var(--color-text-primary)]">
-              {t('settings.computerUse.pythonPathLabel')}
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <input
-                id="computer-use-python-path"
-                type="text"
-                value={pythonPathDraft}
-                onChange={e => {
-                  setPythonPathDraft(e.target.value)
-                  setPythonPathMessage(null)
-                }}
-                placeholder={t('settings.computerUse.pythonPathPlaceholder')}
-                className="min-w-[220px] flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container)] px-3 py-2 font-mono text-xs text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-brand)] focus:outline-none"
-              />
-              <button
-                onClick={choosePythonPath}
-                disabled={pythonPathSaving}
-                className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
-              >
-                <span className="material-symbols-outlined text-[16px]">folder_open</span>
-                {t('settings.computerUse.pythonPathBrowse')}
-              </button>
-              <button
-                onClick={() => savePythonPath()}
-                disabled={pythonPathSaving || !pythonPathDirty}
-                className="flex items-center gap-1.5 rounded-lg bg-[var(--color-brand)] px-3 py-2 text-xs font-semibold text-[var(--color-on-primary)] hover:opacity-90 disabled:opacity-50"
-              >
-                <span className="material-symbols-outlined text-[16px]">{pythonPathSaving ? 'hourglass_empty' : 'save'}</span>
-                {t('settings.computerUse.pythonPathSave')}
-              </button>
-              {pythonPathSaved && (
-                <button
-                  onClick={() => savePythonPath('')}
+          <Card>
+            <CardContent className="space-y-2">
+              <Label htmlFor="computer-use-python-path">
+                {t('settings.computerUse.pythonPathLabel')}
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  id="computer-use-python-path"
+                  type="text"
+                  value={pythonPathDraft}
+                  onChange={event => {
+                    setPythonPathDraft(event.target.value)
+                    setPythonPathMessage(null)
+                  }}
+                  placeholder={t('settings.computerUse.pythonPathPlaceholder')}
+                  aria-describedby="computer-use-python-path-hint"
+                  className="min-w-[220px] flex-1 font-mono text-xs"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={choosePythonPath}
                   disabled={pythonPathSaving}
-                  className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
                 >
-                  <span className="material-symbols-outlined text-[16px]">restart_alt</span>
-                  {t('settings.computerUse.pythonPathAuto')}
-                </button>
-              )}
-            </div>
-            <p className="text-xs text-[var(--color-text-tertiary)]">
-              {pythonPathMessage ?? t('settings.computerUse.pythonPathHint')}
-            </p>
-          </div>
+                  <FolderOpen aria-hidden="true" />
+                  {t('settings.computerUse.pythonPathBrowse')}
+                </Button>
+                <LoadingButton
+                  loading={pythonPathSaving}
+                  onClick={() => void savePythonPath()}
+                  disabled={!pythonPathDirty}
+                >
+                  {!pythonPathSaving && <Save aria-hidden="true" />}
+                  {t('settings.computerUse.pythonPathSave')}
+                </LoadingButton>
+                {pythonPathSaved && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => void savePythonPath('')}
+                    disabled={pythonPathSaving}
+                  >
+                    <RotateCcw aria-hidden="true" />
+                    {t('settings.computerUse.pythonPathAuto')}
+                  </Button>
+                )}
+              </div>
+              <p
+                id="computer-use-python-path-hint"
+                role={pythonPathMessage ? 'status' : undefined}
+                className="text-xs text-[var(--color-text-tertiary)]"
+              >
+                {pythonPathMessage ?? t('settings.computerUse.pythonPathHint')}
+              </p>
+            </CardContent>
+          </Card>
 
-          {/* macOS Permissions — only shown on macOS (darwin) */}
           {envReady && status.platform === 'darwin' && (
             <>
-              <StatusRow
+              <ComputerUseStatusRow
                 label={t('settings.computerUse.accessibility')}
                 ok={status.permissions.accessibility}
                 detail={
@@ -400,7 +546,7 @@ export function ComputerUseSettings() {
                       : t('settings.computerUse.permDenied')
                 }
               />
-              <StatusRow
+              <ComputerUseStatusRow
                 label={t('settings.computerUse.screenRecording')}
                 ok={screenRecordingReady}
                 detail={
@@ -410,180 +556,242 @@ export function ComputerUseSettings() {
                 }
               />
               {(accessibilityNeedsAttention || screenRecordingNeedsAttention) && (
-                <div className="flex flex-col gap-2 px-4 py-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
-                  <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.computerUse.permRestartHint')}</p>
-                  <div className="flex gap-2">
-                    {accessibilityNeedsAttention && (
-                      <button
-                        onClick={() => openSystemSettings('Privacy_Accessibility')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--color-text-accent)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--color-surface-hover)]"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">open_in_new</span>
-                        {t('settings.computerUse.openAccessibility')}
-                      </button>
-                    )}
-                    {screenRecordingNeedsAttention && (
-                      <button
-                        onClick={() => openSystemSettings('Privacy_ScreenCapture')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--color-text-accent)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--color-surface-hover)]"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">open_in_new</span>
-                        {t('settings.computerUse.openScreenRecording')}
-                      </button>
-                    )}
-                  </div>
-                </div>
+                <Alert className="border-yellow-500/20 bg-yellow-500/5">
+                  <AlertDescription>
+                    <p>{t('settings.computerUse.permRestartHint')}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {accessibilityNeedsAttention && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => void handleOpenSystemSettings('Privacy_Accessibility')}
+                        >
+                          <ExternalLink aria-hidden="true" />
+                          {t('settings.computerUse.openAccessibility')}
+                        </Button>
+                      )}
+                      {screenRecordingNeedsAttention && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => void handleOpenSystemSettings('Privacy_ScreenCapture')}
+                        >
+                          <ExternalLink aria-hidden="true" />
+                          {t('settings.computerUse.openScreenRecording')}
+                        </Button>
+                      )}
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
+              {systemSettingsError && (
+                <Alert variant="destructive">
+                  <AlertDescription>{systemSettingsError}</AlertDescription>
+                </Alert>
               )}
             </>
           )}
 
           {allReady && (status.platform !== 'darwin' || (status.permissions.accessibility && screenRecordingReady)) && (
-            <div className="px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/30 text-sm text-green-600 flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>verified</span>
-              {t('settings.computerUse.allReady')}
-            </div>
+            <Alert className="border-green-500/30 bg-green-500/10">
+              <AlertDescription className="flex items-center gap-2 text-green-600">
+                <CircleCheck className="h-[18px] w-[18px]" aria-hidden="true" />
+                {t('settings.computerUse.allReady')}
+              </AlertDescription>
+            </Alert>
           )}
 
           {setupResult && (
-            <div className={`rounded-lg border p-4 space-y-2 ${setupResult.success ? 'bg-green-500/5 border-green-500/30' : 'bg-red-500/5 border-red-500/30'}`}>
-              <div className={`text-sm font-medium ${setupResult.success ? 'text-green-600' : 'text-red-400'}`}>
+            <Alert
+              variant={setupResult.success ? 'default' : 'destructive'}
+              className={setupResult.success ? 'border-green-500/30 bg-green-500/5' : undefined}
+            >
+              <AlertTitle className={setupResult.success ? 'text-green-600' : undefined}>
                 {setupResult.success ? t('settings.computerUse.setupSuccess') : t('settings.computerUse.setupFail')}
-              </div>
-              {setupResult.steps.map((step, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-                  <StatusIcon ok={step.ok} />
-                  <span>{step.message}</span>
-                </div>
-              ))}
-            </div>
+              </AlertTitle>
+              <AlertDescription className="space-y-2">
+                {setupResult.steps.map((step, index) => (
+                  <div key={`${step.name}-${index}`} className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+                    <StatusIcon ok={step.ok} />
+                    <span>{step.message}</span>
+                  </div>
+                ))}
+              </AlertDescription>
+            </Alert>
           )}
 
-          {/* Action buttons */}
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             {!status.python.installed && (
-              <button
-                onClick={() => openExternalUrl(pythonDownloadUrl)}
-                className="flex items-center gap-2 px-5 py-2.5 bg-[var(--color-brand)] text-[var(--color-on-primary)] text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity"
+              <Button
+                size="lg"
+                onClick={() => void openExternalUrl(pythonDownloadUrl)}
               >
-                <span className="material-symbols-outlined text-[18px]">open_in_new</span>
+                <ExternalLink aria-hidden="true" />
                 {t('settings.computerUse.downloadPython')}
-              </button>
+              </Button>
             )}
-            {!envReady && status.python.installed && (
-              <button
-                onClick={handleSetup}
-                disabled={setupRunning}
-                className="flex items-center gap-2 px-5 py-2.5 bg-[var(--color-brand)] text-[var(--color-on-primary)] text-sm font-semibold rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity"
+            {!envReady && status.supported && status.python.installed && (
+              <LoadingButton
+                size="lg"
+                loading={setupRunning}
+                onClick={() => void handleSetup()}
               >
-                <span className="material-symbols-outlined text-[18px]">{setupRunning ? 'hourglass_empty' : 'download'}</span>
+                {!setupRunning && <Download aria-hidden="true" />}
                 {setupRunning ? t('settings.computerUse.setupRunning') : t('settings.computerUse.setupBtn')}
-              </button>
+              </LoadingButton>
             )}
-            <button
-              onClick={fetchStatus}
-              className="flex items-center gap-2 px-4 py-2.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--color-surface-hover)] transition-colors"
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => void fetchStatus()}
             >
-              <span className="material-symbols-outlined text-[18px]">refresh</span>
+              <RefreshCw aria-hidden="true" />
               {t('settings.computerUse.recheckBtn')}
-            </button>
+            </Button>
           </div>
 
-          {/* ─── App Authorization Section ─── */}
           {envReady && (
-            <div className="space-y-4 pt-4 border-t border-[var(--color-border)]">
-              <div>
-                <h3 className="text-base font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-                  {t('settings.computerUse.appsTitle')}
-                  {appsSaved && (
-                    <span className="text-xs font-normal text-green-500 flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
-                      {t('settings.computerUse.appsSaved')}
-                    </span>
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="text-base">{t('settings.computerUse.appsTitle')}</CardTitle>
+                  {configSaveState === 'saving' && (
+                    <Badge variant="secondary">{t('common.loading')}</Badge>
                   )}
-                </h3>
-                <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+                  {configSaveState === 'saved' && (
+                    <Badge variant="outline" className="text-green-600">
+                      <Check aria-hidden="true" />
+                      {t('settings.computerUse.appsSaved')}
+                    </Badge>
+                  )}
+                </div>
+                <CardDescription>
                   {t('settings.computerUse.appsDescription')}
-                </p>
-              </div>
+                  {' '}
+                  {t('settings.computerUse.newSessionsHint')}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-0">
+                {configSaveState === 'error' && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{t('settings.computerUse.appsSaveFailed')}</AlertDescription>
+                  </Alert>
+                )}
 
-              {/* Grant flags */}
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={clipboardAccess}
-                    onChange={e => toggleFlag('clipboard', e.target.checked)}
-                    className="rounded border-[var(--color-border)] accent-[var(--color-brand)]"
+                <div className="flex flex-wrap gap-4">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="computer-use-clipboard-read"
+                      checked={clipboardRead}
+                      disabled={configState !== 'ready'}
+                      onCheckedChange={checked => toggleFlag('clipboardRead', checked === true)}
+                    />
+                    <Label htmlFor="computer-use-clipboard-read" className="cursor-pointer text-[var(--color-text-secondary)]">
+                      {t('settings.computerUse.flagClipboardRead')}
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="computer-use-clipboard-write"
+                      checked={clipboardWrite}
+                      disabled={configState !== 'ready'}
+                      onCheckedChange={checked => toggleFlag('clipboardWrite', checked === true)}
+                    />
+                    <Label htmlFor="computer-use-clipboard-write" className="cursor-pointer text-[var(--color-text-secondary)]">
+                      {t('settings.computerUse.flagClipboardWrite')}
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="computer-use-system-keys"
+                      checked={systemKeys}
+                      disabled={configState !== 'ready'}
+                      onCheckedChange={checked => toggleFlag('systemKeys', checked === true)}
+                    />
+                    <Label htmlFor="computer-use-system-keys" className="cursor-pointer text-[var(--color-text-secondary)]">
+                      {t('settings.computerUse.flagSystemKeys')}
+                    </Label>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[var(--color-text-tertiary)]"
+                    aria-hidden="true"
                   />
-                  {t('settings.computerUse.flagClipboard')}
-                </label>
-                <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={systemKeys}
-                    onChange={e => toggleFlag('systemKeys', e.target.checked)}
-                    className="rounded border-[var(--color-border)] accent-[var(--color-brand)]"
+                  <Input
+                    type="text"
+                    value={searchQuery}
+                    onChange={event => setSearchQuery(event.target.value)}
+                    placeholder={t('settings.computerUse.appsSearch')}
+                    aria-label={t('settings.computerUse.appsSearch')}
+                    className="pl-9"
                   />
-                  {t('settings.computerUse.flagSystemKeys')}
-                </label>
-              </div>
+                </div>
 
-              {/* Search */}
-              <div className="relative">
-                <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)] absolute left-3 top-1/2 -translate-y-1/2">search</span>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder={t('settings.computerUse.appsSearch')}
-                  className="w-full pl-9 pr-4 py-2 text-sm bg-[var(--color-surface-container-low)] border border-[var(--color-border)] rounded-lg text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:outline-none focus:border-[var(--color-brand)]"
-                />
-              </div>
-
-              {/* App list */}
-              {appsLoading ? (
-                <div className="py-6 text-center text-sm text-[var(--color-text-tertiary)]">
-                  {t('settings.computerUse.appsLoading')}
-                </div>
-              ) : installedApps.length === 0 ? (
-                <div className="py-6 text-center text-sm text-[var(--color-text-tertiary)]">
-                  {t('settings.computerUse.appsEmpty')}
-                </div>
-              ) : (
-                <div className="max-h-[400px] overflow-y-auto rounded-lg border border-[var(--color-border)]">
-                  {sortedApps.map(app => {
-                    const isAuthorized = authorizedBundleIds.has(app.bundleId)
-                    return (
-                      <button
-                        key={app.bundleId}
-                        onClick={() => toggleApp(app)}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)] border-b border-[var(--color-border)] last:border-b-0 ${
-                          isAuthorized ? 'bg-[var(--color-brand)]/5' : ''
-                        }`}
-                      >
-                        <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border ${
-                          isAuthorized
-                            ? 'bg-[var(--color-brand)] border-[var(--color-brand)]'
-                            : 'border-[var(--color-border)]'
-                        }`}>
-                          {isAuthorized && (
-                            <span className="material-symbols-outlined text-[14px] text-white" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-[var(--color-text-primary)] truncate">
-                            {app.displayName}
+                {appsLoading ? (
+                  <div className="space-y-2" role="status" aria-label={t('settings.computerUse.appsLoading')}>
+                    <Skeleton className="h-14 w-full" />
+                    <Skeleton className="h-14 w-full" />
+                    <Skeleton className="h-14 w-full" />
+                  </div>
+                ) : appsLoadFailed ? (
+                  <Alert variant="destructive">
+                    <AlertDescription className="flex items-center justify-between gap-3">
+                      <span>{t('settings.computerUse.appsLoadFailed')}</span>
+                      <Button variant="outline" size="sm" onClick={() => void fetchApps()}>
+                        <RefreshCw aria-hidden="true" />
+                        {t('common.retry')}
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                ) : installedApps.length === 0 ? (
+                  <Alert>
+                    <AlertDescription>{t('settings.computerUse.appsEmpty')}</AlertDescription>
+                  </Alert>
+                ) : sortedApps.length === 0 ? (
+                  <Alert>
+                    <AlertDescription>{t('settings.computerUse.appsNoResults')}</AlertDescription>
+                  </Alert>
+                ) : (
+                  <ScrollArea className="h-[400px] rounded-[var(--radius-md)] border border-[var(--color-border)]">
+                    <div className="divide-y divide-[var(--color-border)]">
+                      {sortedApps.map(app => {
+                        const isAuthorized = authorizedBundleIds.has(app.bundleId)
+                        const inputId = `computer-use-app-${app.bundleId}`
+                        return (
+                          <div
+                            key={app.bundleId}
+                            className={`flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-[var(--color-surface-hover)] ${
+                              isAuthorized ? 'bg-[var(--color-brand)]/5' : ''
+                            }`}
+                          >
+                            <Checkbox
+                              id={inputId}
+                              checked={isAuthorized}
+                              disabled={configState !== 'ready'}
+                              aria-label={app.displayName}
+                              onCheckedChange={checked => toggleApp(app, checked === true)}
+                            />
+                            <Label
+                              htmlFor={inputId}
+                              className="min-w-0 flex-1 cursor-pointer flex-col items-start gap-0.5"
+                            >
+                              <span className="block w-full truncate text-sm font-medium text-[var(--color-text-primary)]">
+                                {app.displayName}
+                              </span>
+                              <span className="block w-full truncate font-mono text-[11px] font-normal text-[var(--color-text-tertiary)]">
+                                {app.bundleId}
+                              </span>
+                            </Label>
                           </div>
-                          <div className="text-[11px] text-[var(--color-text-tertiary)] truncate font-mono">
-                            {app.bundleId}
-                          </div>
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
+                        )
+                      })}
+                    </div>
+                  </ScrollArea>
+                )}
+              </CardContent>
+            </Card>
           )}
         </>
       ) : null}

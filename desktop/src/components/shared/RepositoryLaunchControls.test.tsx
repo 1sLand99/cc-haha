@@ -99,6 +99,7 @@ function renderControls(props: Partial<ComponentProps<typeof RepositoryLaunchCon
 
 async function openBranchMenu() {
   const trigger = await screen.findByRole('button', { name: 'Select branch: main' })
+  trigger.focus()
   fireEvent.click(trigger)
   return trigger
 }
@@ -115,12 +116,20 @@ describe('RepositoryLaunchControls', () => {
   it('keeps the desktop branch dropdown when not in mobile browser mode', async () => {
     renderControls()
 
-    await openBranchMenu()
+    const trigger = await openBranchMenu()
 
     const listbox = await screen.findByRole('listbox', { name: 'Select branch' })
     expect(listbox).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: 'Select branch' })).not.toBeInTheDocument()
     expect(listbox.parentElement?.className).toContain('w-[390px]')
+    expect(listbox.parentElement).toHaveAttribute('data-slot', 'popover-content')
+    expect(screen.getByRole('textbox', { name: 'Search branches' })).toHaveFocus()
+
+    fireEvent.keyDown(listbox.parentElement!, { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox', { name: 'Select branch' })).not.toBeInTheDocument()
+      expect(trigger).toHaveFocus()
+    })
   })
 
   it('uses the flatter desktop bar when embedded in a composer', async () => {
@@ -139,12 +148,20 @@ describe('RepositoryLaunchControls', () => {
 
     renderControls()
 
-    await openBranchMenu()
+    const trigger = await openBranchMenu()
 
     const dialog = await screen.findByRole('dialog', { name: 'Select branch' })
     expect(dialog).toHaveClass('inset-x-0')
+    expect(dialog).toHaveAttribute('data-slot', 'sheet-content')
+    expect(document.querySelector('[data-slot="sheet-overlay"]')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
     expect(screen.getByRole('listbox', { name: 'Select branch' })).toBeInTheDocument()
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Select branch' })).not.toBeInTheDocument()
+      expect(trigger).toHaveFocus()
+    })
   })
 
   it('does not use the H5 mobile sheet inside Tauri even on a narrow viewport', async () => {
@@ -172,6 +189,25 @@ describe('RepositoryLaunchControls', () => {
 
     await waitFor(() => {
       expect(onBranchChange).toHaveBeenCalledWith('feature/h5')
+    })
+  })
+
+  it('uses the shadcn worktree popover and restores focus after selection', async () => {
+    const onUseWorktreeChange = vi.fn()
+    renderControls({ onUseWorktreeChange })
+
+    const trigger = await screen.findByRole('button', { name: 'Select worktree mode: Current worktree' })
+    fireEvent.click(trigger)
+
+    const listbox = await screen.findByRole('listbox', { name: 'Select worktree mode' })
+    expect(listbox.parentElement).toHaveAttribute('data-slot', 'popover-content')
+    expect(screen.getByRole('option', { name: 'Current worktree' })).toHaveFocus()
+
+    fireEvent.click(screen.getByRole('option', { name: 'Isolated worktree' }))
+    await waitFor(() => {
+      expect(onUseWorktreeChange).toHaveBeenCalledWith(true)
+      expect(screen.queryByRole('listbox', { name: 'Select worktree mode' })).not.toBeInTheDocument()
+      expect(trigger).toHaveFocus()
     })
   })
 })

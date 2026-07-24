@@ -2,6 +2,8 @@ import { CodeViewer } from './CodeViewer'
 import { memo, useState } from 'react'
 import { useTranslation } from '../../i18n'
 import { InlineImageGallery } from './InlineImageGallery'
+import { Button } from '../ui/button'
+import { Badge } from '../ui/badge'
 
 type Props = {
   content: unknown
@@ -33,10 +35,12 @@ export const ToolResultBlock = memo(function ToolResultBlock({ content, isError,
         : 'border-[var(--color-outline-variant)]/20'
     }`}>
       {/* Status header */}
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
-        className={`flex w-full items-center justify-between px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider ${
+        className={`h-auto w-full justify-between rounded-none px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider active:translate-y-0 ${
         isError
           ? 'bg-[var(--color-error-container)] text-[var(--color-error)]'
           : 'bg-[var(--color-surface-container-high)] text-[var(--color-outline)]'
@@ -48,14 +52,14 @@ export const ToolResultBlock = memo(function ToolResultBlock({ content, isError,
           </span>
           {toolName ? t('tool.result', { toolName }) : t('tool.resultGeneric')}
         </span>
-        <span className={`px-2 py-0.5 rounded-full text-[9px] ${
+        <Badge variant={isError ? 'destructive' : 'outline'} className={`min-h-0 rounded-full px-2 py-0.5 text-[9px] ${
           isError
             ? 'bg-[var(--color-error)]/10'
             : 'bg-[var(--color-diff-added-bg)] text-[var(--color-diff-added-text)]'
         }`}>
           {isError ? t('tool.error') : t('tool.success')}
-        </span>
-      </button>
+        </Badge>
+      </Button>
 
       {/* Inline image gallery from detected paths */}
       <InlineImageGallery text={text} />
@@ -81,12 +85,15 @@ export const ToolResultBlock = memo(function ToolResultBlock({ content, isError,
       )}
 
       {hasMore && (
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setExpanded((value) => !value)}
-          className="w-full py-1 text-[10px] font-medium text-[var(--color-text-accent)] hover:underline bg-[var(--color-surface-container-low)] border-t border-[var(--color-outline-variant)]/10"
+          aria-expanded={expanded}
+          className="h-auto w-full rounded-none border-t border-[var(--color-outline-variant)]/10 bg-[var(--color-surface-container-low)] py-1 text-[10px] text-[var(--color-text-accent)] hover:underline active:translate-y-0"
         >
           {expanded ? t('tool.showLess') : t('tool.showMore', { count: text.length - 200 })}
-        </button>
+        </Button>
       )}
     </div>
   )

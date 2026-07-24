@@ -223,6 +223,9 @@ describe('PetApp', () => {
     const runningRow = await screen.findByRole('button', {
       name: 'Build pet window, pet.window.status.running',
     })
+    expect(runningRow).toHaveAttribute('data-slot', 'button')
+    expect(runningRow).toHaveAttribute('data-custom-slot', 'pet-window-button')
+    expect(runningRow).toHaveAttribute('data-surface', 'session')
     expect(screen.getByRole('list')).toBeInTheDocument()
     expect(screen.queryByText('Review animation')).not.toBeInTheDocument()
     expect(screen.queryByText('Planning the next animation…')).not.toBeInTheDocument()
@@ -310,6 +313,9 @@ describe('PetApp', () => {
   it('focuses the main desktop window after a short mascot pointer gesture', async () => {
     render(<PetApp />)
     const mascot = await screen.findByRole('button', { name: 'pet.window.interact' })
+    expect(mascot).toHaveAttribute('data-slot', 'button')
+    expect(mascot).toHaveAttribute('data-custom-slot', 'pet-window-button')
+    expect(mascot).toHaveAttribute('data-surface', 'mascot')
     mascot.setPointerCapture = vi.fn()
     mascot.hasPointerCapture = vi.fn(() => true)
     mascot.releasePointerCapture = vi.fn()

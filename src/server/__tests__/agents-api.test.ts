@@ -249,6 +249,24 @@ describe('Agents API Markdown CRUD', () => {
     expect(createdMarkdown).toContain('effort: xhigh')
     expect(createdMarkdown).toContain('Review this change for security regressions.')
 
+    const wildcardTools = [
+      'Read',
+      '*',
+      'Bash(git:*)',
+      'Agent(worker, researcher)',
+      'mcp__qa__search',
+    ]
+    const wildcardCreate = await api('POST', '/api/agents', {
+      scope: 'user',
+      cwd: projectCwd,
+      name: 'wildcard-editor',
+      description: 'Preserves persisted wildcard tool rules',
+      systemPrompt: 'Keep the exact persisted tool list available to editors.',
+      tools: wildcardTools,
+    })
+    expect(wildcardCreate.status).toBe(201)
+    expect(wildcardCreate.data.agent.tools).toEqual(wildcardTools)
+
     const userList = await api(
       'GET',
       `/api/agents?cwd=${encodeURIComponent(projectCwd)}`,
@@ -267,6 +285,11 @@ describe('Agents API Markdown CRUD', () => {
         }),
       ]),
     )
+    expect(
+      userList.data.activeAgents.find(
+        (agent: { agentType: string }) => agent.agentType === 'wildcard-editor',
+      )?.tools,
+    ).toEqual(wildcardTools)
 
     const nestedUserDir = path.join(configDir, 'agents', 'review')
     const nestedUserFile = path.join(nestedUserDir, 'reviewer-definition.md')

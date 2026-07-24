@@ -12,6 +12,21 @@ const booleanPayload: Validator = value => typeof value === 'boolean'
 const hasOnlyKeys = (value: Record<string, unknown>, allowedKeys: string[]) =>
   Object.keys(value).every(key => allowedKeys.includes(key))
 
+const MAX_TERMINAL_DIMENSION = 1_000
+const MAX_TERMINAL_CWD_LENGTH = 4_096
+const MAX_TERMINAL_WRITE_LENGTH = 1_048_576
+
+const isTerminalSessionId = (value: unknown) =>
+  typeof value === 'number'
+  && Number.isSafeInteger(value)
+  && value > 0
+
+const isTerminalDimension = (value: unknown) =>
+  typeof value === 'number'
+  && Number.isInteger(value)
+  && value > 0
+  && value <= MAX_TERMINAL_DIMENSION
+
 const sessionIdPayload: Validator = value =>
   typeof value === 'string'
   && value.length > 0
@@ -74,28 +89,39 @@ const commandInvoke: Validator = value =>
 
 const terminalWrite: Validator = value =>
   isRecord(value)
-  && typeof value.sessionId === 'number'
+  && hasOnlyKeys(value, ['sessionId', 'data'])
+  && isTerminalSessionId(value.sessionId)
   && typeof value.data === 'string'
+  && value.data.length <= MAX_TERMINAL_WRITE_LENGTH
 
 const terminalSpawn: Validator = value =>
   value === undefined
   || (
     isRecord(value)
-    && (value.cols === undefined || typeof value.cols === 'number')
-    && (value.rows === undefined || typeof value.rows === 'number')
-    && (value.cwd === undefined || typeof value.cwd === 'string')
-    && (value.shell === undefined || typeof value.shell === 'string')
+    && hasOnlyKeys(value, ['cols', 'rows', 'cwd'])
+    && (value.cols === undefined || isTerminalDimension(value.cols))
+    && (value.rows === undefined || isTerminalDimension(value.rows))
+    && (
+      value.cwd === undefined
+      || (
+        typeof value.cwd === 'string'
+        && value.cwd.length <= MAX_TERMINAL_CWD_LENGTH
+        && !value.cwd.includes('\0')
+      )
+    )
   )
 
 const terminalResize: Validator = value =>
   isRecord(value)
-  && typeof value.sessionId === 'number'
-  && typeof value.cols === 'number'
-  && typeof value.rows === 'number'
+  && hasOnlyKeys(value, ['sessionId', 'cols', 'rows'])
+  && isTerminalSessionId(value.sessionId)
+  && isTerminalDimension(value.cols)
+  && isTerminalDimension(value.rows)
 
 const terminalSessionId: Validator = value =>
   isRecord(value)
-  && typeof value.sessionId === 'number'
+  && hasOnlyKeys(value, ['sessionId'])
+  && isTerminalSessionId(value.sessionId)
 
 const boundsPayload: Validator = value =>
   isRecord(value)

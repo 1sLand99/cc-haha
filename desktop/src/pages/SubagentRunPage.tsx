@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { FileText, RefreshCw } from 'lucide-react'
 import {
   subagentsApi,
   type SubagentRunResponse,
@@ -7,6 +7,13 @@ import {
 } from '../api/subagents'
 import { buildRenderModel, MessageBlock } from '../components/chat/MessageList'
 import { ToolCallGroup } from '../components/chat/ToolCallGroup'
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
+import { Badge } from '../components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
+import { IconButton } from '../components/ui/custom/icon-button'
+import { ScrollArea } from '../components/ui/scroll-area'
+import { Separator } from '../components/ui/separator'
+import { Skeleton } from '../components/ui/skeleton'
 import { useTranslation } from '../i18n'
 import { mapHistoryMessagesToUiMessages, useChatStore } from '../stores/chatStore'
 import type { AgentTaskNotification, UIMessage } from '../types/chat'
@@ -83,30 +90,70 @@ export function SubagentRunPage({
             {sourceSessionId} / {toolUseId}
           </p>
         </div>
-        <button
-          type="button"
-          aria-label={t('subagentRun.refresh')}
+        <IconButton
+          label={t('subagentRun.refresh')}
+          variant="ghost"
           onClick={() => void load()}
           disabled={loading}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] disabled:cursor-not-allowed disabled:opacity-60"
+          aria-busy={loading}
         >
-          <RefreshCw size={15} strokeWidth={2.2} aria-hidden="true" className={loading ? 'animate-spin' : undefined} />
-        </button>
+          <RefreshCw
+            size={15}
+            strokeWidth={2.2}
+            aria-hidden="true"
+            className={loading ? 'motion-safe:animate-spin motion-reduce:animate-none' : undefined}
+          />
+        </IconButton>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {loading && !data ? (
-          <div role="status" className="text-sm text-[var(--color-text-tertiary)]">{t('subagentRun.loading')}</div>
-        ) : null}
-        {error ? (
-          <div role="alert" className="rounded-[var(--radius-md)] border border-[var(--color-error)]/30 bg-[var(--color-error)]/5 px-3 py-2 text-sm text-[var(--color-error)]">
-            {error}
-          </div>
-        ) : null}
-        {data ? (
-          <SubagentRunDetails data={data} />
-        ) : null}
-      </main>
+      <ScrollArea className="min-h-0 flex-1">
+        <main className="px-5 py-4" aria-busy={loading}>
+          {loading && !data ? (
+            <SubagentRunSkeleton label={t('subagentRun.loading')} />
+          ) : null}
+          {error ? (
+            <Alert
+              variant="destructive"
+              role={data ? 'status' : 'alert'}
+              aria-live={data ? 'polite' : undefined}
+              className="mx-auto mb-4 max-w-4xl"
+            >
+              <AlertTitle>{t('common.error')}</AlertTitle>
+              <AlertDescription className="text-[var(--color-error)]">{error}</AlertDescription>
+            </Alert>
+          ) : null}
+          {data ? (
+            <SubagentRunDetails data={data} />
+          ) : null}
+        </main>
+      </ScrollArea>
+    </div>
+  )
+}
+
+function SubagentRunSkeleton({ label }: { label: string }) {
+  return (
+    <div role="status" aria-label={label} className="mx-auto flex max-w-4xl flex-col gap-5">
+      <span className="sr-only">{label}</span>
+      <Card>
+        <CardContent className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }, (_, index) => (
+            <div key={index} className="space-y-2">
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="h-5 w-full" />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-4 w-24" />
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-28 w-full" />
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -116,39 +163,62 @@ function SubagentRunDetails({ data }: { data: SubagentRunResponse }) {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-tertiary)]">
-        <span>{t('subagentRun.source')}: {sourceLabel(data.source, t)}</span>
-        <span aria-hidden="true">/</span>
-        <span>{t('subagentRun.agent')}: {data.agentId ?? t('subagentRun.unknown')}</span>
-        {data.description ? (
-          <>
-            <span aria-hidden="true">/</span>
-            <span>{data.description}</span>
-          </>
-        ) : null}
-        {data.taskId ? (
-          <>
-            <span aria-hidden="true">/</span>
-            <span>{t('subagentRun.task')}: {data.taskId}</span>
-          </>
-        ) : null}
-        <span aria-hidden="true">/</span>
-        <span>{t('subagentRun.updated')}: {formatTimestamp(data.updatedAt)}</span>
-        {data.usage?.totalTokens ? (
-          <>
-            <span aria-hidden="true">/</span>
-            <span>{t('common.tokens', { count: formatNumber(data.usage.totalTokens) })}</span>
-          </>
-        ) : null}
-        {data.outputFile ? (
-          <>
-            <span aria-hidden="true">/</span>
-            <span className="min-w-0 truncate font-mono" title={data.outputFile}>{t('subagentRun.output')}: {data.outputFile}</span>
-          </>
-        ) : null}
-      </div>
+      <Card data-testid="subagent-run-summary">
+        <CardContent className="p-4">
+          <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+            <RunMetadata label={t('subagentRun.source')}>
+              <Badge variant="secondary">{sourceLabel(data.source, t)}</Badge>
+            </RunMetadata>
+            <RunMetadata label={t('subagentRun.agent')}>
+              <span className="font-mono text-xs">{data.agentId ?? t('subagentRun.unknown')}</span>
+            </RunMetadata>
+            {data.taskId ? (
+              <RunMetadata label={t('subagentRun.task')}>
+                <span className="font-mono text-xs">{data.taskId}</span>
+              </RunMetadata>
+            ) : null}
+            <RunMetadata label={t('subagentRun.updated')}>
+              {formatTimestamp(data.updatedAt)}
+            </RunMetadata>
+            {data.usage?.totalTokens ? (
+              <RunMetadata label={t('subagentRun.tokens')}>
+                {formatNumber(data.usage.totalTokens)}
+              </RunMetadata>
+            ) : null}
+            {data.description ? (
+              <RunMetadata label={t('subagentRun.description')}>
+                {data.description}
+              </RunMetadata>
+            ) : null}
+            {data.outputFile ? (
+              <RunMetadata label={t('subagentRun.output')} className="sm:col-span-2">
+                <span className="block truncate font-mono text-xs" title={data.outputFile}>
+                  {data.outputFile}
+                </span>
+              </RunMetadata>
+            ) : null}
+          </dl>
+        </CardContent>
+      </Card>
 
       <ConversationSection data={data} />
+    </div>
+  )
+}
+
+function RunMetadata({
+  label,
+  children,
+  className,
+}: {
+  label: string
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={className}>
+      <dt className="mb-1 text-[11px] font-medium text-[var(--color-text-tertiary)]">{label}</dt>
+      <dd className="min-w-0 text-sm text-[var(--color-text-secondary)]">{children}</dd>
     </div>
   )
 }
@@ -162,63 +232,79 @@ function ConversationSection({ data }: { data: SubagentRunResponse }) {
 
   if (renderModel.renderItems.length === 0) {
     return (
-      <section>
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-normal text-[var(--color-text-tertiary)]">{t('subagentRun.transcript')}</h2>
-        <div className="rounded-lg border border-dashed border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-tertiary)]">
-          {t('subagentRun.noTranscript')}
-        </div>
+      <section aria-labelledby="subagent-transcript-heading">
+        <h2 id="subagent-transcript-heading" className="sr-only">{t('subagentRun.transcript')}</h2>
+        <Card className="border-dashed">
+          <CardContent className="flex items-center gap-3 p-4 text-[var(--color-text-tertiary)]">
+            <FileText className="size-5 shrink-0" aria-hidden="true" />
+            <p className="text-sm">{t('subagentRun.noTranscript')}</p>
+          </CardContent>
+        </Card>
       </section>
     )
   }
 
   return (
-    <section>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <h2 className="text-xs font-semibold uppercase tracking-normal text-[var(--color-text-tertiary)]">{t('subagentRun.transcript')}</h2>
-        {data.truncated ? (
-          <span className="text-[11px] text-[var(--color-text-tertiary)]">{t('subagentRun.truncated')}</span>
-        ) : null}
-      </div>
-      <div data-testid="subagent-conversation" className="space-y-3">
-        {renderModel.renderItems.map((item) => {
-          if (item.kind === 'tool_group') {
-            return (
-              <ToolCallGroup
-                key={item.id}
-                toolCalls={item.toolCalls}
-                resultMap={renderModel.toolResultMap}
-                childToolCallsByParent={renderModel.childToolCallsByParent}
-                agentTaskNotifications={EMPTY_AGENT_TASK_NOTIFICATIONS}
-                showOpenRun={false}
-                isStreaming={false}
-              />
-            )
-          }
+    <Card>
+      <section aria-labelledby="subagent-transcript-heading">
+        <CardHeader className="flex-row items-center justify-between gap-3">
+          <CardTitle className="text-sm">
+            <h2 id="subagent-transcript-heading">{t('subagentRun.transcript')}</h2>
+          </CardTitle>
+          {data.truncated ? (
+            <Badge variant="outline">{t('subagentRun.truncated')}</Badge>
+          ) : null}
+        </CardHeader>
+        <Separator />
+        <CardContent className="p-4">
+          <div data-testid="subagent-conversation" className="space-y-3">
+            {renderModel.renderItems.map((item) => {
+              if (item.kind === 'tool_group') {
+                return (
+                  <ToolCallGroup
+                    key={item.id}
+                    toolCalls={item.toolCalls}
+                    resultMap={renderModel.toolResultMap}
+                    childToolCallsByParent={renderModel.childToolCallsByParent}
+                    agentTaskNotifications={EMPTY_AGENT_TASK_NOTIFICATIONS}
+                    showOpenRun={false}
+                    isStreaming={data.status === 'running'}
+                  />
+                )
+              }
 
-          const toolResult = item.message.type === 'tool_use'
-            ? renderModel.toolResultMap.get(item.message.toolUseId)
-            : null
+              const toolResult = item.message.type === 'tool_use'
+                ? renderModel.toolResultMap.get(item.message.toolUseId)
+                : null
 
-          return (
-            <MessageBlock
-              key={item.message.id}
-              message={item.message}
-              activeThinkingId={null}
-              agentTaskNotifications={EMPTY_AGENT_TASK_NOTIFICATIONS}
-              toolResult={toolResult}
-            />
-          )
-        })}
-      </div>
-    </section>
+              return (
+                <MessageBlock
+                  key={item.message.id}
+                  message={item.message}
+                  activeThinkingId={null}
+                  agentTaskNotifications={EMPTY_AGENT_TASK_NOTIFICATIONS}
+                  toolResult={toolResult}
+                />
+              )
+            })}
+          </div>
+        </CardContent>
+      </section>
+    </Card>
   )
 }
 
 function StatusBadge({ status, t }: { status: SubagentRunStatus; t: TranslationFn }) {
   return (
-    <span className={`rounded-[var(--radius-sm)] border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-normal ${statusToneClass(status)}`}>
+    <Badge
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      variant={status === 'failed' || status === 'stopped' ? 'destructive' : 'outline'}
+      className={statusToneClass(status)}
+    >
       {getSubagentStatusLabel(status, t)}
-    </span>
+    </Badge>
   )
 }
 
@@ -287,6 +373,16 @@ function hasPromptMessage(messages: UIMessage[], prompt: string) {
   ))
 }
 
+function hasAssistantTextMessage(messages: UIMessage[], text: string) {
+  const normalizedResult = normalizedText(text)
+  if (!normalizedResult) return false
+
+  return messages.some((message) => (
+    message.type === 'assistant_text' &&
+    normalizedText(message.content) === normalizedResult
+  ))
+}
+
 function buildSubagentConversationMessages(data: SubagentRunResponse): UIMessage[] {
   const transcriptMessages = mapHistoryMessagesToUiMessages(data.messages, { includeTeammateMessages: true })
   const messages = [...transcriptMessages]
@@ -303,7 +399,13 @@ function buildSubagentConversationMessages(data: SubagentRunResponse): UIMessage
   }
 
   const resultText = (data.result || data.summary)?.trim()
-  if (transcriptMessages.length === 0 && resultText) {
+  const shouldAppendResult = resultText && (
+    transcriptMessages.length === 0 ||
+    data.status === 'completed' ||
+    data.status === 'failed' ||
+    data.status === 'stopped'
+  )
+  if (shouldAppendResult && !hasAssistantTextMessage(transcriptMessages, resultText)) {
     messages.push({
       id: `subagent-result-message-${data.toolUseId}`,
       type: 'assistant_text',

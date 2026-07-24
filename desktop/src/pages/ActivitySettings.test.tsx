@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
 import { ActivitySettings } from './ActivitySettings'
@@ -96,6 +96,16 @@ async function flushActivityLoad() {
     await Promise.resolve()
     await Promise.resolve()
   })
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, reject, resolve }
 }
 
 describe('ActivitySettings', () => {
@@ -245,6 +255,79 @@ describe('ActivitySettings', () => {
     })
     expect(todayCell).toBeInTheDocument()
     expect(screen.queryByRole('gridcell', { name: /May 10, 2026/i })).not.toBeInTheDocument()
+    expect(document.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-slot="card"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-slot="toggle-group"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-slot="activity-heatmap"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-slot="activity-heatmap-scroll"]')).toHaveClass('overflow-x-auto')
+  })
+
+  it('uses shadcn skeletons while loading and recoverable alerts when stats fail', async () => {
+    const pendingStats = createDeferred<typeof activityResponse>()
+    getStatsMock.mockReturnValueOnce(pendingStats.promise)
+
+    const { container } = render(<ActivitySettings />)
+
+    expect(container.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(5)
+    expect(container.querySelector('[aria-busy="true"]')).toBeInTheDocument()
+    expect(screen.queryByText('Total tokens')).not.toBeInTheDocument()
+
+    await act(async () => pendingStats.reject(new Error('stats offline')))
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveAttribute('data-slot', 'alert')
+    expect(alert).toHaveTextContent('stats offline')
+    expect(screen.queryByText('Total tokens')).not.toBeInTheDocument()
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+    await flushActivityLoad()
+
+    expect(getStatsMock).toHaveBeenCalledTimes(2)
+    expect(screen.getByText('Total tokens')).toBeInTheDocument()
+  })
+
+  it('keeps profile editing disabled after a load failure until retry succeeds', async () => {
+    getPreferencesMock.mockRejectedValueOnce(new Error('profile unavailable'))
+    render(<ActivitySettings />)
+
+    await flushActivityLoad()
+
+    expect(screen.getByRole('button', { name: 'Edit profile' })).toBeDisabled()
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('profile unavailable')
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+    await flushActivityLoad()
+
+    expect(getPreferencesMock).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: 'Edit profile' })).toBeEnabled()
+    expect(screen.queryByText('profile unavailable')).not.toBeInTheDocument()
+  })
+
+  it('traps profile editing in a shadcn dialog and restores trigger focus on Escape', async () => {
+    render(<ActivitySettings />)
+    await flushActivityLoad()
+
+    const trigger = screen.getByRole('button', { name: 'Edit profile' })
+    act(() => trigger.focus())
+    fireEvent.click(trigger)
+    await flushActivityLoad()
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveAttribute('data-slot', 'dialog-content')
+    expect(screen.getByLabelText('Display name')).toHaveAttribute('data-slot', 'input')
+    expect(screen.getByText('Display name')).toHaveAttribute('data-slot', 'label')
+    expect(screen.getByLabelText('Display name')).toHaveFocus()
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await flushActivityLoad()
+    await act(async () => {
+      vi.runAllTimers()
+      await Promise.resolve()
+    })
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
   })
 
   it('shows a compact hover preview without a persistent selected-day panel', async () => {
@@ -286,7 +369,7 @@ describe('ActivitySettings', () => {
 
     await flushActivityLoad()
 
-    const summaryPanel = screen.getByText('Total tokens').closest('section')
+    const summaryPanel = screen.getByText('Total tokens').closest('[data-slot="card"]')
     expect(summaryPanel).toHaveClass('activity-summary-panel')
     expect(summaryPanel).toHaveClass('max-w-[900px]')
 
@@ -314,10 +397,10 @@ describe('ActivitySettings', () => {
     await flushActivityLoad()
 
     expect(screen.getByText('Token 活动')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '每周' }))
-    expect(screen.getByRole('button', { name: '每周' })).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(screen.getByRole('button', { name: '累计' }))
-    expect(screen.getByRole('button', { name: '累计' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('radio', { name: '每周' }))
+    expect(screen.getByRole('radio', { name: '每周' })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(screen.getByRole('radio', { name: '累计' }))
+    expect(screen.getByRole('radio', { name: '累计' })).toHaveAttribute('aria-checked', 'true')
 
     fireEvent.click(screen.getByRole('button', { name: '编辑个人资料' }))
     const input = screen.getByLabelText('显示名称')
@@ -393,10 +476,186 @@ describe('ActivitySettings', () => {
     expect(screen.getByText('Saved locally')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove avatar' }))
+    const removeDialog = screen.getByRole('alertdialog')
+    fireEvent.click(within(removeDialog).getByRole('button', { name: 'Remove avatar' }))
     await flushActivityLoad()
 
     expect(deleteProfileAvatarMock).toHaveBeenCalled()
     expect(screen.getByAltText('cc-haha avatar')).toHaveAttribute('src', '/app-icon.png')
+    await act(async () => {
+      vi.runAllTimers()
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('button', { name: 'Change avatar' })).toHaveFocus()
+  })
+
+  it('preserves unsaved text drafts while an immediate avatar upload serializes profile actions', async () => {
+    const pendingUpload = createDeferred<Awaited<ReturnType<typeof uploadProfileAvatarMock>>>()
+    uploadProfileAvatarMock.mockReturnValueOnce(pendingUpload.promise)
+    render(<ActivitySettings />)
+    await flushActivityLoad()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit profile' }))
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Unsaved Captain' } })
+    fireEvent.change(screen.getByLabelText('Second line'), { target: { value: 'draft.example' } })
+
+    const fileInput = screen.getByLabelText('Avatar') as HTMLInputElement
+    const file = new File([new Uint8Array([1, 2, 3])], 'avatar.png', { type: 'image/png' })
+    fireEvent.change(fileInput, { target: { files: [file] } })
+    await flushActivityLoad()
+
+    expect(uploadProfileAvatarMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText('Display name')).toHaveValue('Unsaved Captain')
+    expect(screen.getByLabelText('Second line')).toHaveValue('draft.example')
+    expect(screen.getByLabelText('Display name')).toBeDisabled()
+    expect(screen.getByLabelText('Second line')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Change avatar' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getAllByRole('button', { name: 'Cancel' }).every((button) => button.hasAttribute('disabled'))).toBe(true)
+
+    await act(async () => pendingUpload.resolve({
+      ok: true,
+      preferences: {
+        schemaVersion: 2,
+        profile: {
+          displayName: 'cc-haha',
+          subtitle: 'github.com/NanmiCoder/cc-haha',
+          avatarFile: 'profile/avatar.png',
+          avatarUpdatedAt: '2026-05-09T12:00:00.000Z',
+        },
+        sidebar: {
+          projectOrder: [],
+          pinnedProjects: [],
+          hiddenProjects: [],
+          projectOrganization: 'recentProject',
+          projectSortBy: 'updatedAt',
+        },
+      },
+    }))
+
+    expect(screen.getByLabelText('Display name')).toHaveValue('Unsaved Captain')
+    expect(screen.getByLabelText('Second line')).toHaveValue('draft.example')
+    expect(screen.getByLabelText('Display name')).toBeEnabled()
+    expect(screen.getByText('Saved locally')).toBeInTheDocument()
+  })
+
+  it('rejects invalid avatar files locally without calling the profile API', async () => {
+    render(<ActivitySettings />)
+    await flushActivityLoad()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit profile' }))
+    const fileInput = screen.getByLabelText('Avatar')
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(['plain text'], 'avatar.txt', { type: 'text/plain' })],
+      },
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent('Choose a PNG, JPEG, or WebP image.')
+    expect(uploadProfileAvatarMock).not.toHaveBeenCalled()
+
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File([new Uint8Array(2_000_001)], 'avatar.png', { type: 'image/png' })],
+      },
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent('The avatar must be 2 MB or smaller.')
+    expect(uploadProfileAvatarMock).not.toHaveBeenCalled()
+  })
+
+  it('requires a shadcn confirmation before removing an avatar and remains open on failure', async () => {
+    getPreferencesMock.mockResolvedValueOnce({
+      exists: true,
+      preferences: {
+        schemaVersion: 2,
+        profile: {
+          displayName: 'Local Captain',
+          subtitle: 'Local workspace',
+          avatarFile: 'profile/avatar.webp',
+          avatarUpdatedAt: '2026-05-09T12:00:00.000Z',
+        },
+        sidebar: {
+          projectOrder: [],
+          pinnedProjects: [],
+          hiddenProjects: [],
+          projectOrganization: 'recentProject',
+          projectSortBy: 'updatedAt',
+        },
+      },
+    })
+    deleteProfileAvatarMock.mockRejectedValueOnce(new Error('delete denied'))
+    render(<ActivitySettings />)
+    await flushActivityLoad()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit profile' }))
+    const removeTrigger = screen.getByRole('button', { name: 'Remove avatar' })
+    fireEvent.click(removeTrigger)
+    await flushActivityLoad()
+
+    const firstDialog = screen.getByRole('alertdialog')
+    expect(firstDialog).toHaveAttribute('data-slot', 'alert-dialog-content')
+    expect(within(firstDialog).getByRole('button', { name: 'Cancel' })).toHaveFocus()
+    fireEvent.keyDown(firstDialog, { key: 'Escape' })
+    await flushActivityLoad()
+    await act(async () => {
+      vi.runAllTimers()
+      await Promise.resolve()
+    })
+
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(deleteProfileAvatarMock).not.toHaveBeenCalled()
+    expect(removeTrigger).toHaveFocus()
+
+    fireEvent.click(removeTrigger)
+    const confirmDialog = screen.getByRole('alertdialog')
+    fireEvent.click(within(confirmDialog).getByRole('button', { name: 'Remove avatar' }))
+    await flushActivityLoad()
+
+    expect(deleteProfileAvatarMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('delete denied')
+    expect(screen.getByAltText('Local Captain avatar')).toHaveAttribute(
+      'src',
+      '/api/desktop-ui/preferences/profile/avatar?mock=1',
+    )
+  })
+
+  it('provides roving keyboard focus and one accessible cell per aggregate week', async () => {
+    render(<ActivitySettings />)
+    await flushActivityLoad()
+
+    const dailyCells = screen.getAllByRole('gridcell')
+    const todayCell = screen.getByRole('gridcell', {
+      name: /May 9, 2026: 4 sessions · 128K Tokens/i,
+    })
+    expect(dailyCells.filter((cell) => cell.tabIndex === 0)).toEqual([todayCell])
+    expect(todayCell).toHaveAttribute('aria-current', 'date')
+
+    const olderCell = screen.getByRole('gridcell', {
+      name: /Apr 20, 2026: 38 sessions · 2.7M Tokens/i,
+    })
+    fireEvent.mouseEnter(olderCell)
+    fireEvent.focus(todayCell)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('May 9, 2026')
+    expect(todayCell).toHaveAttribute('aria-describedby')
+
+    fireEvent.keyDown(todayCell, { key: 'ArrowLeft' })
+    expect(document.activeElement).toHaveAccessibleName(/May 2, 2026/i)
+
+    const currentStreakBefore = screen.getByText('Current streak').closest('.activity-summary-metric')?.textContent
+    const longestStreakBefore = screen.getByText('Longest streak').closest('.activity-summary-metric')?.textContent
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Weekly' }))
+    const weeklyCells = screen.getAllByRole('gridcell')
+    expect(weeklyCells).toHaveLength(52)
+    expect(weeklyCells.filter((cell) => cell.tabIndex === 0)).toHaveLength(1)
+    expect(screen.getByText('Current streak').closest('.activity-summary-metric')?.textContent).toBe(currentStreakBefore)
+    expect(screen.getByText('Longest streak').closest('.activity-summary-metric')?.textContent).toBe(longestStreakBefore)
+    expect(weeklyCells.at(-1)).toHaveAccessibleName(/May 3, 2026 - May 9, 2026/i)
+    expect(weeklyCells.at(-1)).toHaveAttribute('aria-current', 'date')
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Cumulative' }))
+    const cumulativeCells = screen.getAllByRole('gridcell')
+    expect(cumulativeCells).toHaveLength(52)
+    expect(cumulativeCells.at(-1)).toHaveAccessibleName(/Through May 9, 2026/i)
   })
 
   it('shows localized duration details and the empty usage state', async () => {

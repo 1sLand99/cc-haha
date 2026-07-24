@@ -169,11 +169,17 @@ export function useSelectionPopoverDismiss({
       dismiss()
     }
 
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') dismiss()
+    }
+
     document.addEventListener('pointerdown', handlePointerDown, true)
     document.addEventListener('scroll', handleScroll, true)
+    document.addEventListener('keydown', handleKeyDown)
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown, true)
       document.removeEventListener('scroll', handleScroll, true)
+      document.removeEventListener('keydown', handleKeyDown)
     }
   }, [active, onDismiss, popoverRef])
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { Camera, Loader2, Minus, MousePointer2, Plus, RotateCcw } from 'lucide-react'
 import { BrowserAddressBar } from './BrowserAddressBar'
 import { computeWebviewBounds } from './computeWebviewBounds'
+import { useTranslation } from '../../i18n'
 import { getServerBaseUrl, isLoopbackHostname } from '../../lib/desktopRuntime'
 import { classifyPreviewLink } from '../../lib/previewLinkRouter'
 import { isAbsoluteLocalPath, localFileUrl, previewFsUrl } from '../../lib/handlePreviewLink'
@@ -17,6 +18,7 @@ import {
 } from '../../stores/browserPanelStore'
 import { useOverlayStore } from '../../stores/overlayStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { IconButton } from '../ui/custom/icon-button'
 
 const LOCAL_PREVIEW_PATH_PREFIXES = ['/preview-fs/', '/local-file/']
 const LOCAL_PREVIEW_READY_TIMEOUT_MS = 2500
@@ -64,6 +66,7 @@ function resolveBrowserNavigationUrl(input: string, sessionId: string): string {
 }
 
 export function BrowserSurface({ sessionId }: { sessionId: string }) {
+  const t = useTranslation()
   const hostRef = useRef<HTMLDivElement>(null)
   const loadSeqRef = useRef(0)
   const requestedUrlRef = useRef<string | null>(null)
@@ -135,6 +138,7 @@ export function BrowserSurface({ sessionId }: { sessionId: string }) {
       loadSeqRef.current += 1
       requestedUrlRef.current = null
       hasNativePreviewRef.current = false
+      useBrowserPanelStore.getState().setPicker(sessionId, false)
       previewBridge.close()
     }
     // The visibility-sync effect below owns setVisible() — including the
@@ -177,9 +181,19 @@ export function BrowserSurface({ sessionId }: { sessionId: string }) {
   }, [reportBounds, sessionId])
 
   useEffect(() => {
+    let disposed = false
     let unsub: (() => void) | undefined
-    void subscribePreviewEvents(sessionId).then((u) => { unsub = u })
-    return () => { unsub?.() }
+    void subscribePreviewEvents(sessionId).then((nextUnsub) => {
+      if (disposed) {
+        nextUnsub()
+        return
+      }
+      unsub = nextUnsub
+    })
+    return () => {
+      disposed = true
+      unsub?.()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
 
@@ -203,86 +217,73 @@ export function BrowserSurface({ sessionId }: { sessionId: string }) {
     requestNativePreview(url)
   }
 
-  const actionButtonClass = [
-    'inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]',
-  ].join(' ')
-
   const setPreviewZoom = (nextZoom: number) => {
     store.setZoom(sessionId, normalizeBrowserZoom(nextZoom))
   }
-
-  const zoomButtonClass = [
-    'inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors',
-    'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-container-low)] hover:text-[var(--color-text-primary)]',
-    'disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[var(--color-text-secondary)]',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]',
-  ].join(' ')
 
   const zoomControls = (
     <div
       data-testid="browser-zoom-controls"
       role="group"
-      aria-label="预览缩放控制"
+      aria-label={t('browser.zoomControls')}
       className="inline-flex h-10 shrink-0 items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 shadow-lg"
     >
-      <button
-        aria-label="缩小预览"
-        title="缩小预览"
+      <IconButton
+        label={t('browser.zoomOut')}
+        variant="ghost"
         disabled={!canZoomOut}
-        className={zoomButtonClass}
+        className="size-8 rounded-full"
         onClick={() => setPreviewZoom(previewZoom - BROWSER_ZOOM_STEP)}
       >
-        <Minus size={14} />
-      </button>
-      <span className="min-w-11 select-none text-center text-xs font-medium tabular-nums text-[var(--color-text-secondary)]">
+        <Minus size={14} aria-hidden="true" />
+      </IconButton>
+      <output
+        aria-live="polite"
+        aria-atomic="true"
+        className="min-w-11 select-none text-center text-xs font-medium tabular-nums text-[var(--color-text-secondary)]"
+      >
         {zoomPercent}%
-      </span>
-      <button
-        aria-label="放大预览"
-        title="放大预览"
+      </output>
+      <IconButton
+        label={t('browser.zoomIn')}
+        variant="ghost"
         disabled={!canZoomIn}
-        className={zoomButtonClass}
+        className="size-8 rounded-full"
         onClick={() => setPreviewZoom(previewZoom + BROWSER_ZOOM_STEP)}
       >
-        <Plus size={14} />
-      </button>
-      <button
-        aria-label="重置预览缩放"
-        title="重置预览缩放"
+        <Plus size={14} aria-hidden="true" />
+      </IconButton>
+      <IconButton
+        label={t('browser.zoomReset')}
+        variant="ghost"
         disabled={previewZoom === DEFAULT_BROWSER_ZOOM}
-        className={zoomButtonClass}
+        className="size-8 rounded-full"
         onClick={() => setPreviewZoom(DEFAULT_BROWSER_ZOOM)}
       >
-        <RotateCcw size={14} />
-      </button>
+        <RotateCcw size={14} aria-hidden="true" />
+      </IconButton>
     </div>
   )
 
   const previewActions = (
     <>
-      <button
-        aria-label="截图"
-        title="截图"
-        className={[
-          actionButtonClass,
-          'border-transparent text-[var(--color-text-secondary)] hover:border-[var(--color-border)]',
-          'hover:bg-[var(--color-surface-container-low)] hover:text-[var(--color-text-primary)]',
-        ].join(' ')}
+      <IconButton
+        label={t('browser.screenshot')}
+        variant="ghost"
+        disabled={!session.url}
+        className="size-8 rounded-full"
         onClick={() => previewBridge.message({ v: 1, type: 'capture', kind: 'full' })}
       >
-        <Camera size={16} />
-      </button>
-      <button
-        aria-label="选择元素"
+        <Camera size={16} aria-hidden="true" />
+      </IconButton>
+      <IconButton
+        label={t('browser.selectElement')}
+        variant="ghost"
+        disabled={!session.url}
         aria-pressed={Boolean(session.pickerActive)}
-        title="选择元素"
-        className={[
-          actionButtonClass,
-          session.pickerActive
-            ? 'border-[var(--color-brand)]/45 bg-[var(--color-surface-selected)] text-[var(--color-brand)]'
-            : 'border-transparent text-[var(--color-text-secondary)] hover:border-[var(--color-border)] hover:bg-[var(--color-surface-container-low)] hover:text-[var(--color-text-primary)]',
-        ].join(' ')}
+        className={session.pickerActive
+          ? 'size-8 rounded-full border-[var(--color-brand)]/45 bg-[var(--color-surface-selected)] text-[var(--color-brand)]'
+          : 'size-8 rounded-full'}
         onClick={() => {
           const cur = useBrowserPanelStore.getState().bySession[sessionId]
           const next = !cur?.pickerActive
@@ -290,8 +291,8 @@ export function BrowserSurface({ sessionId }: { sessionId: string }) {
           previewBridge.message({ v: 1, type: next ? 'enter-picker' : 'exit-picker' })
         }}
       >
-        <MousePointer2 size={16} />
-      </button>
+        <MousePointer2 size={16} aria-hidden="true" />
+      </IconButton>
     </>
   )
 
@@ -327,8 +328,16 @@ export function BrowserSurface({ sessionId }: { sessionId: string }) {
           {/* WebContentsView renders above DOM, so keep the floating controls outside its bounds. */}
           <div ref={hostRef} className="absolute inset-x-0 top-0 bottom-12 overflow-hidden" data-testid="preview-host">
             {session.loading && (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--color-surface)] text-[var(--color-text-tertiary)]">
-                <Loader2 size={18} className="animate-spin" aria-label="加载中" />
+              <div
+                role="status"
+                aria-label={t('browser.loading')}
+                className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--color-surface)] text-[var(--color-text-tertiary)]"
+              >
+                <Loader2
+                  size={18}
+                  aria-hidden="true"
+                  className="motion-safe:animate-spin motion-reduce:animate-none"
+                />
               </div>
             )}
           </div>

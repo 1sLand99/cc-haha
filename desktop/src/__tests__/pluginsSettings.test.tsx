@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
 import { Settings } from '../pages/Settings'
@@ -158,7 +158,10 @@ describe('Settings > Plugins tab', () => {
       marketplaces: [],
       summary: { total: 0, enabled: 0, errorCount: 0, marketplaceCount: 0 },
       selectedPlugin: null,
+      selectedPluginContext: null,
       lastReloadSummary: null,
+      lastSessionReload: null,
+      refreshWarning: null,
       isLoading: false,
       isDetailLoading: false,
       isApplying: false,
@@ -183,6 +186,7 @@ describe('Settings > Plugins tab', () => {
       uninstallPlugin: vi.fn().mockResolvedValue('uninstalled'),
       clearSelection: vi.fn(),
     })
+    useUIStore.setState({ toasts: [] })
   })
 
   it('renders plugin browser summary and grouped cards', () => {
@@ -543,7 +547,7 @@ describe('Settings > Plugins tab', () => {
       },
     })
 
-    const { container } = render(<Settings />)
+    render(<Settings />)
     switchToPluginsTab()
 
     expect(screen.getByText('GitHub integration')).toBeInTheDocument()
@@ -552,7 +556,7 @@ describe('Settings > Plugins tab', () => {
       usePluginStore.setState({ isDetailLoading: true })
     })
 
-    expect(container.querySelector('.animate-spin')).toBeInTheDocument()
+    expect(screen.getByTestId('plugin-detail-skeleton')).toHaveAttribute('aria-busy', 'true')
   })
 
   it('navigates plugin skills into the shared Skills page flow', () => {
@@ -661,4 +665,264 @@ describe('Settings > Plugins tab', () => {
     expect(screen.getByRole('button', { name: /codex-rescue/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /gpt-5-4-prompting/i })).toBeDisabled()
   })
+
+  it('uses shadcn cards, checkboxes, skeletons, alerts, and a focus-safe batch dialog', async () => {
+    const fetchPlugins = vi.fn()
+    usePluginStore.setState({
+      plugins: [pluginSummaryFixture('drawing@test', false)],
+      summary: { total: 1, enabled: 0, errorCount: 0, marketplaceCount: 0 },
+      fetchPlugins,
+    })
+
+    render(<Settings />)
+    switchToPluginsTab()
+
+    const checkbox = screen.getByRole('checkbox', { name: 'Select drawing' })
+    expect(checkbox).toHaveAttribute('data-slot', 'checkbox')
+    expect(checkbox.closest('[data-slot="card"]')).toBeInTheDocument()
+
+    fireEvent.click(checkbox)
+    const trigger = screen.getByRole('button', { name: 'Enable selected' })
+    fireEvent.click(trigger)
+
+    const dialog = screen.getByRole('alertdialog')
+    expect(dialog).toHaveAttribute('data-slot', 'alert-dialog-content')
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus()
+    })
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => {
+      expect(trigger).toHaveFocus()
+    })
+
+    act(() => {
+      usePluginStore.setState({ isLoading: true, error: null })
+    })
+    expect(screen.getByTestId('plugin-list-skeleton')).toHaveAttribute('aria-busy', 'true')
+
+    act(() => {
+      usePluginStore.setState({ isLoading: false, error: 'Could not load plugins' })
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load plugins')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(fetchPlugins).toHaveBeenCalledWith('/workspace/project')
+  })
+
+  it('restores focus to the exact plugin row after returning from detail', async () => {
+    const detail = pluginDetailFixture('drawing@test', true)
+    usePluginStore.setState({
+      plugins: [pluginSummaryFixture('drawing@test', true)],
+      summary: { total: 1, enabled: 1, errorCount: 0, marketplaceCount: 0 },
+      fetchPluginDetail: vi.fn().mockImplementation(async () => {
+        usePluginStore.setState({
+          selectedPlugin: detail,
+          selectedPluginContext: '/workspace/project',
+        })
+      }),
+      clearSelection: vi.fn().mockImplementation(() => {
+        usePluginStore.setState({
+          selectedPlugin: null,
+          selectedPluginContext: null,
+          isDetailLoading: false,
+        })
+      }),
+    })
+
+    render(<Settings />)
+    switchToPluginsTab()
+
+    const row = screen.getByRole('button', { name: /drawing/i })
+    expect(row).toHaveAttribute('data-slot', 'button')
+    fireEvent.click(row)
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to list' }))
+
+    await waitFor(() => {
+      expect(row).toHaveFocus()
+    })
+  })
+
+  it('keeps the uninstall AlertDialog open with an inline error and safe default focus', async () => {
+    usePluginStore.setState({
+      selectedPlugin: pluginDetailFixture('drawing@test', true),
+      selectedPluginContext: '/workspace/project',
+      uninstallPlugin: vi.fn().mockRejectedValue(new Error('Uninstall failed safely')),
+    })
+
+    render(<Settings />)
+    switchToPluginsTab()
+
+    const trigger = screen.getByRole('button', { name: 'Uninstall' })
+    fireEvent.click(trigger)
+    const dialog = screen.getByRole('alertdialog')
+    await waitFor(() => {
+      expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus()
+    })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Uninstall' }))
+    expect(await within(dialog).findByText('Uninstall failed safely')).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => {
+      expect(trigger).toHaveFocus()
+    })
+  })
+
+  it('reports a runtime apply warning after a successful batch mutation', async () => {
+    const bulkEnablePlugins = vi.fn().mockImplementation(async () => {
+      usePluginStore.setState({
+        lastSessionReload: {
+          applied: false,
+          reason: 'failed',
+          commands: 0,
+          agents: 0,
+          plugins: 0,
+          mcpServers: 0,
+          errors: 1,
+        },
+      })
+      return 1
+    })
+    usePluginStore.setState({
+      plugins: [pluginSummaryFixture('drawing@test', false)],
+      summary: { total: 1, enabled: 0, errorCount: 0, marketplaceCount: 0 },
+      bulkEnablePlugins,
+    })
+
+    render(<Settings />)
+    switchToPluginsTab()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select drawing' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Enable selected' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Enable' }))
+
+    await waitFor(() => {
+      expect(useUIStore.getState().toasts.at(-1)).toEqual(
+        expect.objectContaining({
+          type: 'warning',
+          message: 'Changes were saved, but the active session could not apply them. Try Apply changes again or start a new session.',
+        }),
+      )
+    })
+  })
+
+  it.each([
+    {
+      name: 'refresh failure',
+      update: {
+        refreshWarning: 'state refresh failed',
+        lastSessionReload: null,
+      },
+      expected: 'The plugin change was saved, but the desktop could not refresh its state: state refresh failed',
+    },
+    {
+      name: 'inactive runtime',
+      update: {
+        refreshWarning: null,
+        lastSessionReload: {
+          applied: false as const,
+          reason: 'not_running' as const,
+          commands: 0,
+          agents: 0,
+          plugins: 0,
+          mcpServers: 0,
+          errors: 0,
+        },
+      },
+      expected: 'Changes were saved. No active runtime was available, so they will apply to the next session.',
+    },
+  ])('reports the $name after a successful detail mutation', async ({ update, expected }) => {
+    const enablePlugin = vi.fn().mockImplementation(async () => {
+      usePluginStore.setState(update)
+      return 'enabled'
+    })
+    usePluginStore.setState({
+      selectedPlugin: pluginDetailFixture('drawing@test', false),
+      selectedPluginContext: '/workspace/project',
+      enablePlugin,
+    })
+
+    render(<Settings />)
+    switchToPluginsTab()
+    fireEvent.click(screen.getByRole('button', { name: 'Enable' }))
+
+    await waitFor(() => {
+      expect(useUIStore.getState().toasts.at(-1)).toEqual(
+        expect.objectContaining({ type: 'warning', message: expected }),
+      )
+    })
+  })
+
+  it('renders a warning toast when Apply changes returns plugin errors', async () => {
+    const reloadPlugins = vi.fn().mockResolvedValue({
+      enabled: 1,
+      disabled: 0,
+      skills: 1,
+      agents: 0,
+      hooks: 0,
+      mcpServers: 0,
+      lspServers: 0,
+      errors: 2,
+    })
+    usePluginStore.setState({
+      selectedPlugin: pluginDetailFixture('drawing@test', true),
+      selectedPluginContext: '/workspace/project',
+      reloadPlugins,
+    })
+
+    render(<Settings />)
+    switchToPluginsTab()
+    fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }))
+
+    await waitFor(() => {
+      expect(useUIStore.getState().toasts.at(-1)).toEqual(
+        expect.objectContaining({
+          type: 'warning',
+          message: 'Applied plugin changes: 1 active plugins, 1 skills, 2 errors.',
+        }),
+      )
+    })
+  })
 })
+
+function pluginSummaryFixture(id: string, enabled: boolean) {
+  const [name, marketplace] = id.split('@')
+  return {
+    id,
+    name: name!,
+    marketplace: marketplace!,
+    scope: 'user' as const,
+    enabled,
+    hasErrors: false,
+    isBuiltin: false,
+    description: 'Render diagrams.',
+    componentCounts: {
+      commands: 0,
+      agents: 0,
+      skills: 0,
+      hooks: 0,
+      mcpServers: 0,
+      lspServers: 0,
+    },
+    errors: [],
+  }
+}
+
+function pluginDetailFixture(id: string, enabled: boolean) {
+  return {
+    ...pluginSummaryFixture(id, enabled),
+    capabilities: {
+      commands: [],
+      agents: [],
+      skills: [],
+      hooks: [],
+      mcpServers: [],
+      lspServers: [],
+    },
+    commandEntries: [],
+    agentEntries: [],
+    hookEntries: [],
+    skillEntries: [],
+    mcpServerEntries: [],
+  }
+}

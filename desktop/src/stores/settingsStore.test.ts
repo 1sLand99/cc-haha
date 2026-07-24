@@ -2,6 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api/client'
 import { browserHost } from '../lib/desktopHost/browserHost'
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 describe('settingsStore locale defaults', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -1085,6 +1095,92 @@ describe('settingsStore desktop terminal shell persistence', () => {
     expect(useSettingsStore.getState().desktopTerminal).toEqual({
       startupShell: 'custom',
       customShellPath: 'C:\\tools\\pwsh.exe',
+    })
+  })
+
+  it('does not let an older failed save roll back a newer successful selection', async () => {
+    const firstSave = createDeferred<Record<string, unknown>>()
+    const updateUser = vi.fn()
+      .mockImplementationOnce(() => firstSave.promise)
+      .mockResolvedValueOnce({ ok: true })
+
+    vi.doMock('../api/settings', () => ({
+      settingsApi: {
+        getUser: vi.fn(),
+        updateUser,
+        getPermissionMode: vi.fn(),
+        setPermissionMode: vi.fn(),
+        getCliLauncherStatus: vi.fn(),
+      },
+    }))
+
+    const { useSettingsStore } = await import('./settingsStore')
+    const oldRequest = useSettingsStore.getState().setDesktopTerminal({
+      startupShell: 'powershell',
+      customShellPath: '',
+    })
+    const oldRequestResult = oldRequest.catch((error) => error)
+    const newRequest = useSettingsStore.getState().setDesktopTerminal({
+      startupShell: 'pwsh',
+      customShellPath: '',
+    })
+
+    expect(useSettingsStore.getState().desktopTerminal).toEqual({
+      startupShell: 'pwsh',
+      customShellPath: '',
+    })
+    await vi.waitFor(() => {
+      expect(updateUser).toHaveBeenCalledTimes(1)
+    })
+
+    const saveError = new Error('first save failed')
+    firstSave.reject(saveError)
+
+    expect(await oldRequestResult).toBe(saveError)
+    await newRequest
+    expect(updateUser).toHaveBeenNthCalledWith(2, {
+      desktopTerminal: {
+        startupShell: 'pwsh',
+        customShellPath: '',
+      },
+    })
+    expect(useSettingsStore.getState().desktopTerminal).toEqual({
+      startupShell: 'pwsh',
+      customShellPath: '',
+    })
+  })
+
+  it('rolls back a latest failed save to the last successfully persisted terminal settings', async () => {
+    const updateUser = vi.fn()
+      .mockResolvedValueOnce({ ok: true })
+      .mockRejectedValueOnce(new Error('second save failed'))
+
+    vi.doMock('../api/settings', () => ({
+      settingsApi: {
+        getUser: vi.fn(),
+        updateUser,
+        getPermissionMode: vi.fn(),
+        setPermissionMode: vi.fn(),
+        getCliLauncherStatus: vi.fn(),
+      },
+    }))
+
+    const { useSettingsStore } = await import('./settingsStore')
+    const firstRequest = useSettingsStore.getState().setDesktopTerminal({
+      startupShell: 'powershell',
+      customShellPath: '',
+    })
+    const secondRequest = useSettingsStore.getState().setDesktopTerminal({
+      startupShell: 'pwsh',
+      customShellPath: '',
+    })
+
+    await firstRequest
+    await expect(secondRequest).rejects.toThrow('second save failed')
+
+    expect(useSettingsStore.getState().desktopTerminal).toEqual({
+      startupShell: 'powershell',
+      customShellPath: '',
     })
   })
 })

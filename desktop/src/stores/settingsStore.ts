@@ -143,6 +143,9 @@ const DEFAULT_DESKTOP_TERMINAL_SETTINGS: DesktopTerminalSettings = {
   startupShell: 'system',
   customShellPath: '',
 }
+let desktopTerminalSaveQueue: Promise<void> = Promise.resolve()
+let desktopTerminalSaveVersion = 0
+let lastPersistedDesktopTerminal = DEFAULT_DESKTOP_TERMINAL_SETTINGS
 
 const DEFAULT_UPDATE_PROXY_SETTINGS: UpdateProxySettings = {
   mode: 'system',
@@ -232,6 +235,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         loadTraceCaptureSettings(),
       ])
       const theme = useUIStore.getState().theme
+      const desktopTerminal = normalizeDesktopTerminalSettings(userSettings.desktopTerminal)
+      lastPersistedDesktopTerminal = desktopTerminal
       useUIStore.getState().setTheme(theme)
       set({
         permissionMode: mode,
@@ -247,7 +252,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         outputStyle: normalizeOutputStyle(userSettings.outputStyle),
         skipWebFetchPreflight: userSettings.skipWebFetchPreflight !== false,
         desktopNotificationsEnabled: userSettings.desktopNotificationsEnabled === true,
-        desktopTerminal: normalizeDesktopTerminalSettings(userSettings.desktopTerminal),
+        desktopTerminal,
         webSearch: normalizeWebSearchSettings(userSettings.webSearch),
         updateProxy: normalizeUpdateProxySettings(userSettings.updateProxy),
         network: normalizeNetworkSettings(userSettings.network),
@@ -439,15 +444,25 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   setDesktopTerminal: async (settings) => {
-    const prev = get().desktopTerminal
     const next = normalizeDesktopTerminalSettings(settings)
+    const saveVersion = ++desktopTerminalSaveVersion
     set({ desktopTerminal: next })
-    try {
-      await settingsApi.updateUser({ desktopTerminal: next })
-    } catch (error) {
-      set({ desktopTerminal: prev })
-      throw error
-    }
+    const save = desktopTerminalSaveQueue
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await settingsApi.updateUser({ desktopTerminal: next })
+          lastPersistedDesktopTerminal = next
+        } catch (error) {
+          if (saveVersion === desktopTerminalSaveVersion) {
+            set({ desktopTerminal: lastPersistedDesktopTerminal })
+          }
+          throw error
+        }
+      })
+
+    desktopTerminalSaveQueue = save
+    await save
   },
 
   setWebSearch: async (webSearch) => {

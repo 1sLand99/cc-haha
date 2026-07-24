@@ -1,8 +1,16 @@
-import { useMemo, useRef, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
+import { CircleCheck, CircleHelp, Send } from 'lucide-react'
 import { listPendingPermissions, useChatStore } from '../../stores/chatStore'
 import { useTabStore } from '../../stores/tabStore'
 import { useTranslation } from '../../i18n'
-import { Button } from '../shared/Button'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { Card } from '../ui/card'
+import { Checkbox } from '../ui/checkbox'
+import { Label } from '../ui/label'
+import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs'
+import { Textarea } from '../ui/textarea'
 
 type QuestionOption = {
   label: string
@@ -80,6 +88,7 @@ export function AskUserQuestion({ sessionId, toolUseId, input, result }: Props) 
   const [freeTexts, setFreeTexts] = useState<QuestionFreeTexts>({})
   const [hasSubmitted, setHasSubmitted] = useState(false)
   const composingRef = useRef(false)
+  const questionControlId = useId()
 
   if (questions.length === 0) return null
   const safeActiveTab = Math.min(activeTab, questions.length - 1)
@@ -206,7 +215,7 @@ export function AskUserQuestion({ sessionId, toolUseId, input, result }: Props) 
   if (!activeQuestion) return null
 
   return (
-    <div className={`mb-4 rounded-[var(--radius-lg)] border overflow-hidden ${
+    <Card className={`mb-4 overflow-hidden ${
       submitted
         ? 'border-[var(--color-outline-variant)]/40 bg-[var(--color-surface-container-low)] opacity-70'
         : 'border-[var(--color-secondary)] bg-[var(--color-surface-container-lowest)]'
@@ -218,116 +227,148 @@ export function AskUserQuestion({ sessionId, toolUseId, input, result }: Props) 
           : 'bg-[var(--color-surface-container)]'
       }`}>
         <div className="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] bg-[var(--color-secondary)]/10">
-          <span className="material-symbols-outlined text-[18px] text-[var(--color-secondary)]">
-            help
-          </span>
+          <CircleHelp aria-hidden className="size-[18px] text-[var(--color-secondary)]" />
         </div>
         <div className="flex-1 min-w-0">
           <span className="text-sm font-semibold text-[var(--color-text-primary)]">
             {t('question.needsInput')}
           </span>
           {submitted && (
-            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[var(--color-surface-container-high)] text-[var(--color-text-tertiary)]">
+            <Badge
+              variant="secondary"
+              className="ml-2 border-transparent bg-[var(--color-surface-container-high)] text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-tertiary)]"
+            >
               {t(terminalWithoutAnswers ? 'question.completed' : 'question.answered')}
-            </span>
+            </Badge>
           )}
         </div>
       </div>
 
-      {/* Question tabs — horizontal tab bar (only show when multiple questions) */}
-      {questions.length > 1 && (
-        <div className="flex px-4 border-b border-[var(--color-outline-variant)]/20 bg-[var(--color-surface-container-low)] overflow-x-auto">
-          {questions.map((q, i) => {
-            const isActive = safeActiveTab === i
-            const isAnswered = Boolean(freeTexts[i]?.trim()) || (selections[i]?.length ?? 0) > 0
-            const tabLabel = q.header || `Q${i + 1}`
-            return (
-              <button
-                key={i}
-                onClick={() => setActiveTab(i)}
-                className={`relative flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium whitespace-nowrap transition-colors ${
-                  isActive
-                    ? 'text-[var(--color-secondary)]'
-                    : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
-                }`}
-              >
-                {isAnswered && (
-                  <span className="material-symbols-outlined text-[14px] text-[var(--color-success)]">check_circle</span>
-                )}
-                {tabLabel}
-                {isActive && (
-                  <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-[var(--color-secondary)] rounded-t" />
-                )}
-              </button>
-            )
-          })}
-        </div>
-      )}
+      <Tabs
+        value={String(safeActiveTab)}
+        onValueChange={(value) => setActiveTab(Number(value))}
+        className="block"
+      >
+        {/* Question tabs — horizontal tab bar (only show when multiple questions) */}
+        {questions.length > 1 && (
+          <div className="overflow-x-auto border-b border-[var(--color-outline-variant)]/20 bg-[var(--color-surface-container-low)] px-4">
+          <TabsList aria-label={t('question.needsInput')}>
+            {questions.map((q, i) => {
+              const isAnswered = Boolean(freeTexts[i]?.trim()) || (selections[i]?.length ?? 0) > 0
+              const tabLabel = q.header || `Q${i + 1}`
+              return (
+                <TabsTrigger
+                  key={i}
+                  value={String(i)}
+                  className="relative rounded-none px-4 py-2.5 text-xs text-[var(--color-text-tertiary)] hover:bg-transparent hover:text-[var(--color-text-secondary)] data-[state=active]:bg-transparent data-[state=active]:text-[var(--color-secondary)] after:absolute after:bottom-0 after:left-2 after:right-2 after:h-[2px] after:rounded-t after:bg-transparent data-[state=active]:after:bg-[var(--color-secondary)]"
+                >
+                  {isAnswered && <CircleCheck aria-hidden className="size-3.5 text-[var(--color-success)]" />}
+                  {tabLabel}
+                </TabsTrigger>
+              )
+            })}
+          </TabsList>
+          </div>
+        )}
 
-      {/* Active question content */}
-      <div className="px-4 py-3">
+        {/* Active question content */}
+        <TabsContent value={String(safeActiveTab)} forceMount className="px-4 py-3">
         <p className="text-sm font-medium text-[var(--color-text-primary)] mb-3">
           {activeQuestion.question}
         </p>
 
         {/* Option cards */}
         {activeQuestion.options && activeQuestion.options.length > 0 && (
-          <div className="space-y-2 mb-3">
-            {activeQuestion.options.map((opt, optIndex) => {
-              const isSelected = selections[safeActiveTab]?.includes(opt.label) ?? false
-              const isMultiSelect = activeQuestion.multiSelect === true
-              return (
-                <button
-                  key={optIndex}
-                  onClick={() => handleSelect(safeActiveTab, opt.label)}
-                  disabled={submitted}
-                  className={`w-full text-left px-4 py-3 rounded-[var(--radius-md)] border transition-all duration-150 cursor-pointer ${
-                    isSelected
-                      ? 'border-[var(--color-secondary)] bg-[var(--color-secondary)]/8 ring-1 ring-[var(--color-secondary)]/30'
-                      : 'border-[var(--color-outline-variant)]/40 bg-[var(--color-surface)] hover:border-[var(--color-outline-variant)] hover:bg-[var(--color-surface-container-low)]'
-                  } ${submitted ? 'cursor-default' : ''}`}
-                >
-                  <div className="flex items-start gap-3">
-                    {/* Selection indicator */}
-                    <div className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${
+          activeQuestion.multiSelect ? (
+            <div className="mb-3 space-y-2" role="group" aria-label={activeQuestion.question}>
+              {activeQuestion.options.map((opt, optIndex) => {
+                const isSelected = selections[safeActiveTab]?.includes(opt.label) ?? false
+                const optionId = `${questionControlId}-${safeActiveTab}-${optIndex}`
+                return (
+                  <Label
+                    key={optIndex}
+                    htmlFor={optionId}
+                    className={`cursor-pointer items-start rounded-[var(--radius-md)] border px-4 py-3 transition-all duration-150 ${
                       isSelected
-                        ? 'border-[var(--color-secondary)] bg-[var(--color-secondary)]'
-                        : 'border-[var(--color-outline)]'
-                    } ${isMultiSelect ? 'rounded-[var(--radius-xs)]' : 'rounded-full'}`}>
-                      {isSelected && (
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <span className={`text-sm font-medium ${
-                        isSelected
-                          ? 'text-[var(--color-secondary)]'
-                          : 'text-[var(--color-text-primary)]'
-                      }`}>
+                        ? 'border-[var(--color-secondary)] bg-[var(--color-secondary)]/8 ring-1 ring-[var(--color-secondary)]/30'
+                        : 'border-[var(--color-outline-variant)]/40 bg-[var(--color-surface)] hover:border-[var(--color-outline-variant)] hover:bg-[var(--color-surface-container-low)]'
+                    }`}
+                  >
+                    <Checkbox
+                      id={optionId}
+                      checked={isSelected}
+                      disabled={submitted}
+                      onCheckedChange={() => handleSelect(safeActiveTab, opt.label)}
+                      className="mt-0.5 data-[state=checked]:border-[var(--color-secondary)] data-[state=checked]:bg-[var(--color-secondary)]"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className={isSelected ? 'text-sm font-medium text-[var(--color-secondary)]' : 'text-sm font-medium'}>
                         {opt.label}
                       </span>
                       {opt.description && (
-                        <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
+                        <span className="mt-0.5 block text-xs font-normal leading-5 text-[var(--color-text-secondary)]">
                           {opt.description}
-                        </p>
+                        </span>
                       )}
-                    </div>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
+                    </span>
+                  </Label>
+                )
+              })}
+            </div>
+          ) : (
+            <RadioGroup
+              value={selections[safeActiveTab]?.[0] ?? ''}
+              onValueChange={(value) => handleSelect(safeActiveTab, value)}
+              disabled={submitted}
+              aria-label={activeQuestion.question}
+              className="mb-3"
+            >
+              {activeQuestion.options.map((opt, optIndex) => {
+                const isSelected = selections[safeActiveTab]?.includes(opt.label) ?? false
+                const optionId = `${questionControlId}-${safeActiveTab}-${optIndex}`
+                return (
+                  <Label
+                    key={optIndex}
+                    htmlFor={optionId}
+                    className={`cursor-pointer items-start rounded-[var(--radius-md)] border px-4 py-3 transition-all duration-150 ${
+                      isSelected
+                        ? 'border-[var(--color-secondary)] bg-[var(--color-secondary)]/8 ring-1 ring-[var(--color-secondary)]/30'
+                        : 'border-[var(--color-outline-variant)]/40 bg-[var(--color-surface)] hover:border-[var(--color-outline-variant)] hover:bg-[var(--color-surface-container-low)]'
+                    }`}
+                  >
+                    <RadioGroupItem
+                      id={optionId}
+                      value={opt.label}
+                      className="mt-0.5 text-[var(--color-secondary)] data-[state=checked]:border-[var(--color-secondary)]"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className={isSelected ? 'text-sm font-medium text-[var(--color-secondary)]' : 'text-sm font-medium'}>
+                        {opt.label}
+                      </span>
+                      {opt.description && (
+                        <span className="mt-0.5 block text-xs font-normal leading-5 text-[var(--color-text-secondary)]">
+                          {opt.description}
+                        </span>
+                      )}
+                    </span>
+                  </Label>
+                )
+              })}
+            </RadioGroup>
+          )
         )}
 
         {/* Free text input */}
         {!submitted && (
           <div>
-            <label className="text-xs text-[var(--color-text-tertiary)] mb-1.5 block">
+            <Label
+              htmlFor={`${questionControlId}-custom-${safeActiveTab}`}
+              className="mb-1.5 block text-xs font-normal text-[var(--color-text-tertiary)]"
+            >
               {t('question.customResponse')}
-            </label>
-            <textarea
+            </Label>
+            <Textarea
+              id={`${questionControlId}-custom-${safeActiveTab}`}
               value={freeTexts[safeActiveTab] ?? ''}
               onChange={(e) => handleFreeTextChange(safeActiveTab, e.target.value)}
               onCompositionStart={() => { composingRef.current = true }}
@@ -342,7 +383,7 @@ export function AskUserQuestion({ sessionId, toolUseId, input, result }: Props) 
               placeholder={t('question.typePlaceholder')}
               rows={3}
               wrap="soft"
-              className="max-h-48 min-h-[84px] w-full resize-y rounded-[var(--radius-md)] border border-[var(--color-outline-variant)]/40 bg-[var(--color-surface)] px-3 py-2 text-sm leading-relaxed text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-secondary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-secondary)]/30"
+              className="max-h-48 min-h-[84px] resize-y border-[var(--color-outline-variant)]/40 focus-visible:border-[var(--color-secondary)] focus-visible:shadow-[0_0_0_1px_var(--color-secondary)]"
             />
           </div>
         )}
@@ -350,30 +391,28 @@ export function AskUserQuestion({ sessionId, toolUseId, input, result }: Props) 
         {/* Submitted answer display */}
         {submitted && (
           <div className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-            <span className="material-symbols-outlined text-[14px] text-[var(--color-success)]">check_circle</span>
+            <CircleCheck aria-hidden className="size-3.5 text-[var(--color-success)]" />
             <span>
               {t(terminalWithoutAnswers ? 'question.resultPrefix' : 'question.answeredPrefix')}<strong>{answeredText}</strong>
             </span>
           </div>
         )}
-      </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Submit button */}
       {!submitted && (
         <div className="flex items-center gap-2 px-4 py-3 border-t border-[var(--color-outline-variant)]/20 bg-[var(--color-surface-container-low)]">
           <Button
-            variant="primary"
             size="sm"
             disabled={!allAnswered || !pendingRequest}
             onClick={handleSubmit}
-            icon={
-              <span className="material-symbols-outlined text-[14px]">send</span>
-            }
           >
+            <Send aria-hidden className="size-3.5" />
             {t('question.submit')}
           </Button>
         </div>
       )}
-    </div>
+    </Card>
   )
 }

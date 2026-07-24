@@ -12,6 +12,9 @@ import { getDesktopHost } from '../../lib/desktopHost'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { useBrowserPanelStore } from '../../stores/browserPanelStore'
 import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { IconButton } from '../ui/custom/icon-button'
 
 type Props = {
   target: AssistantOutputTarget
@@ -98,9 +101,12 @@ export function AssistantOutputTargetCard({ target, sessionId, workDir }: Props)
           <span className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
             {target.title}
           </span>
-          <span className="shrink-0 rounded-full border border-[var(--color-border)]/70 bg-[var(--color-surface)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
+          <Badge
+            variant="secondary"
+            className="min-h-0 shrink-0 rounded-full border-[var(--color-border)]/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]"
+          >
             {badge}
-          </span>
+          </Badge>
         </div>
         {showSubtitle && (
           <div className="mt-1 truncate text-xs text-[var(--color-text-tertiary)]" title={subtitle}>
@@ -110,24 +116,26 @@ export function AssistantOutputTargetCard({ target, sessionId, workDir }: Props)
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
-        <button
-          type="button"
+        <IconButton
+          label={t('assistantOutputs.open')}
+          tooltip={t('assistantOutputs.open')}
+          variant="secondary"
+          size="icon-sm"
           onClick={handleOpen}
-          aria-label={t('assistantOutputs.open')}
-          title={t('assistantOutputs.open')}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-border)]/70 bg-[var(--color-surface)] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-brand)]/35 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35"
+          className="h-8 w-8 rounded-full border-[var(--color-border)]/70 text-[var(--color-text-secondary)] hover:border-[var(--color-brand)]/35"
         >
           <ExternalLink size={14} strokeWidth={2.2} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
+        </IconButton>
+        <Button
+          variant="secondary"
+          size="sm"
           aria-label={t('openWith.title')}
           onClick={handleOpenWith}
-          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-full border border-[var(--color-border)]/70 bg-[var(--color-surface)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-brand)]/35 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35"
+          className="h-8 shrink-0 gap-1 rounded-full border-[var(--color-border)]/70 px-2.5 text-xs text-[var(--color-text-secondary)] hover:border-[var(--color-brand)]/35"
         >
           {t('openWith.title')}
           <ChevronDown size={13} strokeWidth={2.2} aria-hidden="true" />
-        </button>
+        </Button>
       </div>
 
       {openWith && <OpenWithMenu items={openWith.items} anchor={openWith.anchor} triggerEl={openWith.triggerEl} onClose={() => setOpenWith(null)} />}

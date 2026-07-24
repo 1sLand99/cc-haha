@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
-import { ChevronDown, MessageSquare, X } from 'lucide-react'
+import { ChevronDown, MessageSquare, MousePointerClick, X } from 'lucide-react'
 import { useTranslation, type TranslationKey } from '../../i18n'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { isAbsoluteLocalPath } from '../../lib/handlePreviewLink'
@@ -8,6 +8,12 @@ import { buildOpenWithItems, describeFileType, type OpenWithItem } from '../../l
 import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { useUIStore } from '../../stores/uiStore'
 import { OpenWithMenu } from '../common/OpenWithMenu'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { Card } from '../ui/card'
+import { FileTypeIcon } from '../ui/custom/file-type-icon'
+import { IconButton } from '../ui/custom/icon-button'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 import { ImageGalleryModal } from './ImageGalleryModal'
 
 export type AttachmentPreview = {
@@ -58,6 +64,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
   const t = useTranslation()
   const [activeImageIndex, setActiveImageIndex] = useState<number | null>(null)
   const [openWith, setOpenWith] = useState<{ items: OpenWithItem[]; anchor: DOMRect; triggerEl: HTMLElement } | null>(null)
+  const galleryRef = useRef<HTMLDivElement>(null)
   const desktopHost = getDesktopHost()
 
   const images = useMemo(
@@ -122,9 +129,31 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
     })()
   }
 
+  const removeAttachment = (id: string, attachmentIndex: number) => {
+    if (!onRemove) return
+    const removeIndex = attachments
+      .slice(0, attachmentIndex)
+      .filter((attachment) => Boolean(attachment.id))
+      .length
+    onRemove(id)
+    window.requestAnimationFrame(() => {
+      const remainingButtons = galleryRef.current
+        ? Array.from(galleryRef.current.querySelectorAll<HTMLButtonElement>('[data-attachment-remove-id]'))
+        : []
+      const nextButton = remainingButtons[Math.min(removeIndex, remainingButtons.length - 1)]
+      if (nextButton) {
+        nextButton.focus()
+        return
+      }
+      document
+        .querySelector<HTMLTextAreaElement>('textarea[role="combobox"]:not([disabled])')
+        ?.focus()
+    })
+  }
+
   return (
     <>
-      <div className={isComposer ? 'flex flex-wrap items-center gap-2' : 'flex flex-wrap justify-end gap-2'}>
+      <div ref={galleryRef} className={isComposer ? 'flex flex-wrap items-center gap-2' : 'flex flex-wrap justify-end gap-2'}>
         {attachments.map((attachment, index) => {
           if (attachment.type === 'image' && (attachment.previewUrl || attachment.data)) {
             const src = attachment.previewUrl || attachment.data || ''
@@ -138,14 +167,20 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                 key={attachment.id || `${attachment.name}-${index}`}
                 className={isComposer ? 'group relative' : 'group/selection relative flex max-w-full flex-col items-end gap-1.5'}
               >
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
                   aria-label={`Open ${attachment.name}`}
-                  onClick={() => setActiveImageIndex(images.findIndex((image) => image.src === src))}
+                  onClick={() => {
+                    const imageIndex = attachments
+                      .slice(0, index)
+                      .filter((item) => item.type === 'image' && (item.previewUrl || item.data))
+                      .length
+                    setActiveImageIndex(imageIndex)
+                  }}
                   className={
                     isComposer
-                      ? 'overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)]'
-                      : 'overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] text-left shadow-sm transition-transform hover:scale-[1.01]'
+                      ? 'h-auto overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-0'
+                      : 'h-auto overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-0 text-left shadow-sm transition-transform hover:scale-[1.01]'
                   }
                 >
                   <img
@@ -157,56 +192,48 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                         : 'max-h-[340px] w-full max-w-[360px] object-cover'
                     }
                   />
-                </button>
+                </Button>
                 {hasSelectionNote && (
-                  <>
-                    <span
-                      aria-describedby={tooltipId}
-                      aria-label={`Selection note: ${selectionNote}`}
-                      title={selectionNote}
-                      tabIndex={0}
-                      className={[
-                        'inline-flex h-7 max-w-[260px] items-center gap-1.5 rounded-full border',
-                        'border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-2.5',
-                        'text-[12px] font-medium leading-none text-[var(--color-text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]',
-                        'transition-colors hover:border-[var(--color-brand)]/45 hover:bg-[var(--color-surface-container)]',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2',
-                      ].join(' ')}
-                    >
-                      <span className="material-symbols-outlined text-[15px] text-[var(--color-text-tertiary)]">
-                        ads_click
-                      </span>
-                      <span className="min-w-0 truncate">{attachment.name}</span>
-                    </span>
-                    <span
-                      id={tooltipId}
-                      role="tooltip"
-                      className={[
-                        'pointer-events-none invisible absolute bottom-9 right-0 z-30 w-max max-w-[min(340px,calc(100vw-3rem))]',
-                        'translate-y-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-high)] px-3 py-2',
-                        'text-left text-[13px] leading-5 text-[var(--color-text-primary)] opacity-0 shadow-[var(--shadow-dropdown)]',
-                        'transition-all duration-150 group-hover/selection:visible group-hover/selection:translate-y-0 group-hover/selection:opacity-100',
-                        'group-focus-within/selection:visible group-focus-within/selection:translate-y-0 group-focus-within/selection:opacity-100',
-                      ].join(' ')}
-                    >
+                  <TooltipProvider delayDuration={0}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Badge
+                          id={tooltipId}
+                          variant="secondary"
+                          aria-label={`Selection note: ${selectionNote}`}
+                          title={selectionNote}
+                          tabIndex={0}
+                          className="h-7 max-w-[260px] cursor-default gap-1.5 rounded-full bg-[var(--color-surface-container-low)] px-2.5 text-[12px] text-[var(--color-text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-[var(--color-brand)]/45 hover:bg-[var(--color-surface-container)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2"
+                        >
+                          <MousePointerClick aria-hidden className="size-[15px] text-[var(--color-text-tertiary)]" />
+                          <span className="min-w-0 truncate">{attachment.name}</span>
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" align="end" className="w-max max-w-[min(340px,calc(100vw-3rem))] px-3 py-2 text-left text-[13px] leading-5">
                       <span className="block text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-tertiary)]">
                         修改内容
                       </span>
                       <span className="mt-1 block whitespace-pre-wrap break-words">
                         {selectionNote}
                       </span>
-                    </span>
-                  </>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 )}
                 {onRemove && attachment.id && (
-                  <button
-                    type="button"
-                    onClick={() => onRemove(attachment.id!)}
-                    className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-error)] text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100"
-                    aria-label={t('attachments.remove', { name: attachment.name })}
+                  <IconButton
+                    label={t('attachments.remove', { name: attachment.name })}
+                    variant="destructive"
+                    size="icon-sm"
+                    data-attachment-remove-id={attachment.id}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      removeAttachment(attachment.id!, index)
+                    }}
+                    className="absolute -right-1 -top-1 size-5 rounded-full text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100"
                   >
-                    ×
-                  </button>
+                    <X aria-hidden className="size-3" />
+                  </IconButton>
                 )}
               </div>
             )
@@ -228,10 +255,10 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
             const quotePreview = attachment.quote?.trim().replace(/\s+/g, ' ')
 
             return (
-              <div
+              <Card
                 key={attachment.id || `${attachment.name}-${index}`}
                 data-testid="diff-comment-card"
-                className="group/diff-comment flex max-w-[min(420px,100%)] min-w-[240px] items-start gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-2.5 py-2 text-left shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
+                className="group/diff-comment flex max-w-[min(420px,100%)] min-w-[240px] items-start gap-2 rounded-[8px] px-2.5 py-2 text-left shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
               >
                 <MessageSquare aria-hidden="true" size={15} className="mt-0.5 shrink-0 text-[var(--color-text-tertiary)]" />
                 <span className="min-w-0 flex-1">
@@ -250,16 +277,18 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                   )}
                 </span>
                 {onRemove && attachment.id && (
-                  <button
-                    type="button"
-                    onClick={() => onRemove(attachment.id!)}
-                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-                    aria-label={t('attachments.remove', { name: attachment.name })}
+                  <IconButton
+                    label={t('attachments.remove', { name: attachment.name })}
+                    variant="ghost"
+                    size="icon-sm"
+                    data-attachment-remove-id={attachment.id}
+                    onClick={() => removeAttachment(attachment.id!, index)}
+                    className="size-5 shrink-0 rounded-[4px] text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
                   >
                     <X aria-hidden="true" size={14} />
-                  </button>
+                  </IconButton>
                 )}
-              </div>
+              </Card>
             )
           }
 
@@ -287,7 +316,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] bg-[var(--color-surface)] shadow-[inset_0_0_0_1px_var(--color-border)]"
                 style={{ color: fileIconAccent(fileIcon) }}
               >
-                <span className="material-symbols-outlined text-[19px]">{fileIcon}</span>
+                <FileTypeIcon icon={fileIcon} />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block min-w-0 max-w-[260px] truncate text-[13px] font-semibold leading-5 text-[var(--color-text-primary)]">
@@ -306,7 +335,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
           )
 
           if (canOpenLocally) return (
-            <div
+            <Card
               key={attachment.id || `${attachment.name}-${index}`}
               data-file-extension={typeInfo.ext || undefined}
               className={[
@@ -315,29 +344,31 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                 'transition-colors hover:border-[var(--color-brand)]/35 hover:bg-[var(--color-surface-container)]',
               ].join(' ')}
             >
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 onClick={() => openLocalAttachment(attachment)}
                 aria-label={t('attachments.open', { name: attachment.name })}
                 title={attachment.path}
-                className="flex min-h-12 min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/40"
+                className="h-auto min-h-12 min-w-0 flex-1 justify-start rounded-none px-2.5 py-1.5 text-left focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/40"
               >
                 {fileVisual}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <IconButton
+                label={t('openWith.title')}
+                tooltip={t('openWith.title')}
+                variant="ghost"
+                size="icon"
                 onClick={(event) => openAttachmentWith(event, attachment)}
-                aria-label={t('openWith.title')}
                 title={t('openWith.title')}
-                className="flex w-9 shrink-0 items-center justify-center border-l border-[var(--color-border)] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/40"
+                className="h-auto w-9 self-stretch rounded-none border-l border-[var(--color-border)] text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/40"
               >
                 <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
-              </button>
-            </div>
+              </IconButton>
+            </Card>
           )
 
           return (
-            <div
+            <Card
               key={attachment.id || `${attachment.name}-${index}`}
               data-file-extension={typeInfo.ext || undefined}
               className={[
@@ -348,16 +379,18 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
             >
               {fileVisual}
               {onRemove && attachment.id && (
-                <button
-                  type="button"
-                  onClick={() => onRemove(attachment.id!)}
-                  className={`${hasQuotePreview ? 'mt-0.5' : 'ml-0.5'} flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)]`}
-                  aria-label={t('attachments.remove', { name: attachment.name })}
+                <IconButton
+                  label={t('attachments.remove', { name: attachment.name })}
+                  variant="ghost"
+                  size="icon-sm"
+                  data-attachment-remove-id={attachment.id}
+                  onClick={() => removeAttachment(attachment.id!, index)}
+                  className={`${hasQuotePreview ? 'mt-0.5' : 'ml-0.5'} size-5 shrink-0 rounded-full text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]`}
                 >
-                  <span className="material-symbols-outlined text-[17px]">close</span>
-                </button>
+                  <X aria-hidden className="size-[17px]" />
+                </IconButton>
               )}
-            </div>
+            </Card>
           )
         })}
       </div>

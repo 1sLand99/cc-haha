@@ -55,6 +55,16 @@ function listResponse(items: NormalizedSkill[], nextCursor: string | null = null
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   useMarketStore.setState({
@@ -129,6 +139,46 @@ describe('marketStore list', () => {
       expect.objectContaining({ source: 'skillhub', security: 'benign', installed: 'installed' }),
     )
   })
+
+  it('clears stale load-more state when a fresh list request starts', async () => {
+    const stalePage = deferred<MarketListResponse>()
+    useMarketStore.setState({ items: [makeSkill()], nextCursor: 'next' })
+    mockedApi.list
+      .mockImplementationOnce(() => stalePage.promise)
+      .mockResolvedValueOnce(listResponse([makeSkill({ id: 'skillhub:fresh', source: 'skillhub' })]))
+
+    const loadMorePromise = useMarketStore.getState().loadMore()
+    await Promise.resolve()
+    expect(useMarketStore.getState().isLoadingMore).toBe(true)
+
+    const refreshPromise = useMarketStore.getState().fetchList({ reset: true })
+    expect(useMarketStore.getState().isLoadingMore).toBe(false)
+    await refreshPromise
+    stalePage.resolve(listResponse([makeSkill({ id: 'clawhub:stale' })]))
+    await loadMorePromise
+
+    expect(useMarketStore.getState().isLoadingMore).toBe(false)
+    expect(useMarketStore.getState().items.map((item) => item.id)).toEqual(['skillhub:fresh'])
+  })
+
+  it('does not let a late load-more response roll back a completed install', async () => {
+    const page = deferred<MarketListResponse>()
+    useMarketStore.setState({ items: [makeSkill()], nextCursor: 'next' })
+    mockedApi.list.mockImplementationOnce(() => page.promise)
+    mockedApi.install.mockResolvedValue({
+      ok: true,
+      installedPath: '/tmp/skills/demo',
+      skill: makeSkill({ installState: 'installed', installedInfo: { dirName: 'demo' } }),
+    })
+
+    const loadMorePromise = useMarketStore.getState().loadMore()
+    await useMarketStore.getState().install('clawhub:demo')
+    page.resolve(listResponse([makeSkill(), makeSkill({ id: 'skillhub:new', source: 'skillhub' })]))
+    await loadMorePromise
+
+    expect(useMarketStore.getState().items.find((item) => item.id === 'clawhub:demo')?.installState).toBe('installed')
+    expect(useMarketStore.getState().items.map((item) => item.id)).toContain('skillhub:new')
+  })
 })
 
 describe('marketStore detail cache', () => {
@@ -152,6 +202,31 @@ describe('marketStore detail cache', () => {
 
     expect(useMarketStore.getState().detailError).toBe('down')
     expect(useMarketStore.getState().isDetailLoading).toBe(false)
+  })
+
+  it('ignores an old detail response after backing out and reopening the same skill', async () => {
+    const first = deferred<{ skill: NormalizedSkillDetail; sourceStatus: { status: 'ok' } }>()
+    const second = deferred<{ skill: NormalizedSkillDetail; sourceStatus: { status: 'ok' } }>()
+    mockedApi.detail
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+
+    const firstOpen = useMarketStore.getState().openDetail('clawhub:demo')
+    useMarketStore.getState().backToList()
+    const secondOpen = useMarketStore.getState().openDetail('clawhub:demo')
+
+    second.resolve({
+      skill: makeDetail({ description: '# New' }),
+      sourceStatus: { status: 'ok' },
+    })
+    await secondOpen
+    first.resolve({
+      skill: makeDetail({ description: '# Old' }),
+      sourceStatus: { status: 'ok' },
+    })
+    await firstOpen
+
+    expect(useMarketStore.getState().detail?.description).toBe('# New')
   })
 })
 
@@ -228,6 +303,34 @@ describe('marketStore install/uninstall', () => {
 
     expect(ok).toBe(true)
     expect(useMarketStore.getState().items[0]!.installState).toBe('installable')
+  })
+
+  it('keeps installed-state filters consistent after install and uninstall', async () => {
+    useMarketStore.setState({
+      items: [makeSkill()],
+      filters: { source: 'all', security: 'all', installed: 'installable' },
+    })
+    mockedApi.install.mockResolvedValue({
+      ok: true,
+      installedPath: '/tmp/skills/demo',
+      skill: makeSkill({ installState: 'installed', installedInfo: { dirName: 'demo' } }),
+    })
+
+    await useMarketStore.getState().install('clawhub:demo')
+    expect(useMarketStore.getState().items).toEqual([])
+
+    useMarketStore.setState({
+      items: [makeSkill({ installState: 'installed', installedInfo: { dirName: 'demo' } })],
+      filters: { source: 'all', security: 'all', installed: 'installed' },
+    })
+    mockedApi.uninstall.mockResolvedValue({
+      ok: true,
+      removedPath: '/tmp/skills/demo',
+      skill: makeSkill({ installState: 'installable' }),
+    })
+
+    await useMarketStore.getState().uninstall('clawhub:demo')
+    expect(useMarketStore.getState().items).toEqual([])
   })
 })
 

@@ -74,11 +74,14 @@ export function extractDescriptionFromMarkdown(
  * @param toolsValue The value from frontmatter
  * @returns Parsed tool list as string[]
  */
-function parseToolListString(toolsValue: unknown): string[] | null {
-  // Return null for missing/null - let caller decide the default
-  if (toolsValue === undefined || toolsValue === null) {
-    return null
+export function parseRawToolListFromFrontmatter(
+  toolsValue: unknown,
+): string[] | undefined {
+  // Missing fields inherit access; an explicit null is an empty allowlist.
+  if (toolsValue === undefined) {
+    return undefined
   }
+  if (toolsValue === null) return []
 
   // Empty string or other falsy values mean no tools
   if (!toolsValue) {
@@ -98,11 +101,7 @@ function parseToolListString(toolsValue: unknown): string[] | null {
     return []
   }
 
-  const parsedTools = parseToolListFromCLI(toolsArray)
-  if (parsedTools.includes('*')) {
-    return ['*']
-  }
-  return parsedTools
+  return parseToolListFromCLI(toolsArray)
 }
 
 /**
@@ -113,8 +112,8 @@ function parseToolListString(toolsValue: unknown): string[] | null {
 export function parseAgentToolsFromFrontmatter(
   toolsValue: unknown,
 ): string[] | undefined {
-  const parsed = parseToolListString(toolsValue)
-  if (parsed === null) {
+  const parsed = parseRawToolListFromFrontmatter(toolsValue)
+  if (parsed === undefined) {
     // For agents: undefined = all tools (undefined), null = no tools ([])
     return toolsValue === undefined ? undefined : []
   }
@@ -132,8 +131,8 @@ export function parseAgentToolsFromFrontmatter(
 export function parseSlashCommandToolsFromFrontmatter(
   toolsValue: unknown,
 ): string[] {
-  const parsed = parseToolListString(toolsValue)
-  if (parsed === null) {
+  const parsed = parseRawToolListFromFrontmatter(toolsValue)
+  if (parsed === undefined) {
     return []
   }
   return parsed

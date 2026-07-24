@@ -95,6 +95,7 @@ describe('ConversationNavigator', () => {
     )
 
     const markers = screen.getAllByRole('button')
+    expect(markers.every((marker) => marker.getAttribute('data-slot') === 'button')).toBe(true)
     expect(markers.map((marker) => marker.getAttribute('data-role'))).toEqual(['user', 'assistant'])
     expect(markers[0]?.getAttribute('aria-current')).toBeNull()
     expect(markers[1]?.getAttribute('aria-current')).toBe('location')

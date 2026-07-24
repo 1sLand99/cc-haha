@@ -1,16 +1,25 @@
-import type { ActivityStatus } from './sessionActivityModel'
-import mascotBuild from '../../assets/agent-mascots/agent-mascot-build.png'
-import mascotCheck from '../../assets/agent-mascots/agent-mascot-check.png'
-import mascotCode from '../../assets/agent-mascots/agent-mascot-code.png'
-import mascotData from '../../assets/agent-mascots/agent-mascot-data.png'
-import mascotDesign from '../../assets/agent-mascots/agent-mascot-design.png'
-import mascotDocs from '../../assets/agent-mascots/agent-mascot-docs.png'
-import mascotFix from '../../assets/agent-mascots/agent-mascot-fix.png'
-import mascotPlan from '../../assets/agent-mascots/agent-mascot-plan.png'
-import mascotRelease from '../../assets/agent-mascots/agent-mascot-release.png'
-import mascotSearch from '../../assets/agent-mascots/agent-mascot-search.png'
-import mascotShield from '../../assets/agent-mascots/agent-mascot-shield.png'
-import mascotTerminal from '../../assets/agent-mascots/agent-mascot-terminal.png'
+import mascotBuild from '@/assets/agent-mascots/agent-mascot-build.png'
+import mascotCheck from '@/assets/agent-mascots/agent-mascot-check.png'
+import mascotCode from '@/assets/agent-mascots/agent-mascot-code.png'
+import mascotData from '@/assets/agent-mascots/agent-mascot-data.png'
+import mascotDesign from '@/assets/agent-mascots/agent-mascot-design.png'
+import mascotDocs from '@/assets/agent-mascots/agent-mascot-docs.png'
+import mascotFix from '@/assets/agent-mascots/agent-mascot-fix.png'
+import mascotPlan from '@/assets/agent-mascots/agent-mascot-plan.png'
+import mascotRelease from '@/assets/agent-mascots/agent-mascot-release.png'
+import mascotSearch from '@/assets/agent-mascots/agent-mascot-search.png'
+import mascotShield from '@/assets/agent-mascots/agent-mascot-shield.png'
+import mascotTerminal from '@/assets/agent-mascots/agent-mascot-terminal.png'
+
+export type AgentMascotStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+  | 'running'
+  | 'failed'
+  | 'stopped'
+  | 'idle'
+  | 'error'
 
 export const AGENT_MASCOT_VARIANTS = [
   'code',
@@ -32,7 +41,7 @@ export type AgentMascotVariant = typeof AGENT_MASCOT_VARIANTS[number]
 export type AgentMascotSpec = {
   seed: string
   variant: AgentMascotVariant
-  state: ActivityStatus
+  state: AgentMascotStatus
   motion: 'active' | 'still'
   tone: 'accent' | 'success' | 'danger' | 'muted'
 }
@@ -65,7 +74,7 @@ export function resolveAgentMascotSpec({
   status,
 }: {
   seed: string
-  status: ActivityStatus
+  status: AgentMascotStatus
 }): AgentMascotSpec {
   const normalizedSeed = seed.trim() || 'agent'
   const isRunning = status === 'running' || status === 'in_progress'
@@ -88,13 +97,14 @@ function ringClassName(tone: AgentMascotSpec['tone']): string {
   return 'border-[color-mix(in_srgb,var(--color-brand)_42%,transparent)]'
 }
 
-export function AgentMascot({ seed, status }: { seed: string; status: ActivityStatus }) {
+export function AgentMascot({ seed, status }: { seed: string; status: AgentMascotStatus }) {
   const spec = resolveAgentMascotSpec({ seed, status })
   const isActive = spec.motion === 'active'
   const imageSrc = MASCOT_IMAGE_BY_VARIANT[spec.variant]
 
   return (
     <span
+      data-slot="agent-mascot"
       data-testid="agent-mascot"
       data-agent-mascot-seed={spec.seed}
       data-agent-mascot-variant={spec.variant}

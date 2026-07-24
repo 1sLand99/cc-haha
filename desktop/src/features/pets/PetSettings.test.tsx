@@ -145,7 +145,7 @@ describe('PetSettings', () => {
   it('persists enabling the pet and opens the floating pet window', async () => {
     render(<PetSettings />)
 
-    const toggle = await screen.findByRole('checkbox', { name: 'Show desktop pet' })
+    const toggle = await screen.findByRole('switch', { name: 'Show desktop pet' })
     fireEvent.click(toggle)
 
     await waitFor(() => {
@@ -160,9 +160,9 @@ describe('PetSettings', () => {
   it('keeps the task panel disabled by default and persists enabling it', async () => {
     render(<PetSettings />)
 
-    const panelToggle = await screen.findByRole('checkbox', { name: 'Show active task panel' })
+    const panelToggle = await screen.findByRole('switch', { name: 'Show active task panel' })
     expect(panelToggle).not.toBeChecked()
-    expect(screen.queryByRole('checkbox', { name: 'Start collapsed' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('switch', { name: 'Start collapsed' })).not.toBeInTheDocument()
 
     fireEvent.click(panelToggle)
 
@@ -175,7 +175,7 @@ describe('PetSettings', () => {
     updatePetPreferencesMock.mockRejectedValueOnce(new Error('disk full'))
     render(<PetSettings />)
 
-    const toggle = await screen.findByRole('checkbox', { name: 'Show desktop pet' })
+    const toggle = await screen.findByRole('switch', { name: 'Show desktop pet' })
     fireEvent.click(toggle)
 
     expect(toggle).toBeChecked()
@@ -188,7 +188,7 @@ describe('PetSettings', () => {
     showPetMock.mockRejectedValueOnce(new Error('window unavailable'))
     render(<PetSettings />)
 
-    const toggle = await screen.findByRole('checkbox', { name: 'Show desktop pet' })
+    const toggle = await screen.findByRole('switch', { name: 'Show desktop pet' })
     fireEvent.click(toggle)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Pet preferences could not be saved.')
@@ -204,7 +204,7 @@ describe('PetSettings', () => {
       .mockResolvedValueOnce(preferencesResponse({ ...defaultPetPreferences, enabled: false }))
     render(<PetSettings />)
 
-    const toggle = await screen.findByRole('checkbox', { name: 'Show desktop pet' })
+    const toggle = await screen.findByRole('switch', { name: 'Show desktop pet' })
     expect(toggle).toBeChecked()
 
     window.dispatchEvent(new Event('focus'))
@@ -223,7 +223,7 @@ describe('PetSettings', () => {
       .mockResolvedValueOnce(preferencesResponse({ ...defaultPetPreferences, enabled: false }))
     render(<PetSettings />)
 
-    const toggle = await screen.findByRole('checkbox', { name: 'Show desktop pet' })
+    const toggle = await screen.findByRole('switch', { name: 'Show desktop pet' })
     expect(toggle).toBeChecked()
 
     notifyVisibilityChanged?.()
@@ -245,9 +245,13 @@ describe('PetSettings', () => {
       })
     })
 
-    fireEvent.change(screen.getByRole('slider', { name: 'Pet size' }), { target: { value: '176' } })
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Play animations' }))
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Show active task panel' }))
+    const sizeSlider = screen.getByRole('slider', { name: 'Pet size' })
+    fireEvent.keyDown(sizeSlider, { key: 'ArrowRight' })
+    fireEvent.keyDown(sizeSlider, { key: 'ArrowRight' })
+    fireEvent.keyDown(sizeSlider, { key: 'ArrowRight' })
+    fireEvent.keyDown(sizeSlider, { key: 'ArrowRight' })
+    fireEvent.click(screen.getByRole('switch', { name: 'Play animations' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Show active task panel' }))
 
     await waitFor(() => {
       expect(updatePetPreferencesMock).toHaveBeenCalledWith({ size: 176 })
@@ -262,19 +266,22 @@ describe('PetSettings', () => {
     await screen.findByText('Moon Cat')
 
     const slider = screen.getByRole('slider', { name: 'Pet size' })
-    expect(slider).toHaveClass('accent-[var(--color-brand)]')
-    expect(slider).not.toHaveClass('accent-[var(--color-accent)]')
-
-    const motionToggle = screen.getByRole('checkbox', { name: 'Play animations' })
-    const track = motionToggle.nextElementSibling
-    const thumb = track?.nextElementSibling
-    expect(track).toHaveClass(
-      'peer-checked:bg-[var(--color-switch-checked-bg)]',
-      'peer-focus-visible:ring-[var(--color-border-focus)]/40',
+    expect(slider).toHaveAttribute('data-slot', 'slider-thumb')
+    expect(slider).toHaveClass(
+      'border-[var(--color-brand)]',
+      'focus-visible:shadow-[var(--shadow-focus-ring)]',
     )
-    expect(thumb).toHaveClass('bg-[var(--color-switch-thumb)]')
 
-    const selectedCard = screen.getByRole('button', { name: 'Selected' }).closest('article')
+    const motionToggle = screen.getByRole('switch', { name: 'Play animations' })
+    const thumb = motionToggle.querySelector('[data-slot="switch-thumb"]')
+    expect(motionToggle).toHaveAttribute('data-slot', 'switch')
+    expect(motionToggle).toHaveClass(
+      'data-[state=checked]:bg-[var(--color-brand)]',
+      'focus-visible:shadow-[var(--shadow-focus-ring)]',
+    )
+    expect(thumb).toHaveClass('bg-white')
+
+    const selectedCard = screen.getByRole('button', { name: 'Selected' }).closest('[data-slot="card"]')
     expect(selectedCard).toHaveClass(
       'border-[var(--color-brand)]',
       'bg-[var(--color-surface-selected)]',
@@ -300,6 +307,38 @@ describe('PetSettings', () => {
     expect(screen.getByRole('button', { name: /Generate full animation with AI/ })).toBeDisabled()
     expect(screen.getByText(/configure a separate image-generation service first/i)).toBeInTheDocument()
     expect(screen.getByText(/current chat model is never used/i)).toBeInTheDocument()
+  })
+
+  it('uses a shadcn dialog and restores Add pet focus on Escape', async () => {
+    render(<PetSettings />)
+
+    const trigger = await screen.findByRole('button', { name: 'Add pet' })
+    trigger.focus()
+    fireEvent.click(trigger)
+
+    const dialog = screen.getByRole('dialog', { name: 'Create a custom pet' })
+    expect(dialog).toHaveAttribute('data-slot', 'dialog-content')
+    const imageMethod = screen.getByRole('button', { name: /Animate one image/ })
+    expect(imageMethod).toHaveAttribute(
+      'data-slot',
+      'button',
+    )
+    await waitFor(() => expect(imageMethod).toHaveFocus())
+
+    fireEvent.click(imageMethod)
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Pet ID' })).toHaveFocus())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose another method' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Animate one image/ })).toHaveFocus()
+    })
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(trigger).toHaveFocus()
+    })
   })
 
   it('creates a lightweight animated pet from one local image and selects it', async () => {

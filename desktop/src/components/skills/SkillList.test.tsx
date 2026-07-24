@@ -86,6 +86,11 @@ describe('SkillList', () => {
     expect(screen.getByText('Second skill description')).toBeInTheDocument()
     expect(screen.getAllByText('Plugin').length).toBeGreaterThan(0)
     expect(screen.getByText('Telegram Access')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Alpha Skill/ })).toHaveAttribute('data-slot', 'button')
+    expect(screen.getByPlaceholderText('Search skills by name, description, or source...')).toHaveAttribute(
+      'data-slot',
+      'input',
+    )
   })
 
   it('filters installed skills locally by keyword and clears the search', () => {
@@ -126,6 +131,7 @@ describe('SkillList', () => {
 
     expect(screen.getByText('Telegram Access')).toBeInTheDocument()
     expect(screen.getByText('Alpha Skill')).toBeInTheDocument()
+    expect(searchInput).toHaveFocus()
   })
 
   it('uses the active session workDir for project-scoped skills', () => {

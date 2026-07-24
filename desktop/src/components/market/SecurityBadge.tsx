@@ -1,6 +1,8 @@
 import { BadgeCheck, ShieldAlert, ShieldCheck, ShieldQuestion, type LucideIcon } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import type { SecurityStatus } from '../../types/market'
+import { Badge } from '../ui/badge'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 
 const STYLES: Record<SecurityStatus, { icon: LucideIcon; className: string }> = {
   verified: {
@@ -26,14 +28,25 @@ export function SecurityBadge({ status, className = '' }: { status: SecurityStat
   const t = useTranslation()
   const style = STYLES[status]
   const Icon = style.icon
+  const label = t(`market.security.${status}`)
+  const hint = t(`market.securityHint.${status}`)
   return (
-    <span
-      data-testid={`security-badge-${status}`}
-      title={t(`market.securityHint.${status}`)}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-medium ${style.className} ${className}`}
-    >
-      <Icon className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-      {t(`market.security.${status}`)}
-    </span>
+    <TooltipProvider delayDuration={0}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge
+            variant="outline"
+            tabIndex={0}
+            data-testid={`security-badge-${status}`}
+            aria-label={`${label}. ${hint}`}
+            className={`gap-1.5 whitespace-nowrap py-1 text-[11px] ${style.className} ${className}`}
+          >
+            <Icon className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
+            {label}
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>{hint}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }

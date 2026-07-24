@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
 import { SkillCard } from './SkillCard'
@@ -114,21 +114,38 @@ describe('SkillCard', () => {
     expect(second.style.background).toBe(background)
   })
 
-  it('renders the icon image when iconUrl is provided', () => {
+  it('renders the shadcn avatar image when iconUrl loads', async () => {
+    const imageSpy = vi.spyOn(window, 'Image').mockImplementation(() => {
+      const image = document.createElement('img')
+      Object.defineProperty(image, 'complete', { configurable: true, value: true })
+      Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 48 })
+      return image as HTMLImageElement
+    })
     const { container } = render(
       <SkillCard skill={makeSkill({ iconUrl: 'https://example.com/icon.png' })} onOpen={vi.fn()} />,
     )
 
-    const img = container.querySelector('img')
+    const img = await waitFor(() => {
+      const element = container.querySelector('img')
+      expect(element).not.toBeNull()
+      return element
+    })
     expect(img).toHaveAttribute('src', 'https://example.com/icon.png')
+    expect(img).toHaveAttribute('data-slot', 'avatar-image')
     expect(screen.queryByTestId('skill-avatar-fallback')).not.toBeInTheDocument()
+    imageSpy.mockRestore()
   })
 
-  it('explains the security status via tooltip', () => {
+  it('explains the security status via a keyboard-accessible tooltip', async () => {
     render(<SkillCard skill={makeSkill({ securityStatus: 'unknown' })} onOpen={vi.fn()} />)
 
-    expect(screen.getByTestId('security-badge-unknown')).toHaveAttribute(
-      'title',
+    const badge = screen.getByTestId('security-badge-unknown')
+    expect(badge).toHaveAttribute(
+      'aria-label',
+      'Not audited. No security audit data from the source — review the files before installing.',
+    )
+    fireEvent.focus(badge)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
       'No security audit data from the source — review the files before installing.',
     )
   })

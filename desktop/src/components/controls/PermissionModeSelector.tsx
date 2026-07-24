@@ -1,5 +1,16 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useId } from 'react'
 import DOMPurify from 'dompurify'
+import {
+  Bot,
+  Check,
+  ChevronDown,
+  Folder,
+  Gavel,
+  ShieldCheck,
+  Workflow,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useSessionStore } from '../../stores/sessionStore'
@@ -12,14 +23,24 @@ import { isDesktopRuntime } from '../../lib/desktopRuntime'
 import { MobileBottomSheet } from '../shared/MobileBottomSheet'
 import { ActionDialog } from '../shared/ActionDialog'
 import { AutoModeOptInDialog } from './AutoModeOptInDialog'
+import { Button } from '../ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu'
+import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
 
-const MODE_ICONS: Record<PermissionMode, string> = {
-  default: 'verified_user',
-  acceptEdits: 'bolt',
-  auto: 'autoplay',
-  plan: 'architecture',
-  bypassPermissions: 'gavel',
-  dontAsk: 'gavel',
+const MODE_ICONS: Record<PermissionMode, LucideIcon> = {
+  default: ShieldCheck,
+  acceptEdits: Zap,
+  auto: Bot,
+  plan: Workflow,
+  bypassPermissions: Gavel,
+  dontAsk: Gavel,
 }
 
 type Props = {
@@ -56,48 +77,49 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
   const [autoDialog, setAutoDialog] = useState(false)
   const [autoConsentPending, setAutoConsentPending] = useState(false)
   const interactionTabIdRef = useRef<string | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const dialogWasOpenRef = useRef(false)
+  const menuId = `permission-mode-menu-${useId().replace(/:/g, '')}`
 
   const isControlled = value !== undefined
   const PERMISSION_ITEMS: Array<{
     value: PermissionMode
     label: string
     description: string
-    icon: string
+    icon: LucideIcon
     color?: string
   }> = [
     {
       value: 'default',
       label: t('permMode.askPermissions'),
       description: t('permMode.askPermDesc'),
-      icon: 'verified_user',
+      icon: ShieldCheck,
     },
     {
       value: 'acceptEdits',
       label: t('permMode.autoAccept'),
       description: t('permMode.autoAcceptDesc'),
-      icon: 'bolt',
+      icon: Zap,
     },
     {
       value: 'auto',
       label: t('permMode.autoMode'),
       description: t('permMode.autoModeDesc'),
-      icon: 'autoplay',
+      icon: Bot,
       color: 'text-[var(--color-brand)]',
     },
     {
       value: 'plan',
       label: t('permMode.planMode'),
       description: t('permMode.planModeDesc'),
-      icon: 'architecture',
+      icon: Workflow,
       color: 'text-[var(--color-text-tertiary)]',
     },
     {
       value: 'bypassPermissions',
       label: t('permMode.bypass'),
       description: t('permMode.bypassDesc'),
-      icon: 'gavel',
+      icon: Gavel,
       color: 'text-[var(--color-error)]',
     },
   ]
@@ -122,12 +144,7 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
     ? isMobile
       ? 'h-11 w-11 justify-center rounded-xl p-0'
       : 'h-8 w-8 justify-center rounded-full p-0'
-    : 'gap-1.5 rounded-full px-2.5 py-1.5 text-xs'
-  const menuPlacementClass = menuPlacement === 'bottom'
-    ? 'top-full mt-2'
-    : 'bottom-full mb-2'
-  const menuId = 'permission-mode-menu'
-
+    : 'h-auto gap-1.5 rounded-full px-2.5 py-1.5 text-xs'
   useEffect(() => {
     if (isTurnActive) {
       setOpen(false)
@@ -150,148 +167,178 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
   }, [activeTabId, autoDialog, confirmDialog, open])
 
   useEffect(() => {
-    if (!open) return
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (
-        ref.current &&
-        !ref.current.contains(target) &&
-        !menuRef.current?.contains(target)
-      ) {
-        setOpen(false)
-      }
-    }
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    document.addEventListener('keydown', handleEsc)
-    return () => {
-      document.removeEventListener('mousedown', handleClick)
-      document.removeEventListener('keydown', handleEsc)
-    }
-  }, [open])
+    setOpen(false)
+  }, [currentMode])
 
-  const permissionOptions = (
-    <div id={menuId} ref={menuRef} role="menu">
-      {PERMISSION_ITEMS.map((item) => (
-        <button
-          key={item.value}
-          role="menuitem"
-          onClick={() => {
-            const actionTabId = useTabStore.getState().activeTabId
-            if (
-              actionTabId !== interactionTabIdRef.current ||
-              isTurnActiveNow(actionTabId)
-            ) {
-              setOpen(false)
-              setConfirmDialog(false)
-              setAutoDialog(false)
-              interactionTabIdRef.current = null
-              return
-            }
-            if (item.value === 'auto' && item.value !== currentMode) {
-              setOpen(false)
-              setAutoDialog(true)
-              return
-            }
-            if (item.value === 'bypassPermissions') {
-              setOpen(false)
-              setConfirmDialog(true)
-              return
-            }
-            if (isControlled) {
-              onChange?.(item.value)
-            } else {
-              if (actionTabId) setSessionPermissionMode(actionTabId, item.value)
-            }
-            setOpen(false)
-            interactionTabIdRef.current = null
-          }}
-          className={`
-            flex w-full items-start gap-3 px-4 py-3 text-left transition-colors
-            hover:bg-[var(--color-surface-hover)]
-            ${item.value === currentMode ? 'bg-[var(--color-surface-selected)]' : ''}
-          `}
-        >
-          <span className={`material-symbols-outlined mt-0.5 ${item.value === 'auto' ? 'text-[18px]' : 'text-[20px]'} ${item.color || 'text-[var(--color-text-secondary)]'}`}>
-            {item.icon}
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-[var(--color-text-primary)]">{item.label}</div>
-            <div className="mt-0.5 text-xs text-[var(--color-text-tertiary)]">{item.description}</div>
-          </div>
-          {item.value === currentMode && (
-            <span className="material-symbols-outlined mt-0.5 text-[16px] text-[var(--color-brand)]" style={{ fontVariationSettings: "'FILL' 1" }}>
-              check_circle
-            </span>
-          )}
-        </button>
-      ))}
-    </div>
-  )
+  useEffect(() => {
+    const dialogOpen = confirmDialog || autoDialog
+    if (dialogWasOpenRef.current && !dialogOpen) {
+      requestAnimationFrame(() => triggerRef.current?.focus())
+    }
+    dialogWasOpenRef.current = dialogOpen
+  }, [autoDialog, confirmDialog])
 
-  const menuContent = (
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setOpen(false)
+      return
+    }
+
+    const actionTabId = useTabStore.getState().activeTabId
+    if (isTurnActiveNow(actionTabId)) return
+    interactionTabIdRef.current = actionTabId
+    setOpen(true)
+  }
+
+  const selectPermission = (item: (typeof PERMISSION_ITEMS)[number]) => {
+    const actionTabId = useTabStore.getState().activeTabId
+    if (
+      actionTabId !== interactionTabIdRef.current ||
+      isTurnActiveNow(actionTabId)
+    ) {
+      setOpen(false)
+      setConfirmDialog(false)
+      setAutoDialog(false)
+      interactionTabIdRef.current = null
+      return
+    }
+    if (item.value === 'auto' && item.value !== currentMode) {
+      setOpen(false)
+      setAutoDialog(true)
+      return
+    }
+    if (item.value === 'bypassPermissions') {
+      setOpen(false)
+      setConfirmDialog(true)
+      return
+    }
+    if (isControlled) {
+      onChange?.(item.value)
+    } else if (actionTabId) {
+      setSessionPermissionMode(actionTabId, item.value)
+    }
+    setOpen(false)
+    interactionTabIdRef.current = null
+  }
+
+  const renderPermissionItem = (item: (typeof PERMISSION_ITEMS)[number]) => (
     <>
-      <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--color-outline)]">
-        {t('permMode.executionPermissions')}
+      <item.icon
+        aria-hidden
+        className={`mt-0.5 size-5 ${item.color || 'text-[var(--color-text-secondary)]'}`}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold text-[var(--color-text-primary)]">{item.label}</div>
+        <div className="mt-0.5 text-xs text-[var(--color-text-tertiary)]">{item.description}</div>
       </div>
-      {permissionOptions}
     </>
   )
 
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => {
-          const actionTabId = useTabStore.getState().activeTabId
-          if (isTurnActiveNow(actionTabId)) return
-          if (open) {
-            setOpen(false)
-            interactionTabIdRef.current = null
-            return
-          }
-          interactionTabIdRef.current = actionTabId
-          setOpen(true)
-        }}
-        disabled={isTurnActive}
-        aria-label={MODE_LABELS[currentMode]}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        title={isTurnActive ? t('permMode.disabledDuringTurn') : (compact ? MODE_LABELS[currentMode] : undefined)}
-        className={`flex items-center bg-[var(--color-surface-container-low)] font-medium text-[var(--color-text-secondary)] transition-colors ${
-          isTurnActive ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[var(--color-surface-hover)]'
-        } ${compactButtonClass}`}
-      >
-        <span className={`material-symbols-outlined ${currentMode === 'auto' ? 'text-[12px]' : 'text-[14px]'}`}>
-          {MODE_ICONS[currentMode]}
-        </span>
-        {!compact && (
-          <>
-            <span>{MODE_LABELS[currentMode]}</span>
-            <span className="material-symbols-outlined text-[12px]">expand_more</span>
-          </>
-        )}
-      </button>
+  const CurrentModeIcon = MODE_ICONS[currentMode]
+  const trigger = (
+    <Button
+      ref={triggerRef}
+      variant="ghost"
+      size="sm"
+      onClick={isMobile ? () => handleOpenChange(!open) : undefined}
+      disabled={isTurnActive}
+      aria-label={MODE_LABELS[currentMode]}
+      aria-haspopup={isMobile ? 'dialog' : undefined}
+      aria-expanded={isMobile ? open : undefined}
+      aria-controls={open ? menuId : undefined}
+      title={isTurnActive ? t('permMode.disabledDuringTurn') : (compact ? MODE_LABELS[currentMode] : undefined)}
+      className={`flex items-center bg-[var(--color-surface-container-low)] font-medium text-[var(--color-text-secondary)] transition-colors ${
+        isTurnActive ? 'cursor-not-allowed opacity-50' : 'hover:bg-[var(--color-surface-hover)]'
+      } ${compactButtonClass}`}
+    >
+      <CurrentModeIcon aria-hidden className="size-3.5" />
+      {!compact && (
+        <>
+          <span>{MODE_LABELS[currentMode]}</span>
+          <ChevronDown aria-hidden className="size-3" />
+        </>
+      )}
+    </Button>
+  )
 
-      {open && (
-        isMobile ? (
-          <MobileBottomSheet
-            open={open}
-            onClose={() => setOpen(false)}
-            title={t('permMode.executionPermissions')}
-            closeLabel={t('tabs.close')}
-            ariaLabel={t('permMode.executionPermissions')}
-            contentClassName="py-2"
+  return (
+    <div className="relative">
+      {isMobile ? (
+        <>
+          {trigger}
+          {open && (
+            <MobileBottomSheet
+              open={open}
+              onClose={() => setOpen(false)}
+              title={t('permMode.executionPermissions')}
+              closeLabel={t('tabs.close')}
+              ariaLabel={t('permMode.executionPermissions')}
+              contentClassName="py-2"
+            >
+              <RadioGroup
+                id={menuId}
+                value={currentMode}
+                aria-label={t('permMode.executionPermissions')}
+                className="gap-0"
+                onValueChange={(nextMode) => {
+                  const item = PERMISSION_ITEMS.find(candidate => candidate.value === nextMode)
+                  if (item) selectPermission(item)
+                }}
+              >
+                {PERMISSION_ITEMS.map((item) => (
+                  <label
+                    key={item.value}
+                    className={`flex min-h-14 cursor-pointer items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] ${
+                      item.value === currentMode ? 'bg-[var(--color-surface-selected)]' : ''
+                    }`}
+                  >
+                    <RadioGroupItem
+                      value={item.value}
+                      aria-label={item.label}
+                      className="mt-1"
+                    />
+                    {renderPermissionItem(item)}
+                  </label>
+                ))}
+              </RadioGroup>
+            </MobileBottomSheet>
+          )}
+        </>
+      ) : (
+        <DropdownMenu open={open} onOpenChange={handleOpenChange}>
+          <DropdownMenuTrigger asChild>
+            {trigger}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            id={menuId}
+            align="start"
+            side={menuPlacement === 'bottom' ? 'bottom' : 'top'}
+            className="w-[320px] p-2"
           >
-            {permissionOptions}
-          </MobileBottomSheet>
-        ) : (
-          <div id={menuId} ref={menuRef} role="menu" className={`absolute left-0 ${menuPlacementClass} w-[320px] rounded-xl bg-[var(--color-surface-container-lowest)] border border-[var(--color-border)] shadow-[var(--shadow-dropdown)] z-50 py-2`}>
-            {menuContent}
-          </div>
-        )
+            <DropdownMenuLabel className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-outline)]">
+              {t('permMode.executionPermissions')}
+            </DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={currentMode}
+              onValueChange={(nextMode) => {
+                const item = PERMISSION_ITEMS.find(candidate => candidate.value === nextMode)
+                if (item) selectPermission(item)
+              }}
+            >
+              {PERMISSION_ITEMS.map((item) => (
+                <DropdownMenuRadioItem
+                  key={item.value}
+                  value={item.value}
+                  className={`items-start gap-3 py-3 pl-8 pr-2 ${
+                    item.value === currentMode ? 'bg-[var(--color-surface-selected)]' : ''
+                  }`}
+                >
+                  {renderPermissionItem(item)}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
 
       <ActionDialog
@@ -312,20 +359,20 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
               dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(t('permMode.enableBypassBody')) }}
             />
             <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container)] px-3 py-2" title={workDir}>
-              <span className="material-symbols-outlined shrink-0 text-[16px] text-[var(--color-text-tertiary)]">folder</span>
+              <Folder aria-hidden className="size-4 shrink-0 text-[var(--color-text-tertiary)]" />
               <code className="truncate text-xs font-[var(--font-mono)] text-[var(--color-text-primary)]">{workDir}</code>
             </div>
             <ul className="space-y-1.5 text-xs text-[var(--color-text-secondary)]">
               <li className="flex items-start gap-2">
-                <span className="material-symbols-outlined mt-0.5 text-[14px] text-[var(--color-error)]">check</span>
+                <Check aria-hidden className="mt-0.5 size-3.5 text-[var(--color-error)]" />
                 {t('permMode.permReadWrite')}
               </li>
               <li className="flex items-start gap-2">
-                <span className="material-symbols-outlined mt-0.5 text-[14px] text-[var(--color-error)]">check</span>
+                <Check aria-hidden className="mt-0.5 size-3.5 text-[var(--color-error)]" />
                 {t('permMode.permShell')}
               </li>
               <li className="flex items-start gap-2">
-                <span className="material-symbols-outlined mt-0.5 text-[14px] text-[var(--color-error)]">check</span>
+                <Check aria-hidden className="mt-0.5 size-3.5 text-[var(--color-error)]" />
                 {t('permMode.permPackages')}
               </li>
             </ul>

@@ -70,8 +70,10 @@ describe('AssistantOutputTargetCard', () => {
   it('renders a markdown target title + Markdown badge', () => {
     render(<AssistantOutputTargetCard target={markdownTarget} sessionId="s1" />)
     expect(screen.getByText('readme.md')).toBeInTheDocument()
-    expect(screen.getByText('assistantOutputs.kind.markdown')).toBeInTheDocument()
+    expect(screen.getByText('assistantOutputs.kind.markdown')).toHaveAttribute('data-slot', 'badge')
     expect(screen.getByText('docs/readme.md')).toBeInTheDocument()
+    expect(screen.getByLabelText('assistantOutputs.open')).toHaveAttribute('data-size', 'icon-sm')
+    expect(screen.getByLabelText('openWith.title')).toHaveAttribute('data-slot', 'button')
   })
 
   it('renders a localhost target title + Localhost badge (URL not duplicated)', () => {

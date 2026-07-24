@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Info, LoaderCircle, PowerOff, RefreshCw, Server } from 'lucide-react'
 import { skillsApi } from '../../api/skills'
 import { mcpApi } from '../../api/mcp'
 import {
@@ -14,6 +15,14 @@ import { useMcpStore } from '../../stores/mcpStore'
 import { useSkillStore } from '../../stores/skillStore'
 import type { McpServerRecord } from '../../types/mcp'
 import type { SkillMeta } from '../../types/skill'
+import { Alert, AlertDescription } from '../ui/alert'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { Card } from '../ui/card'
+import {
+  LocalSlashInspectorPanel,
+  LocalSlashPanel,
+} from '../ui/custom/local-slash-panel'
 import type { SlashCommandOption } from './composerUtils'
 
 export type LocalSlashCommandName = 'mcp' | 'skills' | 'help' | 'status' | 'cost' | 'context'
@@ -63,41 +72,10 @@ function projectBadge(path?: string, t?: ReturnType<typeof useTranslation>) {
   return t('slash.mcp.projectBadge', { name: label })
 }
 
-function PanelShell({
-  title,
-  subtitle,
-  children,
-  onClose,
-}: {
-  title: string
-  subtitle: string
-  children: React.ReactNode
-  onClose: () => void
-}) {
-  return (
-    <div className="absolute bottom-full left-0 right-0 z-50 mb-3 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-dropdown)]">
-      <div className="flex items-start justify-between gap-4 border-b border-[var(--color-border)] px-5 py-4">
-        <div>
-          <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">{title}</h3>
-          <p className="mt-1 text-sm text-[var(--color-text-tertiary)]">{subtitle}</p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-        >
-          <span className="material-symbols-outlined text-[18px]">close</span>
-        </button>
-      </div>
-      <div className="max-h-[min(620px,72vh)] overflow-y-auto px-5 py-4">{children}</div>
-    </div>
-  )
-}
-
 function LoadingState({ label }: { label: string }) {
   return (
     <div className="flex items-center justify-center py-12 text-sm text-[var(--color-text-tertiary)]">
-      <div className="mr-3 h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-brand)] border-t-transparent" />
+      <LoaderCircle aria-hidden className="mr-3 size-5 animate-spin text-[var(--color-brand)]" />
       {label}
     </div>
   )
@@ -105,18 +83,21 @@ function LoadingState({ label }: { label: string }) {
 
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-10 text-center">
+    <Card className="rounded-2xl border-dashed bg-[var(--color-surface)] px-5 py-10 text-center">
       <div className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</div>
       <div className="mt-2 text-xs leading-6 text-[var(--color-text-tertiary)]">{body}</div>
-    </div>
+    </Card>
   )
 }
 
 function ErrorState({ message }: { message: string }) {
   return (
-    <div className="rounded-2xl border border-[var(--color-inspector-border)] bg-[var(--color-inspector-panel)] px-5 py-4 text-sm text-[var(--color-inspector-danger)]">
-      {message}
-    </div>
+    <Alert
+      variant="destructive"
+      className="rounded-2xl border-[var(--color-inspector-border)] bg-[var(--color-inspector-panel)] px-5 py-4 text-[var(--color-inspector-danger)]"
+    >
+      <AlertDescription className="text-sm text-current">{message}</AlertDescription>
+    </Alert>
   )
 }
 
@@ -185,7 +166,7 @@ function MetricCard({ label, value, detail }: { label: string; value: React.Reac
 function InspectorNotice({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-3 rounded-md border border-[var(--color-inspector-border)] bg-[var(--color-inspector-surface)] px-4 py-3 text-[14px] text-[var(--color-inspector-heading)]">
-      <span className="material-symbols-outlined text-[18px] text-[var(--color-inspector-muted)]">info</span>
+      <Info aria-hidden className="size-[18px] text-[var(--color-inspector-muted)]" />
       <span>{children}</span>
     </div>
   )
@@ -425,13 +406,14 @@ function MemoryFilesBreakdown({ files, t }: { files: ContextMemoryFile[]; t: Tra
       <div className="rounded-md border border-[var(--color-inspector-border)] bg-[var(--color-inspector-panel)] px-5 py-5">
         <div className="flex items-center justify-between gap-3">
           <InspectorSectionTitle>{t('slash.inspector.context.memoryFiles')}</InspectorSectionTitle>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => openSettings()}
-            className="rounded-sm border border-[var(--color-inspector-border)] bg-[var(--color-inspector-chip)] px-2.5 py-1 text-xs font-semibold text-[var(--color-inspector-muted-strong)] hover:text-[var(--color-inspector-text)]"
+            className="rounded-sm border-[var(--color-inspector-border)] bg-[var(--color-inspector-chip)] text-[var(--color-inspector-muted-strong)] hover:text-[var(--color-inspector-text)]"
           >
             {t('slash.inspector.context.openMemory')}
-          </button>
+          </Button>
         </div>
         <div className="mt-4 text-sm text-[var(--color-inspector-muted)]">{t('slash.inspector.context.noMemoryFiles')}</div>
       </div>
@@ -442,13 +424,14 @@ function MemoryFilesBreakdown({ files, t }: { files: ContextMemoryFile[]; t: Tra
     <div className="rounded-md border border-[var(--color-inspector-border)] bg-[var(--color-inspector-panel)] px-5 py-5">
       <div className="flex items-center justify-between gap-3">
         <InspectorSectionTitle>{t('slash.inspector.context.memoryFiles')}</InspectorSectionTitle>
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => openSettings(files[0]?.path)}
-          className="rounded-sm border border-[var(--color-inspector-border)] bg-[var(--color-inspector-chip)] px-2.5 py-1 text-xs font-semibold text-[var(--color-inspector-muted-strong)] hover:text-[var(--color-inspector-text)]"
+          className="rounded-sm border-[var(--color-inspector-border)] bg-[var(--color-inspector-chip)] text-[var(--color-inspector-muted-strong)] hover:text-[var(--color-inspector-text)]"
         >
           {t('slash.inspector.context.openMemory')}
-        </button>
+        </Button>
       </div>
       <div className="mt-4 grid gap-2">
         {files.map((file) => (
@@ -504,21 +487,20 @@ function InspectorStatusBadge({ status, t }: { status: string; t: Translate }) {
   const dotClass = isConnected ? 'bg-[var(--color-inspector-success)]' : isFailed ? 'bg-[var(--color-inspector-danger)]' : 'bg-[var(--color-inspector-muted)]'
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-sm px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] ${badgeClass}`}>
+    <Badge
+      variant="secondary"
+      className={`gap-1.5 rounded-sm border-transparent px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] ${badgeClass}`}
+    >
       <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
       {statusDisplayLabel(status, t)}
-    </span>
+    </Badge>
   )
 }
 
 function McpServerIcon({ status }: { status: string }) {
   const isFailed = status === 'failed'
-  const icon = isFailed ? 'power_off' : 'dns'
-  return (
-    <span className={`material-symbols-outlined text-[20px] ${isFailed ? 'text-[var(--color-inspector-danger)]' : 'text-[var(--color-inspector-success)]'}`}>
-      {icon}
-    </span>
-  )
+  const Icon = isFailed ? PowerOff : Server
+  return <Icon aria-hidden className={`size-5 ${isFailed ? 'text-[var(--color-inspector-danger)]' : 'text-[var(--color-inspector-success)]'}`} />
 }
 
 function ContextOverview({ context, categories, t }: { context: SessionContextSnapshot; categories: ContextCategory[]; t: Translate }) {
@@ -588,10 +570,14 @@ function ContextTab({
 function StatusTab({
   data,
   commands,
+  refreshing,
+  onRefresh,
   t,
 }: {
   data: SessionInspectionResponse
   commands?: SlashCommandOption[]
+  refreshing: boolean
+  onRefresh: () => void
   t: Translate
 }) {
   const mcpServers = Array.isArray(data.status.mcpServers) ? data.status.mcpServers : []
@@ -656,7 +642,18 @@ function StatusTab({
       {mcpServers.length > 0 && (
         <section>
           <InspectorSectionTitle
-            action={<button type="button" className="font-mono text-[12px] tracking-[0.18em] text-[var(--color-inspector-accent)] hover:text-[var(--color-inspector-accent-hover)]">↻ {t('slash.inspector.status.refresh')}</button>}
+            action={(
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={refreshing}
+                onClick={onRefresh}
+                className="font-mono tracking-[0.18em] text-[var(--color-inspector-accent)] hover:bg-transparent hover:text-[var(--color-inspector-accent-hover)]"
+              >
+                <RefreshCw aria-hidden className={refreshing ? 'animate-spin' : undefined} />
+                {t('slash.inspector.status.refresh')}
+              </Button>
+            )}
           >
             {t('slash.inspector.status.mcpServers')}
           </InspectorSectionTitle>
@@ -680,58 +677,6 @@ function StatusTab({
   )
 }
 
-function SessionInspectorShell({
-  selectedTab,
-  tabs,
-  onSelectTab,
-  onClose,
-  children,
-  t,
-}: {
-  selectedTab: SessionInspectorTab
-  tabs: Array<{ id: SessionInspectorTab; label: string }>
-  onSelectTab: (tab: SessionInspectorTab) => void
-  onClose: () => void
-  children: React.ReactNode
-  t: Translate
-}) {
-  return (
-    <div
-      className="absolute bottom-full left-0 right-0 z-50 mb-4 overflow-hidden rounded-[10px] border border-[var(--color-inspector-border)] bg-[var(--color-inspector-surface)] text-[var(--color-inspector-text)] shadow-[var(--shadow-inspector)]"
-    >
-      <div className="grid min-h-[64px] grid-cols-[1fr_auto_1fr] items-center border-b border-[var(--color-inspector-border)] bg-[var(--color-inspector-surface)] px-6">
-        <div className="font-mono text-[16px] font-semibold uppercase text-[var(--color-inspector-accent)]">{t('slash.inspector.title')}</div>
-        <div className="flex items-center gap-8">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => onSelectTab(tab.id)}
-              className={`relative h-10 px-0 font-sans text-sm transition-colors ${
-                selectedTab === tab.id ? 'text-[var(--color-inspector-accent)]' : 'text-[var(--color-inspector-muted-strong)] hover:text-[var(--color-inspector-accent)]'
-              }`}
-            >
-              {tab.label}
-              {selectedTab === tab.id && <span className="absolute bottom-1 left-0 right-0 h-[2px] bg-[var(--color-inspector-accent)]" />}
-            </button>
-          ))}
-        </div>
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t('slash.inspector.close')}
-            className="flex h-10 w-10 items-center justify-center text-[var(--color-inspector-accent)] transition-colors hover:text-[var(--color-inspector-accent-hover)]"
-          >
-            <span className="material-symbols-outlined text-[24px]">close</span>
-          </button>
-        </div>
-      </div>
-      <div className="max-h-[min(540px,58vh)] overflow-y-auto bg-[var(--color-inspector-surface)] px-6 py-6">{children}</div>
-    </div>
-  )
-}
-
 function SessionInspectorPanel({
   command,
   sessionId,
@@ -749,7 +694,10 @@ function SessionInspectorPanel({
   const [error, setError] = useState<string | null>(null)
   const [contextLoading, setContextLoading] = useState(false)
   const [contextError, setContextError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshRequest, setRefreshRequest] = useState(0)
   const contextRequestSessionRef = useRef<string | null>(null)
+  const inspectionSessionRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (command !== 'status' && command !== 'cost' && command !== 'context') return
@@ -759,25 +707,46 @@ function SessionInspectorPanel({
   useEffect(() => {
     if (!sessionId) {
       setError(t('slash.inspector.error.noActiveSession'))
+      setRefreshing(false)
       return
     }
     let cancelled = false
-    setData(null)
+    const sessionChanged = inspectionSessionRef.current !== sessionId
+    inspectionSessionRef.current = sessionId
+    if (sessionChanged) {
+      setData(null)
+      setContextLoading(false)
+      setContextError(null)
+      contextRequestSessionRef.current = null
+    }
     setError(null)
-    setContextLoading(false)
-    setContextError(null)
-    contextRequestSessionRef.current = null
+    setRefreshing(true)
     sessionsApi.getInspection(sessionId, { includeContext: false })
       .then((response) => {
-        if (!cancelled) setData(assertSessionInspectionResponse(response, t))
+        if (cancelled) return
+        const inspected = assertSessionInspectionResponse(response, t)
+        setData((current) => sessionChanged || !current
+          ? inspected
+          : {
+              ...inspected,
+              context: inspected.context ?? current.context,
+              contextEstimate: inspected.contextEstimate ?? current.contextEstimate,
+              errors: {
+                ...(current.errors ?? {}),
+                ...(inspected.errors ?? {}),
+              },
+            })
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
       })
+      .finally(() => {
+        if (!cancelled) setRefreshing(false)
+      })
     return () => {
       cancelled = true
     }
-  }, [sessionId, t])
+  }, [refreshRequest, sessionId, t])
 
   useEffect(() => {
     if (!sessionId || selectedTab !== 'context' || data === null || data.context) return
@@ -820,7 +789,14 @@ function SessionInspectorPanel({
   ]
 
   return (
-    <SessionInspectorShell selectedTab={selectedTab} tabs={tabs} onSelectTab={setSelectedTab} onClose={onClose} t={t}>
+    <LocalSlashInspectorPanel
+      title={t('slash.inspector.title')}
+      value={selectedTab}
+      tabs={tabs}
+      onValueChange={setSelectedTab}
+      closeLabel={t('slash.inspector.close')}
+      onClose={onClose}
+    >
       {error ? (
         <ErrorState message={error} />
       ) : data === null ? (
@@ -835,9 +811,15 @@ function SessionInspectorPanel({
           t={t}
         />
       ) : (
-        <StatusTab data={data} commands={commands} t={t} />
+        <StatusTab
+          data={data}
+          commands={commands}
+          refreshing={refreshing}
+          onRefresh={() => setRefreshRequest((request) => request + 1)}
+          t={t}
+        />
       )}
-    </SessionInspectorShell>
+    </LocalSlashInspectorPanel>
   )
 }
 
@@ -894,9 +876,10 @@ function McpPanel({ cwd, onClose }: { cwd?: string; onClose: () => void }) {
   }, [servers])
 
   return (
-    <PanelShell
+    <LocalSlashPanel
       title={t('slash.mcp.title')}
       subtitle={cwd ? t('slash.mcp.subtitleWithProject', { path: cwd }) : t('slash.mcp.subtitle')}
+      closeLabel={t('slash.inspector.close')}
       onClose={onClose}
     >
       {error ? (
@@ -915,8 +898,8 @@ function McpPanel({ cwd, onClose }: { cwd?: string; onClose: () => void }) {
               </div>
               <div className="overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
                 {grouped.get(scope)?.map((server) => (
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
                     key={`${server.scope}:${server.projectPath ?? 'global'}:${server.name}`}
                     onClick={() => {
                       selectServer(server)
@@ -924,31 +907,33 @@ function McpPanel({ cwd, onClose }: { cwd?: string; onClose: () => void }) {
                       useTabStore.getState().openTab(SETTINGS_TAB_ID, 'Settings', 'settings')
                       onClose()
                     }}
-                    className="block w-full border-t border-[var(--color-border)] px-4 py-4 text-left first:border-t-0 hover:bg-[var(--color-surface-hover)]"
+                    className="block h-auto w-full rounded-none border-t border-[var(--color-border)] px-4 py-4 text-left first:border-t-0"
                   >
                     <div className="flex items-center gap-3">
                       <div className="text-sm font-semibold text-[var(--color-text-primary)]">{server.name}</div>
-                      <span className={`inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-semibold ${toneForStatus(server.status)}`}>
+                      <Badge variant="outline" className={`rounded-full px-2 py-1 text-[11px] font-semibold ${toneForStatus(server.status)}`}>
                         {server.statusLabel}
-                      </span>
+                      </Badge>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-tertiary)]">
-                      <span className="rounded-full bg-[var(--color-surface-hover)] px-2 py-1">{server.transport}</span>
+                      <Badge variant="secondary" className="rounded-full border-transparent bg-[var(--color-surface-hover)] px-2 py-1 font-normal">
+                        {server.transport}
+                      </Badge>
                       {server.projectPath && (
-                        <span className="rounded-full bg-[var(--color-surface-hover)] px-2 py-1" title={server.projectPath}>
+                        <Badge variant="secondary" className="rounded-full border-transparent bg-[var(--color-surface-hover)] px-2 py-1 font-normal" title={server.projectPath}>
                           {projectBadge(server.projectPath, t)}
-                        </span>
+                        </Badge>
                       )}
                       <span className="truncate">{server.summary}</span>
                     </div>
-                  </button>
+                  </Button>
                 ))}
               </div>
             </section>
           ))}
         </div>
       )}
-    </PanelShell>
+    </LocalSlashPanel>
   )
 }
 
@@ -975,9 +960,10 @@ function SkillsPanel({ cwd, onClose }: { cwd?: string; onClose: () => void }) {
   }, [cwd])
 
   return (
-    <PanelShell
+    <LocalSlashPanel
       title={t('slash.skills.title')}
       subtitle={cwd ? t('slash.skills.subtitleWithProject', { path: cwd }) : t('slash.skills.subtitle')}
+      closeLabel={t('slash.inspector.close')}
       onClose={onClose}
     >
       {error ? (
@@ -989,8 +975,8 @@ function SkillsPanel({ cwd, onClose }: { cwd?: string; onClose: () => void }) {
       ) : (
         <div className="overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
           {skills.map((skill) => (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               key={`${skill.source}:${skill.name}`}
               onClick={async () => {
                 await fetchSkillDetail(skill.source, skill.name, cwd, 'skills')
@@ -998,20 +984,20 @@ function SkillsPanel({ cwd, onClose }: { cwd?: string; onClose: () => void }) {
                 useTabStore.getState().openTab(SETTINGS_TAB_ID, 'Settings', 'settings')
                 onClose()
               }}
-              className="block w-full border-t border-[var(--color-border)] px-4 py-4 text-left first:border-t-0 hover:bg-[var(--color-surface-hover)]"
+              className="block h-auto w-full rounded-none border-t border-[var(--color-border)] px-4 py-4 text-left first:border-t-0"
             >
               <div className="flex items-center gap-3">
                 <div className="text-sm font-semibold text-[var(--color-text-primary)]">/{skill.name}</div>
-                <span className="rounded-full bg-[var(--color-surface-hover)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)]">
+                <Badge variant="secondary" className="rounded-full border-transparent bg-[var(--color-surface-hover)] px-2 py-1 text-[11px] font-normal text-[var(--color-text-secondary)]">
                   {skill.source}
-                </span>
+                </Badge>
               </div>
               <div className="mt-2 text-xs leading-6 text-[var(--color-text-tertiary)]">{skill.description}</div>
-            </button>
+            </Button>
           ))}
         </div>
       )}
-    </PanelShell>
+    </LocalSlashPanel>
   )
 }
 
@@ -1068,9 +1054,10 @@ function HelpPanel({
   )
 
   return (
-    <PanelShell
+    <LocalSlashPanel
       title={t('slash.help.title')}
       subtitle={t('slash.help.subtitle')}
+      closeLabel={t('slash.inspector.close')}
       onClose={onClose}
     >
       <div className="space-y-4">
@@ -1103,7 +1090,7 @@ function HelpPanel({
           </section>
         )}
       </div>
-    </PanelShell>
+    </LocalSlashPanel>
   )
 }
 

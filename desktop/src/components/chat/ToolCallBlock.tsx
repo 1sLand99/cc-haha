@@ -14,6 +14,7 @@ import {
   isEnterPlanModeTool,
   isExitPlanModeTool,
 } from './PlanModePreview'
+import { Button } from '../ui/button'
 
 type Props = {
   toolName: string
@@ -117,14 +118,16 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
     <div className={`overflow-hidden rounded-lg border border-[var(--color-border)]/50 bg-[var(--color-surface-container-lowest)] ${
       compact ? 'mb-0' : 'mb-2'
     }`}>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-expanded={expandable ? expanded : undefined}
         onClick={() => {
           if (expandable) {
             setExpanded((value) => !value)
           }
         }}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]/50"
+        className="h-auto w-full justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-[var(--color-surface-hover)]/50 active:translate-y-0"
       >
         <span className="material-symbols-outlined text-[14px] text-[var(--color-outline)]">{icon}</span>
         <span className="text-[11px] font-semibold text-[var(--color-text-secondary)]">
@@ -185,7 +188,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
             {expanded ? 'expand_less' : 'expand_more'}
           </span>
         )}
-      </button>
+      </Button>
 
       {expandable && expanded && (
         <div className="space-y-2.5 border-t border-[var(--color-border)]/60 px-3 py-3">
@@ -272,10 +275,12 @@ function PlanToolCallBlock({
     <div className={`overflow-hidden rounded-lg border border-[var(--color-brand)]/35 bg-[var(--color-surface-container-lowest)] ${
       compact ? 'mb-0' : 'mb-2'
     }`}>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-expanded={expanded}
         onClick={onToggle}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]/50"
+        className="h-auto w-full justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-[var(--color-surface-hover)]/50 active:translate-y-0"
       >
         <span className="material-symbols-outlined text-[14px] text-[var(--color-brand)]">architecture</span>
         <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--color-text-primary)]">
@@ -295,7 +300,7 @@ function PlanToolCallBlock({
         <span className="material-symbols-outlined text-[14px] text-[var(--color-outline)]">
           {expanded ? 'expand_less' : 'expand_more'}
         </span>
-      </button>
+      </Button>
 
       {expanded ? (
         <div className="space-y-2.5 border-t border-[var(--color-border)]/60 px-3 py-3">

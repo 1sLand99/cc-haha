@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SubagentRunResponse } from '../api/subagents'
@@ -76,9 +76,19 @@ describe('SubagentRunPage', () => {
 
     expect(await screen.findByText('Kuhn')).toBeInTheDocument()
     expect(subagentsApi.getRunByTool).toHaveBeenCalledWith('session-1', 'tool-1', 'agent-1')
-    expect(screen.getByText('Agent: abc123')).toBeInTheDocument()
+    const summary = screen.getByTestId('subagent-run-summary')
+    expect(summary).toHaveAttribute('data-slot', 'card')
+    expect(within(summary).getByText('Agent')).toBeInTheDocument()
+    expect(within(summary).getByText('abc123')).toBeInTheDocument()
     expect(screen.getAllByText('Explore repo').length).toBeGreaterThan(0)
-    expect(screen.getByText('Output: /tmp/result.md')).toBeInTheDocument()
+    expect(within(summary).getByText('Output')).toBeInTheDocument()
+    expect(within(summary).getByText('/tmp/result.md')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Completed')
+    expect(screen.getByRole('status')).toHaveAttribute('data-slot', 'badge')
+    expect(screen.getByRole('status')).toHaveAttribute('aria-atomic', 'true')
+    expect(screen.getByRole('button', { name: 'Refresh SubAgent run' })).toHaveAttribute('data-variant', 'ghost')
+    expect(screen.getByRole('heading', { name: 'Transcript' }).closest('[data-slot="card"]')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Stop$/ })).not.toBeInTheDocument()
     expect(screen.queryByText('Parent Agent Tool Call')).not.toBeInTheDocument()
     expect(document.body).not.toHaveTextContent('"prompt": "Read files"')
     expect(screen.queryByText(/Dispatched an agent|派遣了一个代理/)).not.toBeInTheDocument()
@@ -96,7 +106,9 @@ describe('SubagentRunPage', () => {
     render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="Kuhn" />)
 
     expect(screen.getByRole('status')).toHaveTextContent('Loading SubAgent run...')
-    expect(screen.getByRole('button', { name: 'Refresh SubAgent run' })).toBeDisabled()
+    const refresh = screen.getByRole('button', { name: 'Refresh SubAgent run' })
+    expect(refresh).toBeDisabled()
+    expect(refresh.querySelector('svg')).toHaveClass('motion-safe:animate-spin', 'motion-reduce:animate-none')
   })
 
   it('renders a missing transcript fallback', async () => {
@@ -113,6 +125,47 @@ describe('SubagentRunPage', () => {
     const conversation = await screen.findByTestId('subagent-conversation')
     expect(conversation).toHaveTextContent('Only summary available')
     expect(screen.queryByText('No local transcript messages captured for this SubAgent.')).not.toBeInTheDocument()
+  })
+
+  it('uses the shared empty state when no transcript or fallback result exists', async () => {
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun({
+      messages: [],
+      prompt: undefined,
+      summary: undefined,
+      result: undefined,
+    }))
+
+    render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="SubAgent" />)
+
+    const emptyState = await screen.findByText('No local transcript messages captured for this SubAgent.')
+    expect(emptyState.closest('[data-slot="card"]')).toHaveClass('border-dashed')
+  })
+
+  it('shows transcript truncation as a shadcn badge', async () => {
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun({ truncated: true }))
+
+    render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="SubAgent" />)
+
+    const truncation = await screen.findByText('Showing first 50 and latest 950 entries')
+    expect(truncation).toHaveAttribute('data-slot', 'badge')
+  })
+
+  it('keeps a terminal result visible after partial transcript activity', async () => {
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun({
+      result: 'Final audit result',
+      messages: [{
+        id: 'progress',
+        type: 'assistant',
+        content: [{ type: 'text', text: 'Progress update' }],
+        timestamp: TRANSCRIPT_TIMESTAMP,
+      }],
+    }))
+
+    render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="SubAgent" />)
+
+    const transcript = await screen.findByTestId('subagent-conversation')
+    expect(transcript).toHaveTextContent('Progress update')
+    expect(transcript).toHaveTextContent('Final audit result')
   })
 
   it('refreshes running SubAgent runs while the detail tab is open', async () => {
@@ -233,6 +286,7 @@ describe('SubagentRunPage', () => {
     render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="SubAgent" />)
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('boom'))
+    expect(screen.getByRole('alert')).toHaveAttribute('data-slot', 'alert')
     expect(screen.getByRole('button', { name: 'Refresh SubAgent run' })).toBeInTheDocument()
   })
 
@@ -294,7 +348,7 @@ describe('SubagentRunPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh SubAgent run' }))
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('refresh failed'))
+    await waitFor(() => expect(screen.getByText('refresh failed').closest('[role="status"]')).toBeInTheDocument())
     expect(screen.getAllByText('Initial result').length).toBeGreaterThan(0)
   })
 })

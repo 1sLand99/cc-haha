@@ -1,4 +1,3 @@
-import { createRef } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -17,15 +16,13 @@ const labels = {
 afterEach(cleanup)
 
 function renderPopover(overrides: Partial<React.ComponentProps<typeof ReasoningEffortPopover>> = {}) {
-  const anchorRef = createRef<HTMLButtonElement>()
   const onChange = vi.fn()
   const onClose = vi.fn()
   const view = render(
     <>
-      <button ref={anchorRef}>5.6 Sol 极高</button>
       <ReasoningEffortPopover
         open
-        anchorRef={anchorRef}
+        trigger={<button>5.6 Sol 极高</button>}
         options={[...options]}
         value="xhigh"
         labels={labels}
@@ -36,7 +33,7 @@ function renderPopover(overrides: Partial<React.ComponentProps<typeof ReasoningE
       <button>外部区域</button>
     </>,
   )
-  return { ...view, anchorRef, onChange, onClose }
+  return { ...view, onChange, onClose }
 }
 
 describe('ReasoningEffortPopover', () => {
@@ -44,16 +41,16 @@ describe('ReasoningEffortPopover', () => {
     renderPopover()
 
     const popover = screen.getByTestId('reasoning-effort-popover')
-    expect(popover).toHaveStyle({ width: '240px' })
-    expect(popover).toHaveClass('px-3.5', 'pb-3.5', 'pt-3')
+    expect(popover).toHaveAttribute('data-slot', 'popover-content')
+    expect(popover).toHaveClass('w-60', 'px-3.5', 'pb-3.5', 'pt-3')
     expect(popover.querySelectorAll('svg')).toHaveLength(0)
     expect(screen.getByTestId('reasoning-effort-header')).toHaveClass('mb-2.5', 'justify-between')
     expect(screen.getByTestId('reasoning-effort-label')).toHaveClass('text-sm')
     expect(screen.getByTestId('reasoning-effort-context-label')).toHaveClass('text-[10px]')
     expect(screen.getByTestId('reasoning-effort-context-label')).toHaveTextContent('推理强度')
-    expect(screen.getByRole('slider', { name: '推理强度' })).toHaveClass('h-9')
-    expect(screen.getByTestId('reasoning-effort-track')).toHaveClass('h-6')
-    expect(screen.getByTestId('reasoning-effort-thumb')).toHaveClass('h-8', 'w-8')
+    expect(screen.getByTestId('reasoning-effort-slider')).toHaveClass('h-9')
+    expect(popover.querySelector('[data-slot="slider-track"]')).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: '推理强度' })).toHaveAttribute('data-slot', 'slider-thumb')
   })
 
   it('renders every model-supported stop and exposes the selected localized value', () => {
@@ -66,32 +63,21 @@ describe('ReasoningEffortPopover', () => {
     expect(slider).toHaveAttribute('aria-valuetext', '极高')
     expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(5)
     expect(screen.getByText('极高')).toBeInTheDocument()
-    expect(screen.getByTestId('reasoning-effort-fill')).toHaveClass('bg-[var(--color-brand)]')
-    expect(slider).toHaveClass('focus-visible:ring-[var(--color-brand)]')
+    expect(screen.getByTestId('reasoning-effort-popover').querySelector('[data-slot="slider-range"]')).toHaveClass('bg-[var(--color-brand)]')
+    expect(slider).toHaveClass('focus-visible:shadow-[var(--shadow-focus-ring)]')
   })
 
-  it('selects a discrete stop from the track', () => {
+  it('selects a discrete stop through the shadcn slider keyboard behavior', () => {
     const { onChange } = renderPopover()
     const slider = screen.getByRole('slider', { name: '推理强度' })
-    vi.spyOn(slider, 'getBoundingClientRect').mockReturnValue({
-      x: 0,
-      y: 0,
-      width: 400,
-      height: 48,
-      top: 0,
-      right: 400,
-      bottom: 48,
-      left: 0,
-      toJSON: () => ({}),
-    })
 
-    fireEvent.click(slider, { clientX: 200 })
+    fireEvent.keyDown(slider, { key: 'ArrowLeft' })
 
     expect(onChange).toHaveBeenCalledWith('high')
   })
 
   it('supports keyboard navigation and clamps at supported endpoints', () => {
-    const { onChange, rerender, anchorRef } = renderPopover({ value: 'low' })
+    const { onChange, rerender } = renderPopover({ value: 'low' })
     const slider = screen.getByRole('slider', { name: '推理强度' })
 
     fireEvent.keyDown(slider, { key: 'ArrowLeft' })
@@ -103,7 +89,7 @@ describe('ReasoningEffortPopover', () => {
     rerender(
       <ReasoningEffortPopover
         open
-        anchorRef={anchorRef}
+        trigger={<button>5.6 Sol 最大</button>}
         options={[...options]}
         value="max"
         labels={labels}
@@ -115,13 +101,12 @@ describe('ReasoningEffortPopover', () => {
     expect(onChange.mock.calls).toEqual([['medium'], ['max']])
   })
 
-  it('closes on Escape and outside pointer interaction', () => {
+  it('closes on Escape through the shadcn popover dismiss behavior', () => {
     const { onClose } = renderPopover()
     const slider = screen.getByRole('slider', { name: '推理强度' })
 
     fireEvent.keyDown(slider, { key: 'Escape' })
-    fireEvent.pointerDown(screen.getByRole('button', { name: '外部区域' }))
 
-    expect(onClose).toHaveBeenCalledTimes(2)
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

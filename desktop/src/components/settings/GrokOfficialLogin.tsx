@@ -5,6 +5,11 @@ import { useTranslation } from '../../i18n'
 import { copyTextToClipboard } from '../chat/clipboard'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { hahaGrokOAuthApi } from '../../api/hahaGrokOAuth'
+import { Alert, AlertDescription } from '../ui/alert'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { LoadingButton } from '../ui/custom/loading-button'
+import { Skeleton } from '../ui/skeleton'
 
 export function GrokOfficialLogin() {
   const t = useTranslation()
@@ -66,23 +71,30 @@ export function GrokOfficialLogin() {
   }
 
   const manualAuthorizeButton = manualAuthorizeUrl ? (
-    <button
-      type="button"
+    <Button
+      variant="secondary"
+      size="sm"
       onClick={handleCopyAuthorizeUrl}
-      className="inline-flex items-center gap-1.5 self-start rounded-md border border-[var(--color-border-separator)] bg-[var(--color-surface)] px-3 py-1.5 text-xs transition-colors hover:bg-[var(--color-surface-hover)]"
+      className="self-start"
     >
       <Copy className="h-3.5 w-3.5" aria-hidden="true" />
       {t('settings.grokOfficialLogin.copyAuthorizeUrl')}
-    </button>
+    </Button>
   ) : null
 
   if (status === null) {
     return (
       <div data-testid="grok-official-login" className="flex flex-col gap-2 text-xs">
         {error ? (
-          <div className="text-[var(--color-error)]">{t('settings.grokOfficialLogin.errorPrefix')}{error}</div>
+          <Alert variant="destructive" className="py-2">
+            <AlertDescription className="text-[var(--color-error)]">
+              {t('settings.grokOfficialLogin.errorPrefix')}{error}
+            </AlertDescription>
+          </Alert>
         ) : (
-          <div className="text-[var(--color-text-tertiary)]">{t('common.loading')}</div>
+          <div role="status" aria-label={t('common.loading')}>
+            <Skeleton className="h-5 w-32" />
+          </div>
         )}
         {manualAuthorizeButton}
       </div>
@@ -91,19 +103,19 @@ export function GrokOfficialLogin() {
 
   if (status.loggedIn) {
     return (
-      <div data-testid="grok-official-login" className="flex items-center gap-3 text-sm">
-        <span className="text-[var(--color-success)]">
+      <div data-testid="grok-official-login" className="flex flex-wrap items-center gap-3 text-sm">
+        <Badge variant="outline" className="border-[var(--color-success)]/35 text-[var(--color-success)]">
           {t('settings.grokOfficialLogin.loggedInPrefix')} {status.email || t('settings.grokOfficialLogin.accountUnknown')}
-        </span>
-        <button
-          type="button"
+        </Badge>
+        <LoadingButton
+          variant="secondary"
+          size="sm"
           onClick={logout}
-          disabled={isLoading}
-          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border-separator)] bg-[var(--color-surface)] px-3 py-1 text-xs transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+          loading={isLoading}
         >
           <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
           {isLoading ? t('settings.grokOfficialLogin.logoutProcessing') : t('settings.grokOfficialLogin.logoutButton')}
-        </button>
+        </LoadingButton>
       </div>
     )
   }
@@ -111,16 +123,21 @@ export function GrokOfficialLogin() {
   return (
     <div data-testid="grok-official-login" className="flex flex-col gap-2">
       <div className="text-sm text-[var(--color-text-secondary)]">{t('settings.grokOfficialLogin.intro')}</div>
-      <button
-        type="button"
+      <LoadingButton
+        className="self-start"
         onClick={handleLogin}
-        disabled={isLoading}
-        className="inline-flex items-center gap-2 self-start rounded-md bg-[image:var(--gradient-btn-primary)] px-4 py-2 text-sm text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)] transition-opacity hover:brightness-105 disabled:opacity-50"
+        loading={isLoading}
       >
         <LogIn className="h-4 w-4" aria-hidden="true" />
         {isLoading ? t('settings.grokOfficialLogin.loginStarting') : t('settings.grokOfficialLogin.loginButton')}
-      </button>
-      {error && <div className="text-xs text-[var(--color-error)]">{t('settings.grokOfficialLogin.errorPrefix')}{error}</div>}
+      </LoadingButton>
+      {error && (
+        <Alert variant="destructive" className="py-2">
+          <AlertDescription className="text-[var(--color-error)]">
+            {t('settings.grokOfficialLogin.errorPrefix')}{error}
+          </AlertDescription>
+        </Alert>
+      )}
       {manualAuthorizeButton}
     </div>
   )

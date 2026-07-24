@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from '../../i18n'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
+import { Button } from '../ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
 
 export function ThinkingBlock({ content, isActive = false }: { content: string; isActive?: boolean }) {
   const t = useTranslation()
@@ -16,24 +18,25 @@ export function ThinkingBlock({ content, isActive = false }: { content: string; 
   }, [displayContent, expanded, isActive])
 
   return (
-    <div className="mb-1">
+    <Collapsible open={expanded} onOpenChange={setExpanded} className="mb-1">
       <style>{thinkingStyles}</style>
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        className="flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[12px] text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-secondary)]"
-      >
-        <span className="text-[10px] text-[var(--color-outline)]">
-          {expanded ? '\u25BE' : '\u25B8'}
-        </span>
-        <span className="shrink-0 font-medium italic">
-          {isActive ? t('thinking.label') : t('thinking.labelDone')}
-          {isActive && <span className="thinking-dots" />}
-        </span>
-      </button>
-      {expanded && hasDisplayContent && (
-        <div
+      <CollapsibleTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-auto w-full justify-start gap-1.5 rounded-md px-1 py-0.5 text-left text-[12px] text-[var(--color-text-tertiary)] active:translate-y-0"
+        >
+          <span className="text-[10px] text-[var(--color-outline)]">
+            {expanded ? '\u25BE' : '\u25B8'}
+          </span>
+          <span className="shrink-0 font-medium italic">
+            {isActive ? t('thinking.label') : t('thinking.labelDone')}
+            {isActive && <span className="thinking-dots" />}
+          </span>
+        </Button>
+      </CollapsibleTrigger>
+      {hasDisplayContent && (
+        <CollapsibleContent
           ref={contentRef}
           data-thinking-content="expanded"
           className="relative mt-1 max-h-[300px] overflow-y-auto rounded-lg border border-[var(--color-border)]/40 bg-[var(--color-surface-container-lowest)] p-2.5 text-[11px] text-[var(--color-text-secondary)]"
@@ -46,9 +49,9 @@ export function ThinkingBlock({ content, isActive = false }: { content: string; 
             className="thinking-markdown text-[var(--color-text-secondary)]"
           />
           {isActive && <span className="thinking-cursor" />}
-        </div>
+        </CollapsibleContent>
       )}
-    </div>
+    </Collapsible>
   )
 }
 

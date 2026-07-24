@@ -1,5 +1,14 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react'
+import { Check, ChevronDown } from 'lucide-react'
 import { OFFICIAL_MODELS } from '../../constants/modelCatalog'
 import {
   OPENAI_OFFICIAL_MODELS,
@@ -25,6 +34,13 @@ import {
 } from '../../constants/grokOfficialProvider'
 import { MobileBottomSheet } from '../shared/MobileBottomSheet'
 import { ReasoningEffortPopover } from './ReasoningEffortPopover'
+import { Button } from '../ui/button'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '../ui/popover'
+import { ScrollArea } from '../ui/scroll-area'
 
 type ProviderChoice = {
   providerId: string | null
@@ -47,20 +63,6 @@ type Props = {
 export type ModelSelectorHandle = {
   open: () => void
 }
-
-type DropdownPosition = {
-  top: number | undefined
-  bottom: number | undefined
-  left: number
-  width: number
-  maxHeight: number
-}
-
-const DROPDOWN_WIDTH = 360
-const DROPDOWN_GAP = 8
-const VIEWPORT_MARGIN = 16
-const DROPDOWN_MAX_HEIGHT = 420
-const DROPDOWN_MIN_HEIGHT = 180
 
 function officialChoices(
   providerId: string | null,
@@ -212,9 +214,6 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   )
   const [open, setOpen] = useState(false)
   const [effortOpen, setEffortOpen] = useState(false)
-  const [dropdownPosition, setDropdownPosition] = useState<DropdownPosition | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
-  const effortButtonRef = useRef<HTMLButtonElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const requestedProvidersRef = useRef(false)
   const requestedOAuthStatusRef = useRef(false)
@@ -264,77 +263,6 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   useImperativeHandle(selectorRef, () => ({
     open: openSelector,
   }), [openSelector])
-
-  useEffect(() => {
-    if (!open) return
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (
-        ref.current &&
-        !ref.current.contains(target) &&
-        !dropdownRef.current?.contains(target)
-      ) {
-        setOpen(false)
-      }
-    }
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    document.addEventListener('keydown', handleEsc)
-    return () => {
-      document.removeEventListener('mousedown', handleClick)
-      document.removeEventListener('keydown', handleEsc)
-    }
-  }, [open])
-
-  const updateDropdownPosition = useCallback(() => {
-    const anchor = ref.current
-    if (!anchor) return
-
-    const rect = anchor.getBoundingClientRect()
-    const viewportWidth = window.innerWidth || document.documentElement.clientWidth
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight
-    const width = Math.min(DROPDOWN_WIDTH, Math.max(0, viewportWidth - VIEWPORT_MARGIN * 2))
-    const left = Math.min(
-      Math.max(VIEWPORT_MARGIN, rect.right - width),
-      Math.max(VIEWPORT_MARGIN, viewportWidth - width - VIEWPORT_MARGIN),
-    )
-    const spaceBelow = viewportHeight - rect.bottom - DROPDOWN_GAP - VIEWPORT_MARGIN
-    const spaceAbove = rect.top - DROPDOWN_GAP - VIEWPORT_MARGIN
-    const placeBelow = spaceBelow >= DROPDOWN_MIN_HEIGHT || spaceBelow >= spaceAbove
-    const availableHeight = Math.max(
-      DROPDOWN_MIN_HEIGHT,
-      placeBelow ? spaceBelow : spaceAbove,
-    )
-    const maxHeight = Math.min(DROPDOWN_MAX_HEIGHT, availableHeight)
-
-    setDropdownPosition({
-      top: placeBelow ? rect.bottom + DROPDOWN_GAP : undefined,
-      bottom: placeBelow ? undefined : (viewportHeight - rect.top + DROPDOWN_GAP),
-      left,
-      width,
-      maxHeight,
-    })
-  }, [])
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setDropdownPosition(null)
-      return
-    }
-    updateDropdownPosition()
-  }, [open, updateDropdownPosition])
-
-  useEffect(() => {
-    if (!open) return
-    window.addEventListener('resize', updateDropdownPosition)
-    window.addEventListener('scroll', updateDropdownPosition, true)
-    return () => {
-      window.removeEventListener('resize', updateDropdownPosition)
-      window.removeEventListener('scroll', updateDropdownPosition, true)
-    }
-  }, [open, updateDropdownPosition])
 
   const roleLabels = useMemo(
     () => ({
@@ -424,9 +352,64 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
     })
   }
 
+  useEffect(() => {
+    if (!disabled) return
+    setOpen(false)
+    setEffortOpen(false)
+  }, [disabled])
+
+  const selectRuntimeModel = (choice: ProviderChoice, model: ModelInfo) => {
+    const supportedEfforts = model.supportedReasoningEfforts
+    const explicitEffort = activeRuntimeSelection?.effortLevel
+    const nextEffort = supportedEfforts === undefined
+      ? explicitEffort ?? effortLevel
+      : supportedEfforts.length
+        ? explicitEffort && supportedEfforts.includes(explicitEffort)
+          ? explicitEffort
+          : model.defaultReasoningEffort ?? supportedEfforts[0]
+        : undefined
+    handleRuntimeSelect({
+      providerId: choice.providerId,
+      modelId: model.id,
+      ...(nextEffort ? { effortLevel: nextEffort } : {}),
+    })
+  }
+
+  const selectPlainModel = (model: ModelInfo) => {
+    if (isControlled) {
+      onChange?.(model.id)
+    } else {
+      void setModel(model.id)
+    }
+    setOpen(false)
+  }
+
+  const handleOptionKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    const options = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-model-option]')]
+      .filter(option => !option.disabled)
+    if (!options.length) return
+    event.preventDefault()
+    const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement)
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? options.length - 1
+        : event.key === 'ArrowDown'
+          ? (currentIndex + 1 + options.length) % options.length
+          : (currentIndex - 1 + options.length) % options.length
+    options[nextIndex]?.focus()
+  }
+
   const dropdownContent = (
-    <>
-      <div className={`overflow-y-auto ${isMobileBrowser ? 'p-1' : 'p-3'}`} style={{ maxHeight: isMobileBrowser ? undefined : dropdownPosition?.maxHeight }}>
+    <div
+      ref={dropdownRef}
+      role="listbox"
+      aria-label={t('model.configuration')}
+      onKeyDown={handleOptionKeyDown}
+    >
+      <ScrollArea className={isMobileBrowser ? '' : 'max-h-[min(420px,var(--radix-popover-content-available-height))]'}>
+        <div className={isMobileBrowser ? 'p-1' : 'p-3'}>
         {!isMobileBrowser && (
           <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-outline)]">
             {t('model.configuration')}
@@ -454,26 +437,16 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
                       activeRuntimeSelection?.providerId === choice.providerId &&
                       activeRuntimeSelection.modelId === model.id
                     return (
-                      <button
+                      <Button
                         key={`${choice.providerId ?? 'official'}:${model.id}`}
-                        onClick={() => {
-                          const supportedEfforts = model.supportedReasoningEfforts
-                          const explicitEffort = activeRuntimeSelection?.effortLevel
-                          const nextEffort = supportedEfforts === undefined
-                            ? explicitEffort ?? effortLevel
-                            : supportedEfforts.length
-                              ? explicitEffort && supportedEfforts.includes(explicitEffort)
-                                ? explicitEffort
-                                : model.defaultReasoningEffort ?? supportedEfforts[0]
-                              : undefined
-                          handleRuntimeSelect({
-                            providerId: choice.providerId,
-                            modelId: model.id,
-                            ...(nextEffort ? { effortLevel: nextEffort } : {}),
-                          })
-                        }}
+                        type="button"
+                        variant="ghost"
+                        role="option"
+                        aria-selected={isSelected}
+                        data-model-option
+                        onClick={() => selectRuntimeModel(choice, model)}
                         className={`
-                          w-full rounded-lg border px-3 text-left transition-colors
+                          h-auto w-full justify-start rounded-lg border px-3 text-left transition-colors
                           ${isMobileBrowser ? 'min-h-[56px] py-3' : 'py-2.5'}
                           ${isSelected
                             ? 'border-[var(--color-model-option-selected-border)] bg-[var(--color-model-option-selected-bg)]'
@@ -482,13 +455,12 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
                         `}
                       >
                         <div className="flex items-start gap-3">
-                          <div className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${
-                            isSelected ? 'border-[var(--color-brand)]' : 'border-[var(--color-outline)]'
-                          }`}>
-                            {isSelected && (
-                              <div className="h-2 w-2 rounded-full bg-[var(--color-brand)]" />
-                            )}
-                          </div>
+                          <Check
+                            aria-hidden="true"
+                            className={`mt-0.5 size-4 flex-shrink-0 ${
+                              isSelected ? 'text-[var(--color-brand)]' : 'opacity-0'
+                            }`}
+                          />
 
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
@@ -501,7 +473,7 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
                             )}
                           </div>
                         </div>
-                      </button>
+                      </Button>
                     )
                   })}
                 </div>
@@ -513,18 +485,16 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
             {availableModels.map((model) => {
               const isSelected = model.id === selectedModel?.id
               return (
-                <button
+                <Button
                   key={model.id}
-                  onClick={() => {
-                    if (isControlled) {
-                      onChange?.(model.id)
-                    } else {
-                      void setModel(model.id)
-                    }
-                    setOpen(false)
-                  }}
+                  type="button"
+                  variant="ghost"
+                  role="option"
+                  aria-selected={isSelected}
+                  data-model-option
+                  onClick={() => selectPlainModel(model)}
                   className={`
-                    w-full rounded-lg px-3 text-left transition-colors
+                    h-auto w-full justify-start rounded-lg px-3 text-left transition-colors
                     ${isMobileBrowser ? 'min-h-[56px] py-3' : 'py-2.5'}
                     ${isSelected
                       ? 'border border-[var(--color-model-option-selected-border)] bg-[var(--color-model-option-selected-bg)]'
@@ -533,13 +503,12 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
                   `}
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 ${
-                      isSelected ? 'border-[var(--color-brand)]' : 'border-[var(--color-outline)]'
-                    }`}>
-                      {isSelected && (
-                        <div className="h-2 w-2 rounded-full bg-[var(--color-brand)]" />
-                      )}
-                    </div>
+                    <Check
+                      aria-hidden="true"
+                      className={`size-4 flex-shrink-0 ${
+                        isSelected ? 'text-[var(--color-brand)]' : 'opacity-0'
+                      }`}
+                    />
 
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-semibold text-[var(--color-text-primary)]">{model.name}</div>
@@ -550,109 +519,125 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
                       )}
                     </div>
                   </div>
-                </button>
+                </Button>
               )
             })}
           </div>
         )}
-      </div>
-
-    </>
+        </div>
+      </ScrollArea>
+    </div>
   )
 
-  const dropdown = open && dropdownPosition
-    ? isMobileBrowser ? (
-      <MobileBottomSheet
-        open={open}
-        onClose={() => setOpen(false)}
-        title={t('model.configuration')}
-        closeLabel={t('tabs.close')}
-        ariaLabel={t('model.configuration')}
-        contentClassName="p-3"
-        panelRef={dropdownRef}
-        testId="model-selector-dropdown"
-      >
-        {dropdownContent}
-      </MobileBottomSheet>
-    ) : createPortal(
-      <div
-        ref={dropdownRef}
-        data-testid="model-selector-dropdown"
-        className="fixed z-[80] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-dropdown)]"
-        style={{
-          top: dropdownPosition.top,
-          bottom: dropdownPosition.bottom,
-          left: dropdownPosition.left,
-          width: dropdownPosition.width,
-        }}
-      >
-        {dropdownContent}
-      </div>,
-      document.body,
-    )
-    : null
+  const modelTrigger = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      disabled={disabled}
+      onClick={isMobileBrowser ? openSelector : undefined}
+      aria-label={buttonProviderLabel ? `${buttonModelLabel}, ${buttonProviderLabel}` : buttonModelLabel}
+      title={buttonProviderLabel ? `${buttonProviderLabel} · ${buttonModelLabel}` : undefined}
+      className={`h-auto min-w-0 gap-2 rounded-l-full text-xs font-medium text-[var(--color-text-secondary)] ${
+        compact ? `${fluid ? 'flex-1' : ''} max-w-[112px] py-1.5 pl-2.5 pr-1` : 'max-w-[220px] py-1.5 pl-3 pr-1'
+      }`}
+    >
+      <span className={`${compact ? 'text-xs' : 'text-sm'} min-w-0 flex-1 truncate font-semibold text-[var(--color-text-primary)]`}>
+        {buttonModelLabel}
+      </span>
+      {!canEditRuntimeEffort && !compact && buttonProviderLabel && (
+        <span className="max-w-[108px] flex-shrink-0 truncate text-[11px] text-[var(--color-text-tertiary)]">
+          {buttonProviderLabel}
+        </span>
+      )}
+      <ChevronDown aria-hidden="true" className="size-3 flex-shrink-0" />
+    </Button>
+  )
 
   return (
     <div
       data-testid="model-selector-shell"
       className={`relative min-w-0 ${fluid ? 'flex-1' : 'shrink-0'}`}
     >
-      <div ref={ref} className={`flex min-w-0 items-stretch rounded-full bg-[var(--color-surface-container-low)] transition-colors hover:bg-[var(--color-surface-hover)] ${fluid ? 'w-full' : ''} ${disabled ? 'opacity-50' : ''}`}>
-        <button
-          onClick={() => {
-            if (disabled) return
-            setEffortOpen(false)
-            setOpen(!open)
-          }}
-          disabled={disabled}
-          aria-label={buttonProviderLabel ? `${buttonModelLabel}, ${buttonProviderLabel}` : undefined}
-          title={buttonProviderLabel ? `${buttonProviderLabel} · ${buttonModelLabel}` : undefined}
-          className={`flex min-w-0 items-center gap-2 rounded-l-full text-xs font-medium text-[var(--color-text-secondary)] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] disabled:cursor-not-allowed ${
-            compact ? `${fluid ? 'flex-1' : ''} max-w-[112px] py-1.5 pl-2.5 pr-1` : 'max-w-[220px] py-1.5 pl-3 pr-1'
-          }`}
-        >
-          <span className={`${compact ? 'text-xs' : 'text-sm'} min-w-0 flex-1 truncate font-semibold text-[var(--color-text-primary)]`}>
-            {buttonModelLabel}
-          </span>
-          {!canEditRuntimeEffort && !compact && buttonProviderLabel && (
-            <span className="max-w-[108px] flex-shrink-0 truncate text-[11px] text-[var(--color-text-tertiary)]">
-              {buttonProviderLabel}
-            </span>
-          )}
-          <span className="material-symbols-outlined flex-shrink-0 text-[12px]">expand_more</span>
-        </button>
+      <div className={`flex min-w-0 items-stretch rounded-full bg-[var(--color-surface-container-low)] transition-colors hover:bg-[var(--color-surface-hover)] ${fluid ? 'w-full' : ''} ${disabled ? 'opacity-50' : ''}`}>
+        {isMobileBrowser ? (
+          <>
+            {modelTrigger}
+            <MobileBottomSheet
+              open={open}
+              onClose={() => setOpen(false)}
+              title={t('model.configuration')}
+              closeLabel={t('tabs.close')}
+              ariaLabel={t('model.configuration')}
+              contentClassName="p-3"
+              testId="model-selector-dropdown"
+            >
+              {dropdownContent}
+            </MobileBottomSheet>
+          </>
+        ) : (
+          <Popover
+            open={open}
+            onOpenChange={(nextOpen) => {
+              if (disabled) return
+              setEffortOpen(false)
+              setOpen(nextOpen)
+            }}
+          >
+            <PopoverTrigger asChild>
+              {modelTrigger}
+            </PopoverTrigger>
+            <PopoverContent
+              data-testid="model-selector-dropdown"
+              side="top"
+              align="start"
+              sideOffset={8}
+              className="w-[360px] overflow-hidden p-0"
+              onOpenAutoFocus={(event) => {
+                event.preventDefault()
+                queueMicrotask(() => {
+                  const dropdown = dropdownRef.current
+                  const selectedOption = dropdown
+                    ?.querySelector<HTMLButtonElement>('[data-model-option][aria-selected="true"]')
+                  const firstOption = dropdown
+                    ?.querySelector<HTMLButtonElement>('[data-model-option]:not(:disabled)')
+                  ;(selectedOption ?? firstOption)?.focus()
+                })
+              }}
+            >
+              {dropdownContent}
+            </PopoverContent>
+          </Popover>
+        )}
 
         {canEditRuntimeEffort && selectedRuntimeEffort && runtimeEffortOptions.length > 0 && (
-          <button
-            ref={effortButtonRef}
-            type="button"
-            disabled={disabled}
-            aria-label={`${t('model.effort')}: ${effortLabels[selectedRuntimeEffort]}`}
-            aria-expanded={effortOpen}
-            onClick={() => {
-              if (disabled) return
-              setOpen(false)
-              setEffortOpen(!effortOpen)
-            }}
-            className={`rounded-r-full pr-3 text-[var(--color-text-tertiary)] outline-none transition-colors hover:text-[var(--color-text-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] disabled:cursor-not-allowed ${compact ? 'pl-1 text-[10px]' : 'pl-1.5 text-xs'}`}
-          >
-            {effortLabels[selectedRuntimeEffort]}
-          </button>
+          <ReasoningEffortPopover
+            open={effortOpen}
+            trigger={(
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={disabled}
+                aria-label={`${t('model.effort')}: ${effortLabels[selectedRuntimeEffort]}`}
+                className={`h-auto rounded-r-full pr-3 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] ${compact ? 'pl-1 text-[10px]' : 'pl-1.5 text-xs'}`}
+                onClick={() => {
+                  setOpen(false)
+                  setEffortOpen(current => !current)
+                }}
+              >
+                {effortLabels[selectedRuntimeEffort]}
+              </Button>
+            )}
+            options={runtimeEffortOptions.map((option) => option.value)}
+            value={selectedRuntimeEffort}
+            labels={effortLabels}
+            ariaLabel={t('model.effort')}
+            onChange={handleRuntimeEffortSelect}
+            onClose={() => setEffortOpen(false)}
+          />
         )}
       </div>
-      {dropdown}
-      {canEditRuntimeEffort && selectedRuntimeEffort && (
-        <ReasoningEffortPopover
-          open={effortOpen}
-          anchorRef={effortButtonRef}
-          options={runtimeEffortOptions.map((option) => option.value)}
-          value={selectedRuntimeEffort}
-          labels={effortLabels}
-          ariaLabel={t('model.effort')}
-          onChange={handleRuntimeEffortSelect}
-          onClose={() => setEffortOpen(false)}
-        />
-      )}
     </div>
   )
 })

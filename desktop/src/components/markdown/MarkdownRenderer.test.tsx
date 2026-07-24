@@ -16,7 +16,11 @@ vi.mock('../chat/MermaidRenderer', () => ({
   ),
 }))
 
-import { MarkdownRenderer, __markdownParseCacheInternals } from './MarkdownRenderer'
+import {
+  MarkdownRenderer,
+  __markdownParseCacheInternals,
+  markdownToPlainText,
+} from './MarkdownRenderer'
 
 function visibleMathText(container: HTMLElement): string {
   const clone = container.cloneNode(true) as HTMLElement
@@ -261,6 +265,35 @@ describe('MarkdownRenderer', () => {
     const link = screen.getByRole('link', { name: 'OpenAI' })
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
+  })
+
+  it('blocks automatic external resources when requested by a sensitive viewer', () => {
+    const { container } = render(
+      <MarkdownRenderer
+        blockExternalResources
+        content={[
+          'Safe text and [manual](https://example.com/manual).',
+          '![tracking](https://example.com/pixel.png)',
+          '<video src="http://127.0.0.1:9/video.mp4"></video>',
+          '<audio src="https://example.com/audio.mp3"></audio>',
+          '<svg><image href="https://example.com/image.svg"></image></svg>',
+        ].join('\n')}
+      />,
+    )
+
+    expect(screen.getByText(/Safe text/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'manual' })).toBeInTheDocument()
+    expect(container.querySelector('img, video, audio, source, picture, svg, image, use')).toBeNull()
+    expect(container.innerHTML).not.toContain('pixel.png')
+    expect(container.innerHTML).not.toContain('127.0.0.1')
+  })
+
+  it('creates an inert plain-text summary without markdown interactions or resource URLs', () => {
+    expect(markdownToPlainText([
+      '**Review** [the guide](https://example.com/guide).',
+      '![tracking](http://127.0.0.1:9/pixel.png)',
+      '<button>Copy</button>',
+    ].join('\n'))).toBe('Review the guide. Copy')
   })
 
   it('strips style tags from assistant text before injecting markdown html', () => {

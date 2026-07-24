@@ -3,7 +3,18 @@ import { EventEmitter } from 'node:events'
 import net from 'node:net'
 import http from 'node:http'
 import path from 'node:path'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import {
   appendHostDiagnostic,
@@ -326,7 +337,99 @@ describe('Electron sidecar manager', () => {
       expect(contents).not.toContain(homeDir)
       expect(lines).toHaveLength(HOST_DIAGNOSTICS_LINE_LIMIT)
       expect(lines[0]).toBe('line 6')
+      if (process.platform !== 'win32') {
+        expect(statSync(logPath).mode & 0o777).toBe(0o600)
+      }
     } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('creates the Electron diagnostics directory with private permissions', () => {
+    if (process.platform === 'win32') return
+    const dir = mkdtempSync(path.join(tmpdir(), 'cc-haha-electron-host-mode-'))
+    const diagnosticsDir = path.join(dir, 'cc-haha', 'diagnostics')
+    const logPath = path.join(diagnosticsDir, 'electron-host.log')
+    try {
+      appendHostDiagnostic(logPath, 'private mode probe')
+
+      expect(statSync(diagnosticsDir).mode & 0o777).toBe(0o700)
+      expect(statSync(logPath).mode & 0o777).toBe(0o600)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a symlinked Electron diagnostics directory without changing its target', () => {
+    if (process.platform === 'win32') return
+    const dir = mkdtempSync(path.join(tmpdir(), 'cc-haha-electron-host-symlink-dir-'))
+    const diagnosticsDir = path.join(dir, 'cc-haha', 'diagnostics')
+    const unrelatedDir = path.join(dir, 'unrelated')
+    const unrelatedLog = path.join(unrelatedDir, 'electron-host.log')
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      mkdirSync(path.dirname(diagnosticsDir), { recursive: true })
+      mkdirSync(unrelatedDir, { mode: 0o755 })
+      writeFileSync(unrelatedLog, 'unrelated\n', { mode: 0o644 })
+      symlinkSync(unrelatedDir, diagnosticsDir, 'dir')
+
+      appendHostDiagnostic(path.join(diagnosticsDir, 'electron-host.log'), 'must not escape')
+
+      expect(statSync(unrelatedDir).mode & 0o777).toBe(0o755)
+      expect(statSync(unrelatedLog).mode & 0o777).toBe(0o644)
+      expect(readFileSync(unrelatedLog, 'utf-8')).toBe('unrelated\n')
+      expect(errorSpy).toHaveBeenCalledWith('[desktop] failed to persist Electron host diagnostics')
+    } finally {
+      errorSpy.mockRestore()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an ancestor symlink before creating Electron diagnostics outside the config root', () => {
+    if (process.platform === 'win32') return
+    const dir = mkdtempSync(path.join(tmpdir(), 'cc-haha-electron-host-symlink-parent-'))
+    const configDir = path.join(dir, 'config')
+    const unrelatedDir = path.join(dir, 'unrelated')
+    const diagnosticsDir = path.join(configDir, 'cc-haha', 'diagnostics')
+    const unrelatedDiagnosticsDir = path.join(unrelatedDir, 'diagnostics')
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      mkdirSync(configDir)
+      mkdirSync(unrelatedDiagnosticsDir, { recursive: true, mode: 0o755 })
+      symlinkSync(unrelatedDir, path.join(configDir, 'cc-haha'), 'dir')
+
+      appendHostDiagnostic(path.join(diagnosticsDir, 'electron-host.log'), 'must not escape')
+
+      expect(statSync(unrelatedDiagnosticsDir).mode & 0o777).toBe(0o755)
+      expect(existsSync(path.join(unrelatedDiagnosticsDir, 'electron-host.log'))).toBe(false)
+      expect(errorSpy).toHaveBeenCalledWith('[desktop] failed to persist Electron host diagnostics')
+    } finally {
+      errorSpy.mockRestore()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a symlinked Electron diagnostics file without copying its target', () => {
+    if (process.platform === 'win32') return
+    const dir = mkdtempSync(path.join(tmpdir(), 'cc-haha-electron-host-symlink-file-'))
+    const diagnosticsDir = path.join(dir, 'cc-haha', 'diagnostics')
+    const logPath = path.join(diagnosticsDir, 'electron-host.log')
+    const unrelatedLog = path.join(dir, 'unrelated.log')
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      mkdirSync(diagnosticsDir, { recursive: true })
+      writeFileSync(unrelatedLog, 'PRIVATE_UNRELATED_CONTENT\n', { mode: 0o644 })
+      chmodSync(unrelatedLog, 0o644)
+      symlinkSync(unrelatedLog, logPath, 'file')
+
+      appendHostDiagnostic(logPath, 'must not copy target')
+
+      expect(lstatSync(logPath).isSymbolicLink()).toBe(true)
+      expect(statSync(unrelatedLog).mode & 0o777).toBe(0o644)
+      expect(readFileSync(unrelatedLog, 'utf-8')).toBe('PRIVATE_UNRELATED_CONTENT\n')
+      expect(errorSpy).toHaveBeenCalledWith('[desktop] failed to persist Electron host diagnostics')
+    } finally {
+      errorSpy.mockRestore()
       rmSync(dir, { recursive: true, force: true })
     }
   })
