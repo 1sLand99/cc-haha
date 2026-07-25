@@ -1100,6 +1100,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.plugins.applyHint': '启用、禁用或更新后，需要把插件变更重新应用到当前桌面端运行时。',
   'settings.plugins.lastReload': '最近一次应用：{enabled} 个活跃插件，{skills} 个插件技能，{errors} 个错误。',
   'settings.plugins.reloadToast': '插件变更已应用：{enabled} 个活跃插件，{skills} 个技能，{errors} 个错误。',
+  'settings.plugins.reloadWarning': '插件变更已应用，但运行时重载失败：{message}',
   'settings.plugins.marketplacesTitle': '已知插件市场',
   'settings.plugins.marketplacesHint': '这里只展示当前机器已经配置好的 marketplace 来源摘要。',
   'settings.plugins.marketplaceAutoUpdateOn': '自动更新开',

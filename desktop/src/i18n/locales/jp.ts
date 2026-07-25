@@ -1100,6 +1100,7 @@ export const jp: Record<TranslationKey, string> = {
   'settings.plugins.applyHint': '有効化、無効化、更新の変更は、現在のデスクトップランタイムに適用した後で有効になります。',
   'settings.plugins.lastReload': '前回の適用: アクティブなプラグイン {enabled} 個、プラグインスキル {skills} 個、エラー {errors} 件。',
   'settings.plugins.reloadToast': 'プラグインの変更を適用しました: アクティブなプラグイン {enabled} 個、スキル {skills} 個、エラー {errors} 件。',
+  'settings.plugins.reloadWarning': 'プラグインの変更は適用されましたが、ランタイムの再読み込みに失敗しました: {message}',
   'settings.plugins.marketplacesTitle': '既知のマーケットプレイス',
   'settings.plugins.marketplacesHint': 'このマシンに既に設定済みのマーケットプレイスソースの読み取り専用の概要です。',
   'settings.plugins.marketplaceAutoUpdateOn': '自動更新オン',

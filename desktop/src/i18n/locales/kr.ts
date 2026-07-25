@@ -1100,6 +1100,7 @@ export const kr: Record<TranslationKey, string> = {
   'settings.plugins.applyHint': '사용, 사용 안 함, 업데이트 변경 사항은 현재 데스크톱 런타임에 적용한 후 적용됩니다.',
   'settings.plugins.lastReload': '마지막 적용: 활성 플러그인 {enabled}개, 플러그인 스킬 {skills}개, 오류 {errors}건.',
   'settings.plugins.reloadToast': '플러그인 변경 사항을 적용했습니다: 활성 플러그인 {enabled}개, 스킬 {skills}개, 오류 {errors}건.',
+  'settings.plugins.reloadWarning': '플러그인 변경 사항은 적용되었지만 런타임 다시 불러오기에 실패했습니다: {message}',
   'settings.plugins.marketplacesTitle': '알려진 마켓플레이스',
   'settings.plugins.marketplacesHint': '이 컴퓨터에 이미 구성된 마켓플레이스 소스의 읽기 전용 요약입니다.',
   'settings.plugins.marketplaceAutoUpdateOn': '자동 업데이트 켜짐',

@@ -68,7 +68,20 @@ export function PluginDetail() {
     setActionKey(key)
     try {
       const message = await fn()
-      addToast({ type: 'success', message })
+      // The store applies the change, then reloads the runtime, and resolves
+      // either way -- a failed reload only lands in `refreshWarning`. Reporting
+      // a plain success here would make "applied but never reloaded" look
+      // identical to a clean run. Read it after the call: the store clears it
+      // when the mutation starts, so anything present belongs to this action.
+      const refreshWarning = usePluginStore.getState().refreshWarning
+      if (refreshWarning) {
+        addToast({
+          type: 'warning',
+          message: t('settings.plugins.reloadWarning', { message: refreshWarning }),
+        })
+      } else {
+        addToast({ type: 'success', message })
+      }
     } catch (err) {
       addToast({
         type: 'error',

@@ -1098,6 +1098,7 @@ export const en = {
   'settings.plugins.applyHint': 'Enable, disable, and update changes become active after applying them to the current desktop runtime.',
   'settings.plugins.lastReload': 'Last apply: {enabled} active plugins, {skills} plugin skills, {errors} errors.',
   'settings.plugins.reloadToast': 'Applied plugin changes: {enabled} active plugins, {skills} skills, {errors} errors.',
+  'settings.plugins.reloadWarning': 'Plugin change applied, but reloading the runtime failed: {message}',
   'settings.plugins.marketplacesTitle': 'Known marketplaces',
   'settings.plugins.marketplacesHint': 'Read-only summary of marketplace sources already configured for this machine.',
   'settings.plugins.marketplaceAutoUpdateOn': 'Auto-update on',

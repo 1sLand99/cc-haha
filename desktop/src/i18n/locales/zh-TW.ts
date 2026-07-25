@@ -1100,6 +1100,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.plugins.applyHint': '啟用、禁用或更新後，需要把外掛變更重新應用到當前桌面端執行時。',
   'settings.plugins.lastReload': '最近一次應用：{enabled} 個活躍外掛，{skills} 個外掛技能，{errors} 個錯誤。',
   'settings.plugins.reloadToast': '外掛變更已應用：{enabled} 個活躍外掛，{skills} 個技能，{errors} 個錯誤。',
+  'settings.plugins.reloadWarning': '外掛變更已應用，但執行階段重新載入失敗：{message}',
   'settings.plugins.marketplacesTitle': '已知外掛市場',
   'settings.plugins.marketplacesHint': '這裡只展示當前機器已經配置好的 marketplace 來源摘要。',
   'settings.plugins.marketplaceAutoUpdateOn': '自動更新開',
