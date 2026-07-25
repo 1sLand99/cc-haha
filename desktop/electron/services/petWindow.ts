@@ -137,17 +137,43 @@ export function clampPetWindowPosition(
 
 type PetWindowExtent = { width: number; height: number }
 
+function isPositiveExtent(extent: Partial<PetWindowExtent> | undefined): boolean {
+  return typeof extent?.width === 'number' && extent.width > 0
+    && typeof extent?.height === 'number' && extent.height > 0
+}
+
 // Renderer regions are measured against the live viewport, so they have to be
 // clamped to the real content box. Clamping to the nominal constants slices off
 // whatever sits below it once the content area is taller than expected.
+//
+// getContentBounds returns an empty rect while the content view is detached, so
+// fall through to the live window box rather than to the constants — falling
+// back to those would silently reinstate the very clamp this exists to avoid.
 function petWindowContentExtent(window: PetWindow): PetWindowExtent {
-  const contentBounds = window.getContentBounds?.()
-  const width = contentBounds?.width
-  const height = contentBounds?.height
+  const candidates = [window.getContentBounds?.(), window.getBounds()]
+  const measured = candidates.find(isPositiveExtent)
   return {
-    width: typeof width === 'number' && width > 0 ? Math.round(width) : PET_WINDOW_WIDTH,
-    height: typeof height === 'number' && height > 0 ? Math.round(height) : PET_WINDOW_HEIGHT,
+    width: measured ? Math.round(measured.width) : PET_WINDOW_WIDTH,
+    height: measured ? Math.round(measured.height) : PET_WINDOW_HEIGHT,
   }
+}
+
+/**
+ * Moves the window without touching its size.
+ *
+ * Electron implements setPosition as `SetBounds(Rect(position, GetSize()))`, and
+ * on Windows both halves of that DIP round trip round up — so on a fractional
+ * display scale every call grows the window by a pixel. Restating the nominal
+ * size is idempotent instead: the window is created non-resizable at exactly
+ * these dimensions, so re-applying them also heals a window that already drifted.
+ */
+function movePetWindow(window: PetWindow, position: PetWindowPosition): void {
+  window.setBounds({
+    x: position.x,
+    y: position.y,
+    width: PET_WINDOW_WIDTH,
+    height: PET_WINDOW_HEIGHT,
+  })
 }
 
 function normalizePetWindowRegion(region: Rectangle, extent: PetWindowExtent): Rectangle {
@@ -249,7 +275,6 @@ export class PetWindowController {
     window: PetWindow
     pointerStart: PetWindowPosition
     windowStart: PetWindowPosition
-    size: PetWindowExtent
     lastPosition: PetWindowPosition
   } | null = null
   private dragTimer: ReturnType<typeof setInterval> | null = null
@@ -371,7 +396,12 @@ export class PetWindowController {
       : null
     if (dragRegion) this.visibleDragRegion = dragRegion
 
-    if (platform === 'darwin' && dragRegion) {
+    // A saved edge position leaves the transparent padding off-screen, so
+    // creating the window re-clamps it against the whole window and walks the
+    // mascot inwards by the padding width. Restoring it needs the reported
+    // region, which only arrives here — and it arrives on every platform, so
+    // this runs on every platform too.
+    if (dragRegion) {
       const requestedPosition = this.pendingRestoredPosition ?? window.getBounds()
       this.pendingRestoredPosition = null
       const anchor = {
@@ -383,7 +413,7 @@ export class PetWindowController {
       const nextPosition = clampPetWindowPosition(requestedPosition, workArea, dragRegion)
       const bounds = window.getBounds()
       if (nextPosition.x !== bounds.x || nextPosition.y !== bounds.y) {
-        window.setPosition(nextPosition.x, nextPosition.y, false)
+        movePetWindow(window, nextPosition)
       }
     }
 
@@ -417,7 +447,6 @@ export class PetWindowController {
         window,
         pointerStart: { x: pointerStart.x, y: pointerStart.y },
         windowStart: { x: bounds.x, y: bounds.y },
-        size: { width: bounds.width, height: bounds.height },
         lastPosition: { x: bounds.x, y: bounds.y },
       }
       if (this.options.getCursorScreenPoint) {
@@ -479,15 +508,7 @@ export class PetWindowController {
       && nextPosition.y === drag.lastPosition.y
     ) return
 
-    // Windows implements setPosition as getSize() + setBounds(), and that DIP
-    // round trip grows the window a pixel at a time on fractional display
-    // scaling. Restating the size every tick keeps the drag size-neutral.
-    drag.window.setBounds({
-      x: nextPosition.x,
-      y: nextPosition.y,
-      width: drag.size.width,
-      height: drag.size.height,
-    })
+    movePetWindow(drag.window, nextPosition)
     drag.lastPosition = nextPosition
   }
 

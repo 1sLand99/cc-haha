@@ -435,7 +435,7 @@ describe('Electron pet window service', () => {
     })
   })
 
-  it.each(['win32', 'linux'] as const)(
+  it.each(['darwin', 'win32', 'linux'] as const)(
     'restores a %s edge position once the renderer reports the mascot region',
     async (platform) => {
       // Dragging clamps against the mascot, so a saved edge position puts the
@@ -477,36 +477,6 @@ describe('Electron pet window service', () => {
       })
     },
   )
-
-  it('restores an edge position after the renderer reports the visible mascot region', async () => {
-    let petWindow: ReturnType<typeof createFakeWindow> | undefined
-    const createWindow = vi.fn((bounds) => {
-      petWindow = createFakeWindow(bounds as {
-        x: number
-        y: number
-        width: number
-        height: number
-      })
-      return petWindow
-    })
-    const controller = new PetWindowController({
-      createWindow: createWindow as never,
-      getCurrentWorkArea: () => ({ x: 0, y: 25, width: 800, height: 575 }),
-      getWorkAreaForPoint: () => ({ x: 0, y: 25, width: 800, height: 575 }),
-      load: vi.fn().mockResolvedValue(undefined),
-      platform: 'darwin',
-      preloadPath: '/app/electron-dist/preload.cjs',
-      readPosition: () => ({ x: -136, y: 160 }),
-    })
-
-    await controller.show()
-    expect(createWindow).toHaveBeenCalledWith(expect.objectContaining({ x: 0, y: 160 }))
-    controller.setInteractiveRegions(petWindow as never, [
-      { x: 136, y: 240, width: 112, height: 128 },
-    ])
-
-    expect(petWindow?.setPosition).toHaveBeenLastCalledWith(-136, 160, false)
-  })
 
   it('tracks the native cursor at 60 Hz without renderer move payloads', async () => {
     vi.useFakeTimers()
@@ -805,7 +775,7 @@ describe('Electron pet window service', () => {
     try {
       const petWindow = createFakeWindow(
         { x: 100, y: 120, width: PET_WINDOW_WIDTH, height: PET_WINDOW_HEIGHT },
-        { positionDriftPx: 1 },
+        { scaleFactor: 1.15 },
       )
       let cursor = { x: 150, y: 180 }
       const controller = new PetWindowController({
@@ -818,6 +788,10 @@ describe('Electron pet window service', () => {
         preloadPath: '/app/electron-dist/preload.cjs',
       })
       await controller.show()
+      // Chromium reports a fractionally scaled window back a pixel larger than
+      // it was created; that rounding is the engine's, not ours. What has to
+      // hold is that dragging never adds to it.
+      const { width, height } = petWindow.getBounds()
 
       controller.dragWindow(petWindow as never, { phase: 'start', x: 150, y: 180 })
       for (let tick = 0; tick < 60; tick += 1) {
@@ -826,8 +800,46 @@ describe('Electron pet window service', () => {
       }
       controller.dragWindow(petWindow as never, { phase: 'end', ...cursor })
 
-      expect(petWindow.getBounds().width).toBe(PET_WINDOW_WIDTH)
-      expect(petWindow.getBounds().height).toBe(PET_WINDOW_HEIGHT)
+      // Without a position assertion this test would also pass for a drag tick
+      // that moves nothing at all.
+      expect(petWindow.getBounds()).toEqual({ x: 220, y: 240, width, height })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stays size-neutral across repeated drags on a fractionally scaled display', async () => {
+    // Restating a size that was itself read back through the DIP round trip
+    // re-applies the ceil, so the window grows a pixel per drag even though any
+    // single drag looks stable. The recorded size has to come from the nominal
+    // constants the window was created with.
+    vi.useFakeTimers()
+    try {
+      const petWindow = createFakeWindow(
+        { x: 100, y: 120, width: PET_WINDOW_WIDTH, height: PET_WINDOW_HEIGHT },
+        { scaleFactor: 1.15 },
+      )
+      let cursor = { x: 150, y: 180 }
+      const controller = new PetWindowController({
+        createWindow: vi.fn(() => petWindow) as never,
+        getCursorScreenPoint: () => cursor,
+        getCurrentWorkArea: () => ({ x: 0, y: 0, width: 1_600, height: 1_000 }),
+        getWorkAreaForPoint: () => ({ x: 0, y: 0, width: 1_600, height: 1_000 }),
+        load: vi.fn().mockResolvedValue(undefined),
+        platform: 'win32',
+        preloadPath: '/app/electron-dist/preload.cjs',
+      })
+      await controller.show()
+      const { width, height } = petWindow.getBounds()
+
+      for (let drag = 0; drag < 40; drag += 1) {
+        controller.dragWindow(petWindow as never, { phase: 'start', ...cursor })
+        cursor = { x: cursor.x + 4, y: cursor.y + 4 }
+        vi.advanceTimersByTime(16)
+        controller.dragWindow(petWindow as never, { phase: 'end', ...cursor })
+      }
+
+      expect(petWindow.getBounds()).toMatchObject({ width, height })
     } finally {
       vi.useRealTimers()
     }
