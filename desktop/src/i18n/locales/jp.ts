@@ -1041,6 +1041,8 @@ export const jp: Record<TranslationKey, string> = {
   'settings.skills.agentsDirBadge': '.agents',
   'settings.skills.agentsDirHint':
     'Codex、Cursor、Gemini CLI と共有される ~/.agents/skills/ オープン標準ディレクトリ由来',
+  'settings.skills.agentsDirProjectHint':
+    'このプロジェクトの .agents/skills/ ディレクトリ由来 —— 自分でインストールしたものではなく、リポジトリに同梱されています',
   'settings.skills.tokenEstimate': '約 {count} トークン',
   'settings.skills.tokenEstimateShort': '約 {count}',
   'settings.skills.summary.totalSkills': 'スキル総数',

@@ -332,7 +332,12 @@ export function SkillList({
                             <Badge
                               variant="secondary"
                               className="font-mono text-[10px]"
-                              title={t('settings.skills.agentsDirHint')}
+                              // The badge covers both scopes, and they are not
+                              // equally trusted: a project one ships with the
+                              // repository rather than being installed by the user.
+                              title={t(skill.source === 'project'
+                                ? 'settings.skills.agentsDirProjectHint'
+                                : 'settings.skills.agentsDirHint')}
                             >
                               {t('settings.skills.agentsDirBadge')}
                             </Badge>

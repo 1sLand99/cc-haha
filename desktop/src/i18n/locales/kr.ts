@@ -1041,6 +1041,8 @@ export const kr: Record<TranslationKey, string> = {
   'settings.skills.agentsDirBadge': '.agents',
   'settings.skills.agentsDirHint':
     'Codex, Cursor, Gemini CLI와 공유되는 ~/.agents/skills/ 개방 표준 디렉터리에서 가져옴',
+  'settings.skills.agentsDirProjectHint':
+    '현재 프로젝트의 .agents/skills/ 디렉터리에서 가져옴 —— 직접 설치한 것이 아니라 저장소에 포함되어 배포됩니다',
   'settings.skills.tokenEstimate': '약 {count} 토큰',
   'settings.skills.tokenEstimateShort': '약 {count}',
   'settings.skills.summary.totalSkills': '총 스킬',

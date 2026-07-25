@@ -175,6 +175,45 @@ describe('SkillList', () => {
     expect(screen.getByRole('button', { name: /Shared Skill/ })).toContainElement(badges[0]!)
   })
 
+  it('tells a repository-supplied .agents skill apart from one in the home directory', () => {
+    // The same badge covers both scopes, so a hint that always names
+    // ~/.agents/skills would describe a skill that shipped with the repository
+    // as though the user had installed it themselves.
+    useSkillStore.setState({
+      skills: [
+        {
+          name: 'mine',
+          displayName: 'Home Skill',
+          description: 'Installed by another tool under $HOME',
+          source: 'user',
+          rootFlavor: 'agents',
+          userInvocable: true,
+          contentLength: 400,
+          hasDirectory: true,
+        },
+        {
+          name: 'theirs',
+          displayName: 'Repo Skill',
+          description: 'Shipped inside the checked-out project',
+          source: 'project',
+          rootFlavor: 'agents',
+          userInvocable: true,
+          contentLength: 400,
+          hasDirectory: true,
+        },
+      ],
+    })
+
+    render(<SkillList />)
+
+    const hintOf = (name: RegExp) =>
+      screen.getByRole('button', { name }).querySelector('[title]')?.getAttribute('title') ?? ''
+
+    expect(hintOf(/Home Skill/)).toContain('~/.agents/skills/')
+    expect(hintOf(/Repo Skill/)).not.toContain('~/.agents/skills/')
+    expect(hintOf(/Repo Skill/)).toMatch(/project/i)
+  })
+
   it('leaves skills without a rootFlavor unbadged', () => {
     // Older servers omit the field entirely; the list must not break or
     // mislabel them.

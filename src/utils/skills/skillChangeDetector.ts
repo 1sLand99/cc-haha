@@ -173,7 +173,8 @@ export function dispose(): Promise<void> {
  */
 export const subscribe = skillsChanged.subscribe
 
-async function getWatchablePaths(): Promise<string[]> {
+/** Exported for tests: the watch list is otherwise only observable through chokidar. */
+export async function getWatchablePaths(): Promise<string[]> {
   const fs = getFsImplementation()
   const paths: string[] = []
 

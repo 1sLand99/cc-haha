@@ -466,6 +466,13 @@ async function loadSkillsFromSkillsDir(
         )
 
         const skillName = entry.name
+        if (!isRenderableSkillName(skillName)) {
+          logForDebugging(
+            `[skills] Skipped ${skillDirPath}: the directory name contains control characters`,
+            { level: 'warn' },
+          )
+          return null
+        }
         const parsed = parseSkillFrontmatterFields(
           frontmatter,
           markdownContent,
@@ -498,6 +505,43 @@ async function loadSkillsFromSkillsDir(
 }
 
 /**
+ * Whether a skill directory name can be rendered without corrupting whatever
+ * it is rendered into.
+ *
+ * The name reaches the model as one `- name: description` line in the skill
+ * catalog, so a name carrying a line break writes extra entries of its own.
+ * `.agents/skills` is a directory other clients and checked-out repositories
+ * write into, which makes the name attacker-controlled rather than the user's.
+ *
+ * Deliberately narrower than the Agent Skills spec (lowercase alphanumerics and
+ * hyphens): existing `.claude/skills` directories predate that rule, and
+ * silently dropping one of those would be a worse failure than the one this
+ * prevents. Only genuinely unrenderable names are rejected.
+ */
+/**
+ * Dedup key for "same name, same scope".
+ *
+ * Joined with NUL because a scopeKey embeds a directory path: with a printable
+ * separator a scope ending in that character, paired with a name starting with
+ * one, would collide with an unrelated pair. Written as an escape so the
+ * separator is not an invisible byte in this file.
+ */
+function scopedSkillKey(scopeKey: string, name: string): string {
+  return `${scopeKey}\u0000${name}`
+}
+
+export function isRenderableSkillName(name: string): boolean {
+  if (name.length === 0) return false
+  for (const char of name) {
+    const code = char.codePointAt(0) ?? 0
+    // C0 and C1 controls — the line breaks among them are what would let a
+    // name write extra catalog entries.
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return false
+  }
+  return true
+}
+
+/**
  * Collapses skills that share a name within a single scope, keeping the first.
  * Entries without a scopeKey (legacy /commands/) are always kept.
  *
@@ -513,7 +557,7 @@ function dedupeScopedNameCollisions(entries: SkillWithPath[]): SkillWithPath[] {
       kept.push(entry)
       continue
     }
-    const scopedName = `${entry.scopeKey} ${entry.skill.name}`
+    const scopedName = scopedSkillKey(entry.scopeKey, entry.skill.name)
     if (seen.has(scopedName)) {
       logForDebugging(
         `[skills] Shadowed skill '${entry.skill.name}' in ${entry.filePath}: a skill of the same name was already loaded in this scope`,
@@ -821,7 +865,7 @@ export const getSkillDirCommands = memoize(
       // are genuinely distinct. First wins, and roots are ordered so that is
       // always `.claude`.
       if (scopeKey !== undefined) {
-        const scopedName = `${scopeKey} ${skill.name}`
+        const scopedName = scopedSkillKey(scopeKey, skill.name)
         const claimedBy = seenScopedNames.get(scopedName)
         if (claimedBy !== undefined) {
           logForDebugging(

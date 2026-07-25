@@ -1039,6 +1039,8 @@ export const en = {
   'settings.skills.agentsDirBadge': '.agents',
   'settings.skills.agentsDirHint':
     'From the ~/.agents/skills/ open standard directory, shared with Codex, Cursor, and Gemini CLI',
+  'settings.skills.agentsDirProjectHint':
+    "From this project's .agents/skills/ directory — it ships with the repository, not with your own setup",
   'settings.skills.tokenEstimate': '~{count} tokens',
   'settings.skills.tokenEstimateShort': '~{count}',
   'settings.skills.summary.totalSkills': 'Total skills',

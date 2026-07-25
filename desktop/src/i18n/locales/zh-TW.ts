@@ -1041,6 +1041,8 @@ export const zh: Record<TranslationKey, string> = {
   'settings.skills.agentsDirBadge': '.agents',
   'settings.skills.agentsDirHint':
     '來自 ~/.agents/skills/ 開放標準目錄，與 Codex、Cursor、Gemini CLI 共享',
+  'settings.skills.agentsDirProjectHint':
+    '來自目前專案的 .agents/skills/ 目錄 —— 隨儲存庫一起散布，不是你自己安裝的',
   'settings.skills.tokenEstimate': '約 {count} tokens',
   'settings.skills.tokenEstimateShort': '約 {count}',
   'settings.skills.summary.totalSkills': '技能總數',
