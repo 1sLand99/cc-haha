@@ -97,6 +97,45 @@ describe('composer attachment payloads', () => {
     ])
   })
 
+  it('classifies pasted desktop images as image attachments without inlining their bytes', async () => {
+    const nativePaths = new Map<File, string>()
+    const files = [
+      new File(['png'], 'screenshot.PNG', { type: 'image/png' }),
+      new File(['jpg'], '6代码仓库.jpg', { type: 'image/jpeg' }),
+      new File(['webp'], 'hero.webp', { type: 'image/webp' }),
+      new File(['# Notes'], 'notes.md', { type: 'text/markdown' }),
+    ]
+    nativePaths.set(files[0]!, '/Users/nanmi/Desktop/screenshot.PNG')
+    nativePaths.set(files[1]!, '/Users/nanmi/Desktop/6代码仓库.jpg')
+    nativePaths.set(files[2]!, 'C:\\Users\\Nanmi\\Desktop\\hero.webp')
+    nativePaths.set(files[3]!, '/Users/nanmi/Desktop/notes.md')
+    window.desktopHost = {
+      ...browserHost,
+      kind: 'electron',
+      isDesktop: true,
+      files: {
+        getPathForFile: file => nativePaths.get(file) ?? '',
+      },
+    }
+
+    const attachments = await filesToComposerAttachments(files)
+
+    expect(attachments.map(({ name, type, path, data, previewUrl }) => ({ name, type, path, data, previewUrl }))).toEqual([
+      { name: 'screenshot.PNG', type: 'image', path: '/Users/nanmi/Desktop/screenshot.PNG', data: undefined, previewUrl: undefined },
+      { name: '6代码仓库.jpg', type: 'image', path: '/Users/nanmi/Desktop/6代码仓库.jpg', data: undefined, previewUrl: undefined },
+      { name: 'hero.webp', type: 'image', path: 'C:\\Users\\Nanmi\\Desktop\\hero.webp', data: undefined, previewUrl: undefined },
+      { name: 'notes.md', type: 'file', path: '/Users/nanmi/Desktop/notes.md', data: undefined, previewUrl: undefined },
+    ])
+  })
+
+  it('keeps formats the server cannot inline as file attachments', () => {
+    // `type: 'image'` makes ConversationService inline the bytes as an image block,
+    // which the API rejects for these media types — they stay path references.
+    expect(pathToComposerAttachment('/Users/nanmi/Desktop/logo.svg').type).toBe('file')
+    expect(pathToComposerAttachment('/Users/nanmi/Desktop/photo.avif').type).toBe('file')
+    expect(pathToComposerAttachment('/Users/nanmi/Desktop/icon.ico').type).toBe('file')
+  })
+
   it('reads clipboard files from DataTransfer items when the files list is empty', () => {
     const markdown = new File(['# Notes'], 'notes.md', { type: 'text/markdown' })
     const dataTransfer = {

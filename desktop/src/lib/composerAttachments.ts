@@ -1,3 +1,4 @@
+import { isInlineImagePath } from './attachmentImages'
 import { isDesktopRuntime } from './desktopRuntime'
 import { getDesktopHost } from './desktopHost'
 
@@ -30,8 +31,11 @@ export function getFileNameFromPath(filePath: string): string {
 export function pathToComposerAttachment(filePath: string): ComposerAttachment {
   return {
     id: nextAttachmentId(),
+    // Path-only attachments still have to be classified, otherwise a pasted image
+    // renders as a generic file chip instead of a preview (the gallery resolves the
+    // preview from the path via the local server, so the payload stays path-only).
+    type: isInlineImagePath(filePath) ? 'image' : 'file',
     name: getFileNameFromPath(filePath),
-    type: 'file',
     path: filePath,
   }
 }

@@ -261,6 +261,60 @@ describe('AttachmentGallery', () => {
     expect(tooltip.className).toContain('group-hover/selection:visible')
   })
 
+  it('previews a path-only pasted image instead of a file chip', () => {
+    const path = '/Users/nanmi/Desktop/6代码仓库.png'
+    const view = render(
+      <AttachmentGallery
+        variant="message"
+        attachments={[{ id: 'pasted-1', type: 'image', name: '6代码仓库.png', path }]}
+      />,
+    )
+
+    const image = view.getByRole('img', { name: '6代码仓库.png' })
+    expect(image).toHaveAttribute(
+      'src',
+      `http://127.0.0.1:3456/api/filesystem/file?path=${encodeURIComponent(path)}`,
+    )
+    expect(view.container.querySelector('[data-file-extension]')).not.toBeInTheDocument()
+  })
+
+  it('opens the path-only image preview in the gallery modal', async () => {
+    const view = render(
+      <AttachmentGallery
+        variant="composer"
+        attachments={[{ id: 'pasted-1', type: 'image', name: 'shot.png', path: '/Users/nanmi/Desktop/shot.png' }]}
+      />,
+    )
+
+    fireEvent.click(view.getByRole('button', { name: 'Open shot.png' }))
+
+    expect(await view.findByText('1 / 1')).toBeInTheDocument()
+  })
+
+  it('falls back to the file card when a path-only image cannot be loaded', () => {
+    const view = render(
+      <AttachmentGallery
+        attachments={[{ id: 'pasted-1', type: 'image', name: 'moved.png', path: '/Volumes/external/moved.png' }]}
+      />,
+    )
+
+    fireEvent.error(view.getByRole('img', { name: 'moved.png' }))
+
+    expect(view.queryByRole('img', { name: 'moved.png' })).not.toBeInTheDocument()
+    expect(view.container.querySelector('[data-file-extension="PNG"]')).toBeInTheDocument()
+  })
+
+  it('keeps relative image paths on the file card', () => {
+    const view = render(
+      <AttachmentGallery
+        attachments={[{ id: 'relative-1', type: 'image', name: 'diagram.png', path: 'docs/diagram.png' }]}
+      />,
+    )
+
+    expect(view.queryByRole('img')).not.toBeInTheDocument()
+    expect(view.container.querySelector('[data-file-extension="PNG"]')).toBeInTheDocument()
+  })
+
   it('localizes diff sides and remove actions in Chinese', () => {
     useSettingsStore.setState({ locale: 'zh' })
     const view = render(

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { ChevronDown, MessageSquare, X } from 'lucide-react'
 import { useTranslation, type TranslationKey } from '../../i18n'
+import { attachmentImageSource } from '../../lib/attachmentImages'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { isAbsoluteLocalPath } from '../../lib/handlePreviewLink'
 import { buildOpenWithItems, describeFileType, type OpenWithItem } from '../../lib/openWithItems'
@@ -58,18 +59,30 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
   const t = useTranslation()
   const [activeImageIndex, setActiveImageIndex] = useState<number | null>(null)
   const [openWith, setOpenWith] = useState<{ items: OpenWithItem[]; anchor: DOMRect; triggerEl: HTMLElement } | null>(null)
+  // A path-backed preview can fail (file moved, or outside the paths the local
+  // server is allowed to serve); those attachments fall back to the file card.
+  const [unloadableImageSources, setUnloadableImageSources] = useState<ReadonlySet<string>>(() => new Set())
   const desktopHost = getDesktopHost()
 
   const images = useMemo(
     () =>
-      attachments
-        .filter((attachment) => attachment.type === 'image' && (attachment.previewUrl || attachment.data))
-        .map((attachment) => ({
-          src: attachment.previewUrl || attachment.data || '',
-          name: attachment.name,
-        })),
-    [attachments],
+      attachments.flatMap((attachment) => {
+        if (attachment.type !== 'image') return []
+        const src = attachmentImageSource(attachment)
+        if (!src || unloadableImageSources.has(src)) return []
+        return [{ src, name: attachment.name }]
+      }),
+    [attachments, unloadableImageSources],
   )
+
+  const markImageUnloadable = (src: string) => {
+    setUnloadableImageSources((previous) => {
+      if (previous.has(src)) return previous
+      const next = new Set(previous)
+      next.add(src)
+      return next
+    })
+  }
 
   if (attachments.length === 0) return null
 
@@ -126,8 +139,10 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
     <>
       <div className={isComposer ? 'flex flex-wrap items-center gap-2' : 'flex flex-wrap justify-end gap-2'}>
         {attachments.map((attachment, index) => {
-          if (attachment.type === 'image' && (attachment.previewUrl || attachment.data)) {
-            const src = attachment.previewUrl || attachment.data || ''
+          const imageSrc = attachment.type === 'image' ? attachmentImageSource(attachment) : undefined
+
+          if (imageSrc && !unloadableImageSources.has(imageSrc)) {
+            const src = imageSrc
             const selectionNote = attachment.note?.trim()
             const hasSelectionNote = !isComposer && !!selectionNote
             const tooltipId = hasSelectionNote
@@ -151,6 +166,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                   <img
                     src={src}
                     alt={attachment.name}
+                    onError={() => markImageUnloadable(src)}
                     className={
                       isComposer
                         ? 'h-16 w-16 object-cover'
