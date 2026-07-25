@@ -6,10 +6,10 @@ import { cn } from '@/lib/utils'
 type PetWindowButtonSurface = 'mascot' | 'taskBadge' | 'session' | 'panelToggle'
 
 const surfaceClassNames: Record<PetWindowButtonSurface, string> = {
-  mascot: 'pet-mascot-button !h-auto !w-auto !rounded-none !p-0 hover:!bg-transparent',
-  taskBadge: 'pet-task-badge',
-  session: 'pet-session-row !justify-start !whitespace-normal',
-  panelToggle: 'pet-panel-toggle',
+  mascot: 'pet-mascot-button !h-auto !w-auto !rounded-none !p-0 hover:!bg-transparent active:!translate-y-0',
+  taskBadge: 'pet-task-badge active:!translate-y-0',
+  session: 'pet-session-row !justify-start !whitespace-normal active:!translate-y-0',
+  panelToggle: 'pet-panel-toggle active:!translate-y-0',
 }
 
 type PetWindowButtonProps = Omit<
@@ -34,5 +34,6 @@ const PetWindowButton = React.forwardRef<HTMLButtonElement, PetWindowButtonProps
     )
   },
 )
+PetWindowButton.displayName = 'PetWindowButton'
 
 export { PetWindowButton }

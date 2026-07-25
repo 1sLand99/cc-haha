@@ -240,7 +240,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       useUIStore.getState().setTheme(theme)
       set({
         permissionMode: mode,
-        availableModels: modelsRes.models,
+        // 服务端响应异常可能缺 models 字段,兜底为空数组防止下游渲染崩溃
+        availableModels: modelsRes.models ?? [],
         activeProviderName: modelsRes.provider?.name ?? null,
         currentModel: model,
         effortLevel: level,

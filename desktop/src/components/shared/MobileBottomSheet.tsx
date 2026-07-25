@@ -58,8 +58,8 @@ export function MobileBottomSheet({
         data-testid={testId}
         side="bottom"
         showCloseButton={false}
-        overlayClassName="z-[10000] bg-black/25"
-        className={`z-[10001] max-h-[min(78dvh,640px)] min-h-0 overflow-hidden rounded-t-2xl border-x-0 border-y border-[var(--color-border)] shadow-[0_-18px_48px_rgba(54,35,28,0.22)] ${panelClassName}`}
+        overlayClassName="z-[70] bg-black/25"
+        className={`z-[71] max-h-[min(78dvh,640px)] min-h-0 overflow-hidden rounded-t-2xl border-x-0 border-y border-[var(--color-border)] shadow-[0_-18px_48px_rgba(54,35,28,0.22)] ${panelClassName}`}
         onOpenAutoFocus={() => {
           returnFocusRef.current = document.activeElement instanceof HTMLElement
             ? document.activeElement

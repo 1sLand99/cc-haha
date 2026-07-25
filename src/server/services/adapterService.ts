@@ -97,6 +97,7 @@ class AdapterService {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         return {}
       }
+      console.error('[AdapterService] Failed to read adapter config:', err)
       throw ApiError.internal('Failed to read adapter config')
     }
   }
@@ -180,8 +181,9 @@ class AdapterService {
       })
       await fs.rename(tmpFile, filePath)
       await fs.chmod(filePath, 0o600).catch(() => {})
-    } catch {
+    } catch (err) {
       await fs.unlink(tmpFile).catch(() => {})
+      console.error('[AdapterService] Failed to write adapter config:', err)
       throw ApiError.internal('Failed to write adapter config')
     }
   }

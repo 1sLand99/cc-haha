@@ -36,6 +36,7 @@ const PopoverContent = React.forwardRef<
     </PopoverPrimitive.Portal>
   )
 })
+PopoverContent.displayName = 'PopoverContent'
 
 function PopoverAnchor(props: React.ComponentProps<typeof PopoverPrimitive.Anchor>) {
   return <PopoverPrimitive.Anchor data-slot="popover-anchor" {...props} />

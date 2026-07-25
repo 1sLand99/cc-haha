@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
+// vi.hoisted must run before the imports that reference the mocked module,
+// so the mock factory can use this value instead of capturing the import.
 const { sendMock } = vi.hoisted(() => ({
   sendMock: vi.fn(),
 }))

@@ -51,5 +51,6 @@ const ResizableSeparator = React.forwardRef<HTMLDivElement, ResizableSeparatorPr
     )
   },
 )
+ResizableSeparator.displayName = 'ResizableSeparator'
 
 export { ResizableSeparator }

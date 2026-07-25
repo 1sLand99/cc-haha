@@ -175,6 +175,33 @@ describe('buildDiagnosticsIssueReport', () => {
     expect(report).not.toContain('PRIVATE_ASSISTANT_REPLY')
   })
 
+  test('keeps ordinary model names readable but redacts secret-like model values', () => {
+    const report = buildDiagnosticsIssueReport({
+      generatedAt: '2026-07-11T09:10:11.000Z',
+      appInfo: { appVersion: '0.4.7', platform: 'darwin', arch: 'arm64', bun: '1.2.18', node: 'v22.17.0' },
+      providersSummary: {
+        providers: [{
+          id: 'provider-1',
+          name: 'Test Provider',
+          apiFormat: 'anthropic',
+          baseUrl: { hostname: 'api.example.com' },
+          models: {
+            main: 'claude-sonnet-4',
+            fallback: 'gpt-4o',
+            leaked: 'sk-proj-LEAKEDMODELKEY',
+          },
+        }],
+      },
+      events: [],
+      corruptLineCount: 0,
+    })
+
+    expect(report).toContain('claude-sonnet-4')
+    expect(report).toContain('gpt-4o')
+    expect(report).not.toContain('sk-proj-LEAKEDMODELKEY')
+    expect(report).toContain('leaked=\\[REDACTED\\]')
+  })
+
   test('keeps untrusted event and provider metadata from injecting Markdown or leaking secrets', () => {
     const extendedSecrets = [
       `AIza${'A'.repeat(35)}`,

@@ -110,6 +110,13 @@ describe('PermissionModeSelector', () => {
     useUIStore.setState({ toasts: [] })
   })
 
+  it('falls back to the default mode display when settings have not finished loading', () => {
+    // 回归:设置未加载时 permissionMode 为 undefined,图标组件式渲染曾因此整页崩溃
+    useSettingsStore.setState({ permissionMode: undefined as never })
+    render(<PermissionModeSelector />)
+    expect(screen.getByRole('button', { name: 'Ask permissions' })).toBeInTheDocument()
+  })
+
   it('updates the active session without writing the global default mode', () => {
     const setGlobalPermissionMode = vi.fn()
     const setSessionPermissionMode = vi.fn()

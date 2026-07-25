@@ -1357,7 +1357,7 @@ describe('ChatInput file mentions', () => {
 
     render(<ChatInput compact />)
 
-    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    const input = screen.getByRole('combobox') as HTMLTextAreaElement
     fireEvent.paste(input, {
       clipboardData: {
         files: [],

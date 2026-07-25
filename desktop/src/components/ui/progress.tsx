@@ -12,12 +12,15 @@ const Progress = React.forwardRef<
       ? Math.min(Math.max(value, 0), 100)
       : null
 
+  const isIndeterminate = normalizedValue === null
+
   return (
     <ProgressPrimitive.Root
       ref={ref}
       data-slot="progress"
       className={cn(
         'relative h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-surface-container-low)]',
+        isIndeterminate && 'progress-indeterminate-track',
         className,
       )}
       value={normalizedValue}
@@ -25,10 +28,10 @@ const Progress = React.forwardRef<
     >
       <ProgressPrimitive.Indicator
         data-slot="progress-indicator"
-        data-indeterminate={normalizedValue === null ? 'true' : undefined}
-        className="h-full w-full rounded-full bg-[var(--color-text-accent)] transition-transform duration-300 data-[indeterminate=true]:w-1/3 data-[indeterminate=true]:opacity-75 data-[indeterminate=true]:motion-safe:animate-pulse data-[indeterminate=true]:motion-reduce:animate-none"
+        data-indeterminate={isIndeterminate ? 'true' : undefined}
+        className="h-full w-full rounded-full bg-[var(--color-text-accent)] transition-transform duration-300 data-[indeterminate=true]:hidden"
         style={
-          normalizedValue === null
+          isIndeterminate
             ? undefined
             : { transform: `translateX(-${100 - normalizedValue}%)` }
         }
@@ -36,5 +39,6 @@ const Progress = React.forwardRef<
     </ProgressPrimitive.Root>
   )
 })
+Progress.displayName = 'Progress'
 
 export { Progress }

@@ -234,7 +234,10 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
     </>
   )
 
-  const CurrentModeIcon = MODE_ICONS[currentMode]
+  // 设置/会话未加载完成时 currentMode 可能为 undefined,显示层回退到 default,
+  // 避免图标组件式渲染(MODE_ICONS[undefined] 不是合法元素)导致整页崩溃
+  const displayMode: PermissionMode = currentMode && MODE_ICONS[currentMode] ? currentMode : 'default'
+  const CurrentModeIcon = MODE_ICONS[displayMode]
   const trigger = (
     <Button
       ref={triggerRef}
@@ -242,11 +245,11 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
       size="sm"
       onClick={isMobile ? () => handleOpenChange(!open) : undefined}
       disabled={isTurnActive}
-      aria-label={MODE_LABELS[currentMode]}
+      aria-label={MODE_LABELS[displayMode]}
       aria-haspopup={isMobile ? 'dialog' : undefined}
       aria-expanded={isMobile ? open : undefined}
       aria-controls={open ? menuId : undefined}
-      title={isTurnActive ? t('permMode.disabledDuringTurn') : (compact ? MODE_LABELS[currentMode] : undefined)}
+      title={isTurnActive ? t('permMode.disabledDuringTurn') : (compact ? MODE_LABELS[displayMode] : undefined)}
       className={`flex items-center bg-[var(--color-surface-container-low)] font-medium text-[var(--color-text-secondary)] transition-colors ${
         isTurnActive ? 'cursor-not-allowed opacity-50' : 'hover:bg-[var(--color-surface-hover)]'
       } ${compactButtonClass}`}
@@ -254,7 +257,7 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
       <CurrentModeIcon aria-hidden className="size-3.5" />
       {!compact && (
         <>
-          <span>{MODE_LABELS[currentMode]}</span>
+          <span>{MODE_LABELS[displayMode]}</span>
           <ChevronDown aria-hidden className="size-3" />
         </>
       )}

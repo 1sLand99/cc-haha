@@ -841,6 +841,9 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                 {t('sidebar.indexDegraded')}
               </div>
             )}
+            {/* Intentionally use native overflow-y-auto instead of ScrollArea;
+                the session list relies on standard scroll behavior and the
+                sidebar-scroll-area class already provides custom styling. */}
             <div
               ref={sessionScrollAreaRef}
               data-testid="sidebar-session-scroll-area"

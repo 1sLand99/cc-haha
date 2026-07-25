@@ -29,13 +29,14 @@ const SheetOverlay = React.forwardRef<
       ref={ref}
       data-slot="sheet-overlay"
       className={cn(
-        'fixed inset-0 z-[100] bg-black/35 backdrop-blur-[1px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0',
+        'fixed inset-0 z-[70] bg-black/35 backdrop-blur-[1px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0',
         className,
       )}
       {...props}
     />
   )
 })
+SheetOverlay.displayName = 'SheetOverlay'
 
 type SheetContentProps = React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content> & {
   side?: 'top' | 'right' | 'bottom' | 'left'
@@ -71,7 +72,7 @@ const SheetContent = React.forwardRef<
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          'fixed z-[101] flex flex-col border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] text-[var(--color-text-primary)] shadow-[var(--shadow-dropdown)] outline-none transition ease-in-out data-[state=closed]:animate-out data-[state=open]:animate-in',
+          'fixed z-[71] flex flex-col border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] text-[var(--color-text-primary)] shadow-[var(--shadow-dropdown)] outline-none transition ease-in-out data-[state=closed]:animate-out data-[state=open]:animate-in',
           sideClasses[side],
           className,
         )}
@@ -91,6 +92,7 @@ const SheetContent = React.forwardRef<
     </SheetPortal>
   )
 })
+SheetContent.displayName = 'SheetContent'
 
 function SheetHeader({ className, ...props }: React.ComponentProps<'div'>) {
   return (

@@ -35,5 +35,6 @@ const ComposerOverlayPanel = React.forwardRef<HTMLDivElement, ComposerOverlayPan
     )
   },
 )
+ComposerOverlayPanel.displayName = 'ComposerOverlayPanel'
 
 export { ComposerOverlayPanel }

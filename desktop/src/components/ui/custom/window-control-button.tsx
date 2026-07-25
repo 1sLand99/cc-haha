@@ -31,5 +31,6 @@ const WindowControlButton = React.forwardRef<HTMLButtonElement, WindowControlBut
     )
   },
 )
+WindowControlButton.displayName = 'WindowControlButton'
 
 export { WindowControlButton }

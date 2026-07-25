@@ -64,6 +64,9 @@ export type ModelSelectorHandle = {
   open: () => void
 }
 
+/** availableModels 兜底空数组(模块级常量,保持引用稳定不破坏 useMemo) */
+const EMPTY_MODELS: ModelInfo[] = []
+
 function officialChoices(
   providerId: string | null,
   models: ModelInfo[],
@@ -192,11 +195,14 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   const isMobileBrowser = useMobileViewport() && !isDesktopRuntime()
   const {
     currentModel: storeModel,
-    availableModels,
+    availableModels: rawAvailableModels,
     effortLevel,
     activeProviderName,
     setModel,
   } = useSettingsStore()
+  // 服务端响应异常/未加载时 availableModels 可能被写入 undefined,
+  // 这里统一兜底为空数组,防止入口页渲染崩溃;用模块级常量保持引用稳定
+  const availableModels = rawAvailableModels ?? EMPTY_MODELS
   const {
     providers,
     activeId,

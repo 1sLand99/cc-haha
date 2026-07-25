@@ -68,6 +68,23 @@ async function cleanupExpiredWhatsAppStaging(): Promise<void> {
   }
 }
 
+export async function cleanupStaleWhatsAppLoginDirectories(): Promise<void> {
+  const root = getManagedWhatsAppRoot()
+  const entries = await fs.readdir(root).catch(() => [])
+  const now = Date.now()
+  for (const entry of entries) {
+    if (!entry.startsWith('.login-')) continue
+    const fullPath = path.join(root, entry)
+    const stat = await fs.lstat(fullPath).catch(() => null)
+    if (!stat || stat.isSymbolicLink()) continue
+    if (now - stat.mtimeMs > WHATSAPP_STAGING_TTL_MS) {
+      await removeManagedWhatsAppDir(fullPath)
+    }
+  }
+}
+
+cleanupStaleWhatsAppLoginDirectories().catch(() => {})
+
 async function promoteWhatsAppAuth(stagingDir: string, targetDir: string): Promise<void> {
   if (!isManagedWhatsAppAuthDir(stagingDir) || !isManagedWhatsAppAuthDir(targetDir)) {
     throw ApiError.internal('WhatsApp authentication directory is invalid')

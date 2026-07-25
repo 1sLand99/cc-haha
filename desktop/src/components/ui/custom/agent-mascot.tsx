@@ -91,10 +91,10 @@ export function resolveAgentMascotSpec({
 }
 
 function ringClassName(tone: AgentMascotSpec['tone']): string {
-  if (tone === 'danger') return 'border-[color-mix(in_srgb,var(--color-error)_42%,transparent)]'
-  if (tone === 'success') return 'border-[color-mix(in_srgb,var(--color-success)_34%,transparent)]'
-  if (tone === 'muted') return 'border-[color-mix(in_srgb,var(--color-text-tertiary)_24%,transparent)]'
-  return 'border-[color-mix(in_srgb,var(--color-brand)_42%,transparent)]'
+  if (tone === 'danger') return 'border-[var(--color-agent-mascot-danger-ring)]'
+  if (tone === 'success') return 'border-[var(--color-agent-mascot-success-ring)]'
+  if (tone === 'muted') return 'border-[var(--color-agent-mascot-muted-ring)]'
+  return 'border-[var(--color-agent-mascot-accent-ring)]'
 }
 
 export function AgentMascot({ seed, status }: { seed: string; status: AgentMascotStatus }) {

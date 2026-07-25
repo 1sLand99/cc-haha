@@ -14,6 +14,7 @@ const AlertDialogTrigger = React.forwardRef<
 >(function AlertDialogTrigger(props, ref) {
   return <AlertDialogPrimitive.Trigger ref={ref} data-slot="alert-dialog-trigger" {...props} />
 })
+AlertDialogTrigger.displayName = 'AlertDialogTrigger'
 
 function AlertDialogPortal(props: React.ComponentProps<typeof AlertDialogPrimitive.Portal>) {
   return <AlertDialogPrimitive.Portal data-slot="alert-dialog-portal" {...props} />
@@ -35,6 +36,7 @@ const AlertDialogOverlay = React.forwardRef<
     />
   )
 })
+AlertDialogOverlay.displayName = 'AlertDialogOverlay'
 
 const AlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
@@ -55,6 +57,7 @@ const AlertDialogContent = React.forwardRef<
     </AlertDialogPortal>
   )
 })
+AlertDialogContent.displayName = 'AlertDialogContent'
 
 function AlertDialogHeader({ className, ...props }: React.ComponentProps<'div'>) {
   return <div data-slot="alert-dialog-header" className={cn('grid gap-2', className)} {...props} />
@@ -112,6 +115,7 @@ const AlertDialogAction = React.forwardRef<
     />
   )
 })
+AlertDialogAction.displayName = 'AlertDialogAction'
 
 const AlertDialogCancel = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Cancel>,
@@ -129,6 +133,7 @@ const AlertDialogCancel = React.forwardRef<
     />
   )
 })
+AlertDialogCancel.displayName = 'AlertDialogCancel'
 
 export {
   AlertDialog,

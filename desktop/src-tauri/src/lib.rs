@@ -237,6 +237,11 @@ const MIN_VISIBLE_PIXELS: i64 = 64;
 // Keep this above the server's CLI shutdown wait. The server gives each CLI
 // session enough time to run gracefulShutdown cleanup before it escalates.
 const SIDECAR_GRACEFUL_TERMINATION_TIMEOUT: Duration = Duration::from_millis(8_000);
+const MAX_TERMINAL_DIMENSION: u16 = 1000;
+const MAX_TERMINAL_CWD_LENGTH: usize = 4096;
+const MAX_TERMINAL_WRITE_LENGTH: usize = 1_048_576;
+const MIN_TERMINAL_COLS: u16 = 20;
+const MIN_TERMINAL_ROWS: u16 = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -433,9 +438,45 @@ struct TerminalState {
 }
 
 struct TerminalSession {
+    owner: String,
     master: Box<dyn MasterPty + Send>,
     writer: Mutex<Box<dyn std::io::Write + Send>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+}
+
+fn validate_terminal_dimension(value: u16) -> Result<u16, String> {
+    if value == 0 || value > MAX_TERMINAL_DIMENSION {
+        return Err(format!(
+            "terminal dimension must be between 1 and {MAX_TERMINAL_DIMENSION}"
+        ));
+    }
+    Ok(value)
+}
+
+fn validate_terminal_cwd_input(cwd: &Option<String>) -> Result<(), String> {
+    if let Some(value) = cwd {
+        if value.len() > MAX_TERMINAL_CWD_LENGTH {
+            return Err("terminal cwd exceeds maximum length".to_string());
+        }
+        if value.contains('\0') {
+            return Err("terminal cwd contains unsupported NUL byte".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn validate_terminal_write_data(data: &str) -> Result<(), String> {
+    if data.len() > MAX_TERMINAL_WRITE_LENGTH {
+        return Err("terminal write data exceeds maximum length".to_string());
+    }
+    Ok(())
+}
+
+fn assert_terminal_owner(session_owner: &str, caller_label: &str) -> Result<(), String> {
+    if session_owner != caller_label {
+        return Err("terminal session is owned by another renderer".to_string());
+    }
+    Ok(())
 }
 
 #[derive(Serialize, Clone)]
@@ -456,12 +497,6 @@ struct TerminalExitPayload {
     session_id: u32,
     code: u32,
     signal: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-struct DesktopTerminalSettingsFile {
-    desktop_terminal: Option<DesktopTerminalConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -989,19 +1024,24 @@ fn setup_system_tray(app: &mut tauri::App) -> tauri::Result<()> {
 
 #[tauri::command]
 fn terminal_spawn(
+    window: tauri::WebviewWindow,
     app: AppHandle,
     state: State<'_, TerminalState>,
     cols: u16,
     rows: u16,
     cwd: Option<String>,
 ) -> Result<TerminalSpawnResult, String> {
+    validate_terminal_cwd_input(&cwd)?;
+    let validated_cols = validate_terminal_dimension(cols)?.max(MIN_TERMINAL_COLS);
+    let validated_rows = validate_terminal_dimension(rows)?.max(MIN_TERMINAL_ROWS);
     let cwd_path = resolve_terminal_cwd(cwd)?;
     let shell = resolved_terminal_shell(&app)?;
+    let owner = window.label().to_string();
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
-            rows: rows.max(8),
-            cols: cols.max(20),
+            rows: validated_rows,
+            cols: validated_cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -1040,6 +1080,7 @@ fn terminal_spawn(
         sessions.insert(
             session_id,
             TerminalSession {
+                owner,
                 master: pair.master,
                 writer: Mutex::new(writer),
                 killer: Mutex::new(killer),
@@ -1124,10 +1165,12 @@ fn terminal_spawn(
 
 #[tauri::command]
 fn terminal_write(
+    window: tauri::WebviewWindow,
     state: State<'_, TerminalState>,
     session_id: u32,
     data: String,
 ) -> Result<(), String> {
+    validate_terminal_write_data(&data)?;
     let sessions = state
         .sessions
         .lock()
@@ -1135,6 +1178,7 @@ fn terminal_write(
     let session = sessions
         .get(&session_id)
         .ok_or_else(|| "terminal session is not running".to_string())?;
+    assert_terminal_owner(&session.owner, window.label())?;
     let mut writer = session
         .writer
         .lock()
@@ -1150,11 +1194,14 @@ fn terminal_write(
 
 #[tauri::command]
 fn terminal_resize(
+    window: tauri::WebviewWindow,
     state: State<'_, TerminalState>,
     session_id: u32,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    let validated_cols = validate_terminal_dimension(cols)?.max(MIN_TERMINAL_COLS);
+    let validated_rows = validate_terminal_dimension(rows)?.max(MIN_TERMINAL_ROWS);
     let sessions = state
         .sessions
         .lock()
@@ -1162,11 +1209,12 @@ fn terminal_resize(
     let session = sessions
         .get(&session_id)
         .ok_or_else(|| "terminal session is not running".to_string())?;
+    assert_terminal_owner(&session.owner, window.label())?;
     session
         .master
         .resize(PtySize {
-            rows: rows.max(8),
-            cols: cols.max(20),
+            rows: validated_rows,
+            cols: validated_cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -1175,12 +1223,20 @@ fn terminal_resize(
 }
 
 #[tauri::command]
-fn terminal_kill(state: State<'_, TerminalState>, session_id: u32) -> Result<(), String> {
+fn terminal_kill(
+    window: tauri::WebviewWindow,
+    state: State<'_, TerminalState>,
+    session_id: u32,
+) -> Result<(), String> {
     let session = {
         let mut sessions = state
             .sessions
             .lock()
             .map_err(|_| "terminal state is unavailable".to_string())?;
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| "terminal session is not running".to_string())?;
+        assert_terminal_owner(&session.owner, window.label())?;
         sessions.remove(&session_id)
     };
 
@@ -1194,6 +1250,32 @@ fn terminal_kill(state: State<'_, TerminalState>, session_id: u32) -> Result<(),
             .map_err(|err| format!("kill terminal shell: {err}"))?;
     }
     Ok(())
+}
+
+fn kill_terminal_sessions_for_window(app_handle: &AppHandle, label: &str) {
+    let sessions_to_kill: Vec<TerminalSession> = {
+        let Some(state) = app_handle.try_state::<TerminalState>() else {
+            return;
+        };
+        let Ok(mut sessions) = state.sessions.lock() else {
+            return;
+        };
+        let ids: Vec<u32> = sessions
+            .iter()
+            .filter(|(_, session)| session.owner == label)
+            .map(|(id, _)| *id)
+            .collect();
+        ids.into_iter()
+            .filter_map(|id| sessions.remove(&id))
+            .collect()
+    };
+    for session in sessions_to_kill {
+        let _ = session
+            .killer
+            .lock()
+            .map_err(|_| "terminal killer is unavailable".to_string())
+            .and_then(|mut killer| killer.kill().map_err(|err| format!("kill terminal shell: {err}")));
+    }
 }
 
 #[tauri::command]
@@ -1467,8 +1549,45 @@ fn read_h5_fixed_port() -> Option<u16> {
 fn read_desktop_terminal_config() -> Option<DesktopTerminalConfig> {
     let path = desktop_terminal_settings_path()?;
     let contents = fs::read_to_string(path).ok()?;
-    let settings = serde_json::from_str::<DesktopTerminalSettingsFile>(&contents).ok()?;
-    settings.desktop_terminal
+    parse_desktop_terminal_config(&contents)
+}
+
+fn parse_desktop_terminal_config(contents: &str) -> Option<DesktopTerminalConfig> {
+    let settings: serde_json::Value = serde_json::from_str(contents).ok()?;
+    let desktop_terminal = settings.get("desktopTerminal")?;
+    if !desktop_terminal.is_object() {
+        return None;
+    }
+
+    // Explicitly validate types instead of relying on serde to silently fail.
+    let startup_shell = match desktop_terminal.get("startupShell") {
+        Some(serde_json::Value::String(value)) => Some(value.clone()),
+        Some(serde_json::Value::Null) | None => None,
+        Some(_) => return None,
+    };
+    let custom_shell_path = match desktop_terminal.get("customShellPath") {
+        Some(serde_json::Value::String(value)) => Some(value.clone()),
+        Some(serde_json::Value::Null) | None => None,
+        Some(_) => return None,
+    };
+
+    let normalized = startup_shell.as_deref().map(str::trim).unwrap_or("");
+    if !["", "system", "pwsh", "powershell", "cmd", "custom"].contains(&normalized) {
+        return None;
+    }
+
+    // custom with an empty path falls back to the system default shell.
+    if normalized == "custom" && custom_shell_path.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        return Some(DesktopTerminalConfig {
+            startup_shell: Some("system".to_string()),
+            custom_shell_path: None,
+        });
+    }
+
+    Some(DesktopTerminalConfig {
+        startup_shell,
+        custom_shell_path,
+    })
 }
 
 fn resolved_terminal_shell(app: &AppHandle) -> Result<String, String> {
@@ -1524,9 +1643,12 @@ fn resolve_desktop_terminal_shell(
                 .custom_shell_path
                 .as_deref()
                 .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| "custom terminal shell path is empty".to_string())?;
-            Ok(Some(path.to_string()))
+                .filter(|value| !value.is_empty());
+            match path {
+                Some(value) => Ok(Some(value.to_string())),
+                // Fall back to the system default shell instead of returning an error.
+                None => Ok(None),
+            }
         }
         _ => Ok(None),
     }
@@ -2124,14 +2246,16 @@ fn kill_windows_sidecars() {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_terminal_output, default_utf8_locale, dir_has_portable_data, ensure_utf8_locale,
-        has_meaningful_intersection, is_browser_safe_port, is_persistable_window_state,
-        normalize_terminal_bash_path, parse_env_block, parse_h5_fixed_port,
-        reserve_browser_safe_port, reserve_local_port_with_preference,
-        resolve_agent_powershell_path_override, resolve_desktop_terminal_shell,
-        resolve_terminal_cwd, run_notification_bridge, select_h5_dist_dir, DesktopTerminalConfig,
-        StoredServerState, StoredWindowState, TerminalHostPlatform, SERVER_BIND_HOST,
-        SERVER_CONTROL_HOST,
+        assert_terminal_owner, decode_terminal_output, default_utf8_locale, dir_has_portable_data,
+        ensure_utf8_locale, has_meaningful_intersection, is_browser_safe_port,
+        is_persistable_window_state, normalize_terminal_bash_path, parse_desktop_terminal_config,
+        parse_env_block, parse_h5_fixed_port, reserve_browser_safe_port,
+        reserve_local_port_with_preference, resolve_agent_powershell_path_override,
+        resolve_desktop_terminal_shell, resolve_terminal_cwd, run_notification_bridge,
+        select_h5_dist_dir, DesktopTerminalConfig, StoredServerState, StoredWindowState,
+        TerminalHostPlatform, MAX_TERMINAL_CWD_LENGTH, MAX_TERMINAL_WRITE_LENGTH, SERVER_BIND_HOST,
+        SERVER_CONTROL_HOST, validate_terminal_cwd_input, validate_terminal_dimension,
+        validate_terminal_write_data,
     };
     use std::{collections::HashMap, fs, net::TcpListener};
 
@@ -2586,6 +2710,102 @@ mod tests {
 
         assert!(ran_on_worker);
     }
+
+    #[test]
+    fn terminal_dimension_accepts_valid_values() {
+        assert_eq!(validate_terminal_dimension(1).unwrap(), 1);
+        assert_eq!(validate_terminal_dimension(1000).unwrap(), 1000);
+        assert_eq!(validate_terminal_dimension(80).unwrap(), 80);
+    }
+
+    #[test]
+    fn terminal_dimension_rejects_zero_and_oversized() {
+        assert!(validate_terminal_dimension(0).is_err());
+        assert!(validate_terminal_dimension(1001).is_err());
+        assert!(validate_terminal_dimension(u16::MAX).is_err());
+    }
+
+    #[test]
+    fn terminal_cwd_rejects_long_and_null_byte() {
+        let long = "a".repeat(MAX_TERMINAL_CWD_LENGTH + 1);
+        assert!(validate_terminal_cwd_input(&Some(long)).is_err());
+        assert!(validate_terminal_cwd_input(&Some("/tmp\0evil".to_string())).is_err());
+        assert!(validate_terminal_cwd_input(&Some("/tmp".to_string())).is_ok());
+        assert!(validate_terminal_cwd_input(&None).is_ok());
+    }
+
+    #[test]
+    fn terminal_write_rejects_oversized_data() {
+        let oversized = "x".repeat(MAX_TERMINAL_WRITE_LENGTH + 1);
+        assert!(validate_terminal_write_data(&oversized).is_err());
+        let exact = "x".repeat(MAX_TERMINAL_WRITE_LENGTH);
+        assert!(validate_terminal_write_data(&exact).is_ok());
+    }
+
+    #[test]
+    fn terminal_owner_assertion_matches_window_label() {
+        assert!(assert_terminal_owner("main", "main").is_ok());
+        assert!(assert_terminal_owner("main", "other").is_err());
+    }
+
+    #[test]
+    fn parse_desktop_terminal_config_rejects_non_string_types() {
+        let json = r#"{"desktopTerminal":{"startupShell":123,"customShellPath":"/bin/sh"}}"#;
+        assert!(parse_desktop_terminal_config(json).is_none());
+
+        let json = r#"{"desktopTerminal":{"startupShell":"custom","customShellPath":true}}"#;
+        assert!(parse_desktop_terminal_config(json).is_none());
+    }
+
+    #[test]
+    fn parse_desktop_terminal_config_custom_empty_path_falls_back() {
+        let json = r#"{"desktopTerminal":{"startupShell":"custom","customShellPath":""}}"#;
+        let config = parse_desktop_terminal_config(json).unwrap();
+        assert_eq!(config.startup_shell.as_deref(), Some("system"));
+        assert_eq!(config.custom_shell_path, None);
+    }
+
+    #[test]
+    fn resolve_desktop_terminal_shell_custom_empty_path_falls_back() {
+        let config = DesktopTerminalConfig {
+            startup_shell: Some("custom".to_string()),
+            custom_shell_path: Some("   ".to_string()),
+        };
+        let result = resolve_desktop_terminal_shell(
+            TerminalHostPlatform::Windows,
+            Some(&config),
+            "powershell.exe",
+        );
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn resolve_desktop_terminal_shell_custom_uses_path() {
+        let config = DesktopTerminalConfig {
+            startup_shell: Some("custom".to_string()),
+            custom_shell_path: Some("C:\\tools\\pwsh.exe".to_string()),
+        };
+        let result = resolve_desktop_terminal_shell(
+            TerminalHostPlatform::Windows,
+            Some(&config),
+            "powershell.exe",
+        );
+        assert_eq!(result.unwrap(), Some("C:\\tools\\pwsh.exe".to_string()));
+    }
+
+    #[test]
+    fn resolve_desktop_terminal_shell_invalid_startup_shell_returns_none() {
+        let config = DesktopTerminalConfig {
+            startup_shell: Some("invalid".to_string()),
+            custom_shell_path: None,
+        };
+        let result = resolve_desktop_terminal_shell(
+            TerminalHostPlatform::Windows,
+            Some(&config),
+            "powershell.exe",
+        );
+        assert_eq!(result.unwrap(), None);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2747,6 +2967,13 @@ pub fn run() {
         } if label == MAIN_WINDOW_LABEL => {
             save_main_window_state(app_handle);
         }
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::Destroyed,
+            ..
+        } => {
+            kill_terminal_sessions_for_window(app_handle, &label);
+        }
         #[cfg(target_os = "macos")]
         RunEvent::Reopen {
             has_visible_windows: false,
@@ -2769,3 +2996,4 @@ pub fn run() {
         _ => {}
     });
 }
+

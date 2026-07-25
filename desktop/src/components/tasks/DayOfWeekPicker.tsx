@@ -27,6 +27,9 @@ export function DayOfWeekPicker({ selected, onChange }: Props) {
       type="multiple"
       value={selected.map(String)}
       onValueChange={(values) => {
+        // ToggleGroup allows clearing all selections by default; prevent it so
+        // at least one day stays selected. The empty-array case is therefore
+        // intentionally ignored rather than propagated to onChange.
         if (values.length === 0) return
         onChange(values.map(Number))
       }}

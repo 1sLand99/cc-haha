@@ -80,10 +80,16 @@ function ImageGalleryDialog({
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [images.length, onSelect, open, safeActiveIndex])
 
+  useEffect(() => {
+    if (open && images.length === 0) {
+      onClose()
+    }
+  }, [open, images.length, onClose])
+
   if (!activeImage) return null
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => {
+    <Dialog open={open && images.length > 0} onOpenChange={(nextOpen) => {
       if (!nextOpen) onClose()
     }}>
       <DialogContent
@@ -95,12 +101,6 @@ function ImageGalleryDialog({
         }}
         onEscapeKeyDown={(event) => {
           event.preventDefault()
-          onClose()
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== 'Escape') return
-          event.preventDefault()
-          event.stopPropagation()
           onClose()
         }}
       >
@@ -147,6 +147,7 @@ function ImageGalleryDialog({
           </div>
         )}
 
+        {/* bg 刻意用主题无关的深色:lightbox 看图背景按惯例始终为深色 */}
         <div className="flex max-h-[70vh] items-center justify-center overflow-hidden rounded-2xl bg-[#111]">
           <img src={activeImage.src} alt={activeImage.name} className="max-h-[70vh] w-full object-contain" />
         </div>

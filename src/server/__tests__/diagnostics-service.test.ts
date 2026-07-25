@@ -1065,7 +1065,7 @@ describe('diagnostics API', () => {
         activeId: 'provider-issue-report',
         providers: [{
           id: 'provider-issue-report',
-          name: 'Issue Report Provider',
+          name: '_foo_ Issue Report Provider',
           apiFormat: 'anthropic',
           baseUrl: 'https://user:pass@api.example.com/private?token=x',
           models: { main: 'main-model' },
@@ -1095,7 +1095,10 @@ describe('diagnostics API', () => {
     expect(body.report).toContain('## 诊断关联')
     expect(body.report).toContain('## 复现步骤')
     expect(body.report).toContain('## 错误摘要')
-    expect(body.report).toContain('CLI&#95;EXITED')
+    expect(body.report).toContain('CLI_EXITED')
+    expect(body.report).not.toContain('CLI&#95;EXITED')
+    expect(body.report).not.toContain('_foo_')
+    expect(body.report).toContain('&#95;foo&#95;')
     expect(body.report).toContain('api.example.com')
     expect(body.report).not.toContain('user:pass')
     expect(body.report).not.toContain('/private')

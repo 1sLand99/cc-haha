@@ -47,5 +47,6 @@ const SettingField = React.forwardRef<HTMLInputElement, SettingFieldProps>(
     )
   },
 )
+SettingField.displayName = 'SettingField'
 
 export { SettingField }

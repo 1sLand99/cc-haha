@@ -1,6 +1,9 @@
 import * as React from 'react'
 import { ContextMenu as ContextMenuPrimitive } from 'radix-ui'
 
+// NOTE: CheckboxItem, RadioItem, and Sub components have not been ported yet
+// because there are currently no consumers. Add them here when needed.
+
 import { cn } from '@/lib/utils'
 
 function ContextMenu(props: React.ComponentProps<typeof ContextMenuPrimitive.Root>) {

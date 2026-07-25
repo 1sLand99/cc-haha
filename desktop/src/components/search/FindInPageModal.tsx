@@ -213,8 +213,8 @@ export function FindInPageModal({ open, onClose }: Props) {
   return createPortal(
     <div className="fixed right-3 top-3 z-[70]">
       <style>{`
-        ::highlight(${RESULTS_HL}) { background-color: rgba(250, 204, 21, 0.45); color: inherit; }
-        ::highlight(${ACTIVE_HL}) { background-color: rgba(249, 115, 22, 0.9); color: #fff; }
+        ::highlight(${RESULTS_HL}) { background-color: var(--color-find-highlight); color: inherit; }
+        ::highlight(${ACTIVE_HL}) { background-color: var(--color-find-active); color: var(--color-find-active-fg); }
       `}</style>
       <FindInPageBar
         ref={inputRef}

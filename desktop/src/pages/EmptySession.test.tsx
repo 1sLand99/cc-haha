@@ -772,7 +772,7 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    fireEvent.paste(screen.getByRole('textbox'), {
+    fireEvent.paste(screen.getByRole('combobox'), {
       clipboardData: {
         files: [],
         items: [{
@@ -785,7 +785,7 @@ describe('EmptySession', () => {
 
     expect(await screen.findByText('project-context.json')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByRole('textbox'), {
+    fireEvent.change(screen.getByRole('combobox'), {
       target: { value: 'use this context', selectionStart: 'use this context'.length },
     })
     fireEvent.click(screen.getByRole('button', { name: /Run/i }))

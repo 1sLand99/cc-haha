@@ -2624,6 +2624,9 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         onPointerDown={markUserScrollIntent}
         onTouchStart={markUserScrollIntent}
         onKeyDown={handleKeyDownScrollIntent}
+        // Intentionally use native overflow-y-auto instead of ScrollArea so that
+        // content-visibility paint skipping (chat-render-item--cv) is not broken
+        // by the virtual measuring required by a custom scroll container.
         className={`${CHAT_SCROLL_AREA_CLASS} h-full overflow-y-auto ${chatScrollPaddingClass}`}
       >
         <div

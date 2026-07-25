@@ -279,7 +279,7 @@ describe('PetSettings', () => {
       'data-[state=checked]:bg-[var(--color-brand)]',
       'focus-visible:shadow-[var(--shadow-focus-ring)]',
     )
-    expect(thumb).toHaveClass('bg-white')
+    expect(thumb).toHaveClass('bg-[var(--color-switch-thumb)]')
 
     const selectedCard = screen.getByRole('button', { name: 'Selected' }).closest('[data-slot="card"]')
     expect(selectedCard).toHaveClass(

@@ -34,6 +34,7 @@ const Alert = React.forwardRef<
     />
   )
 })
+Alert.displayName = 'Alert'
 
 function AlertTitle({ className, ...props }: React.ComponentProps<'div'>) {
   return <div data-slot="alert-title" className={cn('font-medium', className)} {...props} />

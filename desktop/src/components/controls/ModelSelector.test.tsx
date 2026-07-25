@@ -107,6 +107,24 @@ describe('ModelSelector', () => {
     expect(fetchOpenAIStatus).not.toHaveBeenCalled()
   })
 
+  it('renders without crashing when availableModels is missing from settings', () => {
+    // 回归:服务端响应缺 models 字段时 availableModels 被写入 undefined,曾致入口页崩溃
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: undefined as never,
+      currentModel: null,
+      activeProviderName: null,
+    })
+    useProviderStore.setState({
+      providers: [],
+      activeId: null,
+      hasLoadedProviders: true,
+      isLoading: false,
+    })
+
+    expect(() => render(<ModelSelector />)).not.toThrow()
+  })
+
   it('queries official OAuth status once when the runtime dropdown is opened', async () => {
     const fetchClaudeStatus = vi.fn(async () => {})
     const fetchOpenAIStatus = vi.fn(async () => {})

@@ -107,7 +107,7 @@ describe('ImageGalleryModal · overlay suppression', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Close image preview' })).toHaveFocus())
   })
 
-  it('navigates with arrow keys and restores focus to the opener on Escape', async () => {
+  it('navigates with arrow keys and restores focus to the opener on close', async () => {
     function GalleryHarness() {
       const [open, setOpen] = useState(false)
       const [activeIndex, setActiveIndex] = useState(0)
@@ -139,10 +139,26 @@ describe('ImageGalleryModal · overlay suppression', () => {
     fireEvent.keyDown(document, { key: 'ArrowRight' })
     expect(screen.getByRole('dialog', { name: 'a.png' })).toBeInTheDocument()
 
-    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: 'Close image preview' }))
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(opener).toHaveFocus()
     })
+  })
+
+  it('calls onClose when opened with an empty image list', async () => {
+    const onClose = vi.fn()
+    render(
+      <ImageGalleryModal
+        open
+        images={[]}
+        activeIndex={0}
+        onClose={onClose}
+        onSelect={() => {}}
+      />,
+    )
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

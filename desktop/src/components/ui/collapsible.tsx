@@ -11,6 +11,7 @@ const CollapsibleTrigger = React.forwardRef<
 >(function CollapsibleTrigger(props, ref) {
   return <CollapsiblePrimitive.Trigger ref={ref} data-slot="collapsible-trigger" {...props} />
 })
+CollapsibleTrigger.displayName = 'CollapsibleTrigger'
 
 const CollapsibleContent = React.forwardRef<
   React.ElementRef<typeof CollapsiblePrimitive.Content>,
@@ -18,5 +19,6 @@ const CollapsibleContent = React.forwardRef<
 >(function CollapsibleContent(props, ref) {
   return <CollapsiblePrimitive.Content ref={ref} data-slot="collapsible-content" {...props} />
 })
+CollapsibleContent.displayName = 'CollapsibleContent'
 
 export { Collapsible, CollapsibleContent, CollapsibleTrigger }

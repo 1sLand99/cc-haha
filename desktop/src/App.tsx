@@ -2,6 +2,7 @@ import { AppShell } from './components/layout/AppShell'
 import { useScheduledTaskDesktopNotifications } from './hooks/useScheduledTaskDesktopNotifications'
 import { installDesktopNotificationNavigation } from './lib/desktopNotificationNavigation'
 import { useEffect } from 'react'
+import { TooltipProvider } from './components/ui/tooltip'
 
 export function App() {
   useScheduledTaskDesktopNotifications()
@@ -22,5 +23,9 @@ export function App() {
       cleanup?.()
     }
   }, [])
-  return <AppShell />
+  return (
+    <TooltipProvider>
+      <AppShell />
+    </TooltipProvider>
+  )
 }

@@ -25,6 +25,7 @@ const ScrollArea = React.forwardRef<
     </ScrollAreaPrimitive.Root>
   )
 })
+ScrollArea.displayName = 'ScrollArea'
 
 const ScrollBar = React.forwardRef<
   React.ElementRef<typeof ScrollAreaPrimitive.Scrollbar>,
@@ -50,5 +51,6 @@ const ScrollBar = React.forwardRef<
     </ScrollAreaPrimitive.Scrollbar>
   )
 })
+ScrollBar.displayName = 'ScrollBar'
 
 export { ScrollArea, ScrollBar }

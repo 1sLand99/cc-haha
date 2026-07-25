@@ -17,6 +17,7 @@ const Card = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'>>(
     )
   },
 )
+Card.displayName = 'Card'
 
 function CardHeader({ className, ...props }: React.ComponentProps<'div'>) {
   return <div data-slot="card-header" className={cn('flex flex-col gap-1.5 p-4', className)} {...props} />

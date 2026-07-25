@@ -18,6 +18,7 @@ import { detectPythonRuntime, isPythonVersionAtLeast } from './computer-use-pyth
 import { buildPipInstallAttempts } from '../../utils/computerUse/pipInstall.js'
 import {
   DEFAULT_DESKTOP_GRANT_FLAGS,
+  getComputerUseConfigPath,
   loadStoredComputerUseConfig,
   loadStoredComputerUseConfigResult,
   normalizePythonPath,
@@ -682,10 +683,13 @@ export async function handleComputerUseApi(
   if (action === 'authorized-apps' && req.method === 'GET') {
     const result = await loadStoredComputerUseConfigResult()
     if (result.error) {
+      const configPath = getComputerUseConfigPath()
       return Response.json(
         {
           error: 'COMPUTER_USE_CONFIG_INVALID',
-          message: 'Computer Use config could not be loaded',
+          message: `Computer Use config could not be loaded: ${result.error}`,
+          configPath,
+          recoveryHint: '删除或修复该文件即可恢复',
         },
         { status: 500 },
       )
@@ -707,10 +711,13 @@ export async function handleComputerUseApi(
     }
     const stored = await loadStoredComputerUseConfigResult()
     if (stored.error) {
+      const configPath = getComputerUseConfigPath()
       return Response.json(
         {
           error: 'COMPUTER_USE_CONFIG_INVALID',
-          message: 'Computer Use config must be repaired before it can be changed',
+          message: `Computer Use config must be repaired before it can be changed: ${stored.error}`,
+          configPath,
+          recoveryHint: '删除或修复该文件即可恢复',
         },
         { status: 409 },
       )

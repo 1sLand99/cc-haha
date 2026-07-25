@@ -22,6 +22,7 @@ const ActivityPanel = React.forwardRef<
     />
   )
 })
+ActivityPanel.displayName = 'ActivityPanel'
 
 const ActivityPanelScrollArea = React.forwardRef<
   React.ElementRef<typeof ScrollArea>,
@@ -36,6 +37,7 @@ const ActivityPanelScrollArea = React.forwardRef<
     />
   )
 })
+ActivityPanelScrollArea.displayName = 'ActivityPanelScrollArea'
 
 const ActivityPanelRowButton = React.forwardRef<
   HTMLButtonElement,
@@ -54,6 +56,7 @@ const ActivityPanelRowButton = React.forwardRef<
     />
   )
 })
+ActivityPanelRowButton.displayName = 'ActivityPanelRowButton'
 
 function ActivityPanelCountBadge({
   className,

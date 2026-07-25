@@ -43,6 +43,7 @@ const DropdownMenuContent = React.forwardRef<
     </DropdownMenuPortal>
   )
 })
+DropdownMenuContent.displayName = 'DropdownMenuContent'
 
 function DropdownMenuItem({
   className,
@@ -172,6 +173,19 @@ function DropdownMenuSubContent({
   )
 }
 
+function DropdownMenuShortcut({
+  className,
+  ...props
+}: React.ComponentProps<'span'>) {
+  return (
+    <span
+      data-slot="dropdown-menu-shortcut"
+      className={cn('ml-auto text-xs tracking-widest text-[var(--color-text-tertiary)]', className)}
+      {...props}
+    />
+  )
+}
+
 const DropdownMenuGroup = DropdownMenuPrimitive.Group
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup
 const DropdownMenuSub = DropdownMenuPrimitive.Sub
@@ -187,6 +201,7 @@ export {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,

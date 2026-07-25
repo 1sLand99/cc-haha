@@ -34,7 +34,10 @@ const FindInPageBar = React.forwardRef<HTMLInputElement, FindInPageBarProps>(
     return (
       <Card
         data-find-bar
-        role="dialog"
+        // role="group" is used instead of dialog because this is a floating
+        // toolbar, not a modal. The Esc key is handled by the parent component
+        // or the call-site that mounts this bar.
+        role="group"
         aria-label="Find in page"
         className={cn(
           'flex items-center gap-1 rounded-[var(--radius-lg)] bg-[var(--color-surface-container-lowest)] p-1.5 shadow-[var(--shadow-dropdown)]',
@@ -82,5 +85,6 @@ const FindInPageBar = React.forwardRef<HTMLInputElement, FindInPageBarProps>(
     )
   },
 )
+FindInPageBar.displayName = 'FindInPageBar'
 
 export { FindInPageBar }

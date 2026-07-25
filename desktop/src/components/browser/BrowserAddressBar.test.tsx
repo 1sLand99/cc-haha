@@ -112,10 +112,8 @@ describe('BrowserAddressBar', () => {
     render(<BrowserAddressBar {...baseProps} loading />)
     const progress = screen.getByTestId('browser-loading-bar')
     expect(progress).toHaveAttribute('data-slot', 'progress')
-    expect(progress.querySelector('[data-slot="progress-indicator"]')).toHaveClass(
-      'data-[indeterminate=true]:motion-safe:animate-pulse',
-      'data-[indeterminate=true]:motion-reduce:animate-none',
-    )
+    expect(progress).toHaveClass('progress-indeterminate-track')
+    expect(progress.querySelector('[data-slot="progress-indicator"]')).toHaveClass('data-[indeterminate=true]:hidden')
     expect(screen.getByLabelText('刷新')).toHaveAttribute('aria-busy', 'true')
     expect(screen.getByLabelText('刷新').querySelector('svg')).toHaveClass(
       'motion-safe:animate-spin',

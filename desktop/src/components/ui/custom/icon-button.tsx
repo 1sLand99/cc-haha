@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button'
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
@@ -22,18 +21,17 @@ const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
     ...props
   }, ref) {
     return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button ref={ref} size={size} aria-label={label} {...props}>
-              {children}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{tooltip}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button ref={ref} size={size} aria-label={label} {...props}>
+            {children}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
     )
   },
 )
+IconButton.displayName = 'IconButton'
 
 export { IconButton }

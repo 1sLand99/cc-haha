@@ -36,6 +36,7 @@ const DialogOverlay = React.forwardRef<
     />
   )
 })
+DialogOverlay.displayName = 'DialogOverlay'
 
 type DialogContentProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
   overlayProps?: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
@@ -78,6 +79,7 @@ const DialogContent = React.forwardRef<
     </DialogPortal>
   )
 })
+DialogContent.displayName = 'DialogContent'
 
 function DialogHeader({ className, ...props }: React.ComponentProps<'div'>) {
   return (

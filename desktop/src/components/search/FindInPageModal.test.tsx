@@ -40,7 +40,7 @@ describe('FindInPageModal', () => {
     fireEvent.change(screen.getByPlaceholderText('Find'), { target: { value: 'searchable' } })
 
     await waitFor(() => expect(screen.getByText('1 / 1')).toBeTruthy())
-    expect(screen.getByRole('dialog', { name: 'Find in page' })).toHaveAttribute('data-slot', 'card')
+    expect(screen.getByRole('group', { name: 'Find in page' })).toHaveAttribute('data-slot', 'card')
     expect(screen.getByPlaceholderText('Find')).toHaveAttribute('data-slot', 'input')
     expect(screen.getByRole('button', { name: 'Previous match' })).toHaveAttribute('data-variant', 'ghost')
     expect(screen.getByRole('button', { name: 'Next match' })).toHaveAttribute('data-variant', 'ghost')
@@ -70,7 +70,7 @@ describe('FindInPageModal', () => {
     await waitFor(() => expect(input).toHaveFocus())
 
     fireEvent.keyDown(input, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Find in page' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Find in page' })).not.toBeInTheDocument())
     expect(opener).toHaveFocus()
   })
 

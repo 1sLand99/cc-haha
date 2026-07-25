@@ -168,12 +168,17 @@ describe('Computer Use API authorized app config', () => {
 
     const getRes = await callAuthorizedApps('GET')
     expect(getRes.status).toBe(500)
-    expect(await getRes.json()).toMatchObject({
-      error: 'COMPUTER_USE_CONFIG_INVALID',
-    })
+    const getBody = await getRes.json() as any
+    expect(getBody.error).toBe('COMPUTER_USE_CONFIG_INVALID')
+    expect(getBody.configPath).toBe(configPath)
+    expect(getBody.recoveryHint).toContain('删除或修复')
 
     const putRes = await callAuthorizedApps('PUT', { enabled: false })
     expect(putRes.status).toBe(409)
+    const putBody = await putRes.json() as any
+    expect(putBody.error).toBe('COMPUTER_USE_CONFIG_INVALID')
+    expect(putBody.configPath).toBe(configPath)
+    expect(putBody.recoveryHint).toContain('删除或修复')
     expect(await readFile(configPath, 'utf8')).toBe('{"enabled":"yes"}')
   })
 

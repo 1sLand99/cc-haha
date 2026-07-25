@@ -1,5 +1,5 @@
 import type { DiagnosticEvent, DiagnosticSeverity } from './diagnosticsService.js'
-import { redactSecrets } from '../../services/teamMemorySync/secretScanner.js'
+import { redactSecrets, scanForSecrets } from '../../services/teamMemorySync/secretScanner.js'
 
 export type SharedDiagnosticEvent = {
   id: string
@@ -111,10 +111,16 @@ export function projectProviderSummaryForSharing(
           Object.entries(provider.models as Record<string, unknown>)
             .filter(([, value]) => typeof value === 'string')
             .slice(0, 40)
-            .map(([key, value]) => [
-              sanitizeSharedIdentifier(key, 'unknown-model-key', 128),
-              sanitizeSharedIdentifier(String(value), '[REDACTED]', MAX_SHARED_IDENTIFIER_LENGTH),
-            ]),
+            .map(([key, value]) => {
+              const stringValue = String(value)
+              const redacted = scanForSecrets(stringValue).length > 0
+              return [
+                sanitizeSharedIdentifier(key, 'unknown-model-key', 128),
+                redacted
+                  ? '[REDACTED]'
+                  : sanitizeSharedIdentifier(stringValue, '[REDACTED]', MAX_SHARED_IDENTIFIER_LENGTH),
+              ]
+            }),
         )
         : {}
       return {
@@ -299,7 +305,13 @@ function escapeMarkdownInline(value: string): string {
   return value
     .replace(/[\\`*[\]()<>!~]/g, '\\$&')
     .replace(/@/g, '&#64;')
-    .replace(/_/g, '&#95;')
+    .replace(/_/g, (match, offset, string) => {
+      // GFM disables intra-word underscore emphasis, so only escape underscores
+      // that sit at a word boundary and could actually trigger italics.
+      const isWordChar = (char: string | undefined) => char !== undefined && /\w/.test(char)
+      if (isWordChar(string[offset - 1]) && isWordChar(string[offset + 1])) return match
+      return '&#95;'
+    })
 }
 
 function formatMetadata(value: unknown): string {

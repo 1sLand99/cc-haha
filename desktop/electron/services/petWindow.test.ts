@@ -21,6 +21,25 @@ const desktopRoot = existsSync(path.resolve(process.cwd(), 'electron', 'main.ts'
 const mainSource = readFileSync(path.join(desktopRoot, 'electron', 'main.ts'), 'utf8')
   .replace(/\r\n/g, '\n')
 
+type FakeWindowOptions = {
+  /**
+   * Display scale factor. Chromium converts window rects between physical
+   * pixels and DIP with ceil in *both* directions (ScreenWin::ScreenToDIPRect
+   * and DIPToScreenRect), so on a fractional scale every getBounds ->
+   * setBounds round trip grows the window by a pixel. Modelling that is what
+   * makes the size-neutrality assertions mean anything; the default of 1 keeps
+   * the arithmetic exact for every test that does not care.
+   */
+  scaleFactor?: number
+  /**
+   * Client area, when it differs from the window box. Renderer regions are
+   * measured against this, not against getBounds().
+   */
+  contentSize?: { width: number; height: number }
+  /** Drop getContentBounds entirely, to exercise the fallback. */
+  withoutContentBounds?: boolean
+}
+
 function createFakeWindow(
   initialBounds = {
     x: 100,
@@ -28,14 +47,38 @@ function createFakeWindow(
     width: PET_WINDOW_WIDTH,
     height: PET_WINDOW_HEIGHT,
   },
-  // Windows resolves setPosition as getSize() + setBounds(), and that DIP round
-  // trip grows the window by a pixel per call on fractional display scaling.
-  { positionDriftPx = 0 }: { positionDriftPx?: number } = {},
+  {
+    scaleFactor = 1,
+    contentSize,
+    withoutContentBounds = false,
+  }: FakeWindowOptions = {},
 ) {
   const handlers = new Map<string, () => void>()
   let visible = false
   let destroyed = false
-  let bounds = { ...initialBounds }
+  const toPhysical = (value: number) => Math.ceil(value * scaleFactor)
+  const toDip = (value: number) => Math.ceil(value / scaleFactor)
+  let physical = {
+    x: initialBounds.x,
+    y: initialBounds.y,
+    width: toPhysical(initialBounds.width),
+    height: toPhysical(initialBounds.height),
+  }
+  const readBounds = () => ({
+    x: physical.x,
+    y: physical.y,
+    width: toDip(physical.width),
+    height: toDip(physical.height),
+  })
+  const setBounds = vi.fn((next: Partial<typeof physical>) => {
+    const merged = { ...readBounds(), ...next }
+    physical = {
+      x: merged.x,
+      y: merged.y,
+      width: toPhysical(merged.width),
+      height: toPhysical(merged.height),
+    }
+  })
 
   return {
     handlers,
@@ -54,13 +97,17 @@ function createFakeWindow(
     setVisibleOnAllWorkspaces: vi.fn(),
     setIgnoreMouseEvents: vi.fn(),
     setShape: vi.fn(),
-    getBounds: vi.fn(() => ({ ...bounds })),
-    getContentBounds: vi.fn(() => ({ ...bounds })),
-    setBounds: vi.fn((next: Partial<typeof bounds>) => {
-      bounds = { ...bounds, ...next }
+    getBounds: vi.fn(readBounds),
+    ...(withoutContentBounds ? {} : {
+      getContentBounds: vi.fn(() => ({ ...readBounds(), ...contentSize })),
     }),
+    setBounds,
+    // Electron implements NativeWindow::SetPosition as
+    // SetBounds(gfx::Rect(position, GetSize())) — the size makes a lossy round
+    // trip through DIP on every call.
     setPosition: vi.fn((x: number, y: number) => {
-      bounds = { ...bounds, x, y, height: bounds.height + positionDriftPx }
+      const { width, height } = readBounds()
+      setBounds({ x, y, width, height })
     }),
     on: vi.fn((event: string, handler: () => void) => {
       handlers.set(event, handler)
@@ -357,12 +404,10 @@ describe('Electron pet window service', () => {
     // Clamping the drag region to the constant would trim the mascot's bottom
     // and stop it short of the work area floor.
     const contentHeight = PET_WINDOW_HEIGHT + 40
-    const petWindow = createFakeWindow({
-      x: 100,
-      y: 120,
-      width: PET_WINDOW_WIDTH,
-      height: contentHeight,
-    })
+    const petWindow = createFakeWindow(
+      { x: 100, y: 120, width: PET_WINDOW_WIDTH, height: PET_WINDOW_HEIGHT },
+      { contentSize: { width: PET_WINDOW_WIDTH, height: contentHeight } },
+    )
     const controller = new PetWindowController({
       createWindow: vi.fn(() => petWindow) as never,
       getCurrentWorkArea: () => ({ x: 0, y: 25, width: 800, height: 575 }),
@@ -381,12 +426,57 @@ describe('Electron pet window service', () => {
 
     expect(lastDragBounds(petWindow)).toEqual({
       x: 100,
-      // Mascot bottom (y + 128) lands exactly on the work area floor.
+      // Mascot bottom (y + 128) lands exactly on the work area floor. Clamping
+      // the region to the window box instead of the content box would place it
+      // 40px short of the floor.
       y: 25 + 575 - (contentHeight - 160) - 128,
       width: PET_WINDOW_WIDTH,
-      height: contentHeight,
+      height: PET_WINDOW_HEIGHT,
     })
   })
+
+  it.each(['win32', 'linux'] as const)(
+    'restores a %s edge position once the renderer reports the mascot region',
+    async (platform) => {
+      // Dragging clamps against the mascot, so a saved edge position puts the
+      // window's transparent padding off-screen. Recreating the window (every
+      // hide/show, and every restart) re-clamps that position against the whole
+      // window, which walks the mascot inwards by the padding width unless the
+      // reported region moves it back.
+      let petWindow: ReturnType<typeof createFakeWindow> | undefined
+      const createWindow = vi.fn((bounds) => {
+        petWindow = createFakeWindow(bounds as {
+          x: number
+          y: number
+          width: number
+          height: number
+        })
+        return petWindow
+      })
+      const controller = new PetWindowController({
+        createWindow: createWindow as never,
+        getCurrentWorkArea: () => ({ x: 0, y: 25, width: 800, height: 575 }),
+        getWorkAreaForPoint: () => ({ x: 0, y: 25, width: 800, height: 575 }),
+        load: vi.fn().mockResolvedValue(undefined),
+        platform,
+        preloadPath: '/app/electron-dist/preload.cjs',
+        readPosition: () => ({ x: -136, y: 160 }),
+      })
+
+      await controller.show()
+      expect(createWindow).toHaveBeenCalledWith(expect.objectContaining({ x: 0, y: 160 }))
+      controller.setInteractiveRegions(petWindow as never, [
+        { x: 136, y: 240, width: 112, height: 128 },
+      ])
+
+      expect(petWindow?.getBounds()).toEqual({
+        x: -136,
+        y: 160,
+        width: PET_WINDOW_WIDTH,
+        height: PET_WINDOW_HEIGHT,
+      })
+    },
+  )
 
   it('restores an edge position after the renderer reports the visible mascot region', async () => {
     let petWindow: ReturnType<typeof createFakeWindow> | undefined
@@ -593,12 +683,10 @@ describe('Electron pet window service', () => {
     // rounding, invisible frame). The mascot sits flush with the viewport
     // bottom, so clamping the shape to the constant would slice its legs off.
     const contentHeight = PET_WINDOW_HEIGHT + 40
-    const petWindow = createFakeWindow({
-      x: 100,
-      y: 120,
-      width: PET_WINDOW_WIDTH,
-      height: contentHeight,
-    })
+    const petWindow = createFakeWindow(
+      { x: 100, y: 120, width: PET_WINDOW_WIDTH, height: PET_WINDOW_HEIGHT },
+      { contentSize: { width: PET_WINDOW_WIDTH, height: contentHeight } },
+    )
     const controller = new PetWindowController({
       createWindow: vi.fn(() => petWindow) as never,
       getCurrentWorkArea: () => ({ x: 0, y: 0, width: 1440, height: 900 }),
@@ -614,6 +702,101 @@ describe('Electron pet window service', () => {
 
     expect(petWindow.setShape).toHaveBeenLastCalledWith([
       { x: 132, y: contentHeight - 126, width: 120, height: 126 },
+    ])
+  })
+
+  it('shapes every reported region, not just the mascot', async () => {
+    // The task badge sits above the mascot and carries its own rect; dropping
+    // the tail of the list would make it unclickable.
+    const petWindow = createFakeWindow()
+    const controller = new PetWindowController({
+      createWindow: vi.fn(() => petWindow) as never,
+      getCurrentWorkArea: () => ({ x: 0, y: 0, width: 1440, height: 900 }),
+      load: vi.fn().mockResolvedValue(undefined),
+      platform: 'win32',
+      preloadPath: '/app/electron-dist/preload.cjs',
+    })
+
+    await controller.show()
+    controller.setInteractiveRegions(petWindow as never, [
+      { x: 144, y: 280, width: 96, height: 104 },
+      { x: 250, y: 40, width: 24, height: 24 },
+    ])
+
+    expect(petWindow.setShape).toHaveBeenLastCalledWith([
+      { x: 132, y: 268, width: 120, height: 128 },
+      { x: 238, y: 28, width: 48, height: 48 },
+    ])
+  })
+
+  it.each([
+    [
+      'clamps a region reported past the content box',
+      { x: PET_WINDOW_WIDTH + 50, y: PET_WINDOW_HEIGHT + 50, width: 40, height: 40 },
+      {
+        x: PET_WINDOW_WIDTH - 1,
+        y: PET_WINDOW_HEIGHT - 1,
+        width: 1,
+        height: 1,
+      },
+    ],
+    [
+      'keeps a degenerate region at least one pixel wide',
+      { x: 100, y: 100, width: 0, height: 0 },
+      { x: 88, y: 88, width: 24, height: 24 },
+    ],
+    [
+      'clamps a negative region back into the content box',
+      { x: -100, y: -100, width: 40, height: 40 },
+      { x: 0, y: 0, width: 1, height: 1 },
+    ],
+  ] as const)('%s', async (_name, region, expected) => {
+    // setShape rejects rectangles outside the window or without positive
+    // extent, so normalization has to hold that invariant for any input the
+    // renderer can produce.
+    const petWindow = createFakeWindow()
+    const controller = new PetWindowController({
+      createWindow: vi.fn(() => petWindow) as never,
+      getCurrentWorkArea: () => ({ x: 0, y: 0, width: 1440, height: 900 }),
+      load: vi.fn().mockResolvedValue(undefined),
+      platform: 'win32',
+      preloadPath: '/app/electron-dist/preload.cjs',
+    })
+
+    await controller.show()
+    controller.setInteractiveRegions(petWindow as never, [region])
+
+    expect(petWindow.setShape).toHaveBeenLastCalledWith([expected])
+  })
+
+  it.each([
+    ['getContentBounds is unavailable', { withoutContentBounds: true }],
+    ['the content view has no extent yet', {
+      contentSize: { width: 0, height: 0 },
+    }],
+  ] as const)('falls back to the window box when %s', async (_name, options) => {
+    // Falling back to the nominal constants would silently reinstate the very
+    // clamp this code exists to avoid, so the live window box is the fallback.
+    const windowHeight = PET_WINDOW_HEIGHT + 40
+    const petWindow = createFakeWindow(
+      { x: 100, y: 120, width: PET_WINDOW_WIDTH, height: windowHeight },
+      options,
+    )
+    const controller = new PetWindowController({
+      createWindow: vi.fn(() => petWindow) as never,
+      getCurrentWorkArea: () => ({ x: 0, y: 0, width: 1440, height: 900 }),
+      load: vi.fn().mockResolvedValue(undefined),
+      platform: 'win32',
+      preloadPath: '/app/electron-dist/preload.cjs',
+    })
+
+    await controller.show()
+    controller.setInteractiveRegions(petWindow as never, [
+      { x: 144, y: windowHeight - 114, width: 96, height: 104 },
+    ])
+
+    expect(petWindow.setShape).toHaveBeenLastCalledWith([
+      { x: 132, y: windowHeight - 126, width: 120, height: 126 },
     ])
   })
 

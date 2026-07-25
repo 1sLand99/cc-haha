@@ -15,6 +15,7 @@ import {
 import { sessionsApi, type PetSessionRuntimeStatus } from '../../api/sessions'
 import { Alert, AlertDescription } from '../../components/ui/alert'
 import { PetWindowButton } from '../../components/ui/custom/pet-window-button'
+import { TooltipProvider } from '../../components/ui/tooltip'
 import { useTranslation } from '../../i18n'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { initializeDesktopServerUrl } from '../../lib/desktopRuntime'
@@ -437,23 +438,30 @@ export function PetApp() {
 
   if (startupError) {
     return (
-      <main className="pet-window-root">
-        <Alert variant="destructive" className="pet-error-card">
-          <AlertDescription className="text-inherit">{startupError}</AlertDescription>
-        </Alert>
-      </main>
+      <TooltipProvider>
+        <main className="pet-window-root">
+          <Alert variant="destructive" className="pet-error-card">
+            <AlertDescription className="text-inherit">{startupError}</AlertDescription>
+          </Alert>
+        </main>
+      </TooltipProvider>
     )
   }
 
   if (!preferences) {
-    return <main className="pet-window-root" aria-busy="true" />
+    return (
+      <TooltipProvider>
+        <main className="pet-window-root" aria-busy="true" />
+      </TooltipProvider>
+    )
   }
 
   return (
-    <main
-      className="pet-window-root"
-      data-expanded={expanded ? 'true' : 'false'}
-    >
+    <TooltipProvider>
+      <main
+        className="pet-window-root"
+        data-expanded={expanded ? 'true' : 'false'}
+      >
       <div
         ref={stackRef}
         className="pet-window-stack"
@@ -651,5 +659,6 @@ export function PetApp() {
         )}
       </div>
     </main>
+    </TooltipProvider>
   )
 }
