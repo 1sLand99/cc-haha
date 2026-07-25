@@ -10,9 +10,7 @@ vi.mock('../components/markdown/MarkdownRenderer', () => ({
 
 import { useMarketStore } from '../stores/marketStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import { useSkillStore } from '../stores/skillStore'
 import type { NormalizedSkill, NormalizedSkillDetail } from '../types/market'
-import type { SkillDetail as LocalSkillDetail } from '../types/skill'
 import { Market } from './Market'
 
 function makeSkill(overrides: Partial<NormalizedSkill> = {}): NormalizedSkill {
@@ -42,32 +40,9 @@ function makeDetail(overrides: Partial<NormalizedSkillDetail> = {}): NormalizedS
   }
 }
 
-function makeLocalSkillDetail(overrides: Partial<LocalSkillDetail> = {}): LocalSkillDetail {
-  return {
-    meta: {
-      name: 'local-demo',
-      displayName: 'Local Demo',
-      description: 'An installed skill',
-      source: 'project',
-      userInvocable: true,
-      contentLength: 12,
-      hasDirectory: true,
-    },
-    tree: [],
-    files: [],
-    skillRoot: '/tmp/local-demo',
-    ...overrides,
-  }
-}
-
 beforeEach(() => {
   localStorage.clear()
   useSettingsStore.setState({ locale: 'en' })
-  useSkillStore.setState({
-    selectedSkill: null,
-    selectedSkillContext: null,
-    isDetailLoading: false,
-  })
   const detail = makeDetail()
   useMarketStore.setState({
     items: [makeSkill()],
@@ -132,42 +107,5 @@ describe('Market', () => {
     expect(screen.getByRole('alertdialog', { name: 'Uninstall skill' })).toHaveTextContent(
       '…/skills/demo/',
     )
-  })
-
-  it('opens the installed skill detail selected from the overview and returns to the market home', async () => {
-    render(<Market />)
-
-    act(() => {
-      useSkillStore.setState({
-        selectedSkill: makeLocalSkillDetail(),
-        selectedSkillReturnTab: 'skills',
-        selectedSkillContext: '',
-      })
-    })
-
-    expect(await screen.findByTestId('skill-detail-view')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Local Demo', level: 1 })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Back to list' }))
-    await waitFor(() => expect(screen.queryByTestId('skill-detail-view')).not.toBeInTheDocument())
-    expect(screen.getByRole('button', { name: 'Demo Skill' })).toBeInTheDocument()
-  })
-
-  it('keeps the market detail view authoritative when a market skill is selected', async () => {
-    render(<Market />)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Demo Skill' }))
-    expect(await screen.findByRole('heading', { name: 'Demo Skill', level: 1 })).toBeInTheDocument()
-
-    act(() => {
-      useSkillStore.setState({
-        selectedSkill: makeLocalSkillDetail(),
-        selectedSkillReturnTab: 'skills',
-        selectedSkillContext: '',
-      })
-    })
-
-    expect(screen.queryByRole('heading', { name: 'Local Demo' })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Demo Skill', level: 1 })).toBeInTheDocument()
   })
 })

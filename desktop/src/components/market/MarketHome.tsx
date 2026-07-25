@@ -14,7 +14,6 @@ import { FilterBar } from './FilterBar'
 import { MarketDisclaimer } from './MarketDisclaimer'
 import { SkillCard } from './SkillCard'
 import { SourceStatusBar } from './SourceStatusBar'
-import { InstalledSkillsOverview } from './InstalledSkillsOverview'
 
 export function MarketHome({
   onRequestInstall,
@@ -73,8 +72,6 @@ export function MarketHome({
       </header>
 
       <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 py-5 lg:px-8">
-        <InstalledSkillsOverview />
-
         <MarketDisclaimer />
 
         <Card className="sticky top-0 z-20 bg-[var(--color-surface-glass)] shadow-[0_8px_24px_rgba(27,28,26,0.06)] backdrop-blur-xl">
