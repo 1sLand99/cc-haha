@@ -205,16 +205,10 @@ describe('TraceSession', () => {
   it('renders the two-pane layout with tree and detail', async () => {
     await renderReady()
 
-    const layout = screen.getByTestId('trace-split-layout')
     expect(screen.getByTestId('trace-header')).toBeInTheDocument()
     expect(screen.getByTestId('trace-tree')).toBeInTheDocument()
     expect(screen.getByTestId('trace-detail')).toBeInTheDocument()
     expect(screen.getByTestId('trace-split-divider')).toBeInTheDocument()
-    expect(layout).toHaveAttribute('data-slot', 'trace-split-pane')
-    expect(layout.querySelector('[data-slot="scroll-area"]')).toBeInTheDocument()
-    expect(layout.querySelector('[data-slot="toggle-group"]')).toBeInTheDocument()
-    expect(layout.querySelector('[data-slot="collapsible"]')).toBeInTheDocument()
-    expect(layout.querySelector('[data-slot="badge"]')).toBeInTheDocument()
 
     // Session root is selected by default and shows the overview grid.
     const detail = within(screen.getByTestId('trace-detail'))
@@ -232,50 +226,6 @@ describe('TraceSession', () => {
     expect(tree.getByText('User message')).toBeInTheDocument()
     expect(tree.getByText('claude-sonnet-4-5')).toBeInTheDocument()
     expect(tree.getByText('Bash')).toBeInTheDocument()
-  })
-
-  it('filters and searches spans with shadcn controls', async () => {
-    await renderReady()
-
-    const tree = within(screen.getByTestId('trace-tree'))
-    const llmFilter = tree.getByLabelText('LLM')
-    fireEvent.click(llmFilter)
-
-    expect(llmFilter).toHaveAttribute('data-state', 'on')
-    expect(tree.getByText('claude-sonnet-4-5')).toBeInTheDocument()
-    expect(tree.queryByText('Bash')).not.toBeInTheDocument()
-
-    fireEvent.change(tree.getByRole('textbox', { name: 'Search spans' }), {
-      target: { value: 'no-such-span' },
-    })
-    expect(tree.getByRole('status')).toHaveTextContent('No matching spans')
-
-    fireEvent.change(tree.getByRole('textbox', { name: 'Search spans' }), {
-      target: { value: '' },
-    })
-    fireEvent.click(tree.getByLabelText('All'))
-    expect(tree.getByText('Bash')).toBeInTheDocument()
-  })
-
-  it('resizes the custom split pane with keyboard ARIA controls and persists the width', async () => {
-    await renderReady()
-
-    const separator = screen.getByRole('separator', { name: 'Resize trace timeline' })
-    expect(separator).toHaveAttribute('aria-valuemin', '280')
-    expect(separator).toHaveAttribute('aria-valuemax', '560')
-    expect(separator).toHaveAttribute('aria-valuenow', '380')
-
-    fireEvent.keyDown(separator, { key: 'ArrowRight' })
-    expect(separator).toHaveAttribute('aria-valuenow', '404')
-    expect(window.localStorage.getItem('trace.treeWidth')).toBe('404')
-
-    fireEvent.keyDown(separator, { key: 'End' })
-    expect(separator).toHaveAttribute('aria-valuenow', '560')
-    expect(window.localStorage.getItem('trace.treeWidth')).toBe('560')
-
-    fireEvent.doubleClick(separator)
-    expect(separator).toHaveAttribute('aria-valuenow', '380')
-    expect(window.localStorage.getItem('trace.treeWidth')).toBe('380')
   })
 
   it('groups timeline rows by turn with user message previews', async () => {
@@ -304,12 +254,9 @@ describe('TraceSession', () => {
     await renderReady()
 
     const tree = within(screen.getByTestId('trace-tree'))
-    const bashRow = tree.getByRole('treeitem', { name: /Bash/ })
-    bashRow.focus()
-    fireEvent.click(bashRow)
+    fireEvent.click(tree.getByText('Bash'))
 
     const detail = within(screen.getByTestId('trace-detail'))
-    expect(screen.getByRole('tree')).toHaveFocus()
     expect(detail.getByRole('heading', { level: 2, name: 'Bash' })).toBeInTheDocument()
     expect(detail.getByText('Duration')).toBeInTheDocument()
     expect(detail.getByText('1.00s')).toBeInTheDocument()
@@ -386,11 +333,7 @@ describe('TraceSession', () => {
       completedAt: '2026-06-09T10:04:01.000Z',
       durationMs: 240_000,
       metadata: { phase: 'api_call_aborted', aborted: true },
-      error: {
-        name: 'AbortError',
-        message: 'Stream idle timeout: no chunks received for 240s',
-        stack: 'AbortError: timed out\n    at stream.ts:42',
-      },
+      error: { name: 'AbortError', message: 'Stream idle timeout: no chunks received for 240s' },
       response: {
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
@@ -418,10 +361,6 @@ describe('TraceSession', () => {
     expect(detail.getByTestId('trace-call-aborted-badge')).toHaveTextContent('Aborted')
     expect(detail.getByText('AbortError')).toBeInTheDocument()
     expect(detail.getByText('Stream idle timeout: no chunks received for 240s')).toBeInTheDocument()
-    const stackTrigger = detail.getByRole('button', { name: 'stack' })
-    expect(stackTrigger).toHaveAttribute('data-slot', 'collapsible-trigger')
-    fireEvent.click(stackTrigger)
-    expect(detail.getByText(/stream\.ts:42/)).toBeInTheDocument()
     expect(
       detail.getByText('The request was aborted before the response completed (timeout or cancellation).'),
     ).toBeInTheDocument()
@@ -456,28 +395,6 @@ describe('TraceSession', () => {
     // Raw section opens by default in fallback mode; semantic sections are skipped.
     await waitFor(() => expect(detail.getByText('Request body')).toBeInTheDocument())
     expect(detail.queryByRole('button', { name: /^Messages/ })).not.toBeInTheDocument()
-  })
-
-  it('retries a failed lazy call detail without changing the selected span', async () => {
-    let detailShouldFail = true
-    vi.mocked(sessionsApi.getTraceCall).mockImplementation(async () => {
-      if (detailShouldFail) throw new Error('detail unavailable')
-      return { call: fullCall }
-    })
-
-    await renderReady()
-
-    fireEvent.click(within(screen.getByTestId('trace-tree')).getByText('claude-sonnet-4-5'))
-    const detail = within(screen.getByTestId('trace-detail'))
-    expect(await detail.findByText('Failed to load the full record; showing the truncated preview.')).toBeInTheDocument()
-
-    const callsBeforeRetry = vi.mocked(sessionsApi.getTraceCall).mock.calls.length
-    detailShouldFail = false
-    fireEvent.click(detail.getByRole('button', { name: 'Retry' }))
-
-    expect(await detail.findByText('Hi from the full record')).toBeInTheDocument()
-    expect(vi.mocked(sessionsApi.getTraceCall).mock.calls.length).toBe(callsBeforeRetry + 1)
-    expect(detail.getByRole('heading', { level: 2, name: 'claude-sonnet-4-5' })).toBeInTheDocument()
   })
 
   it('applies poll updates and short-circuits identical snapshots', async () => {
@@ -710,7 +627,6 @@ describe('TraceSession', () => {
 
     const tree = screen.getByRole('tree')
     const detail = within(screen.getByTestId('trace-detail'))
-    expect(within(tree).getAllByRole('button', { name: 'Toggle turn' })[0]).toHaveAttribute('tabindex', '-1')
 
     // First ArrowDown lands on the turn header.
     fireEvent.keyDown(tree, { key: 'ArrowDown' })
@@ -723,18 +639,6 @@ describe('TraceSession', () => {
 
     // ArrowUp returns to the turn header.
     fireEvent.keyDown(tree, { key: 'ArrowUp' })
-    expect(detail.getByRole('heading', { level: 2, name: 'Hello world' })).toBeInTheDocument()
-
-    // Left/Right collapse and expand the selected turn without moving DOM focus.
-    fireEvent.keyDown(tree, { key: 'ArrowLeft' })
-    expect(within(screen.getByTestId('trace-tree')).queryByText('Bash')).not.toBeInTheDocument()
-    fireEvent.keyDown(tree, { key: 'ArrowRight' })
-    expect(within(screen.getByTestId('trace-tree')).getByText('Bash')).toBeInTheDocument()
-
-    // End/Home jump to the last and first visible items.
-    fireEvent.keyDown(tree, { key: 'End' })
-    expect(screen.getByRole('treeitem', { selected: true })).toBeInTheDocument()
-    fireEvent.keyDown(tree, { key: 'Home' })
     expect(detail.getByRole('heading', { level: 2, name: 'Hello world' })).toBeInTheDocument()
   })
 

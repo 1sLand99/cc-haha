@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Paperclip, Plus } from 'lucide-react'
 import { ApiError } from '../api/client'
 import { agentsApi } from '../api/agents'
 import { skillsApi } from '../api/skills'
@@ -46,17 +45,6 @@ import {
 import type { AttachmentRef } from '../types/chat'
 import type { PermissionMode } from '../types/settings'
 import type { SlashCommandOption } from '../components/chat/composerUtils'
-import { LoadingButton } from '../components/ui/custom/loading-button'
-import { IconButton } from '../components/ui/custom/icon-button'
-import { Button } from '../components/ui/button'
-import { Textarea } from '../components/ui/textarea'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '../components/ui/dropdown-menu'
-import { ComposerOverlayPanel } from '../components/ui/custom/composer-overlay-panel'
 
 type Attachment = ComposerAttachment
 
@@ -110,7 +98,6 @@ export function EmptySession() {
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
   const [fileSearchOpen, setFileSearchOpen] = useState(false)
-  const [fileSearchActiveDescendant, setFileSearchActiveDescendant] = useState<string>()
   const [localSlashPanel, setLocalSlashPanel] = useState<LocalSlashCommandName | null>(null)
   const [atFilter, setAtFilter] = useState('')
   const [atCursorPos, setAtCursorPos] = useState(-1)
@@ -122,6 +109,7 @@ export function EmptySession() {
   const panelRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const modelSelectorRef = useRef<ModelSelectorHandle>(null)
+  const plusMenuRef = useRef<HTMLDivElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const fileSearchRef = useRef<FileSearchMenuHandle>(null)
   const slashItemRefs = useRef<(HTMLButtonElement | null)[]>([])
@@ -148,6 +136,17 @@ export function EmptySession() {
   useEffect(() => {
     textareaRef.current?.focus()
   }, [])
+
+  useEffect(() => {
+    if (!plusMenuOpen) return
+    const handleClick = (event: MouseEvent) => {
+      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
+        setPlusMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [plusMenuOpen])
 
   useEffect(() => {
     if (!slashMenuOpen) return
@@ -634,7 +633,6 @@ export function EmptySession() {
                   ref={fileSearchRef}
                   cwd={workDir || ''}
                   filter={atFilter}
-                  onActiveDescendantChange={setFileSearchActiveDescendant}
                   onNavigate={(relativePath) => {
                     if (atCursorPos < 0) return
                     const replacement = `@${relativePath}`
@@ -691,26 +689,18 @@ export function EmptySession() {
               )}
 
               {slashMenuOpen && filteredCommands.length > 0 && (
-                <ComposerOverlayPanel
+                <div
                   ref={slashMenuRef}
-                  id="empty-slash-command-menu"
-                  role="listbox"
-                  aria-label={t('empty.slashCommands')}
+                  className="absolute bottom-full left-0 right-0 z-50 mb-2 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-dropdown)]"
                 >
-                  <div className="py-1">
+                  <div className="max-h-[260px] overflow-y-auto py-1">
                     {filteredCommands.map((command, index) => (
-                      <Button
-                        type="button"
-                        variant="ghost"
+                      <button
                         key={command.name}
-                        id={`empty-slash-command-option-${index}`}
                         ref={(el) => { slashItemRefs.current[index] = el }}
-                        role="option"
-                        aria-selected={index === slashSelectedIndex}
-                        tabIndex={-1}
                         onClick={() => selectSlashCommand(command.name)}
                         onMouseEnter={() => setSlashSelectedIndex(index)}
-                        className={`h-auto w-full justify-start gap-3 rounded-none px-4 py-2.5 text-left ${
+                        className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
                           index === slashSelectedIndex ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
                         }`}
                       >
@@ -723,10 +713,10 @@ export function EmptySession() {
                           ) : null}
                         </span>
                         <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-tertiary)]">{command.description}</span>
-                      </Button>
+                      </button>
                     ))}
                   </div>
-                </ComposerOverlayPanel>
+                </div>
               )}
 
               {attachments.length > 0 && (
@@ -734,26 +724,13 @@ export function EmptySession() {
               )}
 
               <div className="flex items-start gap-3">
-                <Textarea
+                <textarea
                   ref={textareaRef}
                   value={input}
                   onChange={(event) => handleInputChange(event.target.value, event.target.selectionStart ?? event.target.value.length)}
                   onKeyDown={handleKeyDown}
                   onPaste={handlePaste}
-                  role="combobox"
-                  aria-autocomplete="list"
-                  aria-expanded={slashMenuOpen || fileSearchOpen}
-                  aria-controls={fileSearchOpen
-                    ? 'file-search-menu'
-                    : slashMenuOpen
-                      ? 'empty-slash-command-menu'
-                      : undefined}
-                  aria-activedescendant={fileSearchOpen
-                    ? fileSearchActiveDescendant
-                    : slashMenuOpen && filteredCommands[slashSelectedIndex]
-                      ? `empty-slash-command-option-${slashSelectedIndex}`
-                      : undefined}
-                  className={`min-h-0 flex-1 resize-none rounded-none border-0 bg-transparent px-0 leading-relaxed shadow-none focus-visible:border-0 focus-visible:shadow-none ${
+                  className={`flex-1 resize-none border-none bg-transparent leading-relaxed text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] ${
                     isMobileComposer ? 'max-h-[132px] min-h-[72px] py-1.5 text-base' : 'py-2'
                   }`}
                   style={{ fontFamily: 'var(--font-body)' }}
@@ -766,34 +743,38 @@ export function EmptySession() {
                 isMobileComposer ? 'flex flex-wrap items-center gap-2' : 'flex items-center justify-between'
               }`}>
                 <div className="flex shrink-0 items-center gap-2">
-                  <DropdownMenu open={plusMenuOpen} onOpenChange={setPlusMenuOpen}>
-                    <DropdownMenuTrigger asChild>
-                      <IconButton
-                        type="button"
-                        label="Open composer tools"
-                        variant="ghost"
-                        className={`text-[var(--color-text-secondary)] ${
-                          isMobileComposer ? 'h-11 w-11 rounded-xl' : 'h-8 w-8 rounded-lg'
-                        }`}
-                      >
-                        <Plus aria-hidden="true" className="size-[18px]" />
-                      </IconButton>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      side="top"
-                      align="start"
-                      className={isMobileComposer ? 'w-[min(240px,calc(100vw-32px))]' : 'w-[240px]'}
+                  <div ref={plusMenuRef} className="relative">
+                    <button
+                      onClick={() => setPlusMenuOpen((prev) => !prev)}
+                      aria-label="Open composer tools"
+                      className={`text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] ${
+                        isMobileComposer ? 'inline-flex h-11 w-11 items-center justify-center rounded-xl' : 'rounded-lg p-1.5'
+                      }`}
                     >
-                      <DropdownMenuItem onSelect={openAttachmentPicker} className="gap-3 px-3 py-2.5">
-                        <Paperclip aria-hidden="true" className="size-[18px] text-[var(--color-text-secondary)]" />
-                        <span>{t('empty.addFiles')}</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={insertSlashCommand} className="gap-3 px-3 py-2.5">
-                        <span aria-hidden="true" className="w-[18px] text-center text-lg font-bold text-[var(--color-text-secondary)]">/</span>
-                        <span>{t('empty.slashCommands')}</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                      <span className="material-symbols-outlined text-[18px]">add</span>
+                    </button>
+
+                    {plusMenuOpen && (
+                      <div className={`absolute bottom-full left-0 mb-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 shadow-[var(--shadow-dropdown)] ${
+                        isMobileComposer ? 'w-[min(240px,calc(100vw-32px))]' : 'w-[240px]'
+                      }`}>
+                        <button
+                          onClick={openAttachmentPicker}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
+                        >
+                          <span className="material-symbols-outlined text-[18px] text-[var(--color-text-secondary)]">attach_file</span>
+                          {t('empty.addFiles')}
+                        </button>
+                        <button
+                          onClick={insertSlashCommand}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
+                        >
+                          <span className="w-5 text-center text-[18px] font-bold text-[var(--color-text-secondary)]">/</span>
+                          {t('empty.slashCommands')}
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
                   <PermissionModeSelector
                     workDir={workDir}
@@ -813,19 +794,18 @@ export function EmptySession() {
                     compact={isMobileComposer}
                   />
                   <ModelSelector ref={modelSelectorRef} runtimeKey={DRAFT_RUNTIME_SELECTION_KEY} disabled={isSubmitting} compact={isMobileComposer} />
-                  <LoadingButton
+                  <button
                     onClick={handleSubmit}
                     disabled={!canSubmit}
-                    loading={isSubmitting}
                     aria-label={t('common.run')}
                     title={isMobileComposer ? t('common.run') : undefined}
-                    className={`shrink-0 gap-1 text-xs disabled:opacity-30 ${
+                    className={`flex shrink-0 items-center justify-center gap-1 rounded-lg bg-[image:var(--gradient-btn-primary)] text-xs font-semibold text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)] transition-all hover:brightness-105 disabled:opacity-30 ${
                       isMobileComposer ? 'h-11 w-11 rounded-xl px-0 py-0' : 'w-[112px] px-3 py-1.5'
                     }`}
                   >
                     {!isMobileComposer && t('common.run')}
-                    <ArrowRight className="size-3.5" aria-hidden="true" />
-                  </LoadingButton>
+                    <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                  </button>
                 </div>
               </div>
             </div>

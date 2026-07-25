@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
@@ -335,41 +335,16 @@ describe('EmptySession', () => {
       expect(mocks.listSkills).toHaveBeenCalledTimes(1)
     })
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: '/su', selectionStart: 3 },
     })
 
     await waitFor(() => {
       const commandButtons = screen
-        .getAllByRole('option')
-        .filter((button) => button.textContent?.trim().startsWith('/'))
+        .getAllByRole('button')
+        .filter((button) => button.textContent?.startsWith('/'))
       expect(commandButtons[0]).toHaveTextContent('/superpowers:brainstorming')
     })
-  })
-
-  it('connects the composer combobox to the shadcn slash listbox and virtual focus', async () => {
-    render(<EmptySession />)
-
-    const input = screen.getByRole('combobox')
-    fireEvent.change(input, {
-      target: { value: '/', selectionStart: 1 },
-    })
-
-    const listbox = await screen.findByRole('listbox', { name: 'Slash commands' })
-    const options = within(listbox).getAllByRole('option')
-    expect(listbox).toHaveAttribute('data-slot', 'composer-overlay-panel')
-    expect(input).toHaveAttribute('aria-expanded', 'true')
-    expect(input).toHaveAttribute('aria-controls', listbox.id)
-    expect(options[0]).toHaveAttribute('aria-selected', 'true')
-    expect(input).toHaveAttribute('aria-activedescendant', options[0]!.id)
-
-    fireEvent.keyDown(input, { key: 'ArrowDown' })
-    expect(options[1]).toHaveAttribute('aria-selected', 'true')
-    expect(input).toHaveAttribute('aria-activedescendant', options[1]!.id)
-
-    fireEvent.keyDown(input, { key: 'Escape' })
-    expect(screen.queryByRole('listbox', { name: 'Slash commands' })).not.toBeInTheDocument()
-    expect(input).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('offers active agents as slash entries that insert /agent with the selected type', async () => {
@@ -392,7 +367,7 @@ describe('EmptySession', () => {
       expect(mocks.listAgents).toHaveBeenCalledWith(undefined)
     })
 
-    const input = screen.getByRole('combobox') as HTMLTextAreaElement
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement
     fireEvent.change(input, {
       target: { value: '/debug', selectionStart: 6 },
     })
@@ -410,7 +385,7 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    const input = screen.getByRole('combobox') as HTMLTextAreaElement
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement
     fireEvent.change(input, {
       target: {
         value: '/model',
@@ -449,7 +424,7 @@ describe('EmptySession', () => {
       expect(mocks.listAgents).toHaveBeenCalledWith(undefined)
     })
 
-    const input = screen.getByRole('combobox') as HTMLTextAreaElement
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement
     fireEvent.change(input, {
       target: { value: '/agent', selectionStart: 6 },
     })
@@ -483,7 +458,7 @@ describe('EmptySession', () => {
   it('creates a session with the selected project and branch when submitted', async () => {
     render(<EmptySession />)
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'draft question', selectionStart: 14 },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Pick project' }))
@@ -539,7 +514,7 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'draft question', selectionStart: 14 },
     })
 
@@ -571,7 +546,7 @@ describe('EmptySession', () => {
     render(<EmptySession />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Permission mode: default' }))
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'run automatically', selectionStart: 17 },
     })
     fireEvent.click(screen.getByRole('button', { name: /Run/i }))
@@ -606,7 +581,7 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'draft question', selectionStart: 14 },
     })
 
@@ -671,13 +646,13 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    fireEvent.keyDown(screen.getByLabelText('Open composer tools'), { key: 'ArrowDown' })
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Add files or photos' }))
+    fireEvent.click(screen.getByLabelText('Open composer tools'))
+    fireEvent.click(screen.getByText('Add files or photos'))
 
     expect(await screen.findByText('huge-a.log')).toBeInTheDocument()
     expect(await screen.findByText('huge-b.zip')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'check these files', selectionStart: 'check these files'.length },
     })
     fireEvent.click(screen.getByRole('button', { name: /Run/i }))
@@ -729,7 +704,7 @@ describe('EmptySession', () => {
     expect(await screen.findByText('session-context.log')).toBeInTheDocument()
     expect(screen.queryByTestId('empty-session-drop-overlay')).not.toBeInTheDocument()
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'use this context', selectionStart: 'use this context'.length },
     })
     fireEvent.click(screen.getByRole('button', { name: /Run/i }))
@@ -772,7 +747,7 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    fireEvent.paste(screen.getByRole('combobox'), {
+    fireEvent.paste(screen.getByRole('textbox'), {
       clipboardData: {
         files: [],
         items: [{
@@ -785,7 +760,7 @@ describe('EmptySession', () => {
 
     expect(await screen.findByText('project-context.json')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'use this context', selectionStart: 'use this context'.length },
     })
     fireEvent.click(screen.getByRole('button', { name: /Run/i }))
@@ -820,7 +795,7 @@ describe('EmptySession', () => {
     render(<EmptySession />)
 
     const panel = screen.getByTestId('empty-session-composer-panel')
-    const input = screen.getByRole('combobox') as HTMLTextAreaElement
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement
 
     fireEvent.change(input, {
       target: {
@@ -848,7 +823,7 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'draft question', selectionStart: 14 },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Pick project' }))
@@ -879,7 +854,7 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'draft question', selectionStart: 14 },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Pick project' }))
@@ -907,7 +882,7 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'draft question', selectionStart: 14 },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Pick project' }))
@@ -955,7 +930,7 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'draft question', selectionStart: 14 },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Pick project' }))
@@ -999,7 +974,7 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'draft question', selectionStart: 14 },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Pick project' }))
@@ -1043,7 +1018,7 @@ describe('EmptySession', () => {
 
     render(<EmptySession />)
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'draft question', selectionStart: 14 },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Pick project' }))

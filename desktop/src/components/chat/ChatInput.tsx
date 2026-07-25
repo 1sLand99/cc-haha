@@ -1,13 +1,4 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import {
-  ArrowRight,
-  CornerDownRight,
-  Paperclip,
-  Pencil,
-  Plus,
-  Square,
-  Trash2,
-} from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { useChatStore } from '../../stores/chatStore'
 import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
@@ -55,18 +46,6 @@ import { useComposerFileDrop } from './useComposerFileDrop'
 import { shouldSubmitOnEnter } from './sendShortcut'
 import type { PermissionMode } from '../../types/settings'
 import { getSessionWorkspaceState } from '../../lib/sessionWorkspace'
-import { Button } from '../ui/button'
-import { Input } from '../ui/input'
-import { Textarea } from '../ui/textarea'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '../ui/dropdown-menu'
-import { ComposerOverlayPanel } from '../ui/custom/composer-overlay-panel'
-import { IconButton } from '../ui/custom/icon-button'
-import { KeyboardShortcut } from '../ui/custom/keyboard-shortcut'
 
 type GitInfo = SessionGitInfo
 
@@ -123,7 +102,6 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const [atCursorPos, setAtCursorPos] = useState(-1)
   const [slashFilter, setSlashFilter] = useState('')
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
-  const [fileSearchActiveDescendant, setFileSearchActiveDescendant] = useState<string>()
   const [agentSlashCommands, setAgentSlashCommands] = useState<ReturnType<typeof buildAgentSlashCommands>>([])
   const [launchWorkDir, setLaunchWorkDir] = useState('')
   const [launchBranch, setLaunchBranch] = useState<string | null>(null)
@@ -137,6 +115,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const panelRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const modelSelectorRef = useRef<ModelSelectorHandle>(null)
+  const plusMenuRef = useRef<HTMLDivElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const fileSearchRef = useRef<FileSearchMenuHandle>(null)
   const slashItemRefs = useRef<(HTMLButtonElement | null)[]>([])
@@ -427,6 +406,17 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   }, [input])
 
   useEffect(() => {
+    if (!plusMenuOpen) return
+    const handleClick = (event: MouseEvent) => {
+      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
+        setPlusMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [plusMenuOpen])
+
+  useEffect(() => {
     if (!slashMenuOpen) return
     const handleClick = (event: MouseEvent) => {
       if (
@@ -496,10 +486,6 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   useEffect(() => {
     setSlashSelectedIndex(0)
   }, [slashFilter])
-
-  useEffect(() => {
-    setSlashSelectedIndex((current) => Math.min(current, Math.max(0, filteredCommands.length - 1)))
-  }, [filteredCommands.length])
 
   useEffect(() => {
     const activeItem = slashMenuOpen ? slashItemRefs.current[slashSelectedIndex] : null
@@ -1019,7 +1005,6 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
               cwd={activeLaunchWorkDir || resolvedWorkDir || ''}
               filter={atFilter}
               compact={isMobileComposer}
-              onActiveDescendantChange={setFileSearchActiveDescendant}
               onNavigate={(relativePath) => {
                 if (atCursorPos < 0) return
                 const replacement = `@${relativePath}`
@@ -1077,36 +1062,18 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
           )}
 
           {!isMemberSession && slashMenuOpen && filteredCommands.length > 0 && (
-            <ComposerOverlayPanel
+            <div
               ref={slashMenuRef}
-              id="slash-command-menu"
-              role="listbox"
-              aria-label={slashCommandsLabel}
-              footer={!isMobileComposer ? (
-                <div className="flex items-center gap-1.5 border-t border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-tertiary)]">
-                  <KeyboardShortcut>Up/Down</KeyboardShortcut>
-                  <span>{t('chat.navigate')}</span>
-                  <KeyboardShortcut className="ml-2">Enter</KeyboardShortcut>
-                  <span>{t('chat.select')}</span>
-                  <KeyboardShortcut className="ml-2">Esc</KeyboardShortcut>
-                  <span>{t('chat.dismiss')}</span>
-                </div>
-              ) : undefined}
+              className="absolute bottom-full left-0 right-0 z-50 mb-2 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-dropdown)]"
             >
-              <div className="py-1">
+              <div className="max-h-[300px] overflow-y-auto py-1">
                 {filteredCommands.map((command, index) => (
-                  <Button
+                  <button
                     key={command.name}
-                    id={`slash-command-option-${index}`}
                     ref={(el) => { slashItemRefs.current[index] = el }}
-                    type="button"
-                    variant="ghost"
-                    role="option"
-                    aria-selected={index === slashSelectedIndex}
-                    tabIndex={-1}
                     onClick={() => selectSlashCommand(command.name)}
                     onMouseEnter={() => setSlashSelectedIndex(index)}
-                    className={`h-auto w-full justify-start gap-3 rounded-none px-4 py-2.5 text-left ${
+                    className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
                       index === slashSelectedIndex
                         ? 'bg-[var(--color-surface-hover)]'
                         : 'hover:bg-[var(--color-surface-hover)]'
@@ -1125,10 +1092,20 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                     <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-tertiary)]">
                       {command.description}
                     </span>
-                  </Button>
+                  </button>
                 ))}
               </div>
-            </ComposerOverlayPanel>
+              {!isMobileComposer ? (
+                <div className="flex items-center gap-1.5 border-t border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-tertiary)]">
+                  <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1.5 py-0.5 font-mono text-[10px]">Up/Down</kbd>
+                  <span>{t('chat.navigate')}</span>
+                  <kbd className="ml-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd>
+                  <span>{t('chat.select')}</span>
+                  <kbd className="ml-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1.5 py-0.5 font-mono text-[10px]">Esc</kbd>
+                  <span>{t('chat.dismiss')}</span>
+                </div>
+              ) : null}
+            </div>
           )}
 
           {!isMemberSession && activeTabId && queuedUserMessages.length > 0 && (
@@ -1151,16 +1128,15 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                       'bg-[var(--color-surface-container-lowest)]/70 text-[var(--color-text-secondary)]',
                     ].join(' ')}
                   >
-                    <CornerDownRight aria-hidden className="size-4 shrink-0 text-[var(--color-text-tertiary)]" />
+                    <span className="material-symbols-outlined shrink-0 text-[16px] text-[var(--color-text-tertiary)]" aria-hidden="true">
+                      subdirectory_arrow_right
+                    </span>
                     {isEditing ? (
                       <>
-                        <Input
+                        <input
                           value={editingQueuedMessageText}
                           onChange={(event) => setEditingQueuedMessageText(event.target.value)}
-                          onCompositionStart={() => { composingRef.current = true }}
-                          onCompositionEnd={() => { composingRef.current = false }}
                           onKeyDown={(event) => {
-                            if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return
                             if (event.key === 'Enter') {
                               event.preventDefault()
                               saveQueuedMessageEdit()
@@ -1171,66 +1147,58 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                             }
                           }}
                           aria-label={t('chat.pendingMessageEditInput')}
-                          className="h-7 min-w-0 flex-1 rounded-[6px] px-2 py-1 text-xs"
+                          className="min-w-0 flex-1 rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-border-focus)]"
                           autoFocus
                         />
-                        <Button
+                        <button
                           type="button"
-                          variant="ghost"
-                          size="sm"
                           onClick={saveQueuedMessageEdit}
                           disabled={!editingQueuedMessageText.trim()}
-                          className="shrink-0 rounded-[6px] font-semibold text-[var(--color-brand)]"
+                          className="shrink-0 rounded-[6px] px-2 py-1 font-semibold text-[var(--color-brand)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40"
                         >
                           {t('common.save')}
-                        </Button>
-                        <Button
+                        </button>
+                        <button
                           type="button"
-                          variant="ghost"
-                          size="sm"
                           onClick={cancelQueuedMessageEdit}
-                          className="shrink-0 rounded-[6px] font-medium text-[var(--color-text-tertiary)]"
+                          className="shrink-0 rounded-[6px] px-2 py-1 font-medium text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)]"
                         >
                           {t('common.cancel')}
-                        </Button>
+                        </button>
                       </>
                     ) : (
                       <>
                         <span className="min-w-0 flex-1 truncate font-medium" title={message.displayContent}>
                           {message.displayContent}
                         </span>
-                        <Button
+                        <button
                           type="button"
-                          variant="ghost"
-                          size="sm"
                           onClick={() => sendQueuedUserMessage(activeTabId, message.id)}
                           aria-label={t('chat.pendingMessageGuideNow')}
                           title={t('chat.pendingMessageGuideNow')}
-                          className="h-7 shrink-0 rounded-[6px] font-semibold"
+                          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[6px] px-2 font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
                         >
-                          <CornerDownRight aria-hidden className="size-3.5" />
+                          <span className="material-symbols-outlined text-[15px]" aria-hidden="true">subdirectory_arrow_right</span>
                           <span>{t('chat.pendingMessageGuide')}</span>
-                        </Button>
-                        <IconButton
-                          label={t('chat.pendingMessageEdit')}
-                          variant="ghost"
-                          size="icon-sm"
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => startEditingQueuedMessage(message.id, message.displayContent)}
+                          aria-label={t('chat.pendingMessageEdit')}
                           title={t('chat.pendingMessageEdit')}
-                          className="size-7 shrink-0 rounded-[6px] text-[var(--color-text-tertiary)]"
+                          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
                         >
-                          <Pencil aria-hidden className="size-3.5" />
-                        </IconButton>
-                        <IconButton
-                          label={t('chat.pendingMessageDelete')}
-                          variant="ghost"
-                          size="icon-sm"
+                          <span className="material-symbols-outlined text-[15px]" aria-hidden="true">edit</span>
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => removeQueuedUserMessage(activeTabId, message.id)}
+                          aria-label={t('chat.pendingMessageDelete')}
                           title={t('chat.pendingMessageDelete')}
-                          className="size-7 shrink-0 rounded-[6px] text-[var(--color-text-tertiary)] hover:text-[var(--color-error)]"
+                          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-error)]"
                         >
-                          <Trash2 aria-hidden className="size-3.5" />
-                        </IconButton>
+                          <span className="material-symbols-outlined text-[15px]" aria-hidden="true">delete</span>
+                        </button>
                       </>
                     )}
                   </div>
@@ -1251,7 +1219,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
 
           {isHeroComposer ? (
             <div className="flex items-start gap-3">
-              <Textarea
+              <textarea
                 ref={textareaRef}
                 value={input}
                 onChange={handleInputChange}
@@ -1260,22 +1228,13 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                 onCompositionEnd={() => { composingRef.current = false }}
                 onPaste={handlePaste}
                 placeholder={composerPlaceholder}
-                role="combobox"
-                aria-autocomplete="list"
-                aria-expanded={slashMenuOpen || fileSearchOpen}
-                aria-controls={fileSearchOpen ? 'file-search-menu' : slashMenuOpen ? 'slash-command-menu' : undefined}
-                aria-activedescendant={fileSearchOpen
-                  ? fileSearchActiveDescendant
-                  : slashMenuOpen && filteredCommands[slashSelectedIndex]
-                    ? `slash-command-option-${slashSelectedIndex}`
-                    : undefined}
                 disabled={isWorkspaceMissing}
                 rows={2}
-                className="min-h-0 flex-1 resize-none border-none bg-transparent px-0 py-2 leading-relaxed shadow-none focus-visible:border-transparent focus-visible:shadow-none"
+                className="flex-1 resize-none border-none bg-transparent py-2 leading-relaxed text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] disabled:opacity-50"
               />
             </div>
           ) : (
-            <Textarea
+            <textarea
               ref={textareaRef}
               value={input}
               onChange={handleInputChange}
@@ -1284,18 +1243,9 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
               onCompositionEnd={() => { composingRef.current = false }}
               onPaste={handlePaste}
               placeholder={composerPlaceholder}
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded={slashMenuOpen || fileSearchOpen}
-              aria-controls={fileSearchOpen ? 'file-search-menu' : slashMenuOpen ? 'slash-command-menu' : undefined}
-              aria-activedescendant={fileSearchOpen
-                ? fileSearchActiveDescendant
-                : slashMenuOpen && filteredCommands[slashSelectedIndex]
-                  ? `slash-command-option-${slashSelectedIndex}`
-                  : undefined}
               disabled={isWorkspaceMissing}
               rows={1}
-              className={`min-h-0 w-full resize-none border-none bg-transparent px-0 text-sm leading-relaxed shadow-none focus-visible:border-transparent focus-visible:shadow-none ${
+              className={`w-full resize-none bg-transparent text-sm leading-relaxed text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] disabled:opacity-50 ${
                 useCompactControls ? 'py-1.5' : 'py-2'
               }`}
             />
@@ -1312,32 +1262,34 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
             >
               {!isMemberSession && (
                 <>
-                  <DropdownMenu open={plusMenuOpen} onOpenChange={setPlusMenuOpen}>
-                    <DropdownMenuTrigger asChild>
-                      <IconButton
-                        label="Open composer tools"
-                        variant="ghost"
-                        size={isMobileComposer ? 'icon-lg' : 'icon-sm'}
-                        className={isMobileComposer ? 'h-11 w-11 rounded-xl' : ''}
-                      >
-                        <Plus aria-hidden className="size-[18px]" />
-                      </IconButton>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      side="top"
-                      align="start"
-                      className={isMobileComposer ? 'w-[min(240px,calc(100vw-32px))]' : 'w-[240px]'}
+                  <div ref={plusMenuRef} className="relative">
+                    <button
+                      onClick={() => setPlusMenuOpen((value) => !value)}
+                      aria-label="Open composer tools"
+                      className={`text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] ${isMobileComposer ? 'inline-flex h-11 w-11 items-center justify-center rounded-xl' : 'rounded-[var(--radius-md)] p-1.5'}`}
                     >
-                      <DropdownMenuItem onSelect={openAttachmentPicker} className="gap-3 px-3 py-2.5">
-                        <Paperclip aria-hidden className="size-[18px] text-[var(--color-text-secondary)]" />
-                        <span>{addFilesLabel}</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={insertSlashCommand} className="gap-3 px-3 py-2.5">
-                        <span aria-hidden className="w-[18px] text-center text-lg font-bold text-[var(--color-text-secondary)]">/</span>
-                        <span>{slashCommandsLabel}</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                      <span className="material-symbols-outlined text-[18px]">add</span>
+                    </button>
+
+                    {plusMenuOpen && (
+                      <div className={`absolute bottom-full left-0 z-50 mb-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 shadow-[var(--shadow-dropdown)] ${isMobileComposer ? 'w-[min(240px,calc(100vw-32px))]' : 'w-[240px]'}`}>
+                        <button
+                          onClick={openAttachmentPicker}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
+                        >
+                          <span className="material-symbols-outlined text-[18px] text-[var(--color-text-secondary)]">attach_file</span>
+                          <span className="text-sm text-[var(--color-text-primary)]">{addFilesLabel}</span>
+                        </button>
+                        <button
+                          onClick={insertSlashCommand}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
+                        >
+                          <span className="w-[24px] text-center text-[18px] font-bold text-[var(--color-text-secondary)]">/</span>
+                          <span className="text-sm text-[var(--color-text-primary)]">{slashCommandsLabel}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
                   <PermissionModeSelector compact={useCompactControls} />
                 </>
@@ -1368,7 +1320,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                   fluid={isMobileComposer}
                 />
               )}
-              <Button
+              <button
                 onClick={!isMemberSession && isActive ? () => stopGeneration(activeTabId!) : handleSubmit}
                 disabled={!isMemberSession && isActive ? false : !canSubmit}
                 aria-label={!isMemberSession && isActive ? t('common.stop') : isMemberSession ? t('common.send') : t('common.run')}
@@ -1381,17 +1333,19 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                         : t('common.run')
                       : undefined
                 }
-                variant={!isMemberSession && isActive ? 'destructive' : 'default'}
-                size={iconOnlyAction ? 'icon-sm' : 'default'}
-                className={`shrink-0 rounded-lg text-xs font-semibold ${
+                className={`flex shrink-0 items-center justify-center gap-1 rounded-lg text-xs font-semibold transition-all hover:brightness-105 disabled:opacity-30 ${
                   iconOnlyAction ? `${isMobileComposer ? 'h-11 w-11 rounded-xl px-0 py-0' : 'h-8 w-8 px-0 py-0'}` : 'w-[112px] px-3 py-1.5'
+                } ${
+                  !isMemberSession && isActive
+                    ? 'bg-[var(--color-error-container)] text-[var(--color-on-error-container)]'
+                    : 'bg-[image:var(--gradient-btn-primary)] text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)]'
                 }`}
               >
-                {!isMemberSession && isActive
-                  ? <Square aria-hidden className="size-3.5 fill-current" />
-                  : <ArrowRight aria-hidden className="size-3.5" />}
+                <span className="material-symbols-outlined text-[14px]">
+                  {!isMemberSession && isActive ? 'stop' : 'arrow_forward'}
+                </span>
                 {!iconOnlyAction && (!isMemberSession && isActive ? t('common.stop') : isMemberSession ? t('common.send') : t('common.run'))}
-              </Button>
+              </button>
             </div>
           </div>
 

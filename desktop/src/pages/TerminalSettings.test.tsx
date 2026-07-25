@@ -115,7 +115,6 @@ describe('TerminalSettings', () => {
     Reflect.deleteProperty(window, 'desktopHost')
     vi.stubGlobal('ResizeObserver', class {
       observe = vi.fn()
-      unobserve = vi.fn()
       disconnect = vi.fn()
     })
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
@@ -199,33 +198,14 @@ describe('TerminalSettings', () => {
     render(<TerminalSettings />)
 
     const button = screen.getByRole('button', { name: 'Terminal setup help' })
+    const help = screen.getByRole('tooltip')
     expect(button).toHaveAttribute('aria-expanded', 'false')
 
     fireEvent.click(button)
 
-    const help = screen.getByRole('tooltip')
     expect(button).toHaveAttribute('aria-expanded', 'true')
     expect(help).toHaveTextContent('plugin, skill, and MCP setup')
     expect(help).toHaveTextContent('claude-haha plugin install')
-
-    button.focus()
-    fireEvent.keyDown(button, { key: 'Escape' })
-
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
-    expect(button).toHaveFocus()
-  })
-
-  it('renders terminal chrome and feedback with shadcn primitives', async () => {
-    terminalMocks.available = true
-    terminalMocks.spawn.mockRejectedValueOnce(new Error('spawn unavailable'))
-
-    render(<TerminalSettings />)
-
-    expect(screen.getByTestId('settings-terminal-toolbar').querySelector('[data-slot="badge"]')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Clear' })).toHaveAttribute('data-slot', 'button')
-    expect(screen.getByRole('button', { name: 'Restart' })).toHaveAttribute('data-slot', 'button')
-    expect(await screen.findByRole('alert')).toHaveAttribute('data-slot', 'alert')
-    expect(screen.getByText('spawn unavailable')).toBeInTheDocument()
   })
 
   it('lets the settings page keep scrolling when the terminal is not focused', async () => {
@@ -287,73 +267,6 @@ describe('TerminalSettings', () => {
 
     expect(terminalMocks.terminalInstance.write).toHaveBeenCalledWith('hello\r\n')
     expect(terminalMocks.terminalInstance.write).not.toHaveBeenCalledWith('ignored\r\n')
-  })
-
-  it('replays output and exit events emitted before spawn resolves', async () => {
-    terminalMocks.available = true
-    let outputHandler: ((payload: { session_id: number; data: string }) => void) | undefined
-    let exitHandler: ((payload: { session_id: number; code: number; signal?: string }) => void) | undefined
-    let resolveSpawn: ((value: { session_id: number; shell: string; cwd: string }) => void) | undefined
-    terminalMocks.onOutput.mockImplementation(async (handler) => {
-      outputHandler = handler
-      return vi.fn()
-    })
-    terminalMocks.onExit.mockImplementation(async (handler) => {
-      exitHandler = handler
-      return vi.fn()
-    })
-    terminalMocks.spawn.mockReturnValue(new Promise((resolve) => {
-      resolveSpawn = resolve
-    }))
-
-    render(<TerminalSettings />)
-    await waitFor(() => expect(terminalMocks.spawn).toHaveBeenCalled())
-
-    act(() => {
-      outputHandler?.({ session_id: 7, data: 'fast shell output\r\n' })
-      exitHandler?.({ session_id: 7, code: 0 })
-      resolveSpawn?.({
-        session_id: 7,
-        shell: '/bin/true',
-        cwd: '/tmp',
-      })
-    })
-
-    expect(await screen.findByText('Exited')).toBeInTheDocument()
-    expect(terminalMocks.terminalInstance.write).toHaveBeenCalledWith('fast shell output\r\n')
-    expect(terminalMocks.terminalInstance.writeln).toHaveBeenCalledWith('\r\n[process exited: 0]')
-    expect(screen.queryByText('Running')).not.toBeInTheDocument()
-  })
-
-  it('restores keyboard focus to Restart after the replacement terminal starts', async () => {
-    terminalMocks.available = true
-    let resolveRestart: ((value: { session_id: number; shell: string; cwd: string }) => void) | undefined
-
-    render(<TerminalSettings />)
-    await waitFor(() => expect(terminalMocks.spawn).toHaveBeenCalledTimes(1))
-    terminalMocks.spawn.mockReturnValueOnce(new Promise((resolve) => {
-      resolveRestart = resolve
-    }))
-
-    const restart = screen.getByRole('button', { name: 'Restart' })
-    restart.focus()
-    fireEvent.click(restart)
-
-    await waitFor(() => expect(terminalMocks.spawn).toHaveBeenCalledTimes(2))
-    expect(restart).not.toBeDisabled()
-    expect(restart).toHaveAttribute('aria-busy', 'true')
-    fireEvent.click(restart)
-    expect(terminalMocks.spawn).toHaveBeenCalledTimes(2)
-    act(() => {
-      resolveRestart?.({
-        session_id: 8,
-        shell: '/bin/zsh',
-        cwd: '/Users/test',
-      })
-    })
-
-    await waitFor(() => expect(restart).toHaveFocus())
-    expect(screen.getByText('Running')).toBeInTheDocument()
   })
 
   it('copies the terminal selection through the desktop clipboard on Windows shortcuts', async () => {
@@ -476,8 +389,6 @@ describe('TerminalSettings', () => {
 
     expect(screen.getAllByText('Startup shell')).toHaveLength(2)
     expect(screen.getByText('Use for new terminal sessions and after restart.')).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Startup shell' })).toHaveAttribute('data-slot', 'select-trigger')
-    expect(screen.getByText('Use for new terminal sessions and after restart.').closest('[data-slot="card"]')).toBeInTheDocument()
   })
 
   it('saves a custom Windows bash path from the terminal settings panel', async () => {
@@ -532,7 +443,7 @@ describe('TerminalSettings', () => {
     render(<TerminalSettings showPreferences />)
 
     await screen.findByPlaceholderText('Bash Path')
-    fireEvent.click(screen.getByRole('button', { name: 'Browse for Bash executable' }))
+    fireEvent.click(screen.getByText('folder_open').closest('button')!)
 
     expect(await screen.findByDisplayValue('C:\\Program Files\\Git\\bin\\bash.exe')).toBeInTheDocument()
     expect(open).toHaveBeenCalledWith({
@@ -543,56 +454,5 @@ describe('TerminalSettings', () => {
         extensions: ['exe', '', 'bat', 'cmd', 'ps1'],
       }],
     })
-  })
-
-  it('does not let a late Bash path load overwrite a user draft', async () => {
-    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32')
-    terminalMocks.available = true
-    let resolveBashPath: ((value: string | null) => void) | undefined
-    terminalMocks.getBashPath.mockReturnValue(new Promise((resolve) => {
-      resolveBashPath = resolve
-    }))
-
-    render(<TerminalSettings showPreferences />)
-
-    const input = await screen.findByPlaceholderText('Bash Path')
-    fireEvent.change(input, { target: { value: 'C:\\Draft\\bash.exe' } })
-    await act(async () => {
-      resolveBashPath?.('C:\\Old\\bash.exe')
-    })
-
-    expect(input).toHaveValue('C:\\Draft\\bash.exe')
-  })
-
-  it('surfaces Bash path load, browse, and reset failures in shadcn alerts', async () => {
-    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32')
-    terminalMocks.available = true
-    terminalMocks.getBashPath.mockRejectedValue(new Error('load failed'))
-    terminalMocks.setBashPath.mockRejectedValue(new Error('reset failed'))
-    const open = vi.fn().mockRejectedValue(new Error('dialog failed'))
-    window.desktopHost = {
-      ...browserHost,
-      kind: 'electron',
-      isDesktop: true,
-      capabilities: {
-        ...browserHost.capabilities,
-        dialogs: true,
-      },
-      dialogs: {
-        ...browserHost.dialogs,
-        open,
-      },
-    }
-
-    render(<TerminalSettings showPreferences />)
-
-    expect(await screen.findByText('Could not load the saved Bash path.')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Browse for Bash executable' }))
-    expect(await screen.findByText('Could not open the Bash file picker.')).toBeInTheDocument()
-
-    fireEvent.change(screen.getByPlaceholderText('Bash Path'), { target: { value: 'C:\\Old\\bash.exe' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Reset to default' }))
-    expect(await screen.findByText('Could not reset the Bash path.')).toBeInTheDocument()
-    expect(screen.getAllByRole('alert').at(-1)).toHaveAttribute('data-slot', 'alert')
   })
 })

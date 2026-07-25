@@ -1,4 +1,4 @@
-import { Button } from '../ui/button'
+import { Button } from './Button'
 
 type ConfirmPopoverProps = {
   message: string
@@ -24,7 +24,7 @@ export function ConfirmPopover({
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           {cancelLabel}
         </Button>
-        <Button type="button" variant={confirmVariant === 'danger' ? 'destructive' : 'default'} size="sm" onClick={onConfirm}>
+        <Button type="button" variant={confirmVariant} size="sm" onClick={onConfirm}>
           {confirmLabel}
         </Button>
       </div>

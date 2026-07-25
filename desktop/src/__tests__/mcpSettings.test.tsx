@@ -8,7 +8,6 @@ import { mcpApi } from '../api/mcp'
 import { useMcpStore } from '../stores/mcpStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import type { McpServerRecord } from '../types/mcp'
 
 vi.mock('../api/sessions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/sessions')>()
@@ -121,10 +120,7 @@ describe('McpSettings', () => {
 
     render(<McpSettings />)
 
-    const loadingState = screen.getByRole('status')
-    expect(loadingState).toHaveTextContent('Loading...')
-    expect(loadingState).toHaveAttribute('data-slot', 'card')
-    expect(loadingState.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(4)
+    expect(screen.getByRole('status')).toHaveTextContent('Loading...')
     expect(screen.queryByText('No MCP servers configured yet')).not.toBeInTheDocument()
     expect(screen.queryByText('Total servers')).not.toBeInTheDocument()
 
@@ -170,33 +166,8 @@ describe('McpSettings', () => {
     await renderLoadedMcpSettings()
 
     expect(screen.getByText('MCP servers')).toBeInTheDocument()
-    expect(screen.getByText('No MCP servers configured yet').closest('[data-slot="card"]')).not.toBeNull()
-    expect(screen.getByRole('button', { name: /add server/i })).toHaveAttribute('data-slot', 'button')
-  })
-
-  it('renders MCP load errors with shadcn alert and retries the same project set', async () => {
-    const fetchServers = vi.fn().mockResolvedValue(undefined)
-    useMcpStore.setState({
-      error: 'Unable to load MCP servers',
-      fetchServers,
-    })
-
-    await renderLoadedMcpSettings()
-
-    const alert = screen.getByRole('alert')
-    expect(alert).toHaveAttribute('data-slot', 'alert')
-    expect(alert).toHaveTextContent('Unable to load MCP servers')
-    const retryButton = screen.getByRole('button', { name: 'Retry' })
-    expect(retryButton).toHaveAttribute('data-slot', 'button')
-
-    await act(async () => {
-      fireEvent.click(retryButton)
-    })
-
-    expect(fetchServers).toHaveBeenLastCalledWith(
-      ['/workspace/project', '/workspace/selected-project', '/workspace/config-project'],
-      '/workspace/project',
-    )
+    expect(screen.getByText('No MCP servers configured yet')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /add server/i })).toBeInTheDocument()
   })
 
   it('shows plugin and user MCP servers in grouped sections', async () => {
@@ -240,16 +211,7 @@ describe('McpSettings', () => {
     expect(screen.getAllByText('Plugin').length).toBeGreaterThan(0)
     expect(screen.getAllByText('User').length).toBeGreaterThan(0)
     expect(screen.getByText('plugin:telegram:telegram')).toBeInTheDocument()
-    const userServerName = screen.getByText('global-user')
-    expect(userServerName.closest('[data-slot="card"]')).not.toBeNull()
-    for (const statusLabel of screen.getAllByText('Connected')) {
-      expect(statusLabel.closest('[data-slot="badge"]')).not.toBeNull()
-    }
-    expect(screen.getAllByRole('switch')).toHaveLength(2)
-    expect(screen.getByRole('switch', { name: 'global-user' })).toHaveAttribute('data-slot', 'switch')
-    const openButton = screen.getByRole('button', { name: 'Open global-user' })
-    expect(openButton).toHaveAttribute('data-slot', 'tooltip-trigger')
-    expect(openButton).toHaveAttribute('data-size', 'icon')
+    expect(screen.getByText('global-user')).toBeInTheDocument()
   })
 
   it('redacts sensitive MCP command details from the list and details views', async () => {
@@ -260,7 +222,6 @@ describe('McpSettings', () => {
       enabled: true,
       status: 'connected',
       statusLabel: 'Connected',
-      statusDetail: 'Authorization: Bearer status-secret --api-key status-api-secret',
       configLocation: '/workspace/project/.mcp.json',
       summary: 'npx context7 --api-key sk-summary-secret',
       canEdit: false,
@@ -283,22 +244,14 @@ describe('McpSettings', () => {
     expect(document.body.textContent).not.toContain('sk-summary-secret')
     expect(document.body.textContent).not.toContain('sk-argument-secret')
     expect(document.body.textContent).not.toContain('sk-env-secret')
-    expect(document.body.textContent).not.toContain('status-secret')
-    expect(document.body.textContent).not.toContain('status-api-secret')
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Open context7' }))
     })
 
-    expect(screen.getByText('Raw config').closest('[data-slot="card"]')).not.toBeNull()
-    expect(screen.getByRole('button', { name: /back to servers/i })).toHaveAttribute('data-slot', 'button')
-    expect(screen.queryByRole('button', { name: /uninstall/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
     expect(document.body.textContent).not.toContain('sk-summary-secret')
     expect(document.body.textContent).not.toContain('sk-argument-secret')
     expect(document.body.textContent).not.toContain('sk-env-secret')
-    expect(document.body.textContent).not.toContain('status-secret')
-    expect(document.body.textContent).not.toContain('status-api-secret')
   })
 
   it('redacts editable MCP secrets without replacing unchanged values on save', async () => {
@@ -367,110 +320,6 @@ describe('McpSettings', () => {
     )
   })
 
-  it('keeps original MCP secrets masked when their key or preceding flag changes', async () => {
-    const server = {
-      name: 'context7',
-      scope: 'local',
-      transport: 'stdio',
-      enabled: true,
-      status: 'connected',
-      statusLabel: 'Connected',
-      configLocation: '/workspace/project/.mcp.json',
-      summary: 'npx context7',
-      canEdit: true,
-      canRemove: true,
-      canReconnect: true,
-      canToggle: true,
-      projectPath: '/workspace/project',
-      config: {
-        type: 'stdio',
-        command: 'npx',
-        args: ['context7', '--api-key', 'sk-argument-provenance-secret'],
-        env: { CONTEXT7_API_KEY: 'sk-env-provenance-secret' },
-      },
-    } as const
-    const updateServer = vi.fn().mockResolvedValue(server)
-    useMcpStore.setState({ servers: [server], updateServer })
-
-    await renderLoadedMcpSettings()
-    fireEvent.click(screen.getByRole('button', { name: 'Open context7' }))
-
-    fireEvent.change(screen.getByDisplayValue('--api-key'), {
-      target: { value: '--public-label' },
-    })
-    fireEvent.change(screen.getByDisplayValue('CONTEXT7_API_KEY'), {
-      target: { value: 'PUBLIC_LABEL' },
-    })
-
-    expect(document.body.textContent).not.toContain('sk-argument-provenance-secret')
-    expect(document.body.textContent).not.toContain('sk-env-provenance-secret')
-    expect(screen.getAllByDisplayValue('[redacted]').length).toBeGreaterThanOrEqual(2)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-    await waitFor(() => {
-      expect(updateServer).toHaveBeenCalledWith(
-        server,
-        {
-          scope: 'local',
-          config: {
-            type: 'stdio',
-            command: 'npx',
-            args: ['context7', '--public-label', 'sk-argument-provenance-secret'],
-            env: { PUBLIC_LABEL: 'sk-env-provenance-secret' },
-          },
-        },
-        '/workspace/project',
-      )
-    })
-  })
-
-  it('does not overwrite an unsaved MCP draft on same-server status updates', async () => {
-    const server = {
-      name: 'filesystem',
-      scope: 'user',
-      transport: 'stdio',
-      enabled: true,
-      status: 'connected',
-      statusLabel: 'Connected',
-      configLocation: '/tmp/config',
-      summary: 'npx filesystem',
-      canEdit: true,
-      canRemove: true,
-      canReconnect: true,
-      canToggle: true,
-      config: {
-        type: 'stdio',
-        command: 'npx',
-        args: ['filesystem'],
-        env: {},
-      },
-    } as const
-    const selectServer = vi.fn((selected: McpServerRecord | null) => {
-      useMcpStore.setState({ selectedServer: selected })
-    })
-    useMcpStore.setState({ servers: [server], selectServer })
-
-    await renderLoadedMcpSettings()
-    fireEvent.click(screen.getByRole('button', { name: 'Open filesystem' }))
-
-    const commandInput = screen.getByLabelText(/Command to launch/)
-    fireEvent.change(commandInput, { target: { value: 'custom-unsaved-command' } })
-
-    act(() => {
-      useMcpStore.setState({
-        selectedServer: {
-          ...server,
-          status: 'checking',
-          statusLabel: 'Checking',
-        },
-      })
-    })
-
-    expect(screen.getByLabelText(/Command to launch/)).toHaveValue('custom-unsaved-command')
-    expect(screen.getByText('Checking')).toBeInTheDocument()
-  })
-
   it('uses the server MCP name rules before enabling Save', async () => {
     await renderLoadedMcpSettings()
 
@@ -479,14 +328,12 @@ describe('McpSettings', () => {
     })
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('radio', { name: /^User/i }))
+      fireEvent.click(screen.getByRole('button', { name: /^User/i }))
     })
 
     fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'bad name' } })
     fireEvent.change(screen.getByLabelText(/Command to launch/), { target: { value: 'echo' } })
 
-    expect(screen.getByLabelText(/Name/)).toBeRequired()
-    expect(screen.getByLabelText(/Name/)).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
 
     fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'bad/name' } })
@@ -496,55 +343,7 @@ describe('McpSettings', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
 
     fireEvent.change(screen.getByLabelText(/Name/), { target: { value: '某某服务器' } })
-    expect(screen.getByLabelText(/Name/)).toHaveAttribute('aria-invalid', 'false')
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
-  })
-
-  it('composes the MCP editor from shadcn form primitives', async () => {
-    await renderLoadedMcpSettings()
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /add server/i }))
-    })
-
-    expect(screen.getByLabelText(/Name/)).toHaveFocus()
-    expect(screen.getByLabelText(/Name/)).toHaveAttribute('data-slot', 'input')
-    expect(screen.getByRole('radiogroup', { name: 'Config scope' })).toHaveAttribute('data-slot', 'radio-group')
-    expect(screen.getByRole('radio', { name: /^Local/i })).toHaveAttribute('data-slot', 'setting-radio-card')
-    expect(screen.getByRole('radiogroup', { name: 'Transport' })).toHaveAttribute('data-slot', 'toggle-group')
-    expect(screen.getByRole('radio', { name: 'STDIO' })).toHaveAttribute('data-slot', 'toggle-group-item')
-    const addArgumentButton = screen.getByRole('button', { name: 'Add argument' })
-    expect(addArgumentButton).toHaveAttribute('data-slot', 'button')
-    expect(screen.getByRole('button', { name: 'Delete Arguments 1' })).toHaveAttribute('data-slot', 'tooltip-trigger')
-    expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute('data-slot', 'button')
-
-    fireEvent.click(addArgumentButton)
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Arguments chrome-devtools-mcp@latest 2')).toHaveFocus()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Delete Arguments 2' }))
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Arguments chrome-devtools-mcp@latest 1')).toHaveFocus()
-    })
-
-    const httpTransport = screen.getByRole('radio', { name: 'Streamable HTTP' })
-    fireEvent.pointerDown(httpTransport, { button: 0 })
-    fireEvent.click(httpTransport)
-
-    await waitFor(() => {
-      expect(httpTransport).toHaveAttribute('aria-checked', 'true')
-      expect(screen.getByLabelText(/URL/)).toHaveAttribute('data-slot', 'input')
-      expect(screen.getByLabelText('OAuth client ID')).toHaveAttribute('data-slot', 'input')
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: /back to servers/i }))
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /add server/i })).toHaveFocus()
-    })
   })
 
   it('keeps same-name project MCP servers distinct by project path', async () => {
@@ -653,36 +452,17 @@ describe('McpSettings', () => {
 
     await renderLoadedMcpSettings()
 
-    const openButton = screen.getByRole('button', { name: 'Open global-user' })
-    openButton.focus()
     await act(async () => {
-      fireEvent.click(openButton)
+      fireEvent.click(screen.getByRole('button', { name: 'Open global-user' }))
     })
 
-    expect(screen.getByRole('heading', { name: 'Configure global-user MCP' })).toHaveFocus()
-    const uninstallButton = screen.getByRole('button', { name: /uninstall/i })
-    uninstallButton.focus()
     await act(async () => {
-      fireEvent.click(uninstallButton)
+      fireEvent.click(screen.getByRole('button', { name: /uninstall/i }))
     })
 
-    expect(screen.getByRole('alertdialog')).toHaveAttribute('data-slot', 'alert-dialog-content')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByText('Delete MCP server')).toBeInTheDocument()
     expect(screen.getByText('Delete MCP server "global-user"? This action cannot be undone.')).toBeInTheDocument()
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus()
-    })
-
-    fireEvent.keyDown(document, { key: 'Escape' })
-
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-      expect(uninstallButton).toHaveFocus()
-    })
-
-    await act(async () => {
-      fireEvent.click(uninstallButton)
-    })
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
@@ -757,50 +537,6 @@ describe('McpSettings', () => {
     expect(toggleServer).toHaveBeenCalledWith(server, '/workspace/project', 'session-1')
   })
 
-  it('locks a shadcn MCP switch while its toggle request is pending', async () => {
-    let resolveToggle!: (value: McpServerRecord) => void
-    const server = {
-      name: 'global-user',
-      scope: 'user',
-      transport: 'http',
-      enabled: true,
-      status: 'connected',
-      statusLabel: 'Connected',
-      configLocation: '/tmp/config',
-      summary: 'https://example.com/mcp',
-      canEdit: true,
-      canRemove: true,
-      canReconnect: true,
-      canToggle: true,
-      config: { type: 'http', url: 'https://example.com/mcp', headers: {} },
-    } as const
-    const toggleServer = vi.fn(() => new Promise<McpServerRecord>((resolve) => {
-      resolveToggle = resolve
-    }))
-    useMcpStore.setState({
-      servers: [server],
-      toggleServer,
-    })
-
-    await renderLoadedMcpSettings()
-
-    const toggle = screen.getByRole('switch', { name: 'global-user' })
-    fireEvent.click(toggle)
-
-    expect(toggleServer).toHaveBeenCalledTimes(1)
-    expect(toggle).toBeDisabled()
-    expect(toggle).toHaveAttribute('aria-busy', 'true')
-
-    await act(async () => {
-      resolveToggle({ ...server, enabled: false })
-    })
-
-    await waitFor(() => {
-      expect(toggle).not.toBeDisabled()
-      expect(toggle).not.toHaveAttribute('aria-busy')
-    })
-  })
-
   it('clears the selected MCP server when returning to the list', async () => {
     const selectServer = vi.fn()
     const server = {
@@ -834,9 +570,6 @@ describe('McpSettings', () => {
     })
 
     expect(selectServer).toHaveBeenLastCalledWith(null)
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Open global-user' })).toHaveFocus()
-    })
   })
 
   it('requires an explicitly selected project before creating local MCP servers', async () => {
@@ -1037,60 +770,6 @@ describe('McpSettings', () => {
         statusLabel: 'Connected',
         statusDetail: undefined,
       })
-    })
-  })
-
-  it('locks MCP editor mutations while reconnect is pending', async () => {
-    let resolveReconnect!: (value: McpServerRecord) => void
-    const server = {
-      name: 'filesystem',
-      scope: 'user',
-      transport: 'stdio',
-      enabled: true,
-      status: 'failed',
-      statusLabel: 'Unavailable',
-      statusDetail: 'Timed out',
-      configLocation: '/tmp/config',
-      summary: 'npx filesystem',
-      canEdit: true,
-      canRemove: true,
-      canReconnect: true,
-      canToggle: true,
-      config: {
-        type: 'stdio',
-        command: 'npx',
-        args: ['filesystem'],
-        env: {},
-      },
-    } as const
-    const reconnectServer = vi.fn(() => new Promise<McpServerRecord>((resolve) => {
-      resolveReconnect = resolve
-    }))
-    useMcpStore.setState({ servers: [server], reconnectServer })
-
-    await renderLoadedMcpSettings()
-    fireEvent.click(screen.getByRole('button', { name: 'Open filesystem' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
-
-    expect(screen.getByRole('button', { name: /back to servers/i })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /uninstall/i })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
-    expect(screen.getByLabelText(/Command to launch/)).toBeDisabled()
-
-    await act(async () => {
-      resolveReconnect({
-        ...server,
-        status: 'connected',
-        statusLabel: 'Connected',
-        statusDetail: undefined,
-      })
-    })
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /back to servers/i })).not.toBeDisabled()
-      expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled()
-      expect(screen.getByLabelText(/Command to launch/)).not.toBeDisabled()
     })
   })
 })

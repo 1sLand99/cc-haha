@@ -74,7 +74,7 @@ describe('WorkbenchPanel native webview lifecycle', () => {
 
     // Switch to the file tab: BrowserSurface unmounts, closing the webview overlay.
     act(() => {
-      fireEvent.mouseDown(screen.getByRole('tab', { name: 'Files' }), { button: 0 })
+      fireEvent.click(screen.getByRole('tab', { name: 'Files' }))
     })
 
     expect(screen.queryByTestId('preview-host')).not.toBeInTheDocument()

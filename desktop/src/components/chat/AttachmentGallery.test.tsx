@@ -2,7 +2,6 @@
 
 import '@testing-library/jest-dom'
 import { fireEvent, render, waitFor } from '@testing-library/react'
-import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { browserHost } from '../../lib/desktopHost/browserHost'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
@@ -124,7 +123,7 @@ describe('AttachmentGallery', () => {
     )
 
     expect(view.container.querySelector(`[data-file-extension="${extension}"]`)).toBeInTheDocument()
-    expect(view.container.querySelector(`[data-file-icon="${icon}"]`)).toBeInTheDocument()
+    expect(view.getByText(icon)).toBeInTheDocument()
   })
 
   it('opens an absolute desktop attachment with the system default app', async () => {
@@ -237,7 +236,7 @@ describe('AttachmentGallery', () => {
     expect(onRemove).toHaveBeenCalledWith('selection-1')
   })
 
-  it('shows a compact element chip for annotated selection images and exposes the note on focus', async () => {
+  it('shows a compact element chip for annotated selection images and exposes the note on hover', () => {
     const view = render(
       <AttachmentGallery
         variant="message"
@@ -253,56 +252,13 @@ describe('AttachmentGallery', () => {
 
     expect(view.getByRole('button', { name: 'Open <h1>' })).toBeTruthy()
     const noteChip = view.getByLabelText('Selection note: 这个标题更轻一点')
-    fireEvent.focus(noteChip)
-    const tooltip = await view.findByRole('tooltip')
+    const tooltip = view.getByRole('tooltip')
     expect(noteChip.textContent).toContain('<h1>')
     expect(noteChip.getAttribute('title')).toBe('这个标题更轻一点')
     expect(noteChip).toHaveAttribute('aria-describedby', tooltip.id)
     expect(tooltip).toHaveTextContent('修改内容')
     expect(tooltip).toHaveTextContent('这个标题更轻一点')
-  })
-
-  it('moves focus to the next remove action and then back to the composer', async () => {
-    function FocusHarness() {
-      const [attachments, setAttachments] = useState([
-        { id: 'one', type: 'file' as const, name: 'one.md' },
-        { id: 'two', type: 'file' as const, name: 'two.md' },
-      ])
-      return (
-        <>
-          <AttachmentGallery
-            variant="composer"
-            attachments={attachments}
-            onRemove={(id) => setAttachments((current) => current.filter((item) => item.id !== id))}
-          />
-          <textarea role="combobox" aria-label="Composer" />
-        </>
-      )
-    }
-
-    const view = render(<FocusHarness />)
-    fireEvent.click(view.getByRole('button', { name: 'Remove one.md' }))
-
-    await waitFor(() => expect(view.getByRole('button', { name: 'Remove two.md' })).toHaveFocus())
-    fireEvent.click(view.getByRole('button', { name: 'Remove two.md' }))
-
-    await waitFor(() => expect(view.getByRole('combobox', { name: 'Composer' })).toHaveFocus())
-  })
-
-  it('opens the selected image index even when image sources are identical', () => {
-    const view = render(
-      <AttachmentGallery
-        attachments={[
-          { id: 'first', type: 'image', name: 'first.png', data: 'data:image/png;base64,SAME' },
-          { id: 'second', type: 'image', name: 'second.png', data: 'data:image/png;base64,SAME' },
-        ]}
-      />,
-    )
-
-    fireEvent.click(view.getByRole('button', { name: 'Open second.png' }))
-
-    expect(view.getByRole('dialog', { name: 'second.png' })).toBeInTheDocument()
-    expect(view.getByText('2 / 2')).toBeInTheDocument()
+    expect(tooltip.className).toContain('group-hover/selection:visible')
   })
 
   it('localizes diff sides and remove actions in Chinese', () => {

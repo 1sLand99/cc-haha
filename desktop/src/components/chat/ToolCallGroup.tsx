@@ -9,9 +9,6 @@ import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
 import { useUIStore } from '../../stores/uiStore'
 import type { AgentTaskNotification, UIMessage } from '../../types/chat'
 import { AGENT_LIFECYCLE_TYPES } from '../../types/team'
-import { Badge } from '../ui/badge'
-import { Button } from '../ui/button'
-import { IconButton } from '../ui/custom/icon-button'
 
 type ToolCall = Extract<UIMessage, { type: 'tool_use' }>
 type ToolResult = Extract<UIMessage, { type: 'tool_result' }>
@@ -250,12 +247,10 @@ function MemoryToolActivityGroup({
         data-testid="memory-tool-activity-card"
         className="overflow-hidden rounded-lg border border-[var(--color-memory-border)] bg-[var(--color-memory-surface)]"
       >
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-expanded={expanded}
+        <button
+          type="button"
           onClick={toggleExpanded}
-          className="h-auto w-full justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-[var(--color-surface-hover)]/50 active:translate-y-0"
+          className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]/50"
         >
           {expanded ? (
             <ChevronDown size={15} className="shrink-0 text-[var(--color-text-tertiary)]" aria-hidden="true" />
@@ -269,19 +264,18 @@ function MemoryToolActivityGroup({
           {isStreaming ? (
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-memory-accent)] animate-pulse-dot" />
           ) : null}
-        </Button>
+        </button>
 
         {expanded ? (
           <div className="border-t border-[var(--color-border)]/55 px-3 py-2.5">
             <div className="space-y-1.5">
               {visibleFiles.map((file) => (
-                <Button
+                <button
                   key={file.path}
-                  variant="ghost"
-                  size="sm"
+                  type="button"
                   title={file.path}
                   onClick={() => openMemorySettings(file.path)}
-                  className="group h-auto w-full items-start justify-start gap-2 px-2 py-1.5 text-left hover:bg-[var(--color-surface-hover)] active:translate-y-0"
+                  className="group flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-surface-hover)] focus:outline-none focus-visible:shadow-[var(--shadow-focus-ring)]"
                 >
                   <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border border-[var(--color-memory-border)] bg-[var(--color-memory-icon-bg)] text-[var(--color-text-tertiary)] group-hover:text-[var(--color-memory-accent)]">
                     <Settings size={12} aria-hidden="true" />
@@ -303,7 +297,7 @@ function MemoryToolActivityGroup({
                       </span>
                     ) : null}
                   </span>
-                </Button>
+                </button>
               ))}
               {hiddenCount > 0 ? (
                 <div className="px-2 py-1 text-[12px] text-[var(--color-text-tertiary)]">
@@ -312,16 +306,14 @@ function MemoryToolActivityGroup({
               ) : null}
             </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              aria-expanded={detailsExpanded}
+            <button
+              type="button"
               onClick={() => setDetailsExpanded((value) => !value)}
-              className="mt-2 h-7 gap-1.5 border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-tertiary)]"
+              className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2 text-[11px] font-medium text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
             >
               {detailsExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               {t('chat.memoryTechnicalDetails')}
-            </Button>
+            </button>
 
             {detailsExpanded ? (
               <div className="mt-2 space-y-1">
@@ -371,12 +363,10 @@ function AgentToolGroup({
 
   return (
     <div className="mb-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-expanded={expanded}
+      <button
+        type="button"
         onClick={toggleExpanded}
-        className="h-auto w-full justify-start gap-2 rounded-lg border border-[var(--color-border)]/40 bg-[var(--color-surface-container-low)] px-3 py-1.5 text-left hover:bg-[var(--color-surface-container-high)] active:translate-y-0"
+        className="flex w-full items-center gap-2 rounded-lg border border-[var(--color-border)]/40 bg-[var(--color-surface-container-low)] px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-surface-container-high)]"
       >
         <span className="material-symbols-outlined text-[14px] text-[var(--color-outline)]">
           {expanded ? 'expand_less' : 'expand_more'}
@@ -401,7 +391,7 @@ function AgentToolGroup({
         {!isAnyRunning && !errorPresent && !allComplete && anyStopped && (
           <span className="material-symbols-outlined text-[14px] text-[var(--color-outline)]">stop_circle</span>
         )}
-      </Button>
+      </button>
 
       {expanded && (
         <div className="relative mt-3 pl-5">
@@ -442,12 +432,10 @@ function ToolCallGroupMulti({ toolCalls, resultMap, childToolCallsByParent, isSt
 
   return (
     <div className="mb-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-expanded={expanded}
+      <button
+        type="button"
         onClick={toggleExpanded}
-        className="h-auto w-full justify-start gap-2 rounded-lg border border-[var(--color-border)]/40 bg-[var(--color-surface-container-low)] px-3 py-1.5 text-left hover:bg-[var(--color-surface-container-high)] active:translate-y-0"
+        className="flex w-full items-center gap-2 rounded-lg border border-[var(--color-border)]/40 bg-[var(--color-surface-container-low)] px-3 py-1.5 text-left transition-colors hover:bg-[var(--color-surface-container-high)]"
       >
         <span className="material-symbols-outlined text-[14px] text-[var(--color-outline)]">
           {expanded ? 'expand_less' : 'expand_more'}
@@ -464,7 +452,7 @@ function ToolCallGroupMulti({ toolCalls, resultMap, childToolCallsByParent, isSt
         {isRunning && (
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-brand)] animate-pulse-dot" />
         )}
-      </Button>
+      </button>
 
       {expanded && (
         <div className="mt-1.5 space-y-1">
@@ -579,46 +567,43 @@ function AgentCallCard({
           )}
         </div>
         {outputSummary && (
-          <Button
-            variant="outline"
-            size="sm"
+          <button
+            type="button"
             onClick={(event) => {
               event.stopPropagation()
               setPreviewOpen(true)
             }}
-            className="h-7 shrink-0 border-[var(--color-border)] px-2.5 text-[11px] text-[var(--color-text-secondary)]"
+            className="shrink-0 rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
           >
             {t('agentStatus.viewResult')}
-          </Button>
+          </button>
         )}
         {canOpenRun && (
-          <Button
-            variant="outline"
-            size="sm"
+          <button
+            type="button"
             aria-label={`Open run ${openRunTitle}`}
             onClick={(event) => {
               event.stopPropagation()
               useTabStore.getState().openSubagentTab(sessionId, toolCall.toolUseId, openRunTitle)
             }}
-            className="h-7 shrink-0 border-[var(--color-border)] px-2.5 text-[11px] text-[var(--color-text-secondary)]"
+            className="shrink-0 rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
           >
             Open run
-          </Button>
+          </button>
         )}
-        <Badge variant="outline" className={`min-h-0 rounded-full border-transparent px-2 py-0.5 text-[10px] ${statusClassName}`}>
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusClassName}`}>
           {statusLabel}
-        </Badge>
-        <IconButton
-          variant="ghost"
-          size="icon-sm"
-          label={expanded ? 'Collapse agent' : 'Expand agent'}
+        </span>
+        <button
+          type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="h-7 w-7 shrink-0 rounded-full text-[var(--color-outline)]"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--color-outline)] transition-colors hover:bg-[var(--color-surface-hover)]"
+          aria-label={expanded ? 'Collapse agent' : 'Expand agent'}
         >
           <span className="material-symbols-outlined text-[16px]">
           {expanded ? 'expand_less' : 'expand_more'}
           </span>
-        </IconButton>
+        </button>
       </div>
 
       {expanded && (

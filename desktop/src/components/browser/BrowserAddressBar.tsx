@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, RotateCw } from 'lucide-react'
-import { useTranslation } from '../../i18n'
 import { isHtmlFilePath } from '../../lib/htmlPreviewPolicy'
-import { IconButton } from '../ui/custom/icon-button'
-import { Input } from '../ui/input'
-import { Progress } from '../ui/progress'
 
 type Props = {
   url: string
@@ -20,7 +16,6 @@ type Props = {
 }
 
 export function BrowserAddressBar({ url, canGoBack, canGoForward, loading = false, onNavigate, onBack, onForward, onReload, rightActions }: Props) {
-  const t = useTranslation()
   const [draft, setDraft] = useState(url)
   useEffect(() => { setDraft(url) }, [url])
 
@@ -29,48 +24,17 @@ export function BrowserAddressBar({ url, canGoBack, canGoForward, loading = fals
       data-testid="browser-address-bar"
       className="relative flex h-11 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] px-2"
     >
-      <IconButton
-        label={t('browser.back')}
-        variant="ghost"
-        className="size-8 rounded-full"
-        disabled={!canGoBack}
-        onClick={onBack}
-      >
-        <ArrowLeft size={16} aria-hidden="true" />
-      </IconButton>
-      <IconButton
-        label={t('browser.forward')}
-        variant="ghost"
-        className="size-8 rounded-full"
-        disabled={!canGoForward}
-        onClick={onForward}
-      >
-        <ArrowRight size={16} aria-hidden="true" />
-      </IconButton>
-      <IconButton
-        label={t('browser.reload')}
-        variant="ghost"
-        className="size-8 rounded-full"
-        aria-busy={loading}
-        onClick={onReload}
-      >
-        {loading
-          ? (
-              <Loader2
-                size={16}
-                aria-hidden="true"
-                className="motion-safe:animate-spin motion-reduce:animate-none"
-              />
-            )
-          : <RotateCw size={16} aria-hidden="true" />}
-      </IconButton>
+      <button aria-label="后退" disabled={!canGoBack} onClick={onBack} className="p-1 disabled:opacity-40"><ArrowLeft size={16} /></button>
+      <button aria-label="前进" disabled={!canGoForward} onClick={onForward} className="p-1 disabled:opacity-40"><ArrowRight size={16} /></button>
+      <button aria-label="刷新" aria-busy={loading} onClick={onReload} className="p-1">
+        {loading ? <Loader2 size={16} className="animate-spin" /> : <RotateCw size={16} />}
+      </button>
       <form className="min-w-0 flex-1" onSubmit={(e) => { e.preventDefault(); onNavigate(normalizeBrowserAddress(draft)) }}>
-        <Input
-          aria-label={t('browser.addressLabel')}
-          className="h-8 rounded-full px-3 text-xs"
+        <input
+          className="w-full rounded-md bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text-primary)]"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder={t('browser.addressPlaceholder')}
+          placeholder="输入网址..."
           spellCheck={false}
         />
       </form>
@@ -80,11 +44,11 @@ export function BrowserAddressBar({ url, canGoBack, canGoForward, loading = fals
         </div>
       )}
       {loading && (
-        <Progress
-          value={null}
-          aria-label={t('browser.loading')}
+        <div
+          role="progressbar"
+          aria-label="加载中"
           data-testid="browser-loading-bar"
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 rounded-none"
+          className="progress-indeterminate-track pointer-events-none absolute inset-x-0 bottom-0 h-0.5"
         />
       )}
     </div>

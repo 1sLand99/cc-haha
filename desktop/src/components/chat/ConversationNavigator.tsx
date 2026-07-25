@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom'
 import { Paperclip } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import type { UIMessage } from '../../types/chat'
-import { Button } from '../ui/button'
 
 export type ConversationNavigationSource = {
   message: UIMessage
@@ -172,13 +171,12 @@ export function ConversationNavigator({
 
           return (
             <div key={item.id} className="relative flex shrink-0 items-center">
-              <Button
+              <button
                 ref={(node) => {
                   if (node) markerRefs.current.set(item.id, node)
                   else markerRefs.current.delete(item.id)
                 }}
-                variant="ghost"
-                size="sm"
+                type="button"
                 data-role={item.role}
                 aria-label={`${roleLabel}: ${item.preview}`}
                 aria-current={isActive ? 'location' : undefined}
@@ -196,7 +194,7 @@ export function ConversationNavigator({
                   setPreviewItemId(null)
                 }}
                 onClick={() => onNavigate(item)}
-                className={`group h-4 items-center justify-start rounded-sm p-0 active:translate-y-0 ${modeStyles.button}`}
+                className={`group flex h-4 items-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35 ${modeStyles.button}`}
               >
                 <span
                   aria-hidden="true"
@@ -212,7 +210,7 @@ export function ConversationNavigator({
                   ].join(' ')}
                   style={{ width: markerWidth }}
                 />
-              </Button>
+              </button>
 
             </div>
           )

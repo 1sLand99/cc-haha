@@ -41,14 +41,6 @@ describe('StartupErrorView', () => {
       expect(screen.getByText('本地服务启动失败')).toBeInTheDocument()
       expect(screen.getByText('startup failed')).toBeInTheDocument()
       expect(screen.getByText('[stderr] boom')).toBeInTheDocument()
-      expect(screen.getByRole('heading', { name: '本地服务启动失败' })).toHaveFocus()
-      expect(screen.getByRole('alert')).toHaveAttribute('data-slot', 'alert')
-      expect(document.querySelectorAll('[data-slot="card"]').length).toBeGreaterThanOrEqual(2)
-      expect(document.querySelector('[data-custom-slot="startup-surface"]')).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: '复制诊断信息' })).toHaveAttribute(
-        'data-slot',
-        'button',
-      )
 
       fireEvent.click(screen.getByRole('button', { name: '复制诊断信息' }))
 

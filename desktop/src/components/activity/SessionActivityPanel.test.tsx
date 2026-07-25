@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionActivityPanel } from './SessionActivityPanel'
@@ -118,13 +118,7 @@ describe('SessionActivityPanel', () => {
       />,
     )
 
-    const panel = screen.getByRole('dialog', { name: /activity/i })
-    expect(panel).toBeInTheDocument()
-    expect(panel).toHaveAttribute('data-slot', 'activity-panel')
-    expect(panel).toHaveAttribute('aria-modal', 'false')
-    expect(panel).toHaveFocus()
-    expect(panel.querySelector('[data-slot="activity-panel-count"]')).toHaveAttribute('data-variant', 'secondary')
-    expect(panel.querySelector('[data-slot="activity-panel-scroll-area"]')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: /activity/i })).toBeInTheDocument()
     expect(screen.queryByText('Output')).not.toBeInTheDocument()
     expect(screen.getByText('Tasks')).toBeInTheDocument()
     expect(screen.getByText('Write tests')).toHaveAttribute('title', 'Write tests')
@@ -209,7 +203,7 @@ describe('SessionActivityPanel', () => {
     expect(screen.getAllByLabelText('Task completed')).toHaveLength(1)
   })
 
-  it('clears visible finished background task keys and moves focus to the next section', async () => {
+  it('clears visible finished background task keys without showing preview details', () => {
     const onClearFinishedBackgroundTasks = vi.fn()
     render(
       <SessionActivityPanel
@@ -250,15 +244,9 @@ describe('SessionActivityPanel', () => {
     expect(screen.queryByText('Task completed with a long markdown report')).not.toBeInTheDocument()
     expect(screen.queryByText('94.3k tokens')).not.toBeInTheDocument()
 
-    const detailTrigger = screen.getByRole('button', { name: /open background task run smoke checks/i })
-    fireEvent.click(detailTrigger)
+    fireEvent.click(screen.getByRole('button', { name: /open background task run smoke checks/i }))
 
-    expect(detailTrigger).toHaveAttribute('data-slot', 'collapsible-trigger')
-    expect(detailTrigger).toHaveAttribute('aria-expanded', 'true')
-    expect(detailTrigger).toHaveAttribute('aria-controls')
     expect(screen.getByText('Details')).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Details: Run smoke checks' })).toBeInTheDocument()
-    expect(screen.getByText('Details').closest('[data-slot="card"]')).toBeInTheDocument()
     expect(screen.getByText('Description')).toBeInTheDocument()
     expect(screen.getByText('# Markdown preview should stay in details')).toBeInTheDocument()
     expect(screen.getByText('Summary')).toBeInTheDocument()
@@ -269,68 +257,6 @@ describe('SessionActivityPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /clear finished/i }))
 
     expect(onClearFinishedBackgroundTasks).toHaveBeenCalledWith(['bash-task-1:completed:1000'])
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /open run kuhn/i })).toHaveFocus()
-    })
-  })
-
-  it('resets expanded background task details when the session changes', () => {
-    const backgroundSection = {
-      id: 'backgroundTasks' as const,
-      title: 'Background Tasks',
-      emptyLabel: 'No background tasks',
-      rows: [{
-        id: 'shared-row',
-        section: 'backgroundTasks' as const,
-        label: 'Shared task id',
-        status: 'completed' as const,
-        description: 'Session-specific detail',
-        taskId: 'shared-task',
-        taskType: 'local_bash',
-        openable: true,
-      }],
-    }
-    const firstModel = model({
-      sessionId: 'session-1',
-      sections: {
-        ...model().sections,
-        tasks: { id: 'tasks', title: 'Tasks', emptyLabel: 'No tasks', rows: [] },
-        subagents: { id: 'subagents', title: 'SubAgents', emptyLabel: 'No SubAgents', rows: [] },
-        backgroundTasks: backgroundSection,
-      },
-    })
-    const secondModel = model({
-      sessionId: 'session-2',
-      sections: {
-        ...model().sections,
-        tasks: { id: 'tasks', title: 'Tasks', emptyLabel: 'No tasks', rows: [] },
-        subagents: { id: 'subagents', title: 'SubAgents', emptyLabel: 'No SubAgents', rows: [] },
-        backgroundTasks: backgroundSection,
-      },
-    })
-    const { rerender } = render(
-      <SessionActivityPanel
-        model={firstModel}
-        open
-        onClose={vi.fn()}
-        onOpenSubagent={vi.fn()}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: /open background task shared task id/i }))
-    expect(screen.getByRole('region', { name: 'Details: Shared task id' })).toBeInTheDocument()
-
-    rerender(
-      <SessionActivityPanel
-        model={secondModel}
-        open
-        onClose={vi.fn()}
-        onOpenSubagent={vi.fn()}
-      />,
-    )
-
-    expect(screen.queryByRole('region', { name: 'Details: Shared task id' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /open background task shared task id/i })).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('stops running background tasks and disables repeat requests while stopping', () => {
@@ -381,10 +307,7 @@ describe('SessionActivityPanel', () => {
       />,
     )
 
-    const stoppingButton = screen.getByRole('button', { name: 'Stopping background task Sleep for 300 seconds' })
-    expect(stoppingButton).toBeDisabled()
-    expect(stoppingButton).toHaveAttribute('aria-busy', 'true')
-    expect(stoppingButton).toHaveAttribute('data-slot', 'button')
+    expect(screen.getByRole('button', { name: 'Stopping background task Sleep for 300 seconds' })).toBeDisabled()
   })
 
   it('does not offer the background task stop control for a running SubAgent', () => {
@@ -463,9 +386,7 @@ describe('SessionActivityPanel', () => {
     const motionRing = within(row).getByTestId('agent-mascot-motion-ring')
 
     expect(row).toHaveTextContent('Running')
-    expect(within(row).getByRole('status')).toHaveAttribute('aria-live', 'polite')
     expect(mascot).toHaveAttribute('aria-hidden', 'true')
-    expect(mascot).toHaveAttribute('data-slot', 'agent-mascot')
     expect(mascot).toHaveAttribute('data-agent-mascot-state', 'running')
     expect(mascot).toHaveAttribute('data-agent-mascot-motion', 'active')
     expect(mascot).toHaveAttribute('data-agent-mascot-tone', 'accent')
@@ -570,27 +491,15 @@ describe('SessionActivityPanel', () => {
     expect(onOpenMember).toHaveBeenCalledWith(member)
   })
 
-  it('closes from the close button and Escape, then restores the trigger focus', async () => {
+  it('closes from the close button and Escape', () => {
     const onClose = vi.fn()
-    render(
-      <>
-        <button id="session-activity-trigger-session-1" type="button">Activity trigger</button>
-        <SessionActivityPanel model={model()} open onClose={onClose} onOpenSubagent={vi.fn()} />
-      </>,
-    )
+    render(<SessionActivityPanel model={model()} open onClose={onClose} onOpenSubagent={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: /close activity/i }))
     expect(onClose).toHaveBeenCalledTimes(1)
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Activity trigger' })).toHaveFocus()
-    })
 
-    screen.getByRole('dialog', { name: /activity/i }).focus()
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(2)
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Activity trigger' })).toHaveFocus()
-    })
   })
 
   it('closes on outside pointerdown', () => {
@@ -639,9 +548,6 @@ describe('SessionActivityPanel', () => {
     )
 
     expect(screen.getByTestId('session-activity-panel')).toHaveAttribute('data-placement', 'rail')
-    expect(screen.getByRole('complementary', { name: 'Activity' })).toBeInTheDocument()
-    expect(screen.getByTestId('session-activity-panel')).not.toHaveAttribute('aria-modal')
-    expect(screen.getByTestId('session-activity-panel')).not.toHaveAttribute('tabindex')
     expect(screen.getByTestId('session-activity-panel')).toHaveClass('my-4')
     expect(screen.getByTestId('session-activity-panel')).toHaveClass('mr-3')
     expect(screen.getByTestId('session-activity-panel')).toHaveClass('w-[336px]')
@@ -713,12 +619,13 @@ describe('SessionActivityPanel', () => {
     const backgroundSection = document.querySelector('section[aria-label="Background Tasks"]')
     const subagentsSection = document.querySelector('section[aria-label="SubAgents"]')
 
-    expect(scrollOwner).toHaveAttribute('data-slot', 'activity-panel-scroll-area')
-    expect(scrollOwner.querySelectorAll('[data-slot="scroll-area-viewport"]')).toHaveLength(1)
-    expect(tasksSection?.querySelector('[data-slot="scroll-area"]')).not.toBeInTheDocument()
-    expect(teamSection?.querySelector('[data-slot="scroll-area"]')).not.toBeInTheDocument()
-    expect(backgroundSection?.querySelector('[data-slot="scroll-area"]')).not.toBeInTheDocument()
-    expect(subagentsSection?.querySelector('[data-slot="scroll-area"]')).not.toBeInTheDocument()
+    expect(scrollOwner).toHaveClass('overflow-y-auto')
+    expect(scrollOwner).toHaveClass('[scrollbar-width:auto]')
+    expect(scrollOwner).toHaveClass('[&::-webkit-scrollbar]:w-2.5')
+    expect(tasksSection?.querySelector('.overflow-y-auto')).not.toBeInTheDocument()
+    expect(teamSection?.querySelector('.overflow-y-auto')).not.toBeInTheDocument()
+    expect(backgroundSection?.querySelector('.overflow-y-auto')).not.toBeInTheDocument()
+    expect(subagentsSection?.querySelector('.overflow-y-auto')).not.toBeInTheDocument()
   })
 
   it('opens a SubAgent row when the row is openable', () => {

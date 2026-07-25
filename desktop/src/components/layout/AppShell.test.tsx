@@ -186,8 +186,6 @@ describe('AppShell boot flow', () => {
     render(<AppShell />)
 
     expect(screen.getByText('app.launching')).toBeInTheDocument()
-    expect(document.querySelector('[data-custom-slot="startup-surface"]')).toBeInTheDocument()
-    expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(2)
 
     expect(await screen.findByText('sidebar loaded')).toBeInTheDocument()
     expect(screen.getByText('tabs loaded')).toBeInTheDocument()
@@ -514,28 +512,24 @@ describe('AppShell boot flow', () => {
       expect(useUIStore.getState().sidebarOpen).toBe(false)
     })
 
-    expect(screen.queryByTestId('sidebar-shell')).not.toBeInTheDocument()
+    expect(screen.getByTestId('sidebar-shell')).toHaveAttribute('data-state', 'closed')
+    expect(screen.getByTestId('sidebar-shell')).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByTestId('sidebar-shell')).toHaveAttribute('inert')
     expect(screen.queryByText('sidebar loaded')).not.toBeInTheDocument()
-    const toggle = screen.getByTestId('mobile-sidebar-toggle')
-    expect(toggle).toHaveAttribute('data-slot', 'button')
-    toggle.focus()
+    expect(screen.getByTestId('mobile-sidebar-toggle')).toBeInTheDocument()
     expect(screen.queryByTestId('sidebar-backdrop')).not.toBeInTheDocument()
 
-    fireEvent.click(toggle)
+    fireEvent.click(screen.getByTestId('mobile-sidebar-toggle'))
 
     expect(useUIStore.getState().sidebarOpen).toBe(true)
     expect(screen.getByTestId('sidebar-shell')).toHaveAttribute('data-state', 'open')
-    expect(screen.getByTestId('sidebar-shell')).toHaveAttribute('data-slot', 'sheet-content')
     expect(screen.getByText('sidebar loaded')).toBeInTheDocument()
-    expect(screen.getByTestId('sidebar-backdrop')).toHaveAttribute('data-slot', 'sheet-overlay')
+    expect(screen.getByTestId('sidebar-backdrop')).toBeInTheDocument()
 
-    fireEvent.keyDown(screen.getByTestId('sidebar-shell'), { key: 'Escape' })
+    fireEvent.click(screen.getByTestId('sidebar-backdrop'))
 
-    await waitFor(() => {
-      expect(useUIStore.getState().sidebarOpen).toBe(false)
-      expect(screen.queryByTestId('sidebar-shell')).not.toBeInTheDocument()
-      expect(toggle).toHaveFocus()
-    })
+    expect(useUIStore.getState().sidebarOpen).toBe(false)
+    expect(screen.getByTestId('sidebar-shell')).toHaveAttribute('data-state', 'closed')
   })
 
   it('shares the mobile drawer row with the active session title', async () => {
@@ -568,7 +562,7 @@ describe('AppShell boot flow', () => {
     expect(header).toHaveTextContent('Analyze recent commits')
     expect(header).toHaveTextContent('session.active')
     expect(header).toHaveTextContent('session.messages')
-    expect(screen.getByTestId('mobile-sidebar-toggle')).toHaveAttribute('data-size', 'icon-lg')
+    expect(screen.getByTestId('mobile-sidebar-toggle')).toHaveClass('h-10', 'w-10')
   })
 
   it('keeps browser H5 mobile on chat tabs when settings was restored as active', async () => {

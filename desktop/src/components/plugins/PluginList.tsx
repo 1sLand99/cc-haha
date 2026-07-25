@@ -1,47 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ChevronRight,
-  ListChecks,
-  PackageX,
-  Puzzle,
-  RefreshCw,
-  RotateCw,
-  Store,
-  ToggleLeft,
-  ToggleRight,
-} from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { usePluginStore, type PluginActionTarget } from '../../stores/pluginStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useTranslation } from '../../i18n'
 import { useUIStore } from '../../stores/uiStore'
+import { Button } from '../shared/Button'
+import { ConfirmDialog } from '../shared/ConfirmDialog'
 import type { PluginSummary } from '../../types/plugin'
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../ui/alert-dialog'
-import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
-import { Badge } from '../ui/badge'
-import { Button } from '../ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
-import { Checkbox } from '../ui/checkbox'
-import { LoadingButton } from '../ui/custom/loading-button'
-import { Skeleton } from '../ui/skeleton'
 
 type PluginBucket = 'attention' | 'enabled' | 'disabled'
 type BatchAction = 'enable' | 'disable'
 
-export function PluginList({
-  onOpenPlugin,
-}: {
-  onOpenPlugin?: (pluginId: string) => void
-}) {
+export function PluginList() {
   const {
     plugins,
     marketplaces,
@@ -62,40 +31,8 @@ export function PluginList({
   const t = useTranslation()
   const [selectedPluginIds, setSelectedPluginIds] = useState<Set<string>>(() => new Set())
   const [confirmBatchAction, setConfirmBatchAction] = useState<BatchAction | null>(null)
-  const [batchError, setBatchError] = useState<string | null>(null)
-  const enableBatchTriggerRef = useRef<HTMLButtonElement>(null)
-  const disableBatchTriggerRef = useRef<HTMLButtonElement>(null)
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const currentWorkDir = activeSession?.workDir || undefined
-
-  const addRuntimeAwareToast = (
-    successMessage: string,
-    successType: 'success' | 'warning' = 'success',
-  ) => {
-    const { lastSessionReload: sessionReload, refreshWarning } =
-      usePluginStore.getState()
-    if (refreshWarning) {
-      addToast({
-        type: 'warning',
-        message: t('settings.plugins.refreshAfterMutationFailed', {
-          error: refreshWarning,
-        }),
-      })
-      return
-    }
-    if (activeSessionId && sessionReload && !sessionReload.applied) {
-      addToast({
-        type: 'warning',
-        message: t(
-          sessionReload.reason === 'not_running'
-            ? 'settings.plugins.runtimeNotRunning'
-            : 'settings.plugins.runtimeApplyFailed',
-        ),
-      })
-      return
-    }
-    addToast({ type: successType, message: successMessage })
-  }
 
   useEffect(() => {
     void fetchPlugins(currentWorkDir)
@@ -150,14 +87,14 @@ export function PluginList({
   const handleReload = async () => {
     try {
       const reloadSummary = await reloadPlugins(currentWorkDir, activeSessionId || undefined)
-      addRuntimeAwareToast(
-        t('settings.plugins.reloadToast', {
+      addToast({
+        type: reloadSummary.errors > 0 ? 'warning' : 'success',
+        message: t('settings.plugins.reloadToast', {
           enabled: String(reloadSummary.enabled),
           skills: String(reloadSummary.skills),
           errors: String(reloadSummary.errors),
         }),
-        reloadSummary.errors > 0 ? 'warning' : 'success',
-      )
+      })
     } catch (err) {
       addToast({
         type: 'error',
@@ -196,7 +133,6 @@ export function PluginList({
     }
 
     try {
-      setBatchError(null)
       const changed = action === 'enable'
         ? await bulkEnablePlugins(toActionTargets(targets), currentWorkDir, activeSessionId || undefined)
         : await bulkDisablePlugins(toActionTargets(targets), currentWorkDir, activeSessionId || undefined)
@@ -209,13 +145,14 @@ export function PluginList({
         return next
       })
       setConfirmBatchAction(null)
-      addRuntimeAwareToast(
-        t(action === 'enable' ? 'settings.plugins.bulkEnableToast' : 'settings.plugins.bulkDisableToast', {
+      addToast({
+        type: 'success',
+        message: t(action === 'enable' ? 'settings.plugins.bulkEnableToast' : 'settings.plugins.bulkDisableToast', {
           count: String(changed),
         }),
-      )
+      })
     } catch (err) {
-      setBatchError(err instanceof Error ? err.message : String(err))
+      setConfirmBatchAction(null)
       addToast({
         type: 'error',
         message: err instanceof Error ? err.message : String(err),
@@ -224,46 +161,36 @@ export function PluginList({
   }
 
   if (isLoading) {
-    return <PluginListSkeleton />
+    return (
+      <div className="flex justify-center py-12">
+        <div className="animate-spin w-5 h-5 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
+      </div>
+    )
   }
 
   if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>{t('settings.plugins.title')}</AlertTitle>
-        <AlertDescription className="break-words">{error}</AlertDescription>
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-2 w-fit"
-          onClick={() => void fetchPlugins(currentWorkDir)}
-        >
-          <RefreshCw aria-hidden="true" />
-          {t('common.retry')}
-        </Button>
-      </Alert>
-    )
+    return <div className="text-sm text-[var(--color-error)] py-4">{error}</div>
   }
 
   if (plugins.length === 0) {
     return (
-      <Card className="border-dashed">
-        <CardContent className="px-6 py-12 text-center">
-          <PackageX className="mx-auto mb-2 size-10 text-[var(--color-text-tertiary)]" aria-hidden="true" />
-          <p className="text-sm text-[var(--color-text-tertiary)]">
-            {t('settings.plugins.empty')}
-          </p>
-          <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
-            {t('settings.plugins.emptyHint')}
-          </p>
-        </CardContent>
-      </Card>
+      <div className="text-center py-12 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6">
+        <span className="material-symbols-outlined text-[40px] text-[var(--color-text-tertiary)] mb-2 block">
+          extension
+        </span>
+        <p className="text-sm text-[var(--color-text-tertiary)]">
+          {t('settings.plugins.empty')}
+        </p>
+        <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+          {t('settings.plugins.emptyHint')}
+        </p>
+      </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
-      <Card className="overflow-hidden">
+      <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] overflow-hidden">
         <div className="flex flex-col gap-4 px-5 py-5 min-w-0">
           <div className="flex flex-col gap-4 min-w-0 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0 max-w-4xl">
@@ -271,7 +198,9 @@ export function PluginList({
                 {t('settings.plugins.browserEyebrow')}
               </div>
               <div className="flex items-center gap-3 mb-2">
-                <Puzzle className="size-[22px] text-[var(--color-brand)]" aria-hidden="true" />
+                <span className="material-symbols-outlined text-[22px] text-[var(--color-brand)]">
+                  extension
+                </span>
                 <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">
                   {t('settings.plugins.browserTitle')}
                 </h3>
@@ -284,20 +213,22 @@ export function PluginList({
             <div className="flex flex-wrap gap-2 xl:justify-end">
               <Button
                 variant="secondary"
+                size="sm"
                 className="min-h-9 flex-1 sm:flex-none"
                 onClick={() => void fetchPlugins(currentWorkDir)}
               >
-                <RefreshCw aria-hidden="true" />
+                <span className="material-symbols-outlined text-[16px]">refresh</span>
                 {t('settings.plugins.refresh')}
               </Button>
-              <LoadingButton
+              <Button
+                size="sm"
                 className="min-h-9 flex-1 sm:flex-none"
                 onClick={handleReload}
                 loading={isApplying}
               >
-                <RotateCw aria-hidden="true" />
+                <span className="material-symbols-outlined text-[16px]">sync</span>
                 {t('settings.plugins.apply')}
-              </LoadingButton>
+              </Button>
             </div>
           </div>
 
@@ -305,22 +236,22 @@ export function PluginList({
             <SummaryCard
               label={t('settings.plugins.summary.total')}
               value={String(summary?.total ?? plugins.length)}
-              icon={Puzzle}
+              icon="extension"
             />
             <SummaryCard
               label={t('settings.plugins.summary.enabled')}
               value={String(summary?.enabled ?? plugins.filter((plugin) => plugin.enabled).length)}
-              icon={CheckCircle2}
+              icon="check_circle"
             />
             <SummaryCard
               label={t('settings.plugins.summary.attention')}
               value={String(grouped.attention.length)}
-              icon={AlertTriangle}
+              icon="warning"
             />
             <SummaryCard
               label={t('settings.plugins.summary.marketplaces')}
               value={String(summary?.marketplaceCount ?? marketplaces.length)}
-              icon={Store}
+              icon="storefront"
             />
           </div>
 
@@ -337,100 +268,87 @@ export function PluginList({
 
         <div className="flex flex-col gap-3 border-t border-[var(--color-border)] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-            <ListChecks className="size-4 text-[var(--color-text-tertiary)]" aria-hidden="true" />
+            <span className="material-symbols-outlined text-[16px] text-[var(--color-text-tertiary)]">
+              checklist
+            </span>
             <span className="font-medium text-[var(--color-text-primary)]">
               {t('settings.plugins.selectionCount', { count: String(selectedPlugins.length) })}
             </span>
             {selectedPlugins.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
+              <button
+                type="button"
                 onClick={clearSelection}
-                className="h-7"
+                className="rounded-md px-2 py-1 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
               >
                 {t('settings.plugins.clearSelection')}
-              </Button>
+              </button>
             )}
           </div>
           <div className="flex flex-wrap gap-2 sm:justify-end">
             <Button
-              ref={enableBatchTriggerRef}
               size="sm"
               disabled={enableCandidates.length === 0 || isApplying}
-              onClick={() => {
-                setBatchError(null)
-                setConfirmBatchAction('enable')
-              }}
+              onClick={() => setConfirmBatchAction('enable')}
             >
-              <ToggleRight aria-hidden="true" />
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">toggle_on</span>
               {t('settings.plugins.enableSelected')}
             </Button>
             <Button
-              ref={disableBatchTriggerRef}
               variant="secondary"
               size="sm"
               disabled={disableCandidates.length === 0 || isApplying}
-              onClick={() => {
-                setBatchError(null)
-                setConfirmBatchAction('disable')
-              }}
+              onClick={() => setConfirmBatchAction('disable')}
             >
-              <ToggleLeft aria-hidden="true" />
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">toggle_off</span>
               {t('settings.plugins.disableSelected')}
             </Button>
           </div>
         </div>
-      </Card>
+      </section>
 
       {marketplaces.length > 0 && (
-        <Card className="overflow-hidden bg-[var(--color-surface)]">
-          <CardHeader className="gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-5 py-4">
-            <CardTitle className="text-sm">
+        <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
+            <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
               {t('settings.plugins.marketplacesTitle')}
-            </CardTitle>
-            <CardDescription className="text-xs">
+            </h4>
+            <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
               {t('settings.plugins.marketplacesHint')}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+            </p>
+          </div>
+          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
             {marketplaces.map((marketplace) => (
-              <Card
+              <div
                 key={marketplace.name}
-                className="bg-[var(--color-surface-container-low)]"
+                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3"
               >
-                <CardContent className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-[var(--color-text-primary)]">
-                      {marketplace.name}
-                    </span>
-                    <Badge className={
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-[var(--color-text-primary)]">
+                    {marketplace.name}
+                  </span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
                     marketplace.autoUpdate
-                        ? 'border-transparent bg-[var(--color-success-container)] text-[var(--color-success)]'
-                        : 'border-transparent bg-[var(--color-surface-container-high)] text-[var(--color-text-tertiary)]'
-                    }>
-                      {marketplace.autoUpdate
-                        ? t('settings.plugins.marketplaceAutoUpdateOn')
-                        : t('settings.plugins.marketplaceAutoUpdateOff')}
-                    </Badge>
-                  </div>
-                  <div className="mt-2 break-words text-xs leading-5 text-[var(--color-text-secondary)]">
-                    {marketplace.source}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-tertiary)]">
-                    <span>{t('settings.plugins.marketplaceInstalledCount', { count: String(marketplace.installedCount) })}</span>
-                    {formatMarketplaceUpdatedAt(marketplace.lastUpdated) && (
-                      <span>
-                        {t('settings.plugins.marketplaceUpdatedAt', {
-                          value: formatMarketplaceUpdatedAt(marketplace.lastUpdated)!,
-                        })}
-                      </span>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+                      ? 'bg-[var(--color-success-container)] text-[var(--color-success)]'
+                      : 'bg-[var(--color-surface-container-high)] text-[var(--color-text-tertiary)]'
+                  }`}>
+                    {marketplace.autoUpdate
+                      ? t('settings.plugins.marketplaceAutoUpdateOn')
+                      : t('settings.plugins.marketplaceAutoUpdateOff')}
+                  </span>
+                </div>
+                <div className="mt-2 text-xs leading-5 text-[var(--color-text-secondary)] break-words">
+                  {marketplace.source}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-tertiary)]">
+                  <span>{t('settings.plugins.marketplaceInstalledCount', { count: String(marketplace.installedCount) })}</span>
+                  {marketplace.lastUpdated && (
+                    <span>{t('settings.plugins.marketplaceUpdatedAt', { value: new Date(marketplace.lastUpdated).toLocaleString() })}</span>
+                  )}
+                </div>
+              </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       )}
 
       {renderGroup('attention', grouped.attention, {
@@ -439,7 +357,6 @@ export function PluginList({
         t,
         selectedPluginIds,
         onToggleSelection: togglePluginSelection,
-        onOpenPlugin,
       })}
       {renderGroup('enabled', grouped.enabled, {
         fetchPluginDetail,
@@ -447,7 +364,6 @@ export function PluginList({
         t,
         selectedPluginIds,
         onToggleSelection: togglePluginSelection,
-        onOpenPlugin,
       })}
       {renderGroup('disabled', grouped.disabled, {
         fetchPluginDetail,
@@ -455,63 +371,23 @@ export function PluginList({
         t,
         selectedPluginIds,
         onToggleSelection: togglePluginSelection,
-        onOpenPlugin,
       })}
 
-      <AlertDialog
+      <ConfirmDialog
         open={confirmBatchAction !== null}
-        onOpenChange={(open) => {
-          if (!open && !isApplying) {
-            setConfirmBatchAction(null)
-            setBatchError(null)
-          }
-        }}
-      >
-        <AlertDialogContent
-          onEscapeKeyDown={(event) => {
-            if (isApplying) event.preventDefault()
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            const trigger = confirmBatchAction === 'disable'
-              ? disableBatchTriggerRef.current
-              : enableBatchTriggerRef.current
-            trigger?.focus()
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirmBatchAction === 'enable'
-                ? t('settings.plugins.bulkEnableTitle', { count: String(confirmBatchPlugins.length) })
-                : t('settings.plugins.bulkDisableTitle', { count: String(confirmBatchPlugins.length) })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirmBatchAction === 'enable'
-                ? t('settings.plugins.bulkEnableBody', { names: confirmBatchNames })
-                : t('settings.plugins.bulkDisableBody', { names: confirmBatchNames })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {batchError && (
-            <Alert variant="destructive">
-              <AlertDescription className="break-words">{batchError}</AlertDescription>
-            </Alert>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isApplying}>
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <LoadingButton
-              variant={confirmBatchAction === 'disable' ? 'destructive' : 'default'}
-              loading={isApplying}
-              onClick={() => void handleBatchConfirm()}
-            >
-              {confirmBatchAction === 'enable'
-                ? t('settings.plugins.enable')
-                : t('settings.plugins.disable')}
-            </LoadingButton>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onClose={() => setConfirmBatchAction(null)}
+        onConfirm={handleBatchConfirm}
+        title={confirmBatchAction === 'enable'
+          ? t('settings.plugins.bulkEnableTitle', { count: String(confirmBatchPlugins.length) })
+          : t('settings.plugins.bulkDisableTitle', { count: String(confirmBatchPlugins.length) })}
+        body={confirmBatchAction === 'enable'
+          ? t('settings.plugins.bulkEnableBody', { names: confirmBatchNames })
+          : t('settings.plugins.bulkDisableBody', { names: confirmBatchNames })}
+        confirmLabel={confirmBatchAction === 'enable' ? t('settings.plugins.enable') : t('settings.plugins.disable')}
+        cancelLabel={t('common.cancel')}
+        confirmVariant={confirmBatchAction === 'disable' ? 'danger' : 'primary'}
+        loading={isApplying}
+      />
     </div>
   )
 }
@@ -522,7 +398,6 @@ type RenderGroupOptions = {
   t: ReturnType<typeof useTranslation>
   selectedPluginIds: Set<string>
   onToggleSelection: (pluginId: string, selected: boolean) => void
-  onOpenPlugin?: (pluginId: string) => void
 }
 
 function renderGroup(
@@ -534,7 +409,6 @@ function renderGroup(
     t,
     selectedPluginIds,
     onToggleSelection,
-    onOpenPlugin,
   }: RenderGroupOptions,
 ) {
   if (items.length === 0) return null
@@ -547,22 +421,22 @@ function renderGroup(
         : 'settings.plugins.group.disabled'
 
   return (
-    <Card
+    <section
       key={bucket}
-      className="overflow-hidden bg-[var(--color-surface)]"
+      className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden"
     >
-      <CardHeader className="flex-row items-start justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-5 py-4">
+      <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
         <div className="min-w-0">
-          <CardTitle className="text-sm">
+          <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
             {t(titleKey)}
-          </CardTitle>
-          <CardDescription className="mt-1 text-xs leading-5">
+          </h4>
+          <p className="text-xs leading-5 text-[var(--color-text-tertiary)] mt-1">
             {t('settings.plugins.groupHint', { count: String(items.length) })}
-          </CardDescription>
+          </p>
         </div>
-        <Badge variant="secondary">{items.length}</Badge>
-      </CardHeader>
-      <CardContent className="flex flex-col p-2">
+        <span className="text-xs text-[var(--color-text-tertiary)]">{items.length}</span>
+      </div>
+      <div className="flex flex-col p-2">
         {items.map((plugin) => (
           <div
             key={plugin.id}
@@ -574,29 +448,26 @@ function renderGroup(
           >
             <div className="flex items-start gap-3">
               {canMutatePlugin(plugin) ? (
-                <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center">
-                  <Checkbox
+                <label className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-container-high)]">
+                  <input
+                    type="checkbox"
                     aria-label={t('settings.plugins.selectPlugin', { name: plugin.name })}
                     checked={selectedPluginIds.has(plugin.id)}
-                    onCheckedChange={(checked) => onToggleSelection(plugin.id, checked === true)}
+                    onChange={(event) => onToggleSelection(plugin.id, event.currentTarget.checked)}
+                    className="h-4 w-4 rounded border-[var(--color-border)] accent-[var(--color-brand)]"
                   />
-                </div>
+                </label>
               ) : (
                 <span className="mt-0.5 h-6 w-6 shrink-0" aria-hidden="true" />
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                data-plugin-key={plugin.id}
-                onClick={() => {
-                  onOpenPlugin?.(plugin.id)
-                  void fetchPluginDetail(plugin.id, cwd)
-                }}
-                className="h-auto min-w-0 flex-1 items-start justify-start gap-3 rounded-lg p-0 text-left hover:bg-transparent active:translate-y-0"
+              <button
+                type="button"
+                onClick={() => void fetchPluginDetail(plugin.id, cwd)}
+                className="flex min-w-0 flex-1 items-start gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]"
               >
-                {plugin.hasErrors
-                  ? <AlertTriangle className="mt-0.5 size-[18px] text-[var(--color-error)]" aria-hidden="true" />
-                  : <Puzzle className="mt-0.5 size-[18px] text-[var(--color-text-tertiary)]" aria-hidden="true" />}
+                <span className="mt-0.5 material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)]">
+                  {plugin.hasErrors ? 'warning' : plugin.enabled ? 'extension' : 'extension_off'}
+                </span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-semibold text-[var(--color-text-primary)] break-all">
@@ -605,9 +476,9 @@ function renderGroup(
                     <StatusPill plugin={plugin} />
                     <ScopePill scope={plugin.scope} />
                     {plugin.version && (
-                      <Badge variant="secondary" className="min-h-4 px-2 py-0 text-[10px]">
+                      <span className="rounded-full bg-[var(--color-surface-container-high)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-tertiary)]">
                         v{plugin.version}
-                      </Badge>
+                      </span>
                     )}
                   </div>
                   <p className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)] break-words">
@@ -631,13 +502,15 @@ function renderGroup(
                     )}
                   </div>
                 </div>
-                <ChevronRight className="size-[18px] text-[var(--color-text-tertiary)] opacity-60 transition-transform group-hover:translate-x-0.5 group-hover:opacity-100" aria-hidden="true" />
-              </Button>
+                <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)] opacity-60 transition-transform group-hover:translate-x-0.5 group-hover:opacity-100">
+                  chevron_right
+                </span>
+              </button>
             </div>
           </div>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
 }
 
@@ -646,15 +519,7 @@ function canMutatePlugin(plugin: PluginSummary) {
 }
 
 function formatPluginNames(plugins: PluginSummary[]) {
-  const names = plugins.map((plugin) => plugin.name)
-  if (names.length <= 4) return names.join(', ')
-  return `${names.slice(0, 4).join(', ')} +${names.length - 4}`
-}
-
-function formatMarketplaceUpdatedAt(value: string | undefined) {
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date.toLocaleString()
+  return plugins.map((plugin) => plugin.name).join(', ')
 }
 
 function SummaryCard({
@@ -664,14 +529,12 @@ function SummaryCard({
 }: {
   label: string
   value: string
-  icon: ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
+  icon: string
 }) {
-  const Icon = icon
   return (
-    <Card className="min-w-0 bg-[var(--color-surface)]">
-      <CardContent className="px-3 py-3">
+    <div className="min-w-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3">
       <div className="flex min-w-0 items-center gap-1.5 text-[11px] uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
-        <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="material-symbols-outlined text-[14px] flex-shrink-0">{icon}</span>
         <span className="min-w-0 truncate text-[10px] leading-4">
           {label}
         </span>
@@ -679,8 +542,7 @@ function SummaryCard({
       <div className="mt-1.5 truncate text-lg font-semibold text-[var(--color-text-primary)]">
         {value}
       </div>
-      </CardContent>
-    </Card>
+    </div>
   )
 }
 
@@ -689,14 +551,14 @@ function StatusPill({ plugin }: { plugin: PluginSummary }) {
 
   if (plugin.hasErrors) {
     return (
-      <Badge variant="destructive" className="min-h-4 px-2 py-0 text-[10px]">
+      <span className="rounded-full bg-[var(--color-error)]/12 px-2 py-0.5 text-[10px] font-medium text-[var(--color-error)]">
         {t('settings.plugins.status.attention')}
-      </Badge>
+      </span>
     )
   }
 
   return (
-    <Badge className={`min-h-4 border-transparent px-2 py-0 text-[10px] ${
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
       plugin.enabled
         ? 'bg-[var(--color-success-container)] text-[var(--color-success)]'
         : 'bg-[var(--color-surface-container-high)] text-[var(--color-text-tertiary)]'
@@ -704,34 +566,15 @@ function StatusPill({ plugin }: { plugin: PluginSummary }) {
       {plugin.enabled
         ? t('settings.plugins.status.enabled')
         : t('settings.plugins.status.disabled')}
-    </Badge>
+    </span>
   )
 }
 
 function ScopePill({ scope }: { scope: PluginSummary['scope'] }) {
   const t = useTranslation()
   return (
-    <Badge variant="outline" className="min-h-4 px-2 py-0 text-[10px]">
+    <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-tertiary)]">
       {t(`settings.plugins.scope.${scope}`)}
-    </Badge>
-  )
-}
-
-function PluginListSkeleton() {
-  return (
-    <div className="grid gap-6" data-testid="plugin-list-skeleton" aria-busy="true">
-      <Card>
-        <CardContent className="grid gap-4 p-5">
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-4 w-full max-w-3xl" />
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            {Array.from({ length: 4 }, (_, index) => (
-              <Skeleton key={index} className="h-[76px] w-full" />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-      <Skeleton className="h-48 w-full" />
-    </div>
+    </span>
   )
 }

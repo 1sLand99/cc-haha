@@ -76,7 +76,6 @@ describe('ComputerUseSettings', () => {
     computerUseApiMock.getStatus.mockResolvedValue(readyStatus)
     computerUseApiMock.getAuthorizedApps.mockResolvedValue(enabledConfig)
     computerUseApiMock.setAuthorizedApps.mockResolvedValue({ ok: true })
-    computerUseApiMock.openSettings.mockResolvedValue({ ok: true })
   })
 
   it('renders the stored disabled state with the MCP exposure hint', async () => {
@@ -92,9 +91,6 @@ describe('ComputerUseSettings', () => {
     expect(
       screen.getByText(/will not inject the computer-use MCP server/i),
     ).toBeInTheDocument()
-    expect(toggle).toHaveAttribute('data-slot', 'switch')
-    expect(screen.getByLabelText('Python Interpreter Path')).toHaveAttribute('data-slot', 'input')
-    expect(document.querySelector('[data-slot="computer-use-status-row"]')).toBeInTheDocument()
   })
 
   it('saves the Computer Use enablement toggle independently', async () => {
@@ -280,7 +276,7 @@ describe('ComputerUseSettings', () => {
     })
 
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('Read Clipboard'))
+      fireEvent.click(screen.getByLabelText('Clipboard Access'))
       await Promise.resolve()
     })
 
@@ -293,241 +289,9 @@ describe('ComputerUseSettings', () => {
       ],
       grantFlags: {
         clipboardRead: false,
-        clipboardWrite: true,
-        systemKeyCombos: true,
-      },
-    })
-  })
-
-  it('serializes rapid config writes so the latest toggle reaches storage last', async () => {
-    const firstWrite = deferred<{ ok: true }>()
-    computerUseApiMock.setAuthorizedApps
-      .mockReset()
-      .mockReturnValueOnce(firstWrite.promise)
-      .mockResolvedValue({ ok: true })
-
-    render(<ComputerUseSettings />)
-
-    const toggle = await screen.findByLabelText('Enabled')
-    await waitFor(() => expect(toggle).toBeChecked())
-
-    fireEvent.click(toggle)
-    await waitFor(() => {
-      expect(computerUseApiMock.setAuthorizedApps).toHaveBeenCalledTimes(1)
-    })
-    fireEvent.click(toggle)
-    expect(toggle).toBeChecked()
-    expect(computerUseApiMock.setAuthorizedApps).toHaveBeenCalledTimes(1)
-
-    await act(async () => {
-      firstWrite.resolve({ ok: true })
-      await firstWrite.promise
-    })
-
-    await waitFor(() => {
-      expect(computerUseApiMock.setAuthorizedApps).toHaveBeenCalledTimes(2)
-    })
-    expect(computerUseApiMock.setAuthorizedApps.mock.calls).toEqual([
-      [{ enabled: false }],
-      [{ enabled: true }],
-    ])
-  })
-
-  it('restores stored app permissions and shows an alert when auto-save fails', async () => {
-    computerUseApiMock.getStatus.mockResolvedValue({
-      ...readyStatus,
-      venv: {
-        ...readyStatus.venv,
-        created: true,
-      },
-      dependencies: {
-        ...readyStatus.dependencies,
-        installed: true,
-      },
-    })
-    computerUseApiMock.getInstalledApps.mockResolvedValue({
-      apps: [
-        {
-          bundleId: 'com.example.Preview',
-          displayName: 'Preview',
-          path: '/Applications/Preview.app',
-        },
-      ],
-    })
-    computerUseApiMock.setAuthorizedApps.mockRejectedValueOnce(new Error('disk full'))
-
-    render(<ComputerUseSettings />)
-
-    const appToggle = await screen.findByRole('checkbox', { name: 'Preview' })
-    fireEvent.click(appToggle)
-
-    expect(await screen.findByText(/could not save the Computer Use permissions/i)).toBeInTheDocument()
-    await waitFor(() => expect(appToggle).not.toBeChecked())
-  })
-
-  it('renders localized status and app-load failures with working retry actions', async () => {
-    computerUseApiMock.getStatus
-      .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValue({
-        ...readyStatus,
-        venv: {
-          ...readyStatus.venv,
-          created: true,
-        },
-        dependencies: {
-          ...readyStatus.dependencies,
-          installed: true,
-        },
-      })
-    computerUseApiMock.getInstalledApps
-      .mockRejectedValueOnce(new Error('scan failed'))
-      .mockResolvedValue({ apps: [] })
-
-    render(<ComputerUseSettings />)
-
-    expect(await screen.findByText('Could not check the Computer Use status.')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-
-    expect(await screen.findByText('Could not load installed apps.')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-
-    expect(await screen.findByText('No installed apps found. Please setup the environment first.')).toBeInTheDocument()
-  })
-
-  it('filters authorized apps by bundle id and exposes a no-results state', async () => {
-    computerUseApiMock.getStatus.mockResolvedValue({
-      ...readyStatus,
-      venv: {
-        ...readyStatus.venv,
-        created: true,
-      },
-      dependencies: {
-        ...readyStatus.dependencies,
-        installed: true,
-      },
-    })
-    computerUseApiMock.getInstalledApps.mockResolvedValue({
-      apps: [
-        {
-          bundleId: 'com.apple.Preview',
-          displayName: 'Preview',
-          path: '/Applications/Preview.app',
-        },
-        {
-          bundleId: 'com.apple.TextEdit',
-          displayName: 'TextEdit',
-          path: '/Applications/TextEdit.app',
-        },
-      ],
-    })
-
-    render(<ComputerUseSettings />)
-
-    const search = await screen.findByRole('textbox', { name: 'Search apps...' })
-    fireEvent.change(search, { target: { value: 'textedit' } })
-    expect(screen.getByRole('checkbox', { name: 'TextEdit' })).toBeInTheDocument()
-    expect(screen.queryByRole('checkbox', { name: 'Preview' })).not.toBeInTheDocument()
-
-    fireEvent.change(search, { target: { value: 'missing' } })
-    expect(screen.getByText('No apps match this search.')).toBeInTheDocument()
-  })
-
-  it('keeps config controls disabled and retries after the initial config load fails', async () => {
-    computerUseApiMock.getAuthorizedApps
-      .mockRejectedValueOnce(new Error('corrupt config'))
-      .mockResolvedValue(enabledConfig)
-
-    render(<ComputerUseSettings />)
-
-    const toggle = await screen.findByLabelText('Enabled')
-    expect(await screen.findByText(/could not load Computer Use permissions/i)).toBeInTheDocument()
-    expect(toggle).toBeDisabled()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    await waitFor(() => expect(toggle).toBeEnabled())
-    expect(toggle).toBeChecked()
-  })
-
-  it('keeps clipboard read and write independent across rapid changes', async () => {
-    computerUseApiMock.getStatus.mockResolvedValue({
-      ...readyStatus,
-      venv: {
-        ...readyStatus.venv,
-        created: true,
-      },
-      dependencies: {
-        ...readyStatus.dependencies,
-        installed: true,
-      },
-    })
-    computerUseApiMock.getInstalledApps.mockResolvedValue({ apps: [] })
-    computerUseApiMock.getAuthorizedApps.mockResolvedValue({
-      ...enabledConfig,
-      grantFlags: {
-        clipboardRead: true,
         clipboardWrite: false,
         systemKeyCombos: true,
       },
     })
-
-    render(<ComputerUseSettings />)
-
-    const readClipboard = await screen.findByLabelText('Read Clipboard')
-    const writeClipboard = screen.getByLabelText('Write Clipboard')
-    expect(readClipboard).toBeChecked()
-    expect(writeClipboard).not.toBeChecked()
-
-    fireEvent.click(writeClipboard)
-    fireEvent.click(readClipboard)
-
-    await waitFor(() => {
-      expect(computerUseApiMock.setAuthorizedApps).toHaveBeenCalledTimes(2)
-    })
-    expect(computerUseApiMock.setAuthorizedApps.mock.calls[1]?.[0]).toMatchObject({
-      grantFlags: {
-        clipboardRead: false,
-        clipboardWrite: true,
-        systemKeyCombos: true,
-      },
-    })
-  })
-
-  it('does not expose setup or app authorization on unsupported platforms', async () => {
-    computerUseApiMock.getStatus.mockResolvedValue({
-      ...readyStatus,
-      platform: 'linux',
-      supported: false,
-    })
-
-    render(<ComputerUseSettings />)
-
-    expect(await screen.findByText('Computer Use is only supported on macOS and Windows.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Install Environment' })).not.toBeInTheDocument()
-    expect(screen.queryByText('Authorized Apps')).not.toBeInTheDocument()
-  })
-
-  it('shows a visible error when opening macOS privacy settings fails', async () => {
-    computerUseApiMock.getStatus.mockResolvedValue({
-      ...readyStatus,
-      venv: {
-        ...readyStatus.venv,
-        created: true,
-      },
-      dependencies: {
-        ...readyStatus.dependencies,
-        installed: true,
-      },
-      permissions: {
-        accessibility: false,
-        screenRecording: true,
-      },
-    })
-    computerUseApiMock.getInstalledApps.mockResolvedValue({ apps: [] })
-    computerUseApiMock.openSettings.mockRejectedValueOnce(new Error('open failed'))
-
-    render(<ComputerUseSettings />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Open Accessibility Settings' }))
-    expect(await screen.findByText('Could not open the system privacy settings.')).toBeInTheDocument()
   })
 })

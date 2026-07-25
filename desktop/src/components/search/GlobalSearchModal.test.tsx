@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom'
-import { useState } from 'react'
 
 import { GlobalSearchModal } from './GlobalSearchModal'
 import { useSessionStore } from '../../stores/sessionStore'
@@ -71,11 +70,6 @@ describe('GlobalSearchModal', () => {
     render(<GlobalSearchModal open onClose={() => {}} />)
     const input = screen.getByPlaceholderText(/search all chats/i)
     await waitFor(() => expect(input).toHaveFocus())
-    const dialog = screen.getByRole('dialog')
-    expect(dialog).toHaveAttribute('data-slot', 'dialog-content')
-    expect(input).toHaveAttribute('data-slot', 'input')
-    expect(within(dialog).getByRole('listbox').closest('[data-slot="scroll-area"]')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveAttribute('data-variant', 'ghost')
   })
 
   it('shows recent sessions from the store when the query is empty', () => {
@@ -139,34 +133,9 @@ describe('GlobalSearchModal', () => {
     expect(screen.getByText('3 matches')).toBeInTheDocument()
     expect(screen.getByText('You')).toBeInTheDocument()
     expect(screen.getByText('Assistant')).toBeInTheDocument()
-    expect(screen.getByText('You')).toHaveAttribute('data-slot', 'badge')
-    expect(screen.getByText('Assistant')).toHaveAttribute('data-slot', 'badge')
 
     const mark = screen.getByText('WORLD')
     expect(mark.tagName).toBe('MARK')
-  })
-
-  it('restores focus to the opener when the controlled dialog closes', async () => {
-    function Harness() {
-      const [open, setOpen] = useState(false)
-      return (
-        <>
-          <button type="button" onClick={() => setOpen(true)}>Open search</button>
-          <GlobalSearchModal open={open} onClose={() => setOpen(false)} />
-        </>
-      )
-    }
-
-    render(<Harness />)
-    const opener = screen.getByRole('button', { name: 'Open search' })
-    opener.focus()
-    fireEvent.click(opener)
-    const input = await screen.findByPlaceholderText(/search all chats/i)
-    await waitFor(() => expect(input).toHaveFocus())
-
-    fireEvent.keyDown(input, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(opener).toHaveFocus()
   })
 
   it('opens the active result on Enter and closes the modal', async () => {

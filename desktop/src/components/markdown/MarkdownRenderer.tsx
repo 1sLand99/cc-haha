@@ -14,7 +14,6 @@ type Props = {
   className?: string
   cache?: boolean
   streaming?: boolean
-  blockExternalResources?: boolean
   onLinkClick?: (href: string, event: ReactMouseEvent<HTMLDivElement>) => boolean | void
 }
 
@@ -46,21 +45,6 @@ const MARKDOWN_SANITIZE_CONFIG = {
   FORBID_TAGS: ['style'],
   FORBID_ATTR: ['style'],
 }
-const EXTERNAL_RESOURCE_TAGS = [
-  'audio',
-  'embed',
-  'iframe',
-  'image',
-  'img',
-  'link',
-  'meta',
-  'object',
-  'picture',
-  'source',
-  'svg',
-  'use',
-  'video',
-]
 
 function normalizeCodeLanguage(language: string | undefined): string | undefined {
   const normalized = language?.trim().split(/\s+/)[0]?.toLowerCase()
@@ -288,21 +272,8 @@ function renderMath(block: MathBlock): string {
   }
 }
 
-function sanitizeMarkdownHtml(html: string, blockExternalResources: boolean): string {
-  return DOMPurify.sanitize(html, blockExternalResources
-    ? {
-        ...MARKDOWN_SANITIZE_CONFIG,
-        FORBID_TAGS: [...MARKDOWN_SANITIZE_CONFIG.FORBID_TAGS, ...EXTERNAL_RESOURCE_TAGS],
-      }
-    : MARKDOWN_SANITIZE_CONFIG)
-}
-
-function enhanceMarkdownHtml(
-  html: string,
-  mathBlocks: MathBlock[],
-  blockExternalResources: boolean,
-): string {
-  const cleanHtml = sanitizeMarkdownHtml(html, blockExternalResources)
+function enhanceMarkdownHtml(html: string, mathBlocks: MathBlock[]): string {
+  const cleanHtml = DOMPurify.sanitize(html, MARKDOWN_SANITIZE_CONFIG)
 
   const needsDomEnhancement = mathBlocks.length > 0 || /<(?:a|table)\b/i.test(cleanHtml)
   if (!needsDomEnhancement) {
@@ -350,22 +321,6 @@ function parseMarkdown(content: string): { html: string; codeBlocks: CodeBlock[]
   const codeBlocks = [...pendingCodeBlocks]
   pendingCodeBlocks = []
   return { html, codeBlocks, mathBlocks }
-}
-
-export function markdownToPlainText(content: string): string {
-  const { html } = parseMarkdown(content)
-  const cleanHtml = sanitizeMarkdownHtml(html, true)
-  if (typeof document === 'undefined') return cleanHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-
-  const template = document.createElement('template')
-  template.innerHTML = cleanHtml
-  template.content
-    .querySelectorAll('address, article, aside, blockquote, button, div, footer, h1, h2, h3, h4, h5, h6, header, li, main, nav, p, pre, section, table')
-    .forEach((element) => {
-      element.prepend(document.createTextNode(' '))
-      element.append(document.createTextNode(' '))
-    })
-  return (template.content.textContent ?? '').replace(/\s+/g, ' ').trim()
 }
 
 type MarkdownParseResult = ReturnType<typeof parseMarkdown>
@@ -513,15 +468,7 @@ function getProseClasses(variant: 'default' | 'document' | 'compact', className?
     .join(' ')
 }
 
-export const MarkdownRenderer = memo(function MarkdownRenderer({
-  content,
-  variant = 'default',
-  className,
-  cache = true,
-  streaming = false,
-  blockExternalResources = false,
-  onLinkClick,
-}: Props) {
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content, variant = 'default', className, cache = true, streaming = false, onLinkClick }: Props) {
   const { html, codeBlocks, mathBlocks } = useMemo(
     () => cache ? getCachedMarkdownParse(content, streaming) : parseMarkdown(content),
     [cache, content, streaming],
@@ -533,10 +480,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
   const parts = useMemo(() => {
     if (codeBlocks.length === 0) {
-      return [{
-        type: 'html' as const,
-        content: enhanceMarkdownHtml(html, mathBlocks, blockExternalResources),
-      }]
+      return [{ type: 'html' as const, content: enhanceMarkdownHtml(html, mathBlocks) }]
     }
 
     const result: MarkdownPart[] = []
@@ -549,24 +493,18 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       const before = remaining.slice(0, idx)
       if (before) {
-        result.push({
-          type: 'html',
-          content: enhanceMarkdownHtml(before, mathBlocks, blockExternalResources),
-        })
+        result.push({ type: 'html', content: enhanceMarkdownHtml(before, mathBlocks) })
       }
       result.push({ type: 'code', block })
       remaining = remaining.slice(idx + marker.length)
     }
 
     if (remaining) {
-      result.push({
-        type: 'html',
-        content: enhanceMarkdownHtml(remaining, mathBlocks, blockExternalResources),
-      })
+      result.push({ type: 'html', content: enhanceMarkdownHtml(remaining, mathBlocks) })
     }
 
     return result
-  }, [html, codeBlocks, mathBlocks, blockExternalResources])
+  }, [html, codeBlocks, mathBlocks])
 
   const handleClick = useCallback(async (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null

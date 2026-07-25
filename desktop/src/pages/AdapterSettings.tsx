@@ -1,46 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import {
-  AlertCircle,
-  Bot,
-  CheckCircle2,
-  ExternalLink,
-  Link2,
-} from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAdapterStore } from '../stores/adapterStore'
 import { useTranslation } from '../i18n'
+import { Input } from '../components/shared/Input'
+import { Button } from '../components/shared/Button'
 import { DirectoryPicker } from '../components/shared/DirectoryPicker'
-import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../components/ui/alert-dialog'
-import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '../components/ui/card'
-import { Label } from '../components/ui/label'
-import { Skeleton } from '../components/ui/skeleton'
-import { Switch } from '../components/ui/switch'
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '../components/ui/tabs'
-import { LoadingButton } from '../components/ui/custom/loading-button'
-import { SettingField } from '../components/ui/custom/setting-field'
+import { ConfirmDialog } from '../components/shared/ConfirmDialog'
 import QRCode from 'qrcode'
-import type { AdapterFileConfig } from '../types/adapter'
 
 type ImTab = 'telegram' | 'feishu' | 'wechat' | 'dingtalk' | 'whatsapp'
 type ImPlatform = 'telegram' | 'feishu' | 'wechat' | 'dingtalk' | 'whatsapp'
@@ -54,9 +19,6 @@ export function AdapterSettings() {
   const {
     config,
     isLoading,
-    hasLoaded,
-    error: loadError,
-    restartWarning,
     fetchConfig,
     updateConfig,
     generatePairingCode,
@@ -128,17 +90,9 @@ export function AdapterSettings() {
   const [isSaving, setIsSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
   const [saveError, setSaveError] = useState('')
-  const [tgAllowedUsersError, setTgAllowedUsersError] = useState('')
-  const [pairingError, setPairingError] = useState('')
-  const [unbindError, setUnbindError] = useState('')
-  const [adapterUnbindError, setAdapterUnbindError] = useState('')
-  const formDirtyRef = useRef(false)
-  const pairedUnbindTriggerRef = useRef<HTMLElement | null>(null)
-  const adapterUnbindTriggerRef = useRef<HTMLElement | null>(null)
 
   // Pairing
   const [pairingCode, setPairingCode] = useState<string | null>(null)
-  const [pairingNow, setPairingNow] = useState(() => Date.now())
   const [isGenerating, setIsGenerating] = useState(false)
   const [pendingUnbind, setPendingUnbind] = useState<{ platform: ImPlatform; userId: string | number } | null>(null)
   const [pendingAdapterUnbind, setPendingAdapterUnbind] = useState<AdapterUnbindTarget | null>(null)
@@ -146,50 +100,38 @@ export function AdapterSettings() {
 
   useEffect(() => {
     fetchConfig()
-  }, [fetchConfig])
-
-  const applyConfigToForm = useCallback((nextConfig: AdapterFileConfig) => {
-    setDefaultProjectDir(nextConfig.defaultProjectDir ?? '')
-    setTgBotToken(nextConfig.telegram?.botToken ?? '')
-    setTgAllowedUsers(nextConfig.telegram?.allowedUsers?.join(', ') ?? '')
-    setFsAppId(nextConfig.feishu?.appId ?? '')
-    setFsAppSecret(nextConfig.feishu?.appSecret ?? '')
-    setFsEncryptKey(nextConfig.feishu?.encryptKey ?? '')
-    setFsVerificationToken(nextConfig.feishu?.verificationToken ?? '')
-    setFsAllowedUsers(nextConfig.feishu?.allowedUsers?.join(', ') ?? '')
-    setFsStreamingCard(nextConfig.feishu?.streamingCard ?? false)
-    setWcAllowedUsers(nextConfig.wechat?.allowedUsers?.join(', ') ?? '')
-    setWaAllowedUsers(nextConfig.whatsapp?.allowedUsers?.join(', ') ?? '')
-    setDtClientId(nextConfig.dingtalk?.clientId ?? '')
-    setDtClientSecret(nextConfig.dingtalk?.clientSecret ?? '')
-    setDtAllowedUsers(nextConfig.dingtalk?.allowedUsers?.join(', ') ?? '')
-    setDtEndpoint(nextConfig.dingtalk?.endpoint ?? '')
-    setDtPermissionCardTemplateId(nextConfig.dingtalk?.permissionCardTemplateId ?? '')
   }, [])
 
-  // Background pairing/binding refreshes must not erase unsaved form input.
+  // Sync form state when config is loaded
   useEffect(() => {
-    if (!formDirtyRef.current) applyConfigToForm(config)
-  }, [applyConfigToForm, config])
-
-  const markFormDirty = useCallback(() => {
-    formDirtyRef.current = true
-    setSaveStatus('idle')
-    setSaveError('')
-  }, [])
+    setDefaultProjectDir(config.defaultProjectDir ?? '')
+    setTgBotToken(config.telegram?.botToken ?? '')
+    setTgAllowedUsers(config.telegram?.allowedUsers?.join(', ') ?? '')
+    setFsAppId(config.feishu?.appId ?? '')
+    setFsAppSecret(config.feishu?.appSecret ?? '')
+    setFsEncryptKey(config.feishu?.encryptKey ?? '')
+    setFsVerificationToken(config.feishu?.verificationToken ?? '')
+    setFsAllowedUsers(config.feishu?.allowedUsers?.join(', ') ?? '')
+    setFsStreamingCard(config.feishu?.streamingCard ?? false)
+    setWcAllowedUsers(config.wechat?.allowedUsers?.join(', ') ?? '')
+    setWaAllowedUsers(config.whatsapp?.allowedUsers?.join(', ') ?? '')
+    setDtClientId(config.dingtalk?.clientId ?? '')
+    setDtClientSecret(config.dingtalk?.clientSecret ?? '')
+    setDtAllowedUsers(config.dingtalk?.allowedUsers?.join(', ') ?? '')
+    setDtEndpoint(config.dingtalk?.endpoint ?? '')
+    setDtPermissionCardTemplateId(config.dingtalk?.permissionCardTemplateId ?? '')
+  }, [config])
 
   useEffect(() => {
     if (!wechatSessionKey) return
 
     let cancelled = false
     let timer: number | null = null
-    let consecutiveFailures = 0
 
     const poll = async () => {
       try {
         const result = await pollWechatLogin(wechatSessionKey)
         if (cancelled) return
-        consecutiveFailures = 0
         if (result.connected) {
           setWechatStatus(t('settings.adapters.wechatBindSuccess'))
           setWechatQrUrl(null)
@@ -207,14 +149,7 @@ export function AdapterSettings() {
           return
         }
       } catch (err) {
-        if (cancelled) return
-        consecutiveFailures += 1
-        setWechatStatus(err instanceof Error ? err.message : 'WeChat bind failed')
-        if (consecutiveFailures >= 3) {
-          setWechatSessionKey(null)
-          setIsWechatBinding(false)
-          return
-        }
+        if (!cancelled) setWechatStatus(err instanceof Error ? err.message : 'WeChat bind failed')
       }
 
       if (!cancelled) {
@@ -235,13 +170,11 @@ export function AdapterSettings() {
 
     let cancelled = false
     let timer: number | null = null
-    let consecutiveFailures = 0
 
     const poll = async () => {
       try {
         const result = await pollWhatsAppLogin(whatsappSessionKey)
         if (cancelled) return
-        consecutiveFailures = 0
         if (result.connected) {
           setWhatsappStatus(t('settings.adapters.whatsappBindSuccess'))
           setWhatsappQrUrl(null)
@@ -261,14 +194,7 @@ export function AdapterSettings() {
           return
         }
       } catch (err) {
-        if (cancelled) return
-        consecutiveFailures += 1
-        setWhatsappStatus(err instanceof Error ? err.message : t('settings.adapters.whatsappBindFailed'))
-        if (consecutiveFailures >= 3) {
-          setWhatsappSessionKey(null)
-          setIsWhatsAppBinding(false)
-          return
-        }
+        if (!cancelled) setWhatsappStatus(err instanceof Error ? err.message : t('settings.adapters.whatsappBindFailed'))
       }
 
       if (!cancelled) {
@@ -288,7 +214,6 @@ export function AdapterSettings() {
     if (!dtRegistration || dtAuthStatus !== 'waiting') return
 
     let cancelled = false
-    let timer: number | null = null
     const poll = async () => {
       if (Date.now() > dtRegistration.expiresAt) {
         setDtAuthStatus('error')
@@ -305,69 +230,45 @@ export function AdapterSettings() {
           setDtRegistration(null)
           setDtAuthError('')
           await fetchConfig()
-          return
         } else if (result.status === 'FAIL' || result.status === 'EXPIRED') {
           setDtAuthStatus('error')
           setDtAuthError(result.failReason || t('settings.adapters.dingtalkAuthFailed'))
           setDtRegistration(null)
-          return
         }
       } catch (err) {
         if (!cancelled) {
           setDtAuthStatus('error')
           setDtAuthError(err instanceof Error ? err.message : t('settings.adapters.dingtalkAuthFailed'))
         }
-        return
-      }
-
-      if (!cancelled) {
-        timer = window.setTimeout(
-          () => void poll(),
-          Math.max(1, dtRegistration.intervalSeconds) * 1000,
-        )
       }
     }
 
+    const timer = window.setInterval(poll, Math.max(1, dtRegistration.intervalSeconds) * 1000)
     void poll()
     return () => {
       cancelled = true
-      if (timer != null) window.clearTimeout(timer)
+      window.clearInterval(timer)
     }
   }, [dtRegistration, dtAuthStatus, pollDingtalkRegistration, fetchConfig, t])
-
-  useEffect(() => {
-    const expiry = config.pairing?.expiresAt
-    if (!expiry || expiry <= Date.now()) return
-    setPairingNow(Date.now())
-    const timer = window.setInterval(() => setPairingNow(Date.now()), 30_000)
-    return () => window.clearInterval(timer)
-  }, [config.pairing?.expiresAt])
 
   async function handleSave() {
     setIsSaving(true)
     setSaveStatus('idle')
     setSaveError('')
     try {
-      const patch: Record<string, unknown> = {
-        defaultProjectDir,
-      }
+      const patch: Record<string, unknown> = {}
 
-      const tgUserValues = tgAllowedUsers
+      if (defaultProjectDir) patch.defaultProjectDir = defaultProjectDir
+
+      const tgUsers = tgAllowedUsers
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean)
-      const tgUsers = tgUserValues.map(Number)
-      if (tgUserValues.some((value, index) => !/^\d+$/.test(value) || !Number.isSafeInteger(tgUsers[index]))) {
-        const message = t('settings.adapters.telegramUsersInvalid')
-        setTgAllowedUsersError(message)
-        setSaveStatus('error')
-        setSaveError(message)
-        return
-      }
-      setTgAllowedUsersError('')
+        .map(Number)
+        .filter((n) => !isNaN(n))
 
       patch.telegram = {
-        botToken: tgBotToken,
+        botToken: tgBotToken || undefined,
         allowedUsers: tgUsers.length ? tgUsers : [],
       }
 
@@ -377,10 +278,10 @@ export function AdapterSettings() {
         .filter(Boolean)
 
       patch.feishu = {
-        appId: fsAppId,
-        appSecret: fsAppSecret,
-        encryptKey: fsEncryptKey,
-        verificationToken: fsVerificationToken,
+        appId: fsAppId || undefined,
+        appSecret: fsAppSecret || undefined,
+        encryptKey: fsEncryptKey || undefined,
+        verificationToken: fsVerificationToken || undefined,
         allowedUsers: fsUsers.length ? fsUsers : [],
         streamingCard: fsStreamingCard,
       }
@@ -391,6 +292,7 @@ export function AdapterSettings() {
         .filter(Boolean)
 
       patch.wechat = {
+        ...config.wechat,
         allowedUsers: wcUsers.length ? wcUsers : [],
       }
 
@@ -400,6 +302,7 @@ export function AdapterSettings() {
         .filter(Boolean)
 
       patch.whatsapp = {
+        ...config.whatsapp,
         allowedUsers: waUsers.length ? waUsers : [],
       }
 
@@ -409,16 +312,14 @@ export function AdapterSettings() {
         .filter(Boolean)
 
       patch.dingtalk = {
-        clientId: dtClientId,
-        clientSecret: dtClientSecret,
+        clientId: dtClientId || undefined,
+        clientSecret: dtClientSecret || undefined,
         allowedUsers: dtUsers.length ? dtUsers : [],
-        endpoint: dtEndpoint,
-        permissionCardTemplateId: dtPermissionCardTemplateId,
+        endpoint: dtEndpoint || undefined,
+        permissionCardTemplateId: dtPermissionCardTemplateId || undefined,
       }
 
       await updateConfig(patch)
-      formDirtyRef.current = false
-      applyConfigToForm(useAdapterStore.getState().config)
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus('idle'), 2000)
     } catch (err) {
@@ -431,16 +332,15 @@ export function AdapterSettings() {
 
   const handleGenerateCode = useCallback(async () => {
     setIsGenerating(true)
-    setPairingError('')
     try {
       const code = await generatePairingCode()
       setPairingCode(code)
     } catch (err) {
-      setPairingError(err instanceof Error ? err.message : t('settings.adapters.generateCodeFailed'))
+      console.error('Failed to generate pairing code:', err)
     } finally {
       setIsGenerating(false)
     }
-  }, [generatePairingCode, t])
+  }, [generatePairingCode])
 
   const handleWechatBind = useCallback(async () => {
     setIsWechatBinding(true)
@@ -511,14 +411,12 @@ export function AdapterSettings() {
       setWechatQrUrl(null)
       setWechatSessionKey(null)
       setWechatStatus(t('settings.adapters.wechatUnbound'))
-      setPendingAdapterUnbind(null)
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('settings.adapters.wechatUnbindFailed')
-      setWechatStatus(message)
-      setAdapterUnbindError(message)
+      setWechatStatus(err instanceof Error ? err.message : t('settings.adapters.wechatUnbindFailed'))
     } finally {
       setIsUnbindingWechatAccount(false)
       setIsWechatBinding(false)
+      setPendingAdapterUnbind(null)
     }
   }, [unbindWechatAccount, fetchConfig, t])
 
@@ -530,14 +428,12 @@ export function AdapterSettings() {
       setDtAuthStatus('idle')
       setDtRegistration(null)
       await fetchConfig()
-      setPendingAdapterUnbind(null)
     } catch (err) {
       setDtAuthStatus('error')
-      const message = err instanceof Error ? err.message : t('settings.adapters.dingtalkUnbindFailed')
-      setDtAuthError(message)
-      setAdapterUnbindError(message)
+      setDtAuthError(err instanceof Error ? err.message : t('settings.adapters.dingtalkUnbindFailed'))
     } finally {
       setIsUnbindingDtBot(false)
+      setPendingAdapterUnbind(null)
     }
   }, [unbindDingtalkBot, fetchConfig, t])
 
@@ -550,24 +446,16 @@ export function AdapterSettings() {
       setWhatsappQrUrl(null)
       setWhatsappSessionKey(null)
       setWhatsappStatus(t('settings.adapters.whatsappUnbound'))
-      setPendingAdapterUnbind(null)
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('settings.adapters.whatsappUnbindFailed')
-      setWhatsappStatus(message)
-      setAdapterUnbindError(message)
+      setWhatsappStatus(err instanceof Error ? err.message : t('settings.adapters.whatsappUnbindFailed'))
     } finally {
       setIsUnbindingWhatsAppAccount(false)
       setIsWhatsAppBinding(false)
+      setPendingAdapterUnbind(null)
     }
   }, [unbindWhatsAppAccount, fetchConfig, t])
 
-  const handleUnbind = useCallback(async (
-    platform: ImPlatform,
-    userId: string | number,
-    trigger: HTMLElement,
-  ) => {
-    setUnbindError('')
-    pairedUnbindTriggerRef.current = trigger
+  const handleUnbind = useCallback(async (platform: ImPlatform, userId: string | number) => {
     setPendingUnbind({ platform, userId })
   }, [])
 
@@ -578,13 +466,10 @@ export function AdapterSettings() {
       await removePairedUser(pendingUnbind.platform, pendingUnbind.userId)
       await fetchConfig()
       setPendingUnbind(null)
-      setUnbindError('')
-    } catch (err) {
-      setUnbindError(err instanceof Error ? err.message : t('settings.adapters.unbindFailed'))
     } finally {
       setIsUnbinding(false)
     }
-  }, [pendingUnbind, removePairedUser, fetchConfig, t])
+  }, [pendingUnbind, removePairedUser, fetchConfig])
 
   // Collect all paired users across platforms
   const allPairedUsers = [
@@ -597,54 +482,18 @@ export function AdapterSettings() {
 
   // Check pairing expiry
   const pairingExpiry = config.pairing?.expiresAt
-  const isPairingActive = pairingExpiry ? pairingNow < pairingExpiry : false
-  const minutesLeft = pairingExpiry ? Math.max(0, Math.ceil((pairingExpiry - pairingNow) / 60000)) : 0
+  const isPairingActive = pairingExpiry ? Date.now() < pairingExpiry : false
+  const minutesLeft = pairingExpiry ? Math.max(0, Math.ceil((pairingExpiry - Date.now()) / 60000)) : 0
   const hasSavedFeishuCredentials = Boolean(config.feishu?.appId && config.feishu?.appSecret)
 
-  if (isLoading || (!hasLoaded && !loadError)) {
+  if (isLoading) {
     return (
-      <div className="max-w-2xl space-y-4" aria-label={t('common.loading')}>
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-56 w-full" />
-        <Skeleton className="h-16 w-full" />
-        <Skeleton className="h-72 w-full" />
+      <div className="flex items-center justify-center py-12 text-[var(--color-text-tertiary)]">
+        <span className="material-symbols-outlined animate-spin text-[20px] mr-2">progress_activity</span>
+        Loading...
       </div>
     )
   }
-
-  if (loadError || !hasLoaded) {
-    return (
-      <Alert variant="destructive" className="max-w-2xl">
-        <AlertCircle aria-hidden="true" />
-        <AlertTitle>{t('settings.adapters.configLoadFailed')}</AlertTitle>
-        <AlertDescription>{loadError || t('settings.adapters.configLoadFailed')}</AlertDescription>
-        <Button className="mt-2 w-fit" variant="secondary" onClick={() => void fetchConfig()}>
-          {t('common.retry')}
-        </Button>
-      </Alert>
-    )
-  }
-
-  const isMutating = isSaving
-    || isGenerating
-    || isUnbinding
-    || isWechatBinding
-    || isWhatsAppBinding
-    || isStartingDtAuth
-    || isUnbindingWechatAccount
-    || isUnbindingDtBot
-    || isUnbindingWhatsAppAccount
-
-  const adapterUnbindTitle = pendingAdapterUnbind === 'wechatAccount'
-    ? t('settings.adapters.wechatUnbindAccount')
-    : pendingAdapterUnbind === 'whatsappAccount'
-      ? t('settings.adapters.whatsappUnbindAccount')
-      : t('settings.adapters.dingtalkUnbindBot')
-  const adapterUnbindDescription = pendingAdapterUnbind === 'wechatAccount'
-    ? t('settings.adapters.wechatUnbindAccountConfirm')
-    : pendingAdapterUnbind === 'whatsappAccount'
-      ? t('settings.adapters.whatsappUnbindAccountConfirm')
-      : t('settings.adapters.dingtalkUnbindBotConfirm')
 
   return (
     <div className="max-w-2xl space-y-8">
@@ -652,30 +501,33 @@ export function AdapterSettings() {
       <div>
         <p className="text-sm leading-6 text-[var(--color-text-secondary)]">
           {t('settings.adapters.description')}{' '}
-          <Button asChild variant="link" className="mx-1 h-auto align-baseline text-sm">
-            <a href={IM_CONFIG_DOCS_URL} target="_blank" rel="noopener noreferrer">
-              {t('settings.adapters.configurationDocs')}
-              <ExternalLink aria-hidden="true" />
-            </a>
-          </Button>
+          <a
+            href={IM_CONFIG_DOCS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-[var(--color-brand)] transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)]"
+          >
+            {t('settings.adapters.configurationDocs')}
+            <span className="material-symbols-outlined text-[14px]" aria-hidden="true">open_in_new</span>
+          </a>
           {t('settings.adapters.descriptionAfterDocs')}
         </p>
       </div>
 
       {/* Pairing */}
-      <Card className="overflow-hidden">
-        <CardHeader className="flex-row items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-hover)] py-3">
-          <Link2 className="size-4 text-[var(--color-text-secondary)]" aria-hidden="true" />
-          <CardTitle className="text-sm">{t('settings.adapters.pairing')}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <section className="rounded-xl border border-[var(--color-border)] overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 bg-[var(--color-surface-hover)] border-b border-[var(--color-border)]">
+          <span className="material-symbols-outlined text-[18px] text-[var(--color-text-secondary)]">link</span>
+          <span className="text-sm font-semibold text-[var(--color-text-primary)]">{t('settings.adapters.pairing')}</span>
+        </div>
+        <div className="p-4 space-y-4">
           <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.adapters.pairingDesc')}</p>
 
           {/* Generate code */}
           <div className="flex items-center gap-3">
-            <LoadingButton onClick={handleGenerateCode} loading={isGenerating} disabled={isMutating && !isGenerating}>
+            <Button onClick={handleGenerateCode} loading={isGenerating}>
               {pairingCode || isPairingActive ? t('settings.adapters.regenerateCode') : t('settings.adapters.generateCode')}
-            </LoadingButton>
+            </Button>
             {pairingCode && (
               <div className="flex items-center gap-2">
                 <span className="font-mono text-2xl font-bold tracking-[0.3em] text-[var(--color-brand)]">
@@ -695,12 +547,6 @@ export function AdapterSettings() {
           {pairingCode && (
             <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.adapters.pairingCodeHint')}</p>
           )}
-          {pairingError && (
-            <Alert variant="destructive">
-              <AlertTitle>{t('settings.adapters.generateCodeFailed')}</AlertTitle>
-              <AlertDescription>{pairingError}</AlertDescription>
-            </Alert>
-          )}
 
           {/* Paired users list */}
           <div>
@@ -715,31 +561,27 @@ export function AdapterSettings() {
                     className="flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--color-surface-hover)]"
                   >
                     <div className="flex items-center gap-2">
-                      <Badge variant="secondary">
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--color-surface)] text-[var(--color-text-secondary)]">
                         {t(`settings.adapters.platform.${user.platform}`)}
-                      </Badge>
+                      </span>
                       <span className="text-sm text-[var(--color-text-primary)]">{user.displayName}</span>
                       <span className="text-xs text-[var(--color-text-tertiary)]">
                         {new Date(user.pairedAt).toLocaleDateString()}
                       </span>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      disabled={isMutating}
-                      onClick={(event) => handleUnbind(user.platform, user.userId, event.currentTarget)}
-                      className="text-[var(--color-error)]"
+                    <button
+                      onClick={() => handleUnbind(user.platform, user.userId)}
+                      className="text-xs text-[var(--color-error)] hover:underline cursor-pointer"
                     >
                       {t('settings.adapters.unbind')}
-                    </Button>
+                    </button>
                   </div>
                 ))}
               </div>
             )}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
       {/* Server URL —— 之前是个手填字段，但桌面端启动 adapter sidecar
           时已经把 server 的动态端口通过 ADAPTER_SERVER_URL env var 注进去了，
@@ -748,70 +590,53 @@ export function AdapterSettings() {
           Standalone 模式（直接 bun run adapters/...）保留 file 字段兜底就够了。 */}
 
       {/* Default Project */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">{t('settings.adapters.defaultProject')}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 pt-0">
-          <Label className="sr-only">{t('settings.adapters.defaultProject')}</Label>
-          <div className="flex flex-wrap items-center gap-2">
-            <DirectoryPicker
-              value={defaultProjectDir}
-              onChange={(value) => {
-                markFormDirty()
-                setDefaultProjectDir(value)
-              }}
-            />
-            {defaultProjectDir && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={isMutating}
-                onClick={() => {
-                  markFormDirty()
-                  setDefaultProjectDir('')
-                }}
-              >
-                {t('settings.adapters.clearDefaultProject')}
-              </Button>
-            )}
-          </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium text-[var(--color-text-primary)]">
+          {t('settings.adapters.defaultProject')}
+        </label>
+        <DirectoryPicker value={defaultProjectDir} onChange={setDefaultProjectDir} />
         <p className="text-xs text-[var(--color-text-tertiary)]">
           {t('settings.adapters.defaultProjectHint')}
         </p>
-        </CardContent>
-      </Card>
+      </div>
 
       {/* IM Adapter Tabs */}
-      <Card className="overflow-hidden">
-        <Tabs
-          value={activeIm}
-          onValueChange={(value) => setActiveIm(value as ImTab)}
-          className="block"
-          orientation="horizontal"
-        >
-          <TabsList
-            aria-label="IM adapter"
-            className="flex w-full justify-start overflow-x-auto rounded-none border-b border-[var(--color-border)] bg-[var(--color-surface-hover)]"
-          >
-            {(['telegram', 'feishu', 'wechat', 'dingtalk', 'whatsapp'] as const).map((platform) => (
-              <TabsTrigger
-                key={platform}
-                value={platform}
-                className="relative rounded-none px-4 py-2.5 data-[state=active]:bg-transparent data-[state=active]:shadow-none after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-transparent data-[state=active]:after:bg-[var(--color-brand)]"
-              >
-                {t(`settings.adapters.${platform}`)}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+      <section className="rounded-xl border border-[var(--color-border)] overflow-hidden">
+        <div role="tablist" aria-label="IM adapter" className="flex items-stretch border-b border-[var(--color-border)] bg-[var(--color-surface-hover)]">
+          <ImTabButton
+            label={t('settings.adapters.telegram')}
+            active={activeIm === 'telegram'}
+            onClick={() => setActiveIm('telegram')}
+          />
+          <ImTabButton
+            label={t('settings.adapters.feishu')}
+            active={activeIm === 'feishu'}
+            onClick={() => setActiveIm('feishu')}
+          />
+          <ImTabButton
+            label={t('settings.adapters.wechat')}
+            active={activeIm === 'wechat'}
+            onClick={() => setActiveIm('wechat')}
+          />
+          <ImTabButton
+            label={t('settings.adapters.dingtalk')}
+            active={activeIm === 'dingtalk'}
+            onClick={() => setActiveIm('dingtalk')}
+          />
+          <ImTabButton
+            label={t('settings.adapters.whatsapp')}
+            active={activeIm === 'whatsapp'}
+            onClick={() => setActiveIm('whatsapp')}
+          />
+        </div>
 
-        <TabsContent value="feishu" className="m-0 space-y-4 p-4">
+        {activeIm === 'feishu' && (
+          <div className="p-4 space-y-4">
             {!hasSavedFeishuCredentials && (
-              <Card className="bg-[var(--color-surface)]">
-                <CardContent>
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex min-w-0 gap-3">
-                    <Bot className="mt-0.5 size-5 text-[var(--color-brand)]" aria-hidden="true" />
+                    <span className="material-symbols-outlined mt-0.5 text-[20px] text-[var(--color-brand)]">smart_toy</span>
                     <div className="min-w-0">
                       <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t('settings.adapters.feishuCreateBotTitle')}</h4>
                       <p className="mt-1 text-xs leading-5 text-[var(--color-text-tertiary)]">{t('settings.adapters.feishuCreateBotDesc')}</p>
@@ -821,101 +646,76 @@ export function AdapterSettings() {
                       </ol>
                     </div>
                   </div>
-                  <Button asChild size="sm">
-                    <a href={FEISHU_CREATE_BOT_URL} target="_blank" rel="noopener noreferrer">
-                      {t('settings.adapters.feishuCreateBotAction')}
-                      <ExternalLink aria-hidden="true" />
-                    </a>
-                  </Button>
+                  <a
+                    href={FEISHU_CREATE_BOT_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-[var(--radius-md)] bg-[image:var(--gradient-btn-primary)] px-3 text-xs font-medium text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)] transition-colors hover:bg-[image:var(--gradient-btn-primary-hover)] hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]"
+                  >
+                    {t('settings.adapters.feishuCreateBotAction')}
+                    <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                  </a>
                 </div>
-                </CardContent>
-              </Card>
+              </div>
             )}
             <div className="grid grid-cols-2 gap-4">
-              <SettingField
-                id="adapter-feishu-app-id"
+              <Input
                 label={t('settings.adapters.appId')}
                 value={fsAppId}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setFsAppId(e.target.value)
-                }}
+                onChange={(e) => setFsAppId(e.target.value)}
                 placeholder={t('settings.adapters.appIdPlaceholder')}
               />
-              <SettingField
-                id="adapter-feishu-app-secret"
+              <Input
                 label={t('settings.adapters.appSecret')}
                 type="password"
                 value={fsAppSecret}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setFsAppSecret(e.target.value)
-                }}
+                onChange={(e) => setFsAppSecret(e.target.value)}
                 placeholder={t('settings.adapters.appSecretPlaceholder')}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <SettingField
-                id="adapter-feishu-encrypt-key"
+              <Input
                 label={t('settings.adapters.encryptKey')}
                 type="password"
                 value={fsEncryptKey}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setFsEncryptKey(e.target.value)
-                }}
+                onChange={(e) => setFsEncryptKey(e.target.value)}
                 placeholder={t('settings.adapters.encryptKeyPlaceholder')}
               />
-              <SettingField
-                id="adapter-feishu-verification-token"
+              <Input
                 label={t('settings.adapters.verificationToken')}
                 type="password"
                 value={fsVerificationToken}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setFsVerificationToken(e.target.value)
-                }}
+                onChange={(e) => setFsVerificationToken(e.target.value)}
                 placeholder={t('settings.adapters.verificationTokenPlaceholder')}
               />
             </div>
             <div className="flex flex-col gap-1">
-              <SettingField
-                id="adapter-feishu-allowed-users"
+              <Input
                 label={t('settings.adapters.allowedUsers')}
                 value={fsAllowedUsers}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setFsAllowedUsers(e.target.value)
-                }}
+                onChange={(e) => setFsAllowedUsers(e.target.value)}
                 placeholder={t('settings.adapters.fsAllowedUsersPlaceholder')}
               />
               <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.adapters.allowedUsersHint')}</p>
             </div>
-            <div className="flex items-center gap-3">
-              <Switch
-                id="adapter-feishu-streaming"
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
                 checked={fsStreamingCard}
-                disabled={isMutating}
-                onCheckedChange={(checked) => {
-                  markFormDirty()
-                  setFsStreamingCard(checked)
-                }}
+                onChange={(e) => setFsStreamingCard(e.target.checked)}
+                className="w-4 h-4 rounded border-[var(--color-border)] accent-[var(--color-brand)]"
               />
               <div>
-                <Label htmlFor="adapter-feishu-streaming">{t('settings.adapters.streamingCard')}</Label>
+                <span className="text-sm text-[var(--color-text-primary)]">{t('settings.adapters.streamingCard')}</span>
                 <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.adapters.streamingCardDesc')}</p>
               </div>
-            </div>
-        </TabsContent>
+            </label>
+          </div>
+        )}
 
-        <TabsContent value="wechat" className="m-0 space-y-4 p-4">
-            <Card className="bg-[var(--color-surface)]">
-              <CardContent className="space-y-3">
+        {activeIm === 'wechat' && (
+          <div className="p-4 space-y-4">
+            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <div className="text-sm font-medium text-[var(--color-text-primary)]">
@@ -926,28 +726,13 @@ export function AdapterSettings() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <LoadingButton
-                    onClick={handleWechatBind}
-                    loading={isWechatBinding && !wechatQrUrl}
-                    disabled={isMutating && !isWechatBinding}
-                    size="sm"
-                  >
+                  <Button onClick={handleWechatBind} loading={isWechatBinding && !wechatQrUrl} size="sm">
                     {config.wechat?.accountId ? t('settings.adapters.wechatRebind') : t('settings.adapters.wechatBind')}
-                  </LoadingButton>
+                  </Button>
                   {config.wechat?.accountId && (
-                    <LoadingButton
-                      onClick={(event) => {
-                        adapterUnbindTriggerRef.current = event.currentTarget
-                        setAdapterUnbindError('')
-                        setPendingAdapterUnbind('wechatAccount')
-                      }}
-                      loading={isUnbindingWechatAccount}
-                      disabled={isMutating}
-                      size="sm"
-                      variant="destructive"
-                    >
+                    <Button onClick={() => setPendingAdapterUnbind('wechatAccount')} loading={isUnbindingWechatAccount} size="sm" variant="danger">
                       {t('settings.adapters.wechatUnbindAccount')}
-                    </LoadingButton>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -966,60 +751,38 @@ export function AdapterSettings() {
               )}
 
               {!wechatQrUrl && wechatStatus && (
-                <Alert>
-                  <AlertDescription>{wechatStatus}</AlertDescription>
-                </Alert>
+                <p className="text-sm text-[var(--color-text-secondary)]">{wechatStatus}</p>
               )}
-              </CardContent>
-            </Card>
+            </div>
 
             <div className="flex flex-col gap-1">
-              <SettingField
-                id="adapter-wechat-allowed-users"
+              <Input
                 label={t('settings.adapters.allowedUsers')}
                 value={wcAllowedUsers}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setWcAllowedUsers(e.target.value)
-                }}
+                onChange={(e) => setWcAllowedUsers(e.target.value)}
                 placeholder={t('settings.adapters.wcAllowedUsersPlaceholder')}
               />
               <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.adapters.wechatAllowedUsersHint')}</p>
             </div>
-        </TabsContent>
+          </div>
+        )}
 
-        <TabsContent value="dingtalk" className="m-0 space-y-4 p-4">
-            <Card className="bg-[var(--color-surface)]">
-              <CardContent className="space-y-3">
+        {activeIm === 'dingtalk' && (
+          <div className="p-4 space-y-4">
+            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t('settings.adapters.dingtalkQrTitle')}</h4>
                   <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">{t('settings.adapters.dingtalkQrDesc')}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <LoadingButton
-                    onClick={handleStartDingtalkAuth}
-                    loading={isStartingDtAuth}
-                    disabled={isMutating && !isStartingDtAuth}
-                    size="sm"
-                  >
+                  <Button onClick={handleStartDingtalkAuth} loading={isStartingDtAuth} size="sm">
                     {t('settings.adapters.dingtalkStartAuth')}
-                  </LoadingButton>
+                  </Button>
                   {(config.dingtalk?.clientId || dtClientId) && (
-                    <LoadingButton
-                      onClick={(event) => {
-                        adapterUnbindTriggerRef.current = event.currentTarget
-                        setAdapterUnbindError('')
-                        setPendingAdapterUnbind('dingtalkBot')
-                      }}
-                      loading={isUnbindingDtBot}
-                      disabled={isMutating}
-                      size="sm"
-                      variant="destructive"
-                    >
+                    <Button onClick={() => setPendingAdapterUnbind('dingtalkBot')} loading={isUnbindingDtBot} size="sm" variant="danger">
                       {t('settings.adapters.dingtalkUnbindBot')}
-                    </LoadingButton>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -1048,120 +811,79 @@ export function AdapterSettings() {
               )}
 
               {dtAuthStatus === 'bound' && (
-                <Alert>
-                  <CheckCircle2 aria-hidden="true" />
-                  <AlertDescription>{t('settings.adapters.dingtalkBound')}</AlertDescription>
-                </Alert>
+                <p className="text-sm text-[var(--color-success)]">{t('settings.adapters.dingtalkBound')}</p>
               )}
               {dtAuthStatus === 'error' && (
-                <Alert variant="destructive">
-                  <AlertCircle aria-hidden="true" />
-                  <AlertDescription>{dtAuthError}</AlertDescription>
-                </Alert>
+                <p className="text-sm text-[var(--color-error)]">{dtAuthError}</p>
               )}
-              </CardContent>
-            </Card>
+            </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <SettingField
-                id="adapter-dingtalk-client-id"
+              <Input
                 label={t('settings.adapters.dingtalkClientId')}
                 value={dtClientId}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setDtClientId(e.target.value)
-                }}
+                onChange={(e) => setDtClientId(e.target.value)}
                 placeholder={t('settings.adapters.dingtalkClientIdPlaceholder')}
               />
-              <SettingField
-                id="adapter-dingtalk-client-secret"
+              <Input
                 label={t('settings.adapters.dingtalkClientSecret')}
                 type="password"
                 value={dtClientSecret}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setDtClientSecret(e.target.value)
-                }}
+                onChange={(e) => setDtClientSecret(e.target.value)}
                 placeholder={t('settings.adapters.dingtalkClientSecretPlaceholder')}
               />
             </div>
-            <SettingField
-              id="adapter-dingtalk-endpoint"
+            <Input
               label={t('settings.adapters.dingtalkEndpoint')}
               value={dtEndpoint}
-              disabled={isSaving}
-              onChange={(e) => {
-                markFormDirty()
-                setDtEndpoint(e.target.value)
-              }}
+              onChange={(e) => setDtEndpoint(e.target.value)}
               placeholder={t('settings.adapters.dingtalkEndpointPlaceholder')}
             />
             <div className="flex flex-col gap-1">
-              <SettingField
-                id="adapter-dingtalk-template-id"
+              <Input
                 label={t('settings.adapters.dingtalkPermissionCardTemplateId')}
                 value={dtPermissionCardTemplateId}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setDtPermissionCardTemplateId(e.target.value)
-                }}
+                onChange={(e) => setDtPermissionCardTemplateId(e.target.value)}
                 placeholder={t('settings.adapters.dingtalkPermissionCardTemplateIdPlaceholder')}
               />
               <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.adapters.dingtalkPermissionCardTemplateIdHint')}</p>
             </div>
             <div className="flex flex-col gap-1">
-              <SettingField
-                id="adapter-dingtalk-allowed-users"
+              <Input
                 label={t('settings.adapters.allowedUsers')}
                 value={dtAllowedUsers}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setDtAllowedUsers(e.target.value)
-                }}
+                onChange={(e) => setDtAllowedUsers(e.target.value)}
                 placeholder={t('settings.adapters.dtAllowedUsersPlaceholder')}
               />
               <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.adapters.allowedUsersHint')}</p>
             </div>
-        </TabsContent>
+          </div>
+        )}
 
-        <TabsContent value="telegram" className="m-0 space-y-4 p-4">
-            <SettingField
-              id="adapter-telegram-token"
+        {activeIm === 'telegram' && (
+          <div className="p-4 space-y-4">
+            <Input
               label={t('settings.adapters.botToken')}
               type="password"
               value={tgBotToken}
-              disabled={isSaving}
-              onChange={(e) => {
-                markFormDirty()
-                setTgBotToken(e.target.value)
-              }}
+              onChange={(e) => setTgBotToken(e.target.value)}
               placeholder={t('settings.adapters.botTokenPlaceholder')}
             />
             <div className="flex flex-col gap-1">
-              <SettingField
-                id="adapter-telegram-allowed-users"
+              <Input
                 label={t('settings.adapters.allowedUsers')}
                 value={tgAllowedUsers}
-                error={tgAllowedUsersError}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setTgAllowedUsersError('')
-                  setTgAllowedUsers(e.target.value)
-                }}
+                onChange={(e) => setTgAllowedUsers(e.target.value)}
                 placeholder={t('settings.adapters.tgAllowedUsersPlaceholder')}
               />
               <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.adapters.allowedUsersHint')}</p>
             </div>
-        </TabsContent>
+          </div>
+        )}
 
-        <TabsContent value="whatsapp" className="m-0 space-y-4 p-4">
-            <Card className="bg-[var(--color-surface)]">
-              <CardContent className="space-y-3">
+        {activeIm === 'whatsapp' && (
+          <div className="p-4 space-y-4">
+            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <div className="text-sm font-medium text-[var(--color-text-primary)]">
@@ -1172,28 +894,13 @@ export function AdapterSettings() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <LoadingButton
-                    onClick={handleWhatsAppBind}
-                    loading={isWhatsAppBinding && !whatsappQrUrl}
-                    disabled={isMutating && !isWhatsAppBinding}
-                    size="sm"
-                  >
+                  <Button onClick={handleWhatsAppBind} loading={isWhatsAppBinding && !whatsappQrUrl} size="sm">
                     {config.whatsapp?.accountJid ? t('settings.adapters.whatsappRebind') : t('settings.adapters.whatsappBind')}
-                  </LoadingButton>
+                  </Button>
                   {config.whatsapp?.accountJid && (
-                    <LoadingButton
-                      onClick={(event) => {
-                        adapterUnbindTriggerRef.current = event.currentTarget
-                        setAdapterUnbindError('')
-                        setPendingAdapterUnbind('whatsappAccount')
-                      }}
-                      loading={isUnbindingWhatsAppAccount}
-                      disabled={isMutating}
-                      size="sm"
-                      variant="destructive"
-                    >
+                    <Button onClick={() => setPendingAdapterUnbind('whatsappAccount')} loading={isUnbindingWhatsAppAccount} size="sm" variant="danger">
                       {t('settings.adapters.whatsappUnbindAccount')}
-                    </LoadingButton>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -1216,151 +923,112 @@ export function AdapterSettings() {
               )}
 
               {!whatsappQrUrl && whatsappStatus && (
-                <Alert>
-                  <AlertDescription>{whatsappStatus}</AlertDescription>
-                </Alert>
+                <p className="text-sm text-[var(--color-text-secondary)]">{whatsappStatus}</p>
               )}
-              </CardContent>
-            </Card>
+            </div>
 
             <div className="flex flex-col gap-1">
-              <SettingField
-                id="adapter-whatsapp-allowed-users"
+              <Input
                 label={t('settings.adapters.allowedUsers')}
                 value={waAllowedUsers}
-                disabled={isSaving}
-                onChange={(e) => {
-                  markFormDirty()
-                  setWaAllowedUsers(e.target.value)
-                }}
+                onChange={(e) => setWaAllowedUsers(e.target.value)}
                 placeholder={t('settings.adapters.waAllowedUsersPlaceholder')}
               />
               <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.adapters.whatsappAllowedUsersHint')}</p>
             </div>
-        </TabsContent>
-        </Tabs>
-      </Card>
+          </div>
+        )}
+      </section>
 
       {/* Save */}
-      <div className="space-y-3">
-        <LoadingButton onClick={handleSave} loading={isSaving} disabled={isMutating && !isSaving}>
+      <div className="flex items-center gap-3">
+        <Button onClick={handleSave} loading={isSaving}>
           {saveStatus === 'saved' ? t('settings.adapters.saved') : t('settings.adapters.save')}
-        </LoadingButton>
+        </Button>
         {saveStatus === 'saved' && (
-          <Alert aria-live="polite">
-            <CheckCircle2 aria-hidden="true" />
-            <AlertTitle>{t('settings.adapters.saved')}</AlertTitle>
-          </Alert>
+          <span className="text-sm text-[var(--color-success)]">
+            <span className="material-symbols-outlined text-[16px] align-middle mr-1">check_circle</span>
+            {t('settings.adapters.saved')}
+          </span>
         )}
         {saveStatus === 'error' && (
-          <Alert variant="destructive">
-            <AlertCircle aria-hidden="true" />
-            <AlertTitle>{t('settings.adapters.saveFailed')}</AlertTitle>
-            <AlertDescription>{saveError}</AlertDescription>
-          </Alert>
-        )}
-        {restartWarning && (
-          <Alert>
-            <AlertCircle aria-hidden="true" />
-            <AlertTitle>{t('settings.adapters.restartFailed')}</AlertTitle>
-            <AlertDescription>{restartWarning}</AlertDescription>
-          </Alert>
+          <span className="text-sm text-[var(--color-error)]">
+            <span className="material-symbols-outlined text-[16px] align-middle mr-1">error</span>
+            {saveError}
+          </span>
         )}
       </div>
 
-      <AlertDialog
+      <ConfirmDialog
         open={pendingUnbind !== null}
-        onOpenChange={(open) => {
-          if (!open && !isUnbinding) {
-            setPendingUnbind(null)
-            setUnbindError('')
-          }
+        onClose={() => {
+          if (isUnbinding) return
+          setPendingUnbind(null)
         }}
-      >
-        <AlertDialogContent
-          onCloseAutoFocus={(event) => {
-            const target = pairedUnbindTriggerRef.current
-            pairedUnbindTriggerRef.current = null
-            if (!target?.isConnected) return
-            event.preventDefault()
-            target.focus()
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.adapters.unbind')}</AlertDialogTitle>
-            <AlertDialogDescription>{t('settings.adapters.unbindConfirm')}</AlertDialogDescription>
-          </AlertDialogHeader>
-          {unbindError && (
-            <Alert variant="destructive">
-              <AlertDescription>{unbindError}</AlertDescription>
-            </Alert>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isUnbinding}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-[var(--color-error)] text-white hover:opacity-90"
-              disabled={isUnbinding}
-              aria-busy={isUnbinding || undefined}
-              onClick={(event) => {
-                event.preventDefault()
-                void confirmUnbind()
-              }}
-            >
-              {t('settings.adapters.unbind')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
+        onConfirm={confirmUnbind}
+        title={t('settings.adapters.unbind')}
+        body={t('settings.adapters.unbindConfirm')}
+        confirmLabel={t('settings.adapters.unbind')}
+        cancelLabel={t('common.cancel')}
+        confirmVariant="danger"
+        loading={isUnbinding}
+      />
+      <ConfirmDialog
         open={pendingAdapterUnbind !== null}
-        onOpenChange={(open) => {
-          if (!open && !isUnbindingWechatAccount && !isUnbindingDtBot && !isUnbindingWhatsAppAccount) {
-            setPendingAdapterUnbind(null)
-            setAdapterUnbindError('')
-          }
+        onClose={() => {
+          if (isUnbindingWechatAccount || isUnbindingDtBot || isUnbindingWhatsAppAccount) return
+          setPendingAdapterUnbind(null)
         }}
-      >
-        <AlertDialogContent
-          onCloseAutoFocus={(event) => {
-            const target = adapterUnbindTriggerRef.current
-            adapterUnbindTriggerRef.current = null
-            if (!target?.isConnected) return
-            event.preventDefault()
-            target.focus()
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>{adapterUnbindTitle}</AlertDialogTitle>
-            <AlertDialogDescription>{adapterUnbindDescription}</AlertDialogDescription>
-          </AlertDialogHeader>
-          {adapterUnbindError && (
-            <Alert variant="destructive">
-              <AlertDescription>{adapterUnbindError}</AlertDescription>
-            </Alert>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isUnbindingWechatAccount || isUnbindingDtBot || isUnbindingWhatsAppAccount}>
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-[var(--color-error)] text-white hover:opacity-90"
-              disabled={isUnbindingWechatAccount || isUnbindingDtBot || isUnbindingWhatsAppAccount}
-              onClick={(event) => {
-                event.preventDefault()
-                const action = pendingAdapterUnbind === 'wechatAccount'
-                  ? handleUnbindWechatAccount
-                  : pendingAdapterUnbind === 'whatsappAccount'
-                    ? handleUnbindWhatsAppAccount
-                    : handleUnbindDingtalkBot
-                void action()
-              }}
-            >
-              {adapterUnbindTitle}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onConfirm={pendingAdapterUnbind === 'wechatAccount'
+          ? handleUnbindWechatAccount
+          : pendingAdapterUnbind === 'whatsappAccount'
+            ? handleUnbindWhatsAppAccount
+            : handleUnbindDingtalkBot}
+        title={pendingAdapterUnbind === 'wechatAccount'
+          ? t('settings.adapters.wechatUnbindAccount')
+          : pendingAdapterUnbind === 'whatsappAccount'
+            ? t('settings.adapters.whatsappUnbindAccount')
+            : t('settings.adapters.dingtalkUnbindBot')}
+        body={pendingAdapterUnbind === 'wechatAccount'
+          ? t('settings.adapters.wechatUnbindAccountConfirm')
+          : pendingAdapterUnbind === 'whatsappAccount'
+            ? t('settings.adapters.whatsappUnbindAccountConfirm')
+            : t('settings.adapters.dingtalkUnbindBotConfirm')}
+        confirmLabel={pendingAdapterUnbind === 'wechatAccount'
+          ? t('settings.adapters.wechatUnbindAccount')
+          : pendingAdapterUnbind === 'whatsappAccount'
+            ? t('settings.adapters.whatsappUnbindAccount')
+            : t('settings.adapters.dingtalkUnbindBot')}
+        cancelLabel={t('common.cancel')}
+        confirmVariant="danger"
+        loading={isUnbindingWechatAccount || isUnbindingDtBot || isUnbindingWhatsAppAccount}
+      />
     </div>
+  )
+}
+
+function ImTabButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`relative px-4 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-inset ${
+        active
+          ? 'text-[var(--color-text-primary)] font-semibold after:absolute after:left-3 after:right-3 after:bottom-0 after:h-[2px] after:bg-[var(--color-brand)]'
+          : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+      }`}
+    >
+      {label}
+    </button>
   )
 }

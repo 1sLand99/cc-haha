@@ -1,10 +1,8 @@
 import React from 'react'
-import { CircleAlert } from 'lucide-react'
-import { t, type TranslationKey } from '../i18n'
+import { t } from '../i18n'
 import { reportReactError } from '../lib/diagnosticsCapture'
+import { Button } from './shared/Button'
 import { DoctorPanel } from './doctor/DoctorPanel'
-import { Button } from './ui/button'
-import { StartupSurface } from './ui/custom/startup-surface'
 
 type Props = {
   children: React.ReactNode
@@ -34,66 +32,23 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 }
 
-type DiagnosticsState = {
-  hasError: boolean
-}
-
-class DiagnosticsFallbackBoundary extends React.Component<
-  { children: React.ReactNode },
-  DiagnosticsState
-> {
-  state: DiagnosticsState = { hasError: false }
-
-  static getDerivedStateFromError(): DiagnosticsState {
-    return { hasError: true }
-  }
-
-  componentDidCatch(error: unknown, errorInfo: React.ErrorInfo) {
-    void reportReactError(error, errorInfo)
-  }
-
-  render() {
-    return this.state.hasError ? null : this.props.children
-  }
-}
-
-function safeTranslate(key: TranslationKey, fallback: string) {
-  try {
-    return t(key)
-  } catch {
-    return fallback
-  }
-}
-
 function ErrorBoundaryFallback() {
-  const title = safeTranslate('errorBoundary.title', 'Something went wrong.')
-  const description = safeTranslate(
-    'errorBoundary.description',
-    'The error was recorded in Diagnostics.',
-  )
-  const retry = safeTranslate('common.retry', 'Retry')
-
   return (
-    <StartupSurface
-      title={title}
-      description={description}
-      icon={<CircleAlert aria-hidden="true" />}
-      actions={(
-        <Button
-          autoFocus
-          type="button"
-          variant="secondary"
-          onClick={() => window.location.reload()}
-        >
-          {retry}
-        </Button>
-      )}
-    >
-      <DiagnosticsFallbackBoundary>
-        <div className="text-left">
+    <div className="h-screen w-screen bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] flex items-center justify-center p-6">
+      <div className="max-w-md w-full text-center">
+        <div className="text-base font-semibold">{t('errorBoundary.title')}</div>
+        <div className="mt-2 text-sm text-[var(--color-text-tertiary)]">
+          {t('errorBoundary.description')}
+        </div>
+        <div className="mt-4 flex justify-center">
+          <Button type="button" variant="secondary" size="sm" onClick={() => window.location.reload()}>
+            {t('common.retry')}
+          </Button>
+        </div>
+        <div className="mt-4 text-left">
           <DoctorPanel compact />
         </div>
-      </DiagnosticsFallbackBoundary>
-    </StartupSurface>
+      </div>
+    </div>
   )
 }

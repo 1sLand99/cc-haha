@@ -13,12 +13,6 @@ import { CopyButton } from '../../shared/CopyButton'
 import { MetaChip } from '../TraceBadges'
 import { Section } from './Section'
 import { MessageBlocks } from './MessageBlocks'
-import { Alert, AlertDescription, AlertTitle } from '../../ui/alert'
-import { Badge } from '../../ui/badge'
-import { Button } from '../../ui/button'
-import { Progress } from '../../ui/progress'
-import { ToggleGroup, ToggleGroupItem } from '../../ui/toggle-group'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../../ui/collapsible'
 
 const MESSAGE_FOLD_THRESHOLD = 20
 const MESSAGE_HEAD_COUNT = 2
@@ -39,7 +33,6 @@ export function LlmCallDetail({
   const isTerminal = span.status !== 'pending'
   const [detail, setDetail] = useState<TraceCallRecord | null>(null)
   const [fetchFailed, setFetchFailed] = useState(false)
-  const [retryNonce, setRetryNonce] = useState(0)
   const fetchKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -59,7 +52,7 @@ export function LlmCallDetail({
         setFetchFailed(true)
       }
     })
-  }, [sessionId, callId, isTerminal, revisionKey, retryNonce])
+  }, [sessionId, callId, isTerminal, revisionKey])
 
   const effectiveCall = detail && detail.id === callId ? detail : call
   const parsed = useMemo(() => {
@@ -87,22 +80,10 @@ export function LlmCallDetail({
   return (
     <div data-testid="trace-llm-detail">
       {loadingDetail ? (
-        <Progress
-          value={null}
-          aria-label={t('common.loading')}
-          className="h-0.5 rounded-none"
-          data-testid="trace-detail-loading"
-        />
+        <div className="progress-indeterminate-track h-0.5 bg-[var(--color-surface-container)]" data-testid="trace-detail-loading" />
       ) : null}
       {fetchFailed ? (
-        <NoticeBar
-          text={t('trace.detail.fetchFailed')}
-          onRetry={() => {
-            fetchKeyRef.current = null
-            setFetchFailed(false)
-            setRetryNonce((value) => value + 1)
-          }}
-        />
+        <NoticeBar text={t('trace.detail.fetchFailed')} />
       ) : null}
       {legacyFallback ? (
         <NoticeBar text={t('trace.detail.legacyTruncated')} />
@@ -188,68 +169,56 @@ function ResponseContent({
   stopReason?: string
 }) {
   const t = useTranslation()
-  const [stackOpen, setStackOpen] = useState(false)
   if (call.error) {
     const aborted = isAbortedTraceCall(call)
     return (
-      <Alert
-        variant="destructive"
+      <div
+        className="rounded-[var(--radius-md)] border border-[var(--color-error)]/25 bg-[var(--color-error-container)]/40 px-3 py-2"
         data-testid="trace-call-error"
       >
-        <AlertTitle className="flex min-w-0 items-center gap-2">
-          <span className="text-xs font-semibold text-[var(--color-error)]">{call.error.name}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="text-xs font-semibold text-[var(--color-error)]">{call.error.name}</div>
           {aborted ? (
-            <Badge
-              variant="destructive"
-              className="min-h-4 rounded-[var(--radius-sm)] px-1.5 py-0 text-[10px]"
+            <span
+              className="inline-flex shrink-0 items-center rounded-[var(--radius-sm)] bg-[var(--color-error)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-error)]"
               data-testid="trace-call-aborted-badge"
             >
               {t('trace.status.aborted')}
-            </Badge>
+            </span>
           ) : null}
-        </AlertTitle>
-        <AlertDescription>
-          <div className="text-xs leading-5 text-[var(--color-text-secondary)]">{call.error.message}</div>
+        </div>
+        <div className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)]">{call.error.message}</div>
         {aborted ? (
           <div className="mt-1 text-[11px] leading-4 text-[var(--color-text-tertiary)]">
             {t('trace.detail.aborted')}
           </div>
         ) : null}
         {call.error.stack ? (
-          <Collapsible open={stackOpen} onOpenChange={setStackOpen} className="mt-1.5">
-            <CollapsibleTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 px-1.5 text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]"
-              >
-                stack
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <pre className="mt-1 max-h-[240px] overflow-y-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-4 text-[var(--color-text-tertiary)]">
-                {call.error.stack}
-              </pre>
-            </CollapsibleContent>
-          </Collapsible>
+          <details className="mt-1.5">
+            <summary className="cursor-pointer text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
+              stack
+            </summary>
+            <pre className="mt-1 max-h-[240px] overflow-y-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-4 text-[var(--color-text-tertiary)]">
+              {call.error.stack}
+            </pre>
+          </details>
         ) : null}
-        </AlertDescription>
-      </Alert>
+      </div>
     )
   }
   if (pending) {
     return (
-      <Alert className="flex items-center gap-2 border-dashed text-xs text-[var(--color-text-tertiary)]">
+      <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-tertiary)]">
         <Loader2 size={13} strokeWidth={2} className="animate-spin" />
         {t('trace.detail.streaming')}
-      </Alert>
+      </div>
     )
   }
   if (!parsedMessage) {
     return (
-      <Alert className="border-dashed text-xs text-[var(--color-text-tertiary)]">
+      <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-tertiary)]">
         {call.response ? t('trace.detail.legacyTruncated') : t('trace.noResponse')}
-      </Alert>
+      </div>
     )
   }
   return (
@@ -280,14 +249,13 @@ function MessageList({ messages }: { messages: NormalizedMessage[] }) {
   return (
     <div className="flex flex-col gap-2">
       {head.map((message, index) => <MessageBlocks key={`head-${index}`} message={message} />)}
-      <Button
-        variant="default"
-        size="sm"
+      <button
+        type="button"
         onClick={() => setShowAll(true)}
-        className="border-dashed text-[11px] text-[var(--color-text-tertiary)]"
+        className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-1.5 text-[11px] text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)] active:scale-[0.98]"
       >
         {t('trace.detail.earlierMessages', { count: hiddenCount })}
-      </Button>
+      </button>
       {tail.map((message, index) => <MessageBlocks key={`tail-${index}`} message={message} />)}
     </div>
   )
@@ -298,25 +266,24 @@ function ToolDefinitions({ tools }: { tools: Array<{ name: string; description?:
   const active = tools.find((tool) => tool.name === expanded)
   return (
     <div>
-      <ToggleGroup
-        type="single"
-        value={expanded ?? ''}
-        onValueChange={(value) => setExpanded(value || null)}
-        variant="default"
-        size="sm"
-        className="w-fit flex-wrap gap-1"
-      >
+      <div className="flex flex-wrap gap-1">
         {tools.map((tool) => (
-          <ToggleGroupItem
+          <button
             key={tool.name}
-            value={tool.name}
+            type="button"
+            onClick={() => setExpanded((current) => current === tool.name ? null : tool.name)}
+            aria-pressed={expanded === tool.name}
             {...(tool.description ? { title: tool.description } : {})}
-            className="h-6 rounded-[var(--radius-sm)] px-1.5 font-mono text-[10px]"
+            className={`rounded-[var(--radius-sm)] border px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
+              expanded === tool.name
+                ? 'border-[var(--color-border-focus)] text-[var(--color-text-primary)]'
+                : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+            }`}
           >
             {tool.name}
-          </ToggleGroupItem>
+          </button>
         ))}
-      </ToggleGroup>
+      </div>
       {active ? (
         <div className="mt-2">
           {active.description ? (
@@ -396,18 +363,10 @@ function RawHeaders({ title, headers }: { title: string; headers: Record<string,
   )
 }
 
-function NoticeBar({ text, onRetry }: { text: string; onRetry?: () => void }) {
-  const t = useTranslation()
+function NoticeBar({ text }: { text: string }) {
   return (
-    <Alert className="mx-4 mt-3 w-auto border-[var(--color-warning)]/30 bg-[var(--color-warning-container)]/30">
-      <AlertDescription className="flex items-center justify-between gap-3 text-[11px] text-[var(--color-text-secondary)]">
-        <span>{text}</span>
-        {onRetry ? (
-          <Button variant="outline" size="sm" onClick={onRetry}>
-            {t('common.retry')}
-          </Button>
-        ) : null}
-      </AlertDescription>
-    </Alert>
+    <div className="mx-4 mt-3 rounded-[var(--radius-md)] border border-[var(--color-warning)]/30 bg-[var(--color-warning-container)]/30 px-3 py-1.5 text-[11px] text-[var(--color-text-secondary)]">
+      {text}
+    </div>
   )
 }

@@ -10,7 +10,6 @@ import { LlmCallDetail } from './detail/LlmCallDetail'
 import { ToolDetail } from './detail/ToolDetail'
 import { MessageDetail } from './detail/MessageDetail'
 import { SessionOverview } from './detail/SessionOverview'
-import { ScrollArea } from '../ui/scroll-area'
 
 export function TraceDetail({
   span,
@@ -31,10 +30,7 @@ export function TraceDetail({
       <div className="shrink-0 border-b border-[var(--color-border)] px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <TypeIcon span={span} />
-          <h2
-            className="min-w-0 truncate text-sm font-semibold text-[var(--color-text-primary)]"
-            aria-live="polite"
-          >
+          <h2 className="min-w-0 truncate text-sm font-semibold text-[var(--color-text-primary)]">
             {spanDisplayTitle(span, t)}
           </h2>
           <StatusPill status={span.status} />
@@ -43,7 +39,7 @@ export function TraceDetail({
           <HeaderChips span={span} />
         </div>
       </div>
-      <ScrollArea className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <DetailBody
           span={span}
           viewModel={viewModel}
@@ -51,7 +47,7 @@ export function TraceDetail({
           revisionKey={revisionKey}
           onSelect={onSelect}
         />
-      </ScrollArea>
+      </div>
     </div>
   )
 }

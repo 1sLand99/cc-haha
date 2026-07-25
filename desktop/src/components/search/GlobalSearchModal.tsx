@@ -1,19 +1,10 @@
 import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react'
-import { LoaderCircle, Search, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Search, X } from 'lucide-react'
 import { useTranslation, type TranslationKey } from '../../i18n'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useTabStore } from '../../stores/tabStore'
 import { searchApi, type SessionSearchResult, type SessionMatch, type SessionMatchRole } from '../../api/search'
-import { Alert } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { IconButton } from '@/components/ui/custom/icon-button'
-import { KeyboardShortcut } from '@/components/ui/custom/keyboard-shortcut'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
-import { Skeleton } from '@/components/ui/skeleton'
 
 const DEBOUNCE_MS = 250
 const RECENT_LIMIT = 8
@@ -50,7 +41,6 @@ export function GlobalSearchModal({ open, onClose }: Props) {
 
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const openerRef = useRef<HTMLElement | null>(null)
   const requestIdRef = useRef(0)
   const requestControllerRef = useRef<AbortController | null>(null)
   const [isComposing, setIsComposing] = useState(false)
@@ -74,6 +64,8 @@ export function GlobalSearchModal({ open, onClose }: Props) {
     requestControllerRef.current?.abort()
     requestControllerRef.current = null
     requestIdRef.current += 1 // invalidate any in-flight request
+    const id = requestAnimationFrame(() => inputRef.current?.focus())
+    return () => cancelAnimationFrame(id)
   }, [open])
 
   // Cancel stale work as soon as the visible query changes. Waiting for the
@@ -216,32 +208,25 @@ export function GlobalSearchModal({ open, onClose }: Props) {
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={(nextOpen) => {
-      if (!nextOpen) onClose()
-    }}>
-      <DialogContent
-        showCloseButton={false}
-        aria-describedby={undefined}
-        className="left-1/2 top-[12vh] flex max-h-[70vh] w-[640px] max-w-[calc(100vw-48px)] -translate-x-1/2 translate-y-0 grid-cols-none flex-col gap-0 overflow-hidden p-0"
-        onOpenAutoFocus={(event) => {
-          openerRef.current = document.activeElement instanceof HTMLElement
-            ? document.activeElement
-            : null
-          event.preventDefault()
-          inputRef.current?.focus()
-        }}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault()
-          openerRef.current?.focus()
-          openerRef.current = null
-        }}
+  if (!open) return null
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]">
+      <div
+        className="absolute inset-0 bg-[var(--color-overlay-scrim)] transition-opacity duration-200"
+        onClick={onClose}
+      />
+
+      <div
+        className="glass-panel relative z-10 flex max-h-[70vh] w-[640px] max-w-[calc(100vw-48px)] flex-col overflow-hidden rounded-[var(--radius-xl)]"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('search.global.placeholder')}
       >
-        <DialogTitle className="sr-only">{t('search.global.placeholder')}</DialogTitle>
         {/* Search input */}
-        <div className="flex items-center gap-2.5 px-4 py-3">
+        <div className="flex items-center gap-2.5 border-b border-[var(--color-border)] px-4 py-3">
           <Search className="h-4 w-4 shrink-0 text-[var(--color-text-tertiary)]" aria-hidden="true" />
-          <Input
+          <input
             ref={inputRef}
             type="text"
             value={query}
@@ -251,23 +236,26 @@ export function GlobalSearchModal({ open, onClose }: Props) {
             onKeyDown={handleKeyDown}
             placeholder={t('search.global.placeholder')}
             aria-label={t('search.global.placeholder')}
-            className="h-8 min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:border-transparent focus-visible:shadow-none"
+            className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
           />
           {loading && (
-            <LoaderCircle className="size-4 animate-spin text-[var(--color-text-tertiary)]" aria-hidden="true" />
+            <span className="material-symbols-outlined animate-spin text-[16px] text-[var(--color-text-tertiary)]">
+              progress_activity
+            </span>
           )}
-          <IconButton
-            label={t('search.global.close')}
-            variant="ghost"
+          <button
+            type="button"
             onClick={onClose}
+            aria-label={t('search.global.close')}
+            title={t('search.global.close')}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
           >
-            <X aria-hidden="true" />
-          </IconButton>
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
         </div>
-        <Separator />
 
         {/* Results */}
-        <ScrollArea ref={listRef} className="min-h-0 flex-1 py-1.5" role="listbox">
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto py-1.5" role="listbox">
           {!isSearching ? (
             <>
               {rows.length > 0 && (
@@ -288,16 +276,13 @@ export function GlobalSearchModal({ open, onClose }: Props) {
               ))}
             </>
           ) : loading && results.length === 0 ? (
-            <div className="space-y-3 px-4 py-5" role="status">
-              <span className="sr-only">{t('search.global.loading')}</span>
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-[92%]" />
-              <Skeleton className="h-10 w-[84%]" />
+            <div className="px-4 py-8 text-center text-xs text-[var(--color-text-tertiary)]">
+              {t('search.global.loading')}
             </div>
           ) : error ? (
-            <Alert variant="destructive" className="mx-4 my-5 w-auto text-center text-xs">
+            <div className="px-4 py-8 text-center text-xs text-[var(--color-error)]">
               {t('search.global.error')}
-            </Alert>
+            </div>
           ) : rows.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-[var(--color-text-tertiary)]">
               {t('search.global.noResults')}
@@ -322,20 +307,20 @@ export function GlobalSearchModal({ open, onClose }: Props) {
               )}
             </>
           )}
-        </ScrollArea>
+        </div>
 
         {/* Footer hints */}
-        <Separator />
-        <div className="flex items-center gap-1.5 px-4 py-1.5 text-[10px] text-[var(--color-text-tertiary)]">
-          <KeyboardShortcut>↑↓</KeyboardShortcut>
+        <div className="flex items-center gap-1.5 border-t border-[var(--color-border)] px-4 py-1.5 text-[10px] text-[var(--color-text-tertiary)]">
+          <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1 py-0.5 font-mono">↑↓</kbd>
           <span>{t('fileSearch.navigate')}</span>
-          <KeyboardShortcut className="ml-2">Enter</KeyboardShortcut>
+          <kbd className="ml-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1 py-0.5 font-mono">Enter</kbd>
           <span>{t('fileSearch.select')}</span>
-          <KeyboardShortcut className="ml-2">Esc</KeyboardShortcut>
+          <kbd className="ml-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1 py-0.5 font-mono">Esc</kbd>
           <span>{t('fileSearch.close')}</span>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -350,15 +335,14 @@ type RowProps = {
 
 function ResultRow({ row, index, active, onActivate, onOpen, t }: RowProps) {
   return (
-    <Button
+    <button
       type="button"
-      variant="ghost"
       data-index={index}
       role="option"
       aria-selected={active}
       onMouseEnter={() => onActivate(index)}
       onClick={() => onOpen(row)}
-      className={`h-auto w-full flex-col items-stretch gap-0.5 rounded-none px-4 py-2 text-left whitespace-normal active:translate-y-0 ${
+      className={`flex w-full flex-col gap-0.5 px-4 py-2 text-left transition-colors focus-visible:outline-none ${
         active ? 'bg-[var(--color-surface-hover)]' : ''
       }`}
     >
@@ -387,7 +371,7 @@ function ResultRow({ row, index, active, onActivate, onOpen, t }: RowProps) {
           </span>
         </div>
       ))}
-    </Button>
+    </button>
   )
 }
 
@@ -400,16 +384,15 @@ function RoleBadge({
 }) {
   const isUser = role === 'user'
   return (
-    <Badge
-      variant={isUser ? 'default' : 'secondary'}
+    <span
       className={`mt-px shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none ${
         isUser
-          ? 'border-transparent bg-[var(--color-brand)]/15 text-[var(--color-brand)]'
-          : ''
+          ? 'bg-[var(--color-brand)]/15 text-[var(--color-brand)]'
+          : 'bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]'
       }`}
     >
       {isUser ? t('search.global.roleUser') : t('search.global.roleAssistant')}
-    </Badge>
+    </span>
   )
 }
 

@@ -27,8 +27,6 @@ import {
   createWorkspaceDiffHighlightCacheKey,
   requestWorkspaceDiffHighlight,
 } from './workspaceDiffHighlightRuntime'
-import { Button } from '../ui/button'
-import { Textarea } from '../ui/textarea'
 
 export const WORKSPACE_PREVIEW_LINE_LIMIT = 2000
 export const WORKSPACE_PLAIN_TEXT_LINE_THRESHOLD = 5000
@@ -564,7 +562,7 @@ export function WorkspaceDiffSurface({
           {t(`workspace.diffReview.${status}`)}
         </div>
       )}
-      <Textarea
+      <textarea
         ref={editorRef}
         aria-label={t('workspace.diffReview.editorLabel')}
         value={review.draft}
@@ -572,27 +570,26 @@ export function WorkspaceDiffSurface({
         onChange={(event) => setReview((current) => ({ ...current, draft: event.target.value }))}
         onKeyDown={handleEditorKeyDown}
         rows={2}
-        className="block min-h-0 w-full resize-y rounded-none border-0 bg-transparent px-3 py-2 font-[var(--font-body)] text-[13px] leading-5 shadow-none focus-visible:border-0 focus-visible:shadow-none"
+        className="block min-h-0 w-full resize-y bg-transparent px-3 py-2 font-[var(--font-body)] text-[13px] leading-5 text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
       />
       <div className="flex items-center justify-end gap-2 px-2 pb-2">
-        <Button
-          variant="ghost"
-          size="sm"
+        <button
+          type="button"
           onClick={closeEditor}
-          className="h-8 rounded-[7px] px-3 text-[12px]"
+          className="inline-flex h-8 items-center justify-center rounded-[7px] px-3 text-[12px] font-medium text-[var(--color-text-secondary)] transition-[color,background-color,transform] duration-200 ease-out hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.98]"
         >
           {t('common.cancel')}
-        </Button>
-        <Button
-          size="sm"
+        </button>
+        <button
+          type="button"
           aria-label={t('workspace.diffReview.submitAria')}
           disabled={!review.draft.trim()}
           onClick={submitComment}
-          className="h-8 min-w-8 gap-1.5 rounded-[7px] bg-[var(--color-info)] px-3 text-[12px] text-[var(--color-surface)] hover:opacity-90"
+          className="inline-flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-[7px] bg-[var(--color-info)] px-3 text-[12px] font-medium text-[var(--color-surface)] transition-[opacity,transform] duration-200 ease-out hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-35"
         >
           <CornerDownLeft aria-hidden="true" size={14} />
           <span>{t('workspace.diffReview.submit')}</span>
-        </Button>
+        </button>
       </div>
     </div>
   )
@@ -690,13 +687,12 @@ export function WorkspaceDiffSurface({
                               data-diff-gutter-utility-slot=""
                               className="absolute inset-y-0 right-0 flex items-center justify-end"
                             >
-                              <Button
+                              <button
                                 ref={(element) => {
                                   if (element) buttonRefs.current.set(row.id, element)
                                   else buttonRefs.current.delete(row.id)
                                 }}
-                                variant="ghost"
-                                size="icon-sm"
+                                type="button"
                                 aria-label={t('workspace.diffReview.commentLineAria', {
                                   path,
                                   side: sideLabel(row.side),
@@ -708,12 +704,12 @@ export function WorkspaceDiffSurface({
                                 onClick={(event) => handleRowClick(event, row)}
                                 onFocus={() => setRovingId(row.id)}
                                 onKeyDown={(event) => handleRowKeyDown(event, row)}
-                                className={`relative right-[calc(1ch-1.25rem)] h-5 w-5 rounded-[4px] p-0 transition-[color,background-color,opacity,transform] duration-100 ease-out before:absolute before:-inset-1 hover:bg-[var(--color-info)] hover:text-[var(--color-surface)] active:scale-[0.96] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-[var(--color-info)] ${
+                                className={`relative right-[calc(1ch-1.25rem)] inline-flex h-5 w-5 items-center justify-center rounded-[4px] transition-[color,background-color,opacity,transform] duration-100 ease-out before:absolute before:-inset-1 hover:bg-[var(--color-info)] hover:text-[var(--color-surface)] active:scale-[0.96] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-[var(--color-info)] ${
                                   selectionFocus ? 'bg-[var(--color-info)] text-[var(--color-surface)] opacity-100' : 'text-[var(--color-text-tertiary)] opacity-0 group-hover:opacity-100 focus:opacity-100'
                                 }`}
                               >
                                 {selected ? <MessageSquare aria-hidden="true" size={12} /> : <Plus aria-hidden="true" size={13} />}
-                              </Button>
+                              </button>
                             </span>
                           )}
                         </span>
@@ -760,14 +756,13 @@ export function WorkspaceDiffSurface({
                 ? t('workspace.previewAllLines', { total: displayItemIds.length })
                 : t('workspace.previewLineLimit', { count: visibleItemIds.size, total: displayItemIds.length })}
             </span>
-            <Button
-              variant="ghost"
-              size="sm"
+            <button
+              type="button"
               onClick={toggleRows}
-              className="ml-auto h-7 rounded-[5px] px-2 text-[11px]"
+              className="ml-auto h-7 rounded-[5px] px-2 text-[11px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
             >
               {showAllRows ? t('workspace.collapsePreview') : t('workspace.showAllLoadedLines')}
-            </Button>
+            </button>
           </div>
         )}
       </div>

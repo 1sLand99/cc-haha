@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../workspace/WorkspacePanel', () => ({
@@ -71,27 +71,11 @@ describe('WorkbenchPanel', () => {
     expect(screen.getByRole('tab', { name: 'Files' })).toHaveAttribute('aria-selected', 'false')
   })
 
-  it('connects the selected mode tab to the visible shadcn tabpanel', () => {
-    render(<WorkbenchPanel sessionId={SESSION_ID} />)
-
-    const filesTab = screen.getByRole('tab', { name: 'Files' })
-    const workspacePanel = screen.getByRole('tabpanel')
-    expect(filesTab).toHaveAttribute('aria-controls', workspacePanel.id)
-    expect(workspacePanel).toContainElement(screen.getByTestId('workspace-panel'))
-
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Browser' }), { button: 0 })
-
-    const browserTab = screen.getByRole('tab', { name: 'Browser' })
-    const browserPanel = screen.getByRole('tabpanel')
-    expect(browserTab).toHaveAttribute('aria-controls', browserPanel.id)
-    expect(browserPanel).toContainElement(screen.getByTestId('browser-surface'))
-    expect(screen.getAllByRole('tabpanel')).toHaveLength(1)
-  })
-
   it('exposes a single compact workbench navigation landmark', () => {
     render(<WorkbenchPanel sessionId={SESSION_ID} variant="tab" />)
 
-    const navigation = screen.getByRole('navigation', { name: 'Workbench navigation' })
+    const navigation = screen.getByTestId('workbench-navigation')
+    expect(navigation).toHaveAttribute('aria-label', 'Workbench navigation')
     expect(navigation).toContainElement(screen.getByRole('button', { name: 'Back to conversation' }))
     expect(navigation).toContainElement(screen.getByRole('tablist', { name: 'Workbench mode' }))
     expect(navigation).toContainElement(screen.getByRole('button', { name: 'Close' }))
@@ -103,7 +87,7 @@ describe('WorkbenchPanel', () => {
     render(<WorkbenchPanel sessionId={SESSION_ID} />)
     expect(useWorkspacePanelStore.getState().getMode(SESSION_ID)).toBe('workspace')
 
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Browser' }), { button: 0 })
+    fireEvent.click(screen.getByRole('tab', { name: 'Browser' }))
 
     expect(useWorkspacePanelStore.getState().getMode(SESSION_ID)).toBe('browser')
     expect(useBrowserPanelStore.getState().bySession[SESSION_ID]).toMatchObject({
@@ -119,24 +103,9 @@ describe('WorkbenchPanel', () => {
     useWorkspacePanelStore.getState().setMode(SESSION_ID, 'browser')
     render(<WorkbenchPanel sessionId={SESSION_ID} />)
 
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Files' }), { button: 0 })
+    fireEvent.click(screen.getByRole('tab', { name: 'Files' }))
 
     expect(useWorkspacePanelStore.getState().getMode(SESSION_ID)).toBe('workspace')
-  })
-
-  it('switches workbench modes with the shadcn Tabs arrow-key contract', async () => {
-    render(<WorkbenchPanel sessionId={SESSION_ID} />)
-
-    const filesTab = screen.getByRole('tab', { name: 'Files' })
-    const browserTab = screen.getByRole('tab', { name: 'Browser' })
-    act(() => filesTab.focus())
-    fireEvent.keyDown(filesTab, { key: 'ArrowRight' })
-
-    await waitFor(() => {
-      expect(browserTab).toHaveFocus()
-      expect(browserTab).toHaveAttribute('data-state', 'active')
-      expect(useWorkspacePanelStore.getState().getMode(SESSION_ID)).toBe('browser')
-    })
   })
 
   it('the close button closes the unified panel', () => {

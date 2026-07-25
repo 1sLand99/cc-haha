@@ -9,7 +9,6 @@ import { openWithContextForWorkspaceFile } from '../../lib/openWithContextForHre
 import { useBrowserPanelStore } from '../../stores/browserPanelStore'
 import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
 import { TargetIcon } from '../common/TargetIcon'
-import { DropdownMenuItem, DropdownMenuSeparator } from '../ui/dropdown-menu'
 
 function openExternal(path: string) {
   void getDesktopHost().shell.openPath(path).catch(() => {})
@@ -68,15 +67,17 @@ export function WorkspaceFileOpenWith({
 
   return (
     <>
-      <DropdownMenuSeparator />
+      <div className="my-1 border-t border-[var(--color-border)]" role="separator" />
       {items.map((item) => (
-        <DropdownMenuItem
+        <button
           key={item.id}
-          onSelect={() => {
+          type="button"
+          role="menuitem"
+          onClick={() => {
             item.onSelect()
             onAfterSelect?.()
           }}
-          className="gap-2 px-3 py-1.5 text-[var(--color-text-primary)]"
+          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]"
         >
           <span
             aria-hidden="true"
@@ -89,7 +90,7 @@ export function WorkspaceFileOpenWith({
             )}
           </span>
           <span className="truncate">{item.label}</span>
-        </DropdownMenuItem>
+        </button>
       ))}
     </>
   )

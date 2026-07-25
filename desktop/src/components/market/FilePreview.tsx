@@ -1,22 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
-import {
-  File,
-  FileCode2,
-  FileJson2,
-  FileText,
-  FolderX,
-  RefreshCw,
-  Scissors,
-  SquareTerminal,
-  TriangleAlert,
-} from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from '../../i18n'
-import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
-import { Button } from '../ui/button'
-import { Card, CardContent, CardHeader } from '../ui/card'
-import { ScrollArea } from '../ui/scroll-area'
-import { Skeleton } from '../ui/skeleton'
-import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
 import { CodeViewer } from '../chat/CodeViewer'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 
@@ -35,15 +18,15 @@ export type PreviewFileContent = {
   truncated: boolean
 }
 
-const LANG_ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  markdown: FileText,
-  python: FileCode2,
-  javascript: FileCode2,
-  typescript: FileCode2,
-  bash: SquareTerminal,
-  json: FileJson2,
-  yaml: FileJson2,
-  text: FileText,
+const LANG_ICONS: Record<string, string> = {
+  markdown: 'description',
+  python: 'code',
+  javascript: 'javascript',
+  typescript: 'code',
+  bash: 'terminal',
+  json: 'data_object',
+  yaml: 'data_object',
+  text: 'notes',
 }
 
 function formatSize(bytes: number): string {
@@ -59,25 +42,22 @@ type LoadState =
   | { kind: 'loaded'; file: PreviewFileContent }
 
 /**
- * Two-pane file preview shared by market and local skill details. Content is
- * loaded lazily and cached per file while the selected skill remains mounted.
+ * Two-pane file preview: file list on the left, rendered content on the
+ * right. Content is fetched lazily via `loadFile` and cached per path for
+ * the lifetime of the component. Serves both market (async fetch) and
+ * locally installed skills (loadFile resolves from memory).
  */
 export function FilePreview({
   files,
   loadFile,
   initialPath,
-  blockExternalResources = false,
 }: {
   files: PreviewFile[]
   loadFile: (path: string) => Promise<PreviewFileContent>
   initialPath?: string
-  blockExternalResources?: boolean
 }) {
   const t = useTranslation()
-  const defaultPath = useMemo(
-    () => initialPath ?? files.find((file) => file.path === 'SKILL.md')?.path ?? files[0]?.path ?? null,
-    [files, initialPath],
-  )
+  const defaultPath = initialPath ?? files.find((f) => f.path === 'SKILL.md')?.path ?? files[0]?.path ?? null
   const [activePath, setActivePath] = useState<string | null>(defaultPath)
   const [state, setState] = useState<LoadState>({ kind: 'idle' })
   const cacheRef = useRef(new Map<string, PreviewFileContent>())
@@ -91,7 +71,6 @@ export function FilePreview({
         setState({ kind: 'loaded', file: cached })
         return
       }
-
       const seq = ++requestSeq.current
       setState({ kind: 'loading' })
       try {
@@ -99,156 +78,114 @@ export function FilePreview({
         cacheRef.current.set(path, file)
         if (requestSeq.current !== seq) return
         setState({ kind: 'loaded', file })
-      } catch (error) {
+      } catch (err) {
         if (requestSeq.current !== seq) return
-        setState({
-          kind: 'error',
-          message: error instanceof Error ? error.message : String(error),
-        })
+        setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) })
       }
     },
     [loadFile],
   )
 
   useEffect(() => {
-    cacheRef.current.clear()
-    requestSeq.current += 1
-    setActivePath(defaultPath)
-    setState({ kind: 'idle' })
     if (defaultPath) void open(defaultPath)
-    return () => {
-      requestSeq.current += 1
-    }
-  }, [defaultPath, open])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   if (files.length === 0) {
     return (
-      <Card className="border-dashed">
-        <CardContent className="px-6 py-12 text-center">
-          <FolderX className="mx-auto mb-2 h-8 w-8 text-[var(--color-text-tertiary)]" aria-hidden="true" />
-          <p className="text-sm text-[var(--color-text-tertiary)]">{t('market.file.noFiles')}</p>
-        </CardContent>
-      </Card>
+      <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6 py-12 text-center">
+        <span className="material-symbols-outlined mb-2 block text-[32px] text-[var(--color-text-tertiary)]">folder_off</span>
+        <p className="text-sm text-[var(--color-text-tertiary)]">{t('market.file.noFiles')}</p>
+      </div>
     )
   }
 
-  const activeFile = files.find((file) => file.path === activePath)
+  const activeFile = files.find((f) => f.path === activePath)
 
   return (
-    <div
-      className="grid min-w-0 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]"
-      data-testid="market-file-preview"
-    >
-      <Card className="min-w-0 overflow-hidden">
-        <ScrollArea className="h-[520px] max-h-[55vh]">
-          <CardContent className="p-1.5">
-            <ToggleGroup
-              type="single"
-              orientation="vertical"
-              value={activePath ?? ''}
-              onValueChange={(path) => {
-                if (path) void open(path)
-              }}
-              aria-label={t('market.detail.files')}
-              className="flex-col items-stretch gap-0.5"
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]" data-testid="market-file-preview">
+      <div className="flex max-h-[520px] flex-col gap-0.5 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5">
+        {files.map((file) => {
+          const active = file.path === activePath
+          return (
+            <button
+              key={file.path}
+              type="button"
+              data-testid={`market-file-item-${file.path}`}
+              onClick={() => void open(file.path)}
+              className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                active
+                  ? 'bg-[var(--color-primary-fixed)] text-[var(--color-brand)]'
+                  : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+              }`}
             >
-            {files.map((file) => {
-              const active = file.path === activePath
-              const FileIcon = LANG_ICONS[file.language] ?? File
-              return (
-                <ToggleGroupItem
-                  key={file.path}
-                  variant="ghost"
-                  value={file.path}
-                  data-testid={`market-file-item-${file.path}`}
-                  className={`h-auto min-h-12 w-full justify-start whitespace-normal px-2.5 py-2 text-left ${
-                    active
-                      ? 'bg-[var(--color-primary-fixed)] text-[var(--color-brand)]'
-                      : ''
-                  }`}
-                >
-                  <FileIcon className="h-4 w-4" aria-hidden="true" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium">{file.path}</span>
-                    <span className={`block text-[10px] font-normal ${active ? 'opacity-80' : 'text-[var(--color-text-tertiary)]'}`}>
-                      {file.language} · {formatSize(file.size)}
-                    </span>
-                  </span>
-                </ToggleGroupItem>
-              )
-            })}
-            </ToggleGroup>
-          </CardContent>
-        </ScrollArea>
-      </Card>
+              <span className="material-symbols-outlined flex-shrink-0 text-[16px]" aria-hidden>
+                {LANG_ICONS[file.language] || 'draft'}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium">{file.path}</span>
+                <span className={`block text-[10px] ${active ? 'opacity-80' : 'text-[var(--color-text-tertiary)]'}`}>
+                  {file.language} · {formatSize(file.size)}
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
 
-      <Card className="min-w-0 overflow-hidden">
+      <div className="min-w-0 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
         {activeFile && (
-          <CardHeader className="flex-row flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-2.5 text-[11px] text-[var(--color-text-tertiary)]">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-2.5 text-[11px] text-[var(--color-text-tertiary)]">
             <span className="font-mono font-medium text-[var(--color-text-secondary)]">{activeFile.path}</span>
             <span>{activeFile.language}</span>
             <span>{formatSize(activeFile.size)}</span>
             {state.kind === 'loaded' && state.file.truncated && (
               <span className="inline-flex items-center gap-1 text-[var(--color-warning)]">
-                <Scissors className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="material-symbols-outlined text-[13px]" aria-hidden>content_cut</span>
                 {t('market.file.truncated')}
               </span>
             )}
-          </CardHeader>
+          </div>
         )}
 
-        <ScrollArea className="h-[480px] max-h-[52vh]">
-          <CardContent className="p-4">
-            {state.kind === 'loading' && (
-              <div className="grid gap-3 py-4" data-testid="market-file-loading" aria-busy="true">
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-              </div>
-            )}
-            {state.kind === 'error' && (
-              <Alert variant="destructive" data-testid="market-file-error">
-                <TriangleAlert aria-hidden="true" />
-                <AlertTitle>{t('market.file.loadError')}</AlertTitle>
-                <AlertDescription className="break-words">{state.message}</AlertDescription>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-2 w-fit"
-                  onClick={() => {
-                    if (activePath) void open(activePath)
-                  }}
-                >
-                  <RefreshCw aria-hidden="true" />
-                  {t('market.retry')}
-                </Button>
-              </Alert>
-            )}
-            {state.kind === 'idle' && (
-              <p className="py-10 text-center text-sm text-[var(--color-text-tertiary)]">
-                {t('market.file.empty')}
-              </p>
-            )}
-            {state.kind === 'loaded' && (
-              state.file.language === 'markdown' ? (
-                <MarkdownRenderer
-                  content={state.file.content}
-                  variant="document"
-                  blockExternalResources={blockExternalResources}
-                />
-              ) : (
-                <CodeViewer
-                  code={state.file.content}
-                  language={state.file.language}
-                  showLineNumbers
-                  wrapLongLines
-                  maxLines={500}
-                />
-              )
-            )}
-          </CardContent>
-        </ScrollArea>
-      </Card>
+        <div className="max-h-[480px] overflow-y-auto p-4">
+          {state.kind === 'loading' && (
+            <div className="flex justify-center py-10" data-testid="market-file-loading">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-brand)] border-t-transparent" />
+            </div>
+          )}
+          {state.kind === 'error' && (
+            <div className="flex flex-col items-center gap-2 py-8 text-center" data-testid="market-file-error">
+              <span className="material-symbols-outlined text-[28px] text-[var(--color-error)]">error</span>
+              <p className="text-sm text-[var(--color-text-primary)]">{t('market.file.loadError')}</p>
+              <p className="max-w-md break-words text-xs text-[var(--color-text-tertiary)]">{state.message}</p>
+              <button
+                type="button"
+                onClick={() => activePath && void open(activePath)}
+                className="mt-1 inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-primary)] hover:border-[var(--color-border-focus)]"
+              >
+                <span className="material-symbols-outlined text-[14px]">refresh</span>
+                {t('market.retry')}
+              </button>
+            </div>
+          )}
+          {state.kind === 'idle' && (
+            <p className="py-10 text-center text-sm text-[var(--color-text-tertiary)]">{t('market.file.empty')}</p>
+          )}
+          {state.kind === 'loaded' &&
+            (state.file.language === 'markdown' ? (
+              <MarkdownRenderer content={state.file.content} variant="document" />
+            ) : (
+              <CodeViewer
+                code={state.file.content}
+                language={state.file.language}
+                showLineNumbers
+                wrapLongLines
+                maxLines={500}
+              />
+            ))}
+        </div>
+      </div>
     </div>
   )
 }

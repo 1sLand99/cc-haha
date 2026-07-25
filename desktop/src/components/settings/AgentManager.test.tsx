@@ -36,7 +36,6 @@ vi.mock('../../api/sessions', async (importOriginal) => {
 
 vi.mock('../markdown/MarkdownRenderer', () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
-  markdownToPlainText: (content: string) => content,
 }))
 
 import type { AgentDefinition, AgentListResponse } from '../../api/agents'
@@ -89,18 +88,8 @@ async function renderManager(response: AgentListResponse = EMPTY_RESPONSE) {
 }
 
 function chooseAgentSelect(label: string, option: string) {
-  fireEvent.click(screen.getByRole('combobox', { name: label }))
-  fireEvent.click(screen.getByRole('option', { name: option }))
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise
-    reject = rejectPromise
-  })
-  return { promise, resolve, reject }
+  fireEvent.click(screen.getByRole('button', { name: label }))
+  fireEvent.click(screen.getByRole('button', { name: option }))
 }
 
 describe('AgentManager', () => {
@@ -131,9 +120,6 @@ describe('AgentManager', () => {
       mutationWarning: null,
       selectedAgent: null,
       selectedAgentReturnTab: 'agents',
-      requestedCwd: undefined,
-      resolvedCwd: undefined,
-      isContextStale: false,
     })
   })
 
@@ -152,33 +138,21 @@ describe('AgentManager', () => {
     })
     await renderManager()
 
-    const createButton = screen.getByRole('button', { name: 'Create Agent' })
-    createButton.focus()
-    fireEvent.click(createButton)
-    expect(screen.getByRole('dialog', { name: 'Create Agent' })).toHaveAttribute(
-      'data-slot',
-      'dialog-content',
-    )
-    expect(screen.getByLabelText(/^Name/)).toHaveFocus()
-    fireEvent.click(screen.getByRole('radio', { name: 'Project' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Project' }))
     expect(screen.getByRole('button', { name: 'Select a project...' })).toBeInTheDocument()
-    expect(Array.from(document.querySelectorAll('select')).every(
-      (element) => element.getAttribute('aria-hidden') === 'true',
-    )).toBe(true)
+    expect(document.querySelector('select')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Select a project...' }))
-    fireEvent.click(await screen.findByRole('option', { name: /Selected Project/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Selected Project/ }))
     expect(screen.getByText('Target project: /workspace/selected')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('combobox', { name: 'Model' }))
-    const modelMenuOption = screen.getByRole('option', { name: 'fable' })
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }))
+    const modelMenuOption = screen.getByRole('button', { name: 'fable' })
     expect(modelMenuOption).toBeInTheDocument()
-    expect(modelMenuOption.closest('[data-slot="select-content"]')).toHaveClass('z-[100]')
+    expect(modelMenuOption.parentElement).toHaveClass('bottom-full')
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.getByRole('heading', { name: 'Create Agent' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: 'fable' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'fable' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('System prompt').parentElement).toHaveTextContent('System prompt*')
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(screen.queryByRole('dialog', { name: 'Create Agent' })).not.toBeInTheDocument()
-    await waitFor(() => expect(createButton).toHaveFocus())
   })
 
   it('keeps the selected project context when creating and editing across projects', async () => {
@@ -232,9 +206,9 @@ describe('AgentManager', () => {
 
     await renderManager()
     fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'Project' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Project' }))
     fireEvent.click(screen.getByTitle('/workspace/a'))
-    fireEvent.click(await screen.findByRole('option', { name: /Project B/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Project B/ }))
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'code_reviewer' } })
     fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Review code' } })
     fireEvent.change(screen.getByLabelText('System prompt'), { target: { value: 'Review carefully.' } })
@@ -245,9 +219,6 @@ describe('AgentManager', () => {
     expect(apiReloadMock).toHaveBeenCalledWith('session-b')
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
-    expect(screen.getByLabelText(/^Description/)).toHaveFocus()
-    expect(screen.getByLabelText(/^Name/)).toBeDisabled()
-    expect(screen.getByRole('radio', { name: 'Project' })).toBeDisabled()
     expect(screen.getByText('Target project: /workspace/b')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
@@ -278,7 +249,7 @@ describe('AgentManager', () => {
     render(<AgentManager />)
     await waitFor(() => expect(useAgentStore.getState().availableTools).toContain('Read'))
     fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'Project' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Project' }))
     expect(screen.getByText('Target project: /workspace/project')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'code_reviewer' } })
     fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Review code' } })
@@ -343,13 +314,13 @@ describe('AgentManager', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /Read/ }))
     fireEvent.click(screen.getByRole('checkbox', { name: /Grep/ }))
     fireEvent.change(screen.getByLabelText('Other tool names or permission patterns'), {
-      target: { value: '*, mcp__docs__search, Bash(git:*)' },
+      target: { value: 'mcp__docs__search, Bash(git:*)' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(apiCreateMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        tools: ['Read', 'Grep', '*', 'mcp__docs__search', 'Bash(git:*)'],
+        tools: ['Read', 'Grep', 'mcp__docs__search', 'Bash(git:*)'],
       }),
     ))
   })
@@ -373,7 +344,7 @@ describe('AgentManager', () => {
     await renderManager()
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'Project' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Project' }))
 
     expect(screen.getByText('Target project: /workspace/source-project')).toBeInTheDocument()
   })
@@ -381,42 +352,12 @@ describe('AgentManager', () => {
   it('rejects names longer than 64 characters before calling the API', async () => {
     await renderManager()
     fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }))
-    const nameField = screen.getByLabelText(/^Name/)
-    fireEvent.change(nameField, { target: { value: `a${'b'.repeat(64)}` } })
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: `a${'b'.repeat(64)}` } })
     fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Review code' } })
     fireEvent.change(screen.getByLabelText('System prompt'), { target: { value: 'Review carefully.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(screen.getByText(/1–64 lowercase letters/)).toBeInTheDocument()
-    expect(nameField).toHaveAttribute('aria-invalid', 'true')
-    expect(nameField).toHaveAttribute('aria-describedby', 'agent-name-error')
-    expect(nameField).toHaveFocus()
-    expect(apiCreateMock).not.toHaveBeenCalled()
-  })
-
-  it('clears each required-field error as the user corrects that field', async () => {
-    await renderManager()
-    fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-    const nameField = screen.getByLabelText(/^Name/)
-    const descriptionField = screen.getByLabelText(/^Description/)
-    const systemPromptField = screen.getByLabelText('System prompt')
-    expect(screen.getByText(/1–64 lowercase letters/)).toBeInTheDocument()
-    expect(screen.getByText('Enter a description.')).toBeInTheDocument()
-    expect(screen.getByText('Enter a system prompt.')).toBeInTheDocument()
-
-    fireEvent.change(nameField, { target: { value: 'qa-agent' } })
-    expect(screen.queryByText(/1–64 lowercase letters/)).not.toBeInTheDocument()
-    expect(nameField).not.toHaveAttribute('aria-invalid')
-
-    fireEvent.change(descriptionField, { target: { value: 'Verify the form.' } })
-    expect(screen.queryByText('Enter a description.')).not.toBeInTheDocument()
-    expect(descriptionField).not.toHaveAttribute('aria-invalid')
-
-    fireEvent.change(systemPromptField, { target: { value: 'Verify isolated behavior.' } })
-    expect(screen.queryByText('Enter a system prompt.')).not.toBeInTheDocument()
-    expect(systemPromptField).not.toHaveAttribute('aria-invalid')
     expect(apiCreateMock).not.toHaveBeenCalled()
   })
 
@@ -515,7 +456,7 @@ describe('AgentManager', () => {
     render(<AgentManager />)
     await waitFor(() => expect(useAgentStore.getState().availableTools).toContain('Read'))
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
-    expect(screen.getByRole('combobox', { name: 'Tools' })).toHaveTextContent('No tools')
+    expect(screen.getByRole('button', { name: 'Tools' })).toHaveTextContent('No tools')
     fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Updated review' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
@@ -564,7 +505,7 @@ describe('AgentManager', () => {
     render(<AgentManager />)
     await waitFor(() => expect(apiListMock).toHaveBeenCalledTimes(1))
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
-    expect(screen.getByRole('combobox', { name: 'Reasoning effort' })).toHaveTextContent('7')
+    expect(screen.getByRole('button', { name: 'Reasoning effort' })).toHaveTextContent('7')
     fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Updated review' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
@@ -605,10 +546,7 @@ describe('AgentManager', () => {
 
     render(<AgentManager />)
     await waitFor(() => expect(apiListMock).toHaveBeenCalledTimes(1))
-    const deleteButton = screen.getByRole('button', { name: 'Delete' })
-    fireEvent.click(deleteButton)
-    expect(screen.getByRole('alertdialog')).toHaveAttribute('data-slot', 'alert-dialog-content')
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus())
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     expect(screen.getByText('File: nested/custom-agent-file.md')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Delete Agent' }))
 
@@ -621,7 +559,6 @@ describe('AgentManager', () => {
     expect(apiReloadMock).toHaveBeenCalledWith('session-1')
     expect(await screen.findByText('No agents available yet.')).toBeInTheDocument()
     expect(useAgentStore.getState().selectedAgent).toBeNull()
-    expect(screen.getByRole('button', { name: 'Create Agent' })).toHaveFocus()
   })
 
   it('keeps non-user and non-project agents read-only even if the API marks them editable', async () => {
@@ -672,66 +609,6 @@ describe('AgentManager', () => {
     expect(screen.getByRole('dialog', { name: 'Create Agent' })).toBeInTheDocument()
   })
 
-  it('keeps a pending create locked and visible while the active project changes', async () => {
-    const write = deferred<{ agent: AgentDefinition }>()
-    const currentAgent = makeAgent({
-      agentType: 'current-project',
-      source: 'projectSettings',
-      target: 'current-project.md',
-    })
-    apiCreateMock.mockReturnValue(write.promise)
-    apiListMock
-      .mockResolvedValueOnce(EMPTY_RESPONSE)
-      .mockResolvedValueOnce({ activeAgents: [currentAgent], allAgents: [currentAgent] })
-    useSessionStore.setState({
-      sessions: [
-        {
-          id: 'old-session',
-          title: 'Old project',
-          createdAt: '',
-          modifiedAt: '',
-          messageCount: 0,
-          projectPath: '/workspace/old',
-          workDir: '/workspace/old',
-          workDirExists: true,
-        },
-        {
-          id: 'current-session',
-          title: 'Current project',
-          createdAt: '',
-          modifiedAt: '',
-          messageCount: 0,
-          projectPath: '/workspace/current',
-          workDir: '/workspace/current',
-          workDirExists: true,
-        },
-      ],
-      activeSessionId: 'old-session',
-    })
-
-    render(<AgentManager />)
-    await waitFor(() => expect(apiListMock).toHaveBeenCalledWith('/workspace/old'))
-    fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }))
-    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'reviewer' } })
-    fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Review code' } })
-    fireEvent.change(screen.getByLabelText('System prompt'), { target: { value: 'Review carefully.' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(useAgentStore.getState().isMutating).toBe(true))
-
-    act(() => useSessionStore.setState({ activeSessionId: 'current-session' }))
-    await waitFor(() => expect(apiListMock).toHaveBeenCalledWith('/workspace/current'))
-
-    expect(screen.getByRole('dialog', { name: 'Create Agent' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
-    expect(screen.queryByRole('button', { name: 'Close dialog' })).not.toBeInTheDocument()
-    expect(apiCreateMock).toHaveBeenCalledTimes(1)
-
-    write.reject(new Error('Old project create failed'))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to save agent')
-    expect(screen.getByRole('dialog', { name: 'Create Agent' })).toBeInTheDocument()
-    expect(screen.queryByText('Old project create failed')).not.toBeInTheDocument()
-  })
-
   it('localizes load failures without exposing raw server errors', async () => {
     useSettingsStore.setState({ locale: 'zh' })
     apiListMock.mockRejectedValue(new Error('HTTP 500: internal agent path leaked'))
@@ -740,54 +617,5 @@ describe('AgentManager', () => {
 
     expect(await screen.findByText('加载 Agent 失败')).toBeInTheDocument()
     expect(screen.queryByText(/internal agent path leaked/)).not.toBeInTheDocument()
-  })
-
-  it('hides the resolved project agents while a different project is pending or fails', async () => {
-    const oldAgent = makeAgent({ agentType: 'old-project-agent', source: 'projectSettings' })
-    const nextRequest = deferred<AgentListResponse>()
-    useSessionStore.setState({
-      sessions: [
-        {
-          id: 'old-session',
-          title: 'Old project',
-          createdAt: '',
-          modifiedAt: '',
-          messageCount: 0,
-          projectPath: '/workspace/old',
-          workDir: '/workspace/old',
-          workDirExists: true,
-        },
-        {
-          id: 'new-session',
-          title: 'New project',
-          createdAt: '',
-          modifiedAt: '',
-          messageCount: 0,
-          projectPath: '/workspace/new',
-          workDir: '/workspace/new',
-          workDirExists: true,
-        },
-      ],
-      activeSessionId: 'old-session',
-    })
-    apiListMock
-      .mockResolvedValueOnce({ activeAgents: [oldAgent], allAgents: [oldAgent] })
-      .mockReturnValueOnce(nextRequest.promise)
-
-    render(<AgentManager />)
-    expect(await screen.findByText('old-project-agent')).toBeInTheDocument()
-
-    act(() => {
-      useSessionStore.setState({ activeSessionId: 'new-session' })
-    })
-
-    await waitFor(() => expect(apiListMock).toHaveBeenLastCalledWith('/workspace/new'))
-    expect(screen.queryByText('old-project-agent')).not.toBeInTheDocument()
-    expect(screen.getByRole('status', { name: /Loading/ })).toBeInTheDocument()
-
-    nextRequest.reject(new Error('New project unavailable'))
-
-    expect(await screen.findByText('Failed to load agents')).toBeInTheDocument()
-    expect(screen.queryByText('old-project-agent')).not.toBeInTheDocument()
   })
 })

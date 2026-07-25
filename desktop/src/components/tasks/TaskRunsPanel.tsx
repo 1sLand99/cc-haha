@@ -1,12 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  CheckCircle2,
-  CircleAlert,
-  ExternalLink,
-  LoaderCircle,
-  TimerOff,
-  X,
-} from 'lucide-react'
 import { useTaskStore } from '../../stores/taskStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useTabStore } from '../../stores/tabStore'
@@ -14,14 +6,6 @@ import { useTranslation } from '../../i18n'
 import { parseRunOutput } from '../../lib/parseRunOutput'
 import type { TaskRun } from '../../types/task'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
-import { Alert, AlertDescription } from '../ui/alert'
-import { Badge } from '../ui/badge'
-import { Button } from '../ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
-import { ScrollArea } from '../ui/scroll-area'
-import { Skeleton } from '../ui/skeleton'
-import { IconButton } from '../ui/custom/icon-button'
 
 function RunOutput({ run }: { run: TaskRun }) {
   const t = useTranslation()
@@ -29,11 +13,9 @@ function RunOutput({ run }: { run: TaskRun }) {
   // Show error prominently if present
   if (run.error) {
     return (
-      <Alert variant="destructive" className="mt-2">
-        <AlertDescription className="whitespace-pre-wrap break-words text-[var(--color-error)]">
-          {run.error}
-        </AlertDescription>
-      </Alert>
+      <div className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-[var(--radius-sm)] border border-[var(--color-error)]/20 bg-[var(--color-error-container)]/28 p-2.5 text-xs text-[var(--color-error)]">
+        {run.error}
+      </div>
     )
   }
 
@@ -41,24 +23,20 @@ function RunOutput({ run }: { run: TaskRun }) {
 
   if (!text) {
     return (
-      <Card className="mt-2 border-transparent">
-        <CardContent className="p-3 text-xs italic text-[var(--color-text-tertiary)]">
-          {run.sessionId ? t('tasks.outputHintSession') : t('tasks.noOutputText')}
-        </CardContent>
-      </Card>
+      <div className="mt-2 p-2.5 rounded-[var(--radius-sm)] bg-[var(--color-surface-container)] text-xs text-[var(--color-text-tertiary)] italic">
+        {run.sessionId ? t('tasks.outputHintSession') : t('tasks.noOutputText')}
+      </div>
     )
   }
 
   return (
-    <ScrollArea className="mt-2 h-48 rounded-[var(--radius-md)] bg-[var(--color-surface-container)]">
-      <div className="p-3">
-        <MarkdownRenderer
-          content={text}
-          variant="compact"
-          className="break-words"
-        />
-      </div>
-    </ScrollArea>
+    <div className="mt-2 max-h-48 overflow-y-auto rounded-[var(--radius-sm)] bg-[var(--color-surface-container)] p-2.5">
+      <MarkdownRenderer
+        content={text}
+        variant="compact"
+        className="break-words"
+      />
+    </div>
   )
 }
 
@@ -68,23 +46,11 @@ type Props = {
   refreshKey?: number
 }
 
-const STATUS_CONFIG = {
-  running: {
-    icon: LoaderCircle,
-    className: 'border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 text-[var(--color-warning)]',
-  },
-  completed: {
-    icon: CheckCircle2,
-    className: 'border-[var(--color-success)]/30 bg-[var(--color-success)]/10 text-[var(--color-success)]',
-  },
-  failed: {
-    icon: CircleAlert,
-    className: 'border-[var(--color-error)]/30 bg-[var(--color-error-container)] text-[var(--color-error)]',
-  },
-  timeout: {
-    icon: TimerOff,
-    className: 'border-[var(--color-error)]/30 bg-[var(--color-error-container)] text-[var(--color-error)]',
-  },
+const STATUS_CONFIG: Record<string, { icon: string; color: string }> = {
+  running:   { icon: 'sync',         color: 'var(--color-warning)' },
+  completed: { icon: 'check_circle', color: 'var(--color-success)' },
+  failed:    { icon: 'error',        color: 'var(--color-error)' },
+  timeout:   { icon: 'timer_off',    color: 'var(--color-error)' },
 }
 
 export function TaskRunsPanel({ taskId, onClose, refreshKey }: Props) {
@@ -94,7 +60,6 @@ export function TaskRunsPanel({ taskId, onClose, refreshKey }: Props) {
   const openTab = useTabStore((s) => s.openTab)
   const [runs, setRuns] = useState<TaskRun[]>([])
   const [loading, setLoading] = useState(true)
-  const [listError, setListError] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [detailState, setDetailState] = useState<{
     runId: string
@@ -121,7 +86,6 @@ export function TaskRunsPanel({ taskId, onClose, refreshKey }: Props) {
     const generation = ++requestGeneration.current
     fetchTaskRuns(taskId, { limit: 100, summaryOnly: true }).then((r) => {
       if (generation !== requestGeneration.current) return
-      setListError(false)
       setRuns((current) => {
         const previousById = new Map(current.map(run => [run.id, run]))
         return r.map((run) => {
@@ -147,10 +111,7 @@ export function TaskRunsPanel({ taskId, onClose, refreshKey }: Props) {
       }
       setLoading(false)
     }).catch(() => {
-      if (generation === requestGeneration.current) {
-        setListError(true)
-        setLoading(false)
-      }
+      if (generation === requestGeneration.current) setLoading(false)
     })
   }, [cancelDetailRequest, fetchTaskRuns, taskId])
 
@@ -235,7 +196,6 @@ export function TaskRunsPanel({ taskId, onClose, refreshKey }: Props) {
   // Initial fetch + re-fetch when refreshKey changes
   useEffect(() => {
     setLoading(true)
-    setListError(false)
     refresh()
     return () => { requestGeneration.current += 1 }
   }, [refresh, refreshKey])
@@ -265,144 +225,111 @@ export function TaskRunsPanel({ taskId, onClose, refreshKey }: Props) {
   }, [hasRunning, taskId, refreshKey, refresh])
 
   return (
-    <Card
-      role="region"
-      aria-label={t('tasks.logsTitle')}
-      aria-busy={loading || undefined}
-      className="overflow-hidden bg-[var(--color-surface)]"
-    >
-      <CardHeader className="flex-row items-center justify-between border-b border-[var(--color-border-separator)] bg-[var(--color-surface-container-low)] px-4 py-3">
-        <CardTitle className="text-sm">{t('tasks.logsTitle')}</CardTitle>
-        <IconButton label={t('tasks.close')} variant="ghost" onClick={onClose}>
-          <X aria-hidden="true" />
-        </IconButton>
-      </CardHeader>
+    <div className="mt-2 mb-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--color-surface-container)]">
+        <span className="text-xs font-medium text-[var(--color-text-primary)]">{t('tasks.logsTitle')}</span>
+        <button
+          onClick={onClose}
+          className="p-0.5 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors"
+        >
+          <span className="material-symbols-outlined text-[16px]">close</span>
+        </button>
+      </div>
 
-      <CardContent className="p-0">
+      {/* Content */}
+      <div className="max-h-64 overflow-y-auto">
         {loading ? (
-          <div aria-label={t('common.loading')} className="space-y-3 p-4">
-            <Skeleton className="h-9" />
-            <Skeleton className="h-9" />
+          <div className="flex items-center justify-center py-6">
+            <div className="animate-spin w-4 h-4 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
           </div>
-        ) : listError ? (
-          <Alert variant="destructive" className="m-4 w-auto">
-            <AlertDescription className="flex items-center justify-between gap-3 text-[var(--color-error)]">
-              <span>{t('common.error')}</span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setLoading(true)
-                  setListError(false)
-                  refresh()
-                }}
-              >
-                {t('common.retry')}
-              </Button>
-            </AlertDescription>
-          </Alert>
         ) : runs.length === 0 ? (
-          <div className="px-4 py-8 text-center text-xs text-[var(--color-text-tertiary)]">
+          <div className="px-4 py-6 text-center text-xs text-[var(--color-text-tertiary)]">
             {t('tasks.noLogs')}
           </div>
         ) : (
-          <ScrollArea className="h-72">
-            <div className="divide-y divide-[var(--color-border-separator)]">
-              {runs.map((run) => {
-                const config = STATUS_CONFIG[run.status] || STATUS_CONFIG.failed
-                const StatusIcon = config.icon
-                const isExpanded = expandedId === run.id
-                const hasDetails = !!(run.output || run.error || run.hasOutput || run.hasError)
+          <div className="divide-y divide-[var(--color-border-separator)]">
+            {runs.map((run) => {
+              const cfg = STATUS_CONFIG[run.status] || STATUS_CONFIG.failed!
+              const isExpanded = expandedId === run.id
+              return (
+                <div key={run.id} className="px-4 py-2.5">
+                  <div className="flex items-center gap-3">
+                    {/* Status icon */}
+                    <span
+                      className={`material-symbols-outlined text-[16px] ${run.status === 'running' ? 'animate-spin' : ''}`}
+                      style={{ color: cfg.color, fontVariationSettings: "'FILL' 1" }}
+                    >
+                      {cfg.icon}
+                    </span>
 
-                return (
-                  <Collapsible
-                    key={run.id}
-                    open={isExpanded}
-                    onOpenChange={() => {
-                      if (hasDetails) toggleOutput(run)
-                    }}
-                    className="px-4 py-3"
-                  >
-                    <div className="flex flex-wrap items-center gap-2.5">
-                      <Badge variant="outline" className={config.className}>
-                        <StatusIcon
-                          className={run.status === 'running' ? 'animate-spin' : undefined}
-                          aria-hidden="true"
-                        />
-                        {t(`tasks.runStatus.${run.status}` as any)}
-                      </Badge>
+                    {/* Status text */}
+                    <span className="text-xs font-medium" style={{ color: cfg.color }}>
+                      {t(`tasks.runStatus.${run.status}` as any)} {/* dynamic key */}
+                    </span>
 
+                    {/* Time */}
+                    <span className="text-xs text-[var(--color-text-tertiary)]">
+                      {new Date(run.startedAt).toLocaleString()}
+                    </span>
+
+                    {/* Duration */}
+                    {run.durationMs != null && (
                       <span className="text-xs text-[var(--color-text-tertiary)]">
-                        {new Date(run.startedAt).toLocaleString()}
+                        {t('tasks.duration', { s: Math.round(run.durationMs / 1000) })}
                       </span>
-                      {run.durationMs != null ? (
-                        <span className="text-xs text-[var(--color-text-tertiary)]">
-                          {t('tasks.duration', { s: Math.round(run.durationMs / 1000) })}
-                        </span>
-                      ) : null}
+                    )}
 
-                      <div className="ml-auto flex items-center gap-2">
-                        {run.sessionId && run.status !== 'running' ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openSession(run.sessionId!, run.taskName)}
-                          >
-                            <ExternalLink aria-hidden="true" />
-                            {t('tasks.openSession')}
-                          </Button>
-                        ) : null}
-
-                        {hasDetails ? (
-                          <CollapsibleTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              aria-expanded={isExpanded}
-                            >
-                              {isExpanded ? t('tasks.hideOutput') : t('tasks.viewOutput')}
-                            </Button>
-                          </CollapsibleTrigger>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <CollapsibleContent>
-                      {run.output || run.error ? (
-                        <RunOutput run={run} />
-                      ) : detailState?.runId === run.id && detailState.status === 'loading' ? (
-                        <div
-                          role="status"
-                          className="mt-2 space-y-2 rounded-[var(--radius-md)] bg-[var(--color-surface-container)] p-3"
+                    <div className="ml-auto flex items-center gap-2">
+                      {/* Open session — only after run completes (session is empty while running) */}
+                      {run.sessionId && run.status !== 'running' && (
+                        <button
+                          onClick={() => openSession(run.sessionId!, run.taskName)}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-[var(--color-brand)] bg-[var(--color-brand)]/8 hover:bg-[var(--color-brand)]/15 rounded-[var(--radius-sm)] transition-colors"
                         >
-                          <span className="sr-only">{t('common.loading')}</span>
-                          <Skeleton className="h-3 w-3/4" />
-                          <Skeleton className="h-3 w-1/2" />
-                        </div>
-                      ) : detailState?.runId === run.id && detailState.status === 'error' ? (
-                        <Alert variant="destructive" className="mt-2">
-                          <AlertDescription className="flex items-center justify-between gap-3 text-[var(--color-error)]">
-                            <span>{t('common.error')}</span>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => { void loadDetail(run) }}
-                            >
-                              {t('common.retry')}
-                            </Button>
-                          </AlertDescription>
-                        </Alert>
-                      ) : (
-                        <RunOutput run={run} />
+                          <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                          {t('tasks.openSession')}
+                        </button>
                       )}
-                    </CollapsibleContent>
-                  </Collapsible>
-                )
-              })}
-            </div>
-          </ScrollArea>
+
+                      {/* Summary toggle */}
+                      {(run.output || run.error || run.hasOutput || run.hasError) && (
+                        <button
+                          onClick={() => { void toggleOutput(run) }}
+                          className="text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"
+                        >
+                          {isExpanded ? t('tasks.hideOutput') : t('tasks.viewOutput')}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Expanded output */}
+                  {isExpanded && (run.output || run.error) ? (
+                    <RunOutput run={run} />
+                  ) : isExpanded && detailState?.runId === run.id && detailState.status === 'loading' ? (
+                    <div className="mt-2 rounded-[var(--radius-sm)] bg-[var(--color-surface-container)] p-2.5 text-xs text-[var(--color-text-tertiary)]">
+                      {t('common.loading')}
+                    </div>
+                  ) : isExpanded && detailState?.runId === run.id && detailState.status === 'error' ? (
+                    <div className="mt-2 flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-[var(--color-error)]/20 bg-[var(--color-error-container)]/28 p-2.5 text-xs text-[var(--color-error)]">
+                      <span>{t('common.error')}</span>
+                      <button
+                        onClick={() => { void loadDetail(run) }}
+                        className="font-medium underline underline-offset-2"
+                      >
+                        {t('common.retry')}
+                      </button>
+                    </div>
+                  ) : isExpanded ? (
+                    <RunOutput run={run} />
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

@@ -1,26 +1,12 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
 import { useSkillStore } from '../../stores/skillStore'
 import { useTranslation } from '../../i18n'
 import { useUIStore } from '../../stores/uiStore'
 import { marketApi } from '../../api/market'
 import { useMarketStore } from '../../stores/marketStore'
-import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../ui/alert-dialog'
-import { Button } from '../ui/button'
-import { Card, CardContent } from '../ui/card'
-import { LoadingButton } from '../ui/custom/loading-button'
-import { Skeleton } from '../ui/skeleton'
 import { SkillDetailView, type SkillDetailMetaItem } from '../market/SkillDetailView'
 import type { PreviewFileContent } from '../market/FilePreview'
+import { ConfirmDialog } from '../shared/ConfirmDialog'
 
 const META_PRIORITY = [
   'when_to_use',
@@ -46,19 +32,10 @@ function formatMetaValue(value: unknown): string {
 }
 
 export function SkillDetail() {
-  const {
-    selectedSkill,
-    selectedSkillReturnTab,
-    selectedSkillContext,
-    isDetailLoading,
-    clearSelection,
-    fetchSkills,
-  } = useSkillStore()
+  const { selectedSkill, selectedSkillReturnTab, isDetailLoading, clearSelection, fetchSkills } = useSkillStore()
   const t = useTranslation()
-  const uninstallTriggerRef = useRef<HTMLButtonElement>(null)
   const [confirmUninstall, setConfirmUninstall] = useState(false)
   const [uninstalling, setUninstalling] = useState(false)
-  const [uninstallError, setUninstallError] = useState<string | null>(null)
 
   const handleBack = useCallback(() => {
     const returnTab = selectedSkillReturnTab
@@ -72,7 +49,7 @@ export function SkillDetail() {
 
   const loadFile = useCallback(
     (path: string): Promise<PreviewFileContent> => {
-      const file = files.find((candidate) => candidate.path === path)
+      const file = files.find((f) => f.path === path)
       if (!file) return Promise.reject(new Error(`File not found: ${path}`))
       const content = file.language === 'markdown' ? (file.body ?? file.content) : file.content
       return Promise.resolve({
@@ -105,7 +82,7 @@ export function SkillDetail() {
         value: new Date(selectedSkill.marketMeta.installedAt).toLocaleDateString(),
       })
     }
-    const entry = selectedSkill.files.find((file) => file.isEntry)
+    const entry = selectedSkill.files.find((f) => f.isEntry)
     const frontmatter = entry?.frontmatter
     if (frontmatter) {
       const entries = Object.entries(frontmatter)
@@ -132,37 +109,32 @@ export function SkillDetail() {
 
   if (isDetailLoading) {
     return (
-      <Card data-testid="skill-detail-skeleton" aria-busy="true">
-        <CardContent className="grid gap-4 p-6">
-          <Skeleton className="h-7 w-28" />
-          <div className="flex items-center gap-4">
-            <Skeleton className="h-16 w-16 rounded-xl" />
-            <div className="grid flex-1 gap-3">
-              <Skeleton className="h-6 w-48" />
-              <Skeleton className="h-4 w-full max-w-2xl" />
-            </div>
-          </div>
-          <Skeleton className="h-64 w-full" />
-        </CardContent>
-      </Card>
+      <div className="flex justify-center py-12">
+        <div className="animate-spin w-5 h-5 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
+      </div>
     )
   }
 
   if (!selectedSkill) return null
 
   const skillMeta = selectedSkill.meta
-  const marketMeta = skillMeta.source === 'user' ? selectedSkill.marketMeta : undefined
-  const entryFile = selectedSkill.files.find((file) => file.isEntry)
+  const marketMeta = selectedSkill.marketMeta
+  const entryFile = selectedSkill.files.find((f) => f.isEntry)
   const description = entryFile ? (entryFile.body ?? entryFile.content) : ''
 
   const runUninstall = async () => {
-    if (!marketMeta || uninstalling) return
-    const refreshCwd = selectedSkillContext || undefined
+    if (!marketMeta) return
     setUninstalling(true)
-    setUninstallError(null)
     try {
       await marketApi.uninstall(marketMeta.id)
-
+      useUIStore.getState().addToast({
+        type: 'success',
+        message: t('market.uninstall.success', { name: skillMeta.displayName || skillMeta.name }),
+      })
+      setConfirmUninstall(false)
+      clearSelection()
+      void fetchSkills()
+      // Keep the market list in sync when it has this skill loaded.
       const market = useMarketStore.getState()
       const detailCache = new Map(market.detailCache)
       detailCache.delete(marketMeta.id)
@@ -170,46 +142,35 @@ export function SkillDetail() {
         detailCache,
         items: market.items.map((item) =>
           item.id === marketMeta.id
-            ? {
-                ...item,
-                installState: 'installable',
-                installedInfo: undefined,
-                notInstallableReason: undefined,
-              }
+            ? { ...item, installState: 'installable', installedInfo: undefined, notInstallableReason: undefined }
             : item,
         ),
       })
-
-      await fetchSkills(refreshCwd)
+    } catch (err) {
       useUIStore.getState().addToast({
-        type: 'success',
-        message: t('market.uninstall.success', {
-          name: skillMeta.displayName || skillMeta.name,
-        }),
+        type: 'error',
+        message: err instanceof Error ? err.message : String(err),
       })
-      setConfirmUninstall(false)
-      clearSelection()
-    } catch (error) {
-      setUninstallError(error instanceof Error ? error.message : String(error))
     } finally {
       setUninstalling(false)
     }
   }
 
   const actions = marketMeta ? (
-    <Button
-      ref={uninstallTriggerRef}
-      variant="outline"
+    <button
+      type="button"
       data-testid="local-skill-uninstall-button"
-      className="text-[var(--color-error)] hover:border-[var(--color-error)]/50"
-      onClick={() => {
-        setUninstallError(null)
-        setConfirmUninstall(true)
-      }}
+      disabled={uninstalling}
+      onClick={() => setConfirmUninstall(true)}
+      className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 text-sm text-[var(--color-error)] transition-colors hover:border-[var(--color-error)]/50 disabled:opacity-50"
     >
-      <Trash2 aria-hidden="true" />
-      {t('market.uninstall.action')}
-    </Button>
+      {uninstalling ? (
+        <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" aria-hidden />
+      ) : (
+        <span className="material-symbols-outlined text-[18px]" aria-hidden>delete</span>
+      )}
+      {uninstalling ? t('market.uninstall.uninstalling') : t('market.uninstall.action')}
+    </button>
   ) : undefined
 
   return (
@@ -223,64 +184,30 @@ export function SkillDetail() {
         actions={actions}
         meta={meta}
         description={description}
-        files={selectedSkill.files.map((file) => ({
-          path: file.path,
-          size: file.content.length,
-          language: file.language,
+        files={selectedSkill.files.map((f) => ({
+          path: f.path,
+          size: f.content.length,
+          language: f.language,
         }))}
         loadFile={loadFile}
         onBack={handleBack}
         backLabel={t('settings.skills.back')}
       />
 
-      <AlertDialog
+      <ConfirmDialog
         open={confirmUninstall}
-        onOpenChange={(open) => {
-          if (!uninstalling) setConfirmUninstall(open)
-        }}
-      >
-        <AlertDialogContent
-          onEscapeKeyDown={(event) => {
-            if (uninstalling) event.preventDefault()
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            uninstallTriggerRef.current?.focus()
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('market.uninstall.confirmTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('market.uninstall.confirmMessage', {
-                name: skillMeta.displayName || skillMeta.name,
-                path: selectedSkill.skillRoot,
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-
-          {uninstallError && (
-            <Alert variant="destructive" data-testid="local-skill-uninstall-error">
-              <AlertTitle>{t('market.uninstall.confirmTitle')}</AlertTitle>
-              <AlertDescription className="break-words">{uninstallError}</AlertDescription>
-            </Alert>
-          )}
-
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={uninstalling}>
-              {t('market.installConfirm.cancel')}
-            </AlertDialogCancel>
-            <LoadingButton
-              variant="destructive"
-              loading={uninstalling}
-              onClick={() => void runUninstall()}
-            >
-              {uninstalling
-                ? t('market.uninstall.uninstalling')
-                : t('market.uninstall.action')}
-            </LoadingButton>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onClose={() => setConfirmUninstall(false)}
+        onConfirm={() => void runUninstall()}
+        title={t('market.uninstall.confirmTitle')}
+        body={t('market.uninstall.confirmMessage', {
+          name: skillMeta.displayName || skillMeta.name,
+          path: selectedSkill.skillRoot,
+        })}
+        confirmLabel={t('market.uninstall.action')}
+        cancelLabel={t('market.installConfirm.cancel')}
+        confirmVariant="danger"
+        loading={uninstalling}
+      />
     </>
   )
 }

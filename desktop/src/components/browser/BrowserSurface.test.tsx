@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 beforeAll(() => {
   Object.defineProperty(globalThis, 'ResizeObserver', {
@@ -9,7 +9,7 @@ beforeAll(() => {
   })
 })
 
-const { bridge, subscribePreviewEventsMock } = vi.hoisted(() => ({
+const { bridge } = vi.hoisted(() => ({
   bridge: {
     open: vi.fn(),
     navigate: vi.fn(),
@@ -19,12 +19,8 @@ const { bridge, subscribePreviewEventsMock } = vi.hoisted(() => ({
     close: vi.fn(),
     message: vi.fn(),
   },
-  subscribePreviewEventsMock: vi.fn(),
 }))
 vi.mock('../../lib/previewBridge', () => ({ previewBridge: bridge }))
-vi.mock('../../lib/previewEvents', () => ({
-  subscribePreviewEvents: subscribePreviewEventsMock,
-}))
 vi.mock('@tauri-apps/api/event', () => ({ listen: () => Promise.resolve(() => {}) }))
 
 import { BrowserSurface } from './BrowserSurface'
@@ -34,16 +30,10 @@ import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
 import { useOverlayStore } from '../../stores/overlayStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 
-beforeEach(() => {
-  useSettingsStore.setState({ locale: 'zh' })
-  subscribePreviewEventsMock.mockResolvedValue(() => {})
-})
-
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
   Object.values(bridge).forEach((f) => f.mockReset())
-  subscribePreviewEventsMock.mockReset()
   useBrowserPanelStore.setState(useBrowserPanelStore.getInitialState(), true)
   // browserPanelStore.open() now also opens the unified workbench; keep it isolated.
   useWorkspacePanelStore.setState(useWorkspacePanelStore.getInitialState(), true)
@@ -101,7 +91,7 @@ describe('BrowserSurface', () => {
     useBrowserPanelStore.getState().open('s1', url)
     render(<BrowserSurface sessionId="s1" />)
 
-    expect(within(screen.getByTestId('preview-host')).getByLabelText('加载预览')).toBeInTheDocument()
+    expect(within(screen.getByTestId('preview-host')).getByLabelText('加载中')).toBeInTheDocument()
     expect(bridge.open).not.toHaveBeenCalled()
 
     await waitFor(() => {
@@ -121,8 +111,6 @@ describe('BrowserSurface', () => {
     useBrowserPanelStore.getState().ensureBlank('s1')
     render(<BrowserSurface sessionId="s1" />)
     expect(screen.getByRole('textbox')).toHaveValue('')
-    expect(screen.getByRole('button', { name: '截图' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '选择元素' })).toBeDisabled()
     expect(bridge.open).not.toHaveBeenCalled()
   })
 
@@ -201,41 +189,11 @@ describe('BrowserSurface', () => {
     expect(bridge.close).toHaveBeenCalled()
   })
 
-  it('releases a preview event subscription that resolves after unmount', async () => {
-    let resolveSubscription!: (unsub: () => void) => void
-    const unsubscribe = vi.fn()
-    subscribePreviewEventsMock.mockReturnValue(new Promise((resolve) => {
-      resolveSubscription = resolve
-    }))
-    useBrowserPanelStore.getState().open('s1', 'http://localhost:5173/')
-
-    const { unmount } = render(<BrowserSurface sessionId="s1" />)
-    unmount()
-    await act(async () => {
-      resolveSubscription(unsubscribe)
-      await Promise.resolve()
-    })
-
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
-  })
-
   it('截图 button triggers a structured capture message', () => {
     useBrowserPanelStore.getState().open('s1', 'http://localhost:5173/')
     render(<BrowserSurface sessionId="s1" />)
     fireEvent.click(screen.getByLabelText('截图'))
     expect(bridge.message).toHaveBeenCalledWith({ v: 1, type: 'capture', kind: 'full' })
-  })
-
-  it('uses shadcn icon buttons for browser actions and preview zoom', () => {
-    useBrowserPanelStore.getState().open('s1', 'http://localhost:5173/')
-    useBrowserPanelStore.getState().setReady('s1')
-    render(<BrowserSurface sessionId="s1" />)
-
-    expect(screen.getByRole('button', { name: '截图' })).toHaveAttribute('data-variant', 'ghost')
-    expect(screen.getByRole('button', { name: '选择元素' })).toHaveAttribute('data-variant', 'ghost')
-    expect(screen.getByRole('button', { name: '缩小预览' })).toHaveAttribute('data-variant', 'ghost')
-    expect(screen.getByRole('button', { name: '放大预览' })).toHaveAttribute('data-variant', 'ghost')
-    expect(screen.getByRole('button', { name: '重置预览缩放' })).toHaveAttribute('data-variant', 'ghost')
   })
 
   it('places preview action buttons on the right side of the address toolbar', () => {
@@ -260,19 +218,6 @@ describe('BrowserSurface', () => {
     expect(bridge.message).toHaveBeenLastCalledWith({ v: 1, type: 'exit-picker' })
   })
 
-  it('clears picker state when the browser surface unmounts', () => {
-    useBrowserPanelStore.getState().open('s1', 'http://localhost:5173/')
-    const { unmount } = render(<BrowserSurface sessionId="s1" />)
-
-    fireEvent.click(screen.getByLabelText('选择元素'))
-    expect(useBrowserPanelStore.getState().bySession['s1']!.pickerActive).toBe(true)
-
-    unmount()
-
-    expect(useBrowserPanelStore.getState().bySession['s1']!.pickerActive).toBe(false)
-    expect(bridge.close).toHaveBeenCalled()
-  })
-
   it('renders floating preview zoom controls that update the native preview zoom', async () => {
     useBrowserPanelStore.getState().open('s1', 'http://localhost:5173/')
     useBrowserPanelStore.getState().setReady('s1')
@@ -282,8 +227,6 @@ describe('BrowserSurface', () => {
     const actions = screen.getByTestId('browser-toolbar-actions')
     const floatingControls = screen.getByTestId('browser-preview-floating-controls')
     expect(controls).toHaveTextContent('100%')
-    expect(within(controls).getByText('100%').tagName).toBe('OUTPUT')
-    expect(within(controls).getByText('100%')).toHaveAttribute('aria-live', 'polite')
     expect(actions).not.toContainElement(controls)
     expect(floatingControls).toContainElement(controls)
     expect(screen.getByTestId('browser-preview-stage')).toContainElement(floatingControls)

@@ -144,8 +144,6 @@ describe('CurrentTurnChangeCard – rich file row (icon / name / type)', () => {
     renderCard(['/w/proj/README.md', '/w/proj/src/index.ts'])
     expect(screen.getByText('README.md')).toBeInTheDocument()
     expect(screen.getByText('index.ts')).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /turnChangesOpenInWorkspaceAria/ })
-      .every((row) => row.getAttribute('data-slot') === 'button')).toBe(true)
   })
 
   it('sorts previewable changed files before source-only files', () => {
@@ -437,14 +435,11 @@ describe('CurrentTurnChangeCard – collapse long file lists', () => {
   it('clicking "show more" reveals all 8 rows and shows "show less"; clicking again re-collapses', () => {
     renderCard(makeFiles(8))
     const showMore = screen.getByText('chat.turnChangesShowMore')
-    expect(showMore.closest('button')).toHaveAttribute('data-slot', 'button')
-    expect(showMore.closest('button')).toHaveAttribute('aria-expanded', 'false')
 
     fireEvent.click(showMore)
     expect(screen.getAllByRole('button', { name: /turnChangesOpenInWorkspaceAria/ })).toHaveLength(8)
     const showLess = screen.getByText('chat.turnChangesShowLess')
     expect(showLess).toBeInTheDocument()
-    expect(showLess.closest('button')).toHaveAttribute('aria-expanded', 'true')
     expect(screen.queryByText('chat.turnChangesShowMore')).not.toBeInTheDocument()
 
     fireEvent.click(showLess)

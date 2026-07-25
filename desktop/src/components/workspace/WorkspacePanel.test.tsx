@@ -1079,7 +1079,6 @@ describe('WorkspacePanel', () => {
       target: { value: 'broken-search' },
     })
     expect(await view.findByText('Workspace search failed')).toBeTruthy()
-    expect(view.getByRole('alert').getAttribute('data-slot')).toBe('alert')
     expect(view.queryByText('services')).toBeNull()
 
     fireEvent.change(view.getByPlaceholderText('Search all files...'), {
@@ -1131,7 +1130,7 @@ describe('WorkspacePanel', () => {
     expect(view.getByRole('button', { name: 'Changed files' })).toBeTruthy()
 
     await clickElement(view.getByRole('button', { name: 'Changed files' }))
-    await clickElement(view.getByRole('menuitemradio', { name: 'All files' }))
+    await clickElement(view.getByRole('menuitem', { name: 'All files' }))
 
     await waitFor(() => {
       expect(getMocks().getWorkspaceTreeMock).toHaveBeenCalledWith('session-tree', '')
@@ -1203,13 +1202,6 @@ describe('WorkspacePanel', () => {
   })
 
   it('renders multiple preview tabs and closes only the exact requested tab', async () => {
-    getMocks().getWorkspaceFileMock.mockResolvedValue({
-      state: 'ok',
-      path: 'src/b.ts',
-      content: 'export const b = 1',
-      language: 'typescript',
-      size: 18,
-    })
     await setWorkspaceState((state) => ({
       ...state,
       panelBySession: {
@@ -1276,19 +1268,6 @@ describe('WorkspacePanel', () => {
     expect(view.getAllByRole('tab', { name: /a\.ts/ })).toHaveLength(2)
     expect(view.getAllByText('a.ts').length).toBeGreaterThanOrEqual(2)
     expect(view.getAllByText('b.ts').length).toBeGreaterThanOrEqual(1)
-
-    const activeDiffTab = view.getByRole('tab', { selected: true })
-    const activePreviewPanel = view.getByRole('tabpanel')
-    expect(activeDiffTab.getAttribute('aria-controls')).toBe(activePreviewPanel.id)
-    expect(activePreviewPanel.contains(view.getByTestId('workspace-preview-content'))).toBe(true)
-
-    const bTab = view.getByRole('tab', { name: /b\.ts/i })
-    act(() => activeDiffTab.focus())
-    fireEvent.keyDown(activeDiffTab, { key: 'ArrowRight' })
-    await waitFor(() => {
-      expect(document.activeElement).toBe(bTab)
-      expect(bTab.getAttribute('aria-selected')).toBe('true')
-    })
 
     await clickElement(view.getByLabelText('Close tab a.ts Diff'))
 
@@ -1980,10 +1959,9 @@ describe('WorkspacePanel', () => {
     }))
 
     const view = await renderPanel('session-preview-menu')
-    const firstTab = view.getByRole('tab', { name: /App\.jsx/i })
 
     await act(() => {
-      fireEvent.contextMenu(firstTab, {
+      fireEvent.contextMenu(view.getByRole('tab', { name: /vite\.config\.js/i }), {
         clientX: 320,
         clientY: 42,
       })
@@ -1993,65 +1971,10 @@ describe('WorkspacePanel', () => {
 
     expect(useWorkspacePanelStore.getState().previewTabsBySession['session-preview-menu']).toMatchObject([
       { id: 'file:src/App.jsx' },
+      { id: 'diff:vite.config.js' },
     ])
-    expect(useWorkspacePanelStore.getState().activePreviewTabIdBySession['session-preview-menu']).toBe('file:src/App.jsx')
-    expect(view.queryByRole('tablist', { name: 'Preview tabs' })).toBeNull()
+    expect(useWorkspacePanelStore.getState().activePreviewTabIdBySession['session-preview-menu']).toBe('diff:vite.config.js')
     expect(view.queryByRole('tab', { name: /index\.css/i })).toBeNull()
-    await waitFor(() => {
-      expect(document.activeElement).toBe(view.getByTestId('workspace-preview-header'))
-    })
-  })
-
-  it('restores focus to the source file after dismissing its context menu', async () => {
-    await setWorkspaceState((state) => ({
-      ...state,
-      panelBySession: {
-        ...state.panelBySession,
-        'session-file-menu-focus': {
-          isOpen: true,
-          activeView: 'all',
-        },
-      },
-      statusBySession: {
-        ...state.statusBySession,
-        'session-file-menu-focus': {
-          state: 'ok',
-          workDir: '/repo',
-          repoName: 'repo',
-          branch: 'main',
-          isGitRepo: true,
-          changedFiles: [],
-        },
-      },
-      treeBySessionPath: {
-        ...state.treeBySessionPath,
-        'session-file-menu-focus': {
-          '': {
-            state: 'ok',
-            path: '',
-            entries: [{ name: 'App.tsx', path: 'src/App.tsx', isDirectory: false }],
-          },
-        },
-      },
-    }))
-
-    const view = await renderPanel('session-file-menu-focus')
-    const fileButton = view.getByRole('button', { name: /App\.tsx/i })
-
-    await act(() => {
-      fireEvent.contextMenu(fileButton, {
-        clientX: 260,
-        clientY: 80,
-      })
-    })
-    expect(view.getByRole('menu')).toBeTruthy()
-
-    fireEvent.keyDown(document, { key: 'Escape' })
-
-    await waitFor(() => {
-      expect(view.queryByRole('menu')).toBeNull()
-      expect(document.activeElement).toBe(fileButton)
-    })
   })
 
   it('adds a workspace file to the chat context from the file tree menu', async () => {
@@ -2648,7 +2571,6 @@ describe('WorkspacePanel', () => {
     const addButtons = view.getAllByRole('button', { name: 'Add to chat' })
     const floatingAddButton = addButtons[addButtons.length - 1]!
 
-    expect(floatingAddButton.getAttribute('data-slot')).toBe('floating-selection-action')
     expect(floatingAddButton.style.left).toBe('101px')
     expect(floatingAddButton.style.top).toBe('46px')
 
@@ -2657,7 +2579,6 @@ describe('WorkspacePanel', () => {
     })
     await flushReactWork()
     expect(view.queryAllByRole('button', { name: 'Add to chat' })).toHaveLength(1)
-    expect(window.getSelection()?.toString()).toBe('')
   })
 
   it('dismisses the selected-code action when clicking outside the popover', async () => {
@@ -2871,7 +2792,7 @@ describe('WorkspacePanel', () => {
 
     const view = await renderPanel('session-empty')
 
-    expect(view.getByText('No changes').closest('[data-slot="inline-state"]')).toBeTruthy()
+    expect(view.getByText('No changes')).toBeTruthy()
 
     getMocks().getWorkspaceStatusMock.mockImplementation(async (sessionId: string) => {
       if (sessionId === 'session-error') {
@@ -2915,7 +2836,6 @@ describe('WorkspacePanel', () => {
     await waitFor(() => {
       expect(view.getByText('status failed')).toBeTruthy()
     })
-    expect(view.getByRole('alert').getAttribute('data-slot')).toBe('inline-state')
   })
 
   it('keeps a loaded diff visible and marks the preview busy while it refreshes', async () => {
@@ -3031,7 +2951,6 @@ describe('WorkspacePanel', () => {
     await flushReactWork()
 
     expect(view.getByText('cached')).toBeTruthy()
-    expect(view.getByRole('alert').getAttribute('data-slot')).toBe('alert')
     expect(view.getByRole('alert').textContent).toContain('文件不存在。')
     expect(view.getByRole('alert').textContent).not.toMatch(/refresh/i)
     await clickElement(view.getByRole('button', { name: '重试' }))

@@ -100,8 +100,6 @@ describe('ChatGPTOfficialLogin', () => {
     expect(shellOpenMock).not.toHaveBeenCalled()
     expect(consoleErrorSpy).toHaveBeenCalledWith('[ChatGPTOfficialLogin] shellOpen failed:', expect.any(Error))
     expect(screen.getByText(/Unable to open browser/)).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveAttribute('data-slot', 'alert')
-    expect(screen.getByRole('button', { name: 'Copy authorization link' })).toHaveAttribute('data-slot', 'button')
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Copy authorization link' }))
@@ -150,6 +148,5 @@ describe('ChatGPTOfficialLogin', () => {
     expect(useHahaOpenAIOAuthStore.getState().isPolling).toBe(false)
     expect(screen.getByText(/Unable to copy authorization link/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Copy authorization link' })).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveAttribute('data-slot', 'alert')
   })
 })

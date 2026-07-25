@@ -1,9 +1,7 @@
-import { useEffect, useRef } from 'react'
-import { Check, Copy, GitFork, LoaderCircle } from 'lucide-react'
+import { Check, Copy, GitFork } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { formatExactMessageTimestamp, formatMessageHoverTime } from '../../lib/formatMessageTimestamp'
 import { CopyButton } from '../shared/CopyButton'
-import { IconButton } from '../ui/custom/icon-button'
 
 export type MessageBranchAction = {
   label: string
@@ -27,7 +25,6 @@ export function MessageActionBar({
   timestamp,
 }: Props) {
   const locale = useSettingsStore((state) => state.locale)
-  const branchClickRef = useRef(false)
   const hasCopy = Boolean(copyText?.trim())
   const hoverTimeLabel = typeof timestamp === 'number'
     ? formatMessageHoverTime(timestamp, locale)
@@ -35,18 +32,6 @@ export function MessageActionBar({
   const exactTimeLabel = typeof timestamp === 'number'
     ? formatExactMessageTimestamp(timestamp, locale)
     : ''
-
-  useEffect(() => {
-    if (!branchAction?.loading) {
-      branchClickRef.current = false
-    }
-  }, [branchAction?.loading])
-
-  const handleBranch = () => {
-    if (!branchAction || branchAction.loading || branchClickRef.current) return
-    branchClickRef.current = true
-    branchAction.onBranch()
-  }
 
   if (!hasCopy && !branchAction) return null
 
@@ -70,22 +55,17 @@ export function MessageActionBar({
           />
         ) : null}
         {branchAction ? (
-          <IconButton
-            label={branchAction.label}
-            tooltip={branchAction.label}
-            variant="ghost"
-            size="icon-sm"
-            onClick={handleBranch}
+          <button
+            type="button"
+            onClick={branchAction.onBranch}
             disabled={branchAction.loading}
-            aria-busy={branchAction.loading}
+            aria-label={branchAction.label}
             title={branchAction.label}
             onPointerUp={(event) => event.currentTarget.blur()}
-            className="size-7 rounded-full border-transparent bg-transparent text-[var(--color-text-tertiary)] hover:border-[var(--color-brand)]/30 hover:bg-[var(--color-surface-container-low)] hover:text-[var(--color-text-primary)] disabled:cursor-wait disabled:opacity-60"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-transparent bg-transparent text-[var(--color-text-tertiary)] transition-colors hover:border-[var(--color-brand)]/30 hover:bg-[var(--color-surface-container-low)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35 disabled:cursor-wait disabled:opacity-60"
           >
-            {branchAction.loading
-              ? <LoaderCircle className="size-[13px] animate-spin" strokeWidth={2.2} aria-hidden />
-              : <GitFork className="size-[13px]" strokeWidth={2.2} aria-hidden />}
-          </IconButton>
+            <GitFork size={13} strokeWidth={2.2} aria-hidden="true" />
+          </button>
         ) : null}
         {hoverTimeLabel ? (
           <span

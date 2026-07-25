@@ -45,8 +45,6 @@ describe('createEditBubble', () => {
     const bubble = createEditBubble(el, { onConfirm: vi.fn(), onCancel: vi.fn() })
 
     expect(bubble.host.style.top).toBe('262px')
-    expect(bubble.host.style.getPropertyValue('--cc-haha-color-brand')).toBe('#8F482F')
-    expect($(bubble, '[data-action="confirm"]').style.background).toBe('var(--cc-haha-color-brand)')
     bubble.destroy()
   })
 

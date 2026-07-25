@@ -14,12 +14,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useChatStore } from '../stores/chatStore'
 import { useCLITaskStore } from '../stores/cliTaskStore'
 import { useTeamStore } from '../stores/teamStore'
-import {
-  WORKSPACE_PANEL_DEFAULT_WIDTH,
-  WORKSPACE_PANEL_MAX_WIDTH,
-  WORKSPACE_PANEL_MIN_WIDTH,
-  useWorkspacePanelStore,
-} from '../stores/workspacePanelStore'
+import { useWorkspacePanelStore } from '../stores/workspacePanelStore'
 import {
   TERMINAL_PANEL_DEFAULT_HEIGHT,
   TERMINAL_PANEL_MAX_HEIGHT,
@@ -47,8 +42,6 @@ import {
 } from '../lib/backgroundTasks'
 import { useActivityPanelStore } from '../stores/activityPanelStore'
 import { getSessionBrowsablePath, getSessionWorkspaceState } from '../lib/sessionWorkspace'
-import { ResizableSeparator } from '../components/ui/custom/resizable-separator'
-import { Button } from '../components/ui/button'
 
 const TASK_POLL_INTERVAL_MS = 1000
 const WORKSPACE_RESIZE_STEP = 32
@@ -182,12 +175,12 @@ function WorkspaceResizeHandle({ panelRef }: { panelRef: RefObject<HTMLElement> 
   }, [dragState, setWidth])
 
   return (
-    <ResizableSeparator
-      label={t('workspace.resizePanel')}
-      orientation="vertical"
-      value={width}
-      min={WORKSPACE_PANEL_MIN_WIDTH}
-      max={WORKSPACE_PANEL_MAX_WIDTH}
+    <div
+      role="separator"
+      aria-label={t('workspace.resizePanel')}
+      aria-orientation="vertical"
+      aria-valuenow={width}
+      tabIndex={0}
       data-testid="workspace-resize-handle"
       onPointerDown={(event) => {
         if (event.button !== 0) return
@@ -204,17 +197,11 @@ function WorkspaceResizeHandle({ panelRef }: { panelRef: RefObject<HTMLElement> 
           event.preventDefault()
           setWidth(renderedWidth - WORKSPACE_RESIZE_STEP)
         }
-        if (event.key === 'Home') {
-          event.preventDefault()
-          setWidth(WORKSPACE_PANEL_MIN_WIDTH)
-        }
-        if (event.key === 'End') {
-          event.preventDefault()
-          setWidth(WORKSPACE_PANEL_MAX_WIDTH)
-        }
       }}
-      onDoubleClick={() => setWidth(WORKSPACE_PANEL_DEFAULT_WIDTH)}
-    />
+      className="group relative z-10 flex w-2 shrink-0 cursor-col-resize items-stretch justify-center bg-[var(--color-surface)] outline-none focus-visible:bg-[var(--color-surface-container)]"
+    >
+      <div className="my-3 w-px rounded-full bg-[var(--color-border)] transition-colors group-hover:bg-[var(--color-border-focus)] group-focus-visible:bg-[var(--color-border-focus)]" />
+    </div>
   )
 }
 
@@ -258,12 +245,14 @@ function TerminalResizeHandle() {
   }, [dragState, setHeight])
 
   return (
-    <ResizableSeparator
-      label={t('terminal.resizePanel')}
-      orientation="horizontal"
-      value={height}
-      min={TERMINAL_PANEL_MIN_HEIGHT}
-      max={TERMINAL_PANEL_MAX_HEIGHT}
+    <div
+      role="separator"
+      aria-label={t('terminal.resizePanel')}
+      aria-orientation="horizontal"
+      aria-valuemin={TERMINAL_PANEL_MIN_HEIGHT}
+      aria-valuemax={TERMINAL_PANEL_MAX_HEIGHT}
+      aria-valuenow={height}
+      tabIndex={0}
       data-testid="terminal-resize-handle"
       onPointerDown={(event) => {
         if (event.button !== 0) return
@@ -289,7 +278,10 @@ function TerminalResizeHandle() {
         }
       }}
       onDoubleClick={() => setHeight(TERMINAL_PANEL_DEFAULT_HEIGHT)}
-    />
+      className="group flex h-2.5 shrink-0 cursor-row-resize items-center bg-[var(--color-surface)] outline-none focus-visible:bg-[var(--color-surface-container)]"
+    >
+      <div className="mx-3 h-px flex-1 rounded-full bg-[var(--color-border)] transition-colors group-hover:bg-[var(--color-border-focus)] group-focus-visible:bg-[var(--color-border-focus)]" />
+    </div>
   )
 }
 
@@ -547,9 +539,7 @@ export function ActiveSession() {
                     {t('teams.memberSessionHint')}
                   </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
+                <button
                   onClick={() => {
                     if (activeTeam?.leadSessionId) {
                       useTabStore.getState().openTab(
@@ -560,11 +550,11 @@ export function ActiveSession() {
                     }
                   }}
                   disabled={!activeTeam?.leadSessionId}
-                  className="h-8 shrink-0 gap-1 rounded-[7px] px-2 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:hover:text-[var(--color-text-secondary)]"
+                  className="flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-50 disabled:hover:text-[var(--color-text-secondary)]"
                 >
-                  <span aria-hidden="true" className="material-symbols-outlined text-[14px]">arrow_back</span>
+                  <span className="material-symbols-outlined text-[14px]">arrow_back</span>
                   {t('teams.backToLeader')}
-                </Button>
+                </button>
               </div>
             </div>
           )}

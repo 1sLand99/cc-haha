@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
-import '@testing-library/jest-dom'
+import { fireEvent, render, screen } from '@testing-library/react'
 
 const { sendMock } = vi.hoisted(() => ({
   sendMock: vi.fn(),
@@ -94,7 +93,7 @@ describe('AskUserQuestion', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('radio', { name: /^No$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^No$/ }))
     fireEvent.click(screen.getByRole('button', { name: /submit/i }))
 
     expect(sendMock).toHaveBeenCalledWith(ACTIVE_TAB, {
@@ -113,29 +112,6 @@ describe('AskUserQuestion', () => {
         },
       },
     })
-  })
-
-  it('submits an answer only once when the action is clicked repeatedly', () => {
-    render(
-      <AskUserQuestion
-        toolUseId="tool-1"
-        input={{
-          questions: [
-            {
-              question: 'Should we persist data?',
-              options: [{ label: 'No' }, { label: 'Yes' }],
-            },
-          ],
-        }}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('radio', { name: /^Yes$/ }))
-    const submit = screen.getByRole('button', { name: /submit/i })
-    fireEvent.click(submit)
-    fireEvent.click(submit)
-
-    expect(sendMock).toHaveBeenCalledTimes(1)
   })
 
   it('allows multiple selections when a question is marked multiSelect', () => {
@@ -158,8 +134,8 @@ describe('AskUserQuestion', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /^Lint$/ }))
-    fireEvent.click(screen.getByRole('checkbox', { name: /^Tests$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Lint$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Tests$/ }))
     fireEvent.click(screen.getByRole('button', { name: /submit/i }))
 
     expect(sendMock).toHaveBeenCalledWith(ACTIVE_TAB, {
@@ -201,8 +177,8 @@ describe('AskUserQuestion', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /^Lint$/ }))
-    fireEvent.click(screen.getByRole('checkbox', { name: /^Tests$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Lint$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Tests$/ }))
     fireEvent.click(screen.getByRole('button', { name: /submit/i }))
 
     expect(sendMock).toHaveBeenCalledWith(ACTIVE_TAB, {
@@ -269,7 +245,7 @@ describe('AskUserQuestion', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('radio', { name: /^Yes$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Yes$/ }))
     fireEvent.click(screen.getByRole('button', { name: /submit/i }))
 
     expect(sendMock).toHaveBeenCalledWith('target-tab', {
@@ -319,16 +295,16 @@ describe('AskUserQuestion', () => {
     fireEvent.change(screen.getByPlaceholderText('Type your answer...'), {
       target: { value: '' },
     })
-    fireEvent.click(screen.getByRole('radio', { name: /^A1$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^A1$/ }))
     fireEvent.change(screen.getByPlaceholderText('Type your answer...'), {
       target: { value: 'custom-q1' },
     })
-    fireEvent.mouseDown(screen.getByRole('tab', { name: /Q2$/ }), { button: 0 })
+    fireEvent.click(screen.getByRole('button', { name: /Q2$/ }))
 
     expect((screen.getByPlaceholderText('Type your answer...') as HTMLTextAreaElement).value).toBe('')
 
-    fireEvent.click(screen.getByRole('radio', { name: /^A2$/ }))
-    fireEvent.mouseDown(screen.getByRole('tab', { name: /Q1$/ }), { button: 0 })
+    fireEvent.click(screen.getByRole('button', { name: /^A2$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Q1$/ }))
 
     expect((screen.getByPlaceholderText('Type your answer...') as HTMLTextAreaElement).value).toBe('custom-q1')
 
@@ -391,83 +367,6 @@ describe('AskUserQuestion', () => {
         },
       },
     })
-  })
-
-  it('supports roving keyboard selection for single-choice questions', async () => {
-    render(
-      <AskUserQuestion
-        toolUseId="tool-1"
-        input={{
-          questions: [
-            {
-              question: 'Should we persist data?',
-              options: [{ label: 'No' }, { label: 'Yes' }],
-            },
-          ],
-        }}
-      />,
-    )
-
-    const noOption = screen.getByRole('radio', { name: /^No$/ })
-    await act(async () => {
-      noOption.focus()
-      fireEvent.keyDown(noOption, { key: 'ArrowDown' })
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-
-    expect(screen.getByRole('radio', { name: /^Yes$/ })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('radio', { name: /^Yes$/ })).toHaveFocus()
-  })
-
-  it('supports arrow-key navigation between question tabs', async () => {
-    render(
-      <AskUserQuestion
-        toolUseId="tool-1"
-        input={{
-          questions: [
-            { header: 'Q1', question: 'First?', options: [{ label: 'A1' }] },
-            { header: 'Q2', question: 'Second?', options: [{ label: 'A2' }] },
-          ],
-        }}
-      />,
-    )
-
-    const firstTab = screen.getByRole('tab', { name: /Q1$/ })
-    await act(async () => {
-      firstTab.focus()
-      fireEvent.keyDown(firstTab, { key: 'ArrowRight' })
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-
-    expect(screen.getByRole('tab', { name: /Q2$/ })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: /Q2$/ })).toHaveFocus()
-    expect(screen.getByText('Second?')).toBeInTheDocument()
-  })
-
-  it('does not submit a composing custom response', () => {
-    render(
-      <AskUserQuestion
-        toolUseId="tool-1"
-        input={{
-          questions: [
-            {
-              question: 'What context should we restore?',
-              options: [{ label: 'Skip' }],
-            },
-          ],
-        }}
-      />,
-    )
-
-    const textarea = screen.getByPlaceholderText('Type your answer...')
-    fireEvent.change(textarea, { target: { value: '正在输入' } })
-    fireEvent.compositionStart(textarea)
-    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true, keyCode: 229 })
-    expect(sendMock).not.toHaveBeenCalled()
-
-    fireEvent.compositionEnd(textarea)
-    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
-    expect(sendMock).toHaveBeenCalledTimes(1)
   })
 
   it('renders aborted permission results as terminal instead of asking again', () => {

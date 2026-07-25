@@ -13,8 +13,6 @@ import { getDesktopHost } from '../../lib/desktopHost'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { useBrowserPanelStore } from '../../stores/browserPanelStore'
 import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
-import { Button } from '../ui/button'
-import { LoadingButton } from '../ui/custom/loading-button'
 
 type CurrentTurnChangeCardProps = {
   sessionId: string
@@ -151,17 +149,16 @@ export function CurrentTurnChangeCard({
           </div>
         </div>
 
-        <LoadingButton
-          variant="secondary"
-          size="sm"
+        <button
+          type="button"
           onClick={onUndo}
-          loading={isUndoing}
+          disabled={isUndoing}
           aria-label={undoAria}
-          className="h-8 shrink-0 gap-1.5 border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] hover:border-[var(--color-brand)]/40"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-brand)]/40 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <span className="material-symbols-outlined text-[15px]">undo</span>
           {isUndoing ? t('chat.turnChangesUndoing') : undoLabel}
-        </LoadingButton>
+        </button>
       </div>
 
       <div className="divide-y divide-[var(--color-border)]">
@@ -171,15 +168,14 @@ export function CurrentTurnChangeCard({
           const previewable = isPreviewableChangedFile(fileEntry.displayPath)
           return (
             <div key={fileEntry.apiPath} className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
+              <button
+                type="button"
                 id={`turn-change-opener-${checkpoint.target.targetUserMessageId}-${encodeURIComponent(fileEntry.apiPath)}`}
                 data-source-turn-key={checkpoint.target.targetUserMessageId}
                 onClick={(event) => openChangedFile(event, fileEntry)}
                 aria-label={t('chat.turnChangesOpenInWorkspaceAria', { path: fileEntry.displayPath })}
                 title={fileEntry.displayPath}
-                className="min-h-[52px] min-w-0 flex-1 justify-start gap-3 px-4 text-left hover:bg-[var(--color-surface-hover)] active:translate-y-0"
+                className="flex min-h-[52px] min-w-0 flex-1 items-center gap-3 rounded-[var(--radius-md)] px-4 text-left transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35"
               >
                 <span className="material-symbols-outlined shrink-0 text-[22px] text-[var(--color-text-tertiary)]">{typeInfo.icon}</span>
                 <span className="min-w-0 flex-1">
@@ -187,18 +183,17 @@ export function CurrentTurnChangeCard({
                   <span className="block truncate text-xs text-[var(--color-text-tertiary)]">{`${t(typeInfo.categoryKey as Parameters<typeof t>[0])} · ${typeInfo.ext}`}</span>
                 </span>
                 <ChevronRight size={17} strokeWidth={1.9} aria-hidden="true" className="shrink-0 text-[var(--color-text-tertiary)]" />
-              </Button>
+              </button>
               {previewable && (
-                <Button
-                  variant="secondary"
-                  size="sm"
+                <button
+                  type="button"
                   aria-label={t('openWith.title')}
                   onClick={(event) => handleOpenWith(event, fileEntry)}
-                  className="mr-2 h-8 shrink-0 gap-1 border-[var(--color-border)] px-2.5 text-xs text-[var(--color-text-secondary)]"
+                  className="mr-2 inline-flex h-8 shrink-0 items-center gap-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35"
                 >
                   {t('openWith.title')}
                   <ChevronDown size={14} strokeWidth={1.9} />
-                </Button>
+                </button>
               )}
             </div>
           )
@@ -206,12 +201,10 @@ export function CurrentTurnChangeCard({
       </div>
 
       {canCollapse && (
-        <Button
-          variant="ghost"
-          size="sm"
+        <button
+          type="button"
           onClick={() => setShowAllFiles((current) => !current)}
-          aria-expanded={showAllFiles}
-          className="h-auto w-full rounded-none border-t border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-secondary)] active:translate-y-0"
+          className="flex w-full items-center justify-center gap-1 border-t border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35"
         >
           {showAllFiles ? (
             <>
@@ -224,7 +217,7 @@ export function CurrentTurnChangeCard({
               <ChevronDown size={14} strokeWidth={1.9} />
             </>
           )}
-        </Button>
+        </button>
       )}
 
       {error && (

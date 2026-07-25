@@ -13,8 +13,6 @@ import {
 } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import type { TraceSpan, TraceSpanStatus } from '../../lib/traceViewModel'
-import { Badge } from '../ui/badge'
-import { cn } from '../../lib/utils'
 
 type TraceTranslator = ReturnType<typeof useTranslation>
 
@@ -70,22 +68,19 @@ export function StatusGlyph({ status }: { status: TraceSpanStatus }) {
 export function StatusPill({ status }: { status: TraceSpanStatus }) {
   const t = useTranslation()
   const className = status === 'error'
-    ? 'border-[var(--color-error)]/30 bg-[var(--color-error-container)] text-[var(--color-error)]'
+    ? 'bg-[var(--color-error)]/10 text-[var(--color-error)]'
     : status === 'pending'
-      ? 'border-[var(--color-warning)]/30 bg-[var(--color-warning-container)]/50 text-[var(--color-warning)]'
-      : 'border-[var(--color-success)]/25 bg-[var(--color-success)]/10 text-[var(--color-success)]'
+      ? 'bg-[var(--color-warning)]/10 text-[var(--color-warning)]'
+      : 'bg-[var(--color-success)]/10 text-[var(--color-success)]'
   const label = status === 'error'
     ? t('trace.status.error')
     : status === 'pending'
       ? t('trace.status.pending')
       : t('trace.status.ok')
   return (
-    <Badge
-      variant="outline"
-      className={cn('min-h-4 rounded-[var(--radius-sm)] px-1.5 py-0 text-[10px] font-semibold', className)}
-    >
+    <span className={`inline-flex shrink-0 items-center rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] font-semibold ${className}`}>
       {label}
-    </Badge>
+    </span>
   )
 }
 
@@ -101,29 +96,25 @@ export function MetaChip({
   title?: string
 }) {
   return (
-    <Badge
-      variant="outline"
-      className="min-h-5 min-w-0 gap-1 rounded-[var(--radius-sm)] border-transparent bg-[var(--color-surface-container-low)] px-1.5 py-0 text-[10px] font-normal"
+    <span
+      className="inline-flex min-w-0 items-center gap-1 text-[10px]"
       {...(title ? { title } : {})}
     >
       <span className="shrink-0 text-[var(--color-text-tertiary)]">{label}</span>
       <span className={`truncate font-mono ${tone === 'danger' ? 'text-[var(--color-error)]' : 'text-[var(--color-text-secondary)]'}`}>
         {value}
       </span>
-    </Badge>
+    </span>
   )
 }
 
 export function LiveBadge() {
   const t = useTranslation()
   return (
-    <Badge
-      variant="outline"
-      className="min-h-5 gap-1 rounded-[var(--radius-sm)] border-[var(--color-success)]/25 bg-[var(--color-success)]/5 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-success)]"
-    >
-      <span className="size-1.5 rounded-full bg-[var(--color-success)] animate-pulse-dot" aria-hidden="true" />
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-success)]/25 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-success)]">
+      <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-success)] animate-pulse-dot" />
       {t('trace.live')}
-    </Badge>
+    </span>
   )
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type HTMLAttributes } from 'react'
 import { Sidebar } from './Sidebar'
 import { ContentRouter } from './ContentRouter'
 import { ToastContainer } from '../shared/Toast'
@@ -23,15 +23,11 @@ import { useChatStore } from '../../stores/chatStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useTranslation } from '../../i18n'
 import { H5ConnectionView } from './H5ConnectionView'
-import { Skeleton } from '../ui/skeleton'
-import { StartupSurface } from '../ui/custom/startup-surface'
 import { useMobileViewport } from '../../hooks/useMobileViewport'
 import type { Tab } from '../../stores/tabStore'
 import { getTraceLaunchRequest } from '../../lib/traceLaunch'
 import { TraceList } from '../../pages/TraceList'
 import { TraceSession } from '../../pages/TraceSession'
-import { Button } from '../ui/button'
-import { Sheet, SheetContent, SheetTitle } from '../ui/sheet'
 
 function isChatTab(tab: Tab | undefined) {
   return tab?.type === 'session'
@@ -47,7 +43,6 @@ export function AppShell() {
   const [h5StartupError, setH5StartupError] = useState<H5ConnectionRequiredError | null>(null)
   const [bootstrapNonce, setBootstrapNonce] = useState(0)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-  const mobileSidebarTriggerRef = useRef<HTMLButtonElement>(null)
   const t = useTranslation()
   const traceLaunch = useMemo(() => getTraceLaunchRequest(), [])
   const desktopRuntime = isDesktopRuntime()
@@ -72,6 +67,11 @@ export function AppShell() {
     if (diff < 86400000) return t('session.timeHours', { n: Math.floor(diff / 3600000) })
     return t('session.timeDays', { n: Math.floor(diff / 86400000) })
   })()
+  const sidebarHiddenProps: HTMLAttributes<HTMLDivElement> & { inert?: '' } =
+    isMobileShell && !effectiveSidebarOpen
+      ? { 'aria-hidden': true, inert: '' }
+      : {}
+
   useEffect(() => {
     const sessionStore = useSessionStore.getState()
     if (activeSession) {
@@ -258,16 +258,9 @@ export function AppShell() {
 
   if (!ready) {
     return (
-      <StartupSurface
-        title={t('app.launching')}
-        aria-live="polite"
-        aria-busy="true"
-      >
-        <div className="space-y-2" aria-hidden="true">
-          <Skeleton className="h-2.5 w-4/5" />
-          <Skeleton className="h-2.5 w-3/5" />
-        </div>
-      </StartupSurface>
+      <div className="app-shell-viewport flex items-center justify-center bg-[var(--color-surface)] text-[var(--color-text-secondary)]">
+        {t('app.launching')}
+      </div>
     )
   }
 
@@ -286,40 +279,27 @@ export function AppShell() {
 
   return (
     <div className={`app-shell app-shell-viewport flex overflow-hidden bg-[var(--color-surface)]${isMobileShell ? ' app-shell--mobile' : ''}`}>
-      {isMobileShell ? (
-        <Sheet
-          open={effectiveSidebarOpen}
-          onOpenChange={(open) => setEffectiveSidebarOpen(open)}
-        >
-          <SheetContent
-            id="sidebar-shell"
-            data-testid="sidebar-shell"
-            data-mobile="true"
-            side="left"
-            showCloseButton={false}
-            overlayTestId="sidebar-backdrop"
-            overlayClassName="app-shell-backdrop z-40 border-0 p-0"
-            className="sidebar-shell sidebar-shell--mobile z-50 w-[min(88vw,320px)] max-w-none p-0"
-            onCloseAutoFocus={(event) => {
-              event.preventDefault()
-              mobileSidebarTriggerRef.current?.focus()
-            }}
-          >
-            <SheetTitle className="sr-only">{t('sidebar.projects')}</SheetTitle>
-            <Sidebar isMobile onRequestClose={() => setEffectiveSidebarOpen(false)} />
-          </SheetContent>
-        </Sheet>
-      ) : (
-        <div
-          id="sidebar-shell"
-          data-testid="sidebar-shell"
-          data-state={effectiveSidebarOpen ? 'open' : 'closed'}
-          data-mobile="false"
-          className="sidebar-shell"
-        >
+      {isMobileShell && effectiveSidebarOpen ? (
+        <button
+          type="button"
+          data-testid="sidebar-backdrop"
+          className="app-shell-backdrop fixed inset-0 z-40 border-0 p-0"
+          aria-label={t('sidebar.collapse')}
+          onClick={() => setEffectiveSidebarOpen(false)}
+        />
+      ) : null}
+      <div
+        id="sidebar-shell"
+        data-testid="sidebar-shell"
+        data-state={effectiveSidebarOpen ? 'open' : 'closed'}
+        data-mobile={isMobileShell ? 'true' : 'false'}
+        className={`sidebar-shell${isMobileShell ? ' sidebar-shell--mobile' : ''}`}
+        {...sidebarHiddenProps}
+      >
+        {!isMobileShell || effectiveSidebarOpen ? (
           <Sidebar isMobile={isMobileShell} onRequestClose={() => setEffectiveSidebarOpen(false)} />
-        </div>
-      )}
+        ) : null}
+      </div>
       <main
         id="content-area"
         data-sidebar-state={effectiveSidebarOpen ? 'open' : 'closed'}
@@ -330,21 +310,19 @@ export function AppShell() {
             data-testid="mobile-session-header"
             className="flex shrink-0 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2"
           >
-            <Button
-              ref={mobileSidebarTriggerRef}
-              variant="ghost"
-              size="icon-lg"
+            <button
+              type="button"
               data-testid="mobile-sidebar-toggle"
               aria-controls="sidebar-shell"
               aria-expanded={effectiveSidebarOpen}
               aria-label={effectiveSidebarOpen ? t('sidebar.collapse') : t('sidebar.expand')}
               onClick={toggleEffectiveSidebar}
-              className="shrink-0 rounded-lg text-[var(--color-text-primary)]"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
             >
               <span className="material-symbols-outlined text-[20px]">
                 {effectiveSidebarOpen ? 'close' : 'menu'}
               </span>
-            </Button>
+            </button>
             {isActiveChatTab ? (
               <div className="min-w-0 flex-1">
                 <h1 className="truncate text-[15px] font-bold leading-tight text-[var(--color-text-primary)]">

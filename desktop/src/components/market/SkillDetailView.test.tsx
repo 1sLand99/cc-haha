@@ -1,23 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
 vi.mock('../markdown/MarkdownRenderer', () => ({
-  MarkdownRenderer: ({
-    content,
-    variant,
-    blockExternalResources,
-  }: {
-    content: string
-    variant?: string
-    blockExternalResources?: boolean
-  }) => (
-    <div
-      data-testid="markdown-renderer"
-      data-content={content}
-      data-variant={variant}
-      data-block-external={String(Boolean(blockExternalResources))}
-    />
+  MarkdownRenderer: ({ content, variant }: { content: string; variant?: string }) => (
+    <div data-testid="markdown-renderer" data-content={content} data-variant={variant} />
   ),
 }))
 
@@ -71,31 +58,13 @@ describe('SkillDetailView', () => {
   it('renders the decision header with badges and the overview markdown', () => {
     renderView()
 
-    const heading = screen.getByRole('heading', { name: 'Demo Skill', level: 1 })
-    expect(heading).toBeInTheDocument()
-    expect(heading).toHaveFocus()
+    expect(screen.getByText('Demo Skill')).toBeInTheDocument()
     expect(screen.getByText('v1.0.0')).toBeInTheDocument()
     expect(screen.getByTestId('security-badge-benign')).toBeInTheDocument()
     expect(screen.getByTestId('install-badge-installable')).toBeInTheDocument()
     const markdown = screen.getByTestId('markdown-renderer')
     expect(markdown).toHaveAttribute('data-content', '# Body')
     expect(markdown).toHaveAttribute('data-variant', 'document')
-  })
-
-  it('uses shadcn tabs with arrow-key navigation', async () => {
-    renderView()
-
-    const overviewTab = screen.getByTestId('skill-detail-tab-overview')
-    const filesTab = screen.getByTestId('skill-detail-tab-files')
-    expect(overviewTab).toHaveAttribute('data-slot', 'tabs-trigger')
-    act(() => {
-      overviewTab.focus()
-      fireEvent.keyDown(overviewTab, { key: 'ArrowRight' })
-    })
-
-    await waitFor(() => expect(filesTab).toHaveFocus())
-    expect(filesTab).toHaveAttribute('data-state', 'active')
-    expect(screen.getByTestId('market-file-preview')).toBeInTheDocument()
   })
 
   it('shows the not-installable reason prominently', () => {
@@ -130,25 +99,6 @@ describe('SkillDetailView', () => {
     expect(code).toHaveTextContent('print("hi")')
     expect(code).toHaveAttribute('data-line-numbers', 'true')
     expect(screen.getByText(/Preview truncated/)).toBeInTheDocument()
-  })
-
-  it('uses a single-selection toggle group for files and blocks market external resources', async () => {
-    renderView({ blockExternalResources: true })
-
-    expect(screen.getByTestId('markdown-renderer')).toHaveAttribute('data-block-external', 'true')
-    fireEvent.click(screen.getByTestId('skill-detail-tab-files'))
-
-    const firstFile = await screen.findByTestId('market-file-item-SKILL.md')
-    const secondFile = screen.getByTestId('market-file-item-scripts/run.py')
-    expect(firstFile).toHaveAttribute('data-slot', 'toggle-group-item')
-    expect(firstFile.closest('[data-slot="toggle-group"]')).toHaveAttribute('data-orientation', 'vertical')
-
-    act(() => {
-      firstFile.focus()
-      fireEvent.keyDown(firstFile, { key: 'ArrowDown' })
-    })
-    await waitFor(() => expect(secondFile).toHaveFocus())
-    expect(screen.getAllByTestId('markdown-renderer').at(-1)).toHaveAttribute('data-block-external', 'true')
   })
 
   it('shows a file load error with retry', async () => {

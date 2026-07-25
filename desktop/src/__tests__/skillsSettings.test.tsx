@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
 import { Settings } from '../pages/Settings'
@@ -85,23 +85,14 @@ describe('Settings > Skills tab', () => {
     useUIStore.setState({ activeSettingsTab: 'providers', pendingSettingsTab: null })
     useSkillStore.setState({
       skills: [],
-      skillsContext: '/workspace/project',
       selectedSkill: null,
       selectedSkillReturnTab: 'skills',
-      selectedSkillContext: null,
       isLoading: false,
       isDetailLoading: false,
       error: null,
       fetchSkills: MOCK_FETCH_SKILLS,
       fetchSkillDetail: MOCK_FETCH_SKILL_DETAIL,
       clearSelection: MOCK_CLEAR_SELECTION,
-    })
-    MOCK_CLEAR_SELECTION.mockImplementation(() => {
-      useSkillStore.setState({
-        selectedSkill: null,
-        selectedSkillContext: null,
-        isDetailLoading: false,
-      })
     })
   })
 
@@ -303,158 +294,6 @@ describe('Settings > Skills tab', () => {
       await Promise.resolve()
     })
 
-    expect(
-      screen.getByRole('heading', { name: 'Installed Plugins' }),
-    ).toBeInTheDocument()
-  })
-
-  it('preserves the search and restores focus to the exact skill after Back', async () => {
-    useSkillStore.setState({
-      skills: [
-        {
-          name: 'alpha',
-          displayName: 'Alpha Skill',
-          description: 'First skill description',
-          source: 'user',
-          userInvocable: true,
-          contentLength: 400,
-          hasDirectory: true,
-        },
-        {
-          name: 'beta',
-          displayName: 'Beta Skill',
-          description: 'Second skill description',
-          source: 'project',
-          userInvocable: true,
-          contentLength: 200,
-          hasDirectory: true,
-        },
-      ],
-    })
-
-    render(<Settings />)
-    switchToSkillsTab()
-
-    const searchInput = screen.getByPlaceholderText('Search skills by name, description, or source...')
-    fireEvent.change(searchInput, { target: { value: 'alpha' } })
-    const alphaRow = screen.getByRole('button', { name: /Alpha Skill/ })
-    fireEvent.click(alphaRow)
-
-    act(() => {
-      useSkillStore.setState({
-        selectedSkill: {
-          meta: {
-            name: 'alpha',
-            displayName: 'Alpha Skill',
-            description: 'First skill description',
-            source: 'user',
-            userInvocable: true,
-            contentLength: 400,
-            hasDirectory: true,
-          },
-          tree: [{ name: 'SKILL.md', path: 'SKILL.md', type: 'file' }],
-          files: [
-            {
-              path: 'SKILL.md',
-              content: '# Alpha',
-              body: '# Alpha',
-              language: 'markdown',
-              isEntry: true,
-            },
-          ],
-          skillRoot: '/tmp/alpha',
-        },
-        selectedSkillContext: '/workspace/project',
-      })
-    })
-
-    const heading = screen.getByRole('heading', { name: 'Alpha Skill', level: 1 })
-    await waitFor(() => expect(heading).toHaveFocus())
-    fireEvent.click(screen.getByRole('button', { name: 'Back to list' }))
-
-    await waitFor(() => {
-      expect(searchInput).toHaveValue('alpha')
-      expect(alphaRow).toHaveFocus()
-    })
-  })
-
-  it('shows the shadcn detail skeleton while detail data is loading', () => {
-    useSkillStore.setState({
-      skills: [
-        {
-          name: 'alpha',
-          displayName: 'Alpha Skill',
-          description: 'First skill description',
-          source: 'user',
-          userInvocable: true,
-          contentLength: 400,
-          hasDirectory: true,
-        },
-      ],
-      selectedSkill: null,
-      selectedSkillContext: '/workspace/project',
-      isDetailLoading: true,
-    })
-
-    render(<Settings />)
-    switchToSkillsTab()
-
-    expect(screen.getByTestId('skill-detail-skeleton')).toHaveAttribute('aria-busy', 'true')
-    expect(screen.getByPlaceholderText('Search skills by name, description, or source...')).not.toBeVisible()
-  })
-
-  it('closes an open detail when the active project context changes', async () => {
-    useSkillStore.setState({
-      skills: [
-        {
-          name: 'alpha',
-          displayName: 'Alpha Skill',
-          description: 'First skill description',
-          source: 'project',
-          userInvocable: true,
-          contentLength: 400,
-          hasDirectory: true,
-        },
-      ],
-      selectedSkill: {
-        meta: {
-          name: 'alpha',
-          displayName: 'Alpha Skill',
-          description: 'First skill description',
-          source: 'project',
-          userInvocable: true,
-          contentLength: 400,
-          hasDirectory: true,
-        },
-        tree: [],
-        files: [],
-        skillRoot: '/workspace/project/.claude/skills/alpha',
-      },
-      selectedSkillContext: '/workspace/project',
-    })
-
-    render(<Settings />)
-    switchToSkillsTab()
-
-    act(() => {
-      useSessionStore.setState({
-        sessions: [
-          {
-            id: 'session-2',
-            title: 'Other project',
-            createdAt: '2026-04-20T00:00:00.000Z',
-            modifiedAt: '2026-04-20T00:00:00.000Z',
-            messageCount: 1,
-            projectPath: '/workspace/other',
-            workDir: '/workspace/other',
-            workDirExists: true,
-          },
-        ],
-        activeSessionId: 'session-2',
-      })
-    })
-
-    await waitFor(() => expect(MOCK_CLEAR_SELECTION).toHaveBeenCalled())
-    expect(screen.getByText('Browse installed skills')).toBeInTheDocument()
+    expect(screen.getByText('Installed Plugins')).toBeInTheDocument()
   })
 })

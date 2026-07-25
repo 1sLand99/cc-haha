@@ -1,4 +1,5 @@
 import { useRef, useEffect, useMemo, memo, useState, useCallback, useDeferredValue, useLayoutEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowDown, BookMarked, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleStop, FileStack, LoaderCircle, MessageCircle, Settings, Target, XCircle } from 'lucide-react'
 import { ApiError } from '../../api/client'
 import { sessionsApi, type SessionTurnCheckpoint } from '../../api/sessions'
@@ -44,8 +45,6 @@ import {
   registerConversationFindController,
   type ConversationFindController,
 } from '../search/conversationFindBridge'
-import { FloatingSelectionAction } from '../ui/custom/floating-selection-action'
-import { Button } from '../ui/button'
 
 type ToolCall = Extract<UIMessage, { type: 'tool_use' }>
 type ToolResult = Extract<UIMessage, { type: 'tool_result' }>
@@ -160,15 +159,19 @@ function ChatSelectionMenu({
   const t = useTranslation()
   if (!selection) return null
 
-  return (
-    <FloatingSelectionAction
+  return createPortal(
+    <button
       ref={popoverRef}
-      x={selection.x}
-      y={selection.y}
-      label={t('chat.addSelectionToChat')}
-      icon={<MessageCircle size={21} strokeWidth={2.15} className="shrink-0 text-[var(--color-text-primary)]" aria-hidden="true" />}
-      onSelect={onAdd}
-    />
+      type="button"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onAdd}
+      className="fixed z-50 inline-flex h-11 items-center gap-2 rounded-full border border-[var(--color-border)]/70 bg-[var(--color-surface-container-lowest)] px-5 text-[15px] font-semibold text-[var(--color-text-primary)] shadow-[0_10px_28px_rgba(15,23,42,0.14),0_2px_8px_rgba(15,23,42,0.08)] transition-colors hover:bg-[var(--color-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35"
+      style={{ left: selection.x, top: selection.y }}
+    >
+      <MessageCircle size={21} strokeWidth={2.15} className="shrink-0 text-[var(--color-text-primary)]" aria-hidden="true" />
+      <span>{t('chat.addSelectionToChat')}</span>
+    </button>,
+    document.body,
   )
 }
 
@@ -205,13 +208,12 @@ function CompactStatusDivider({ message, state }: { message?: CompactSummaryEven
     <section data-testid="compact-status-divider" className="my-4 w-full px-1">
       <div className="flex w-full items-center gap-3">
         <div className="h-px flex-1 bg-[var(--color-border)]" aria-hidden="true" />
-        <Button
-          variant="ghost"
-          size="sm"
+        <button
+          type="button"
           aria-expanded={hasDetails ? expanded : undefined}
           onClick={() => hasDetails && setExpanded((value) => !value)}
           disabled={!hasDetails}
-          className="group min-h-8 max-w-[min(78vw,520px)] gap-2 px-2.5 py-1 text-[13px] font-semibold text-[var(--color-text-secondary)] hover:bg-transparent hover:text-[var(--color-text-primary)] disabled:cursor-default disabled:hover:text-[var(--color-text-secondary)] active:translate-y-0"
+          className="group inline-flex min-h-8 max-w-[min(78vw,520px)] items-center gap-2 rounded-md px-2.5 py-1 text-[13px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] disabled:cursor-default disabled:hover:text-[var(--color-text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/30"
         >
           {state === 'compacting' ? (
             <LoaderCircle size={16} strokeWidth={2.1} className="shrink-0 animate-spin text-[var(--color-text-tertiary)]" aria-hidden="true" />
@@ -221,7 +223,7 @@ function CompactStatusDivider({ message, state }: { message?: CompactSummaryEven
           <span className="min-w-0 truncate font-medium text-[var(--color-text-primary)]">
             {title}
           </span>
-        </Button>
+        </button>
         <div className="h-px flex-1 bg-[var(--color-border)]" aria-hidden="true" />
       </div>
       {hasDetails && expanded && (
@@ -259,12 +261,10 @@ function GoalEventCard({ message }: { message: GoalEvent }) {
         data-testid="goal-event-card"
         className="overflow-hidden rounded-lg border border-[var(--color-memory-border)] bg-[var(--color-memory-surface)]"
       >
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-expanded={expanded}
+        <button
+          type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="h-auto w-full justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-[var(--color-surface-hover)]/50 active:translate-y-0"
+          className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]/50"
         >
           {expanded ? (
             <ChevronDown size={15} className="shrink-0 text-[var(--color-text-tertiary)]" aria-hidden="true" />
@@ -281,7 +281,7 @@ function GoalEventCard({ message }: { message: GoalEvent }) {
               {message.status}
             </span>
           ) : null}
-        </Button>
+        </button>
 
         {expanded ? (
           <div className="border-t border-[var(--color-border)]/55 px-3 py-2.5">
@@ -899,15 +899,14 @@ function MemoryEventCard({ message }: { message: MemoryEvent }) {
               <div className="font-medium text-[var(--color-text-primary)]">
                 {t('chat.memorySavedTitle', { count: message.files.length })}
               </div>
-              <Button
-                variant="secondary"
-                size="sm"
+              <button
+                type="button"
                 onClick={() => openMemorySettings(message.files[0]?.path)}
-                className="h-7 gap-1.5 border-[var(--color-border)] px-2 text-[11px] text-[var(--color-text-secondary)] hover:border-[var(--color-brand)]/50"
+                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-brand)]/50 hover:text-[var(--color-text-primary)]"
               >
                 <Settings size={13} aria-hidden="true" />
                 {t('chat.memoryOpenSettings')}
-              </Button>
+              </button>
             </div>
             {message.message ? (
               <div className="mt-1 text-[var(--color-text-tertiary)]">{message.message}</div>
@@ -2624,9 +2623,6 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         onPointerDown={markUserScrollIntent}
         onTouchStart={markUserScrollIntent}
         onKeyDown={handleKeyDownScrollIntent}
-        // Intentionally use native overflow-y-auto instead of ScrollArea so that
-        // content-visibility paint skipping (chat-render-item--cv) is not broken
-        // by the virtual measuring required by a custom scroll container.
         className={`${CHAT_SCROLL_AREA_CLASS} h-full overflow-y-auto ${chatScrollPaddingClass}`}
       >
         <div
@@ -2706,17 +2702,16 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       ) : null}
 
       {showJumpToLatest && (
-        <Button
-          variant="secondary"
-          size="sm"
+        <button
+          type="button"
           onClick={handleJumpToLatest}
           title={t('chat.jumpToLatest')}
           aria-label={t('chat.jumpToLatest')}
-          className="absolute bottom-4 right-5 z-20 h-9 gap-2 rounded-full border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] px-3 text-xs text-[var(--color-text-primary)] shadow-[var(--shadow-dropdown)] hover:border-[var(--color-brand)]/50 hover:bg-[var(--color-surface-container-low)]"
+          className="absolute bottom-4 right-5 z-20 flex h-9 items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] px-3 text-xs font-medium text-[var(--color-text-primary)] shadow-[var(--shadow-dropdown)] transition-colors hover:border-[var(--color-brand)]/50 hover:bg-[var(--color-surface-container-low)]"
         >
           <ArrowDown size={15} aria-hidden="true" />
           <span>{t('chat.jumpToLatest')}</span>
-        </Button>
+        </button>
       )}
 
       <ConfirmDialog

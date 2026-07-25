@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
 import { InstallConfirmDialog } from './InstallConfirmDialog'
@@ -28,7 +28,7 @@ beforeEach(() => {
 })
 
 describe('InstallConfirmDialog', () => {
-  it('uses a shadcn alert dialog and shows name, source, version, security and install location', async () => {
+  it('shows name, source, version, security and install location', () => {
     render(
       <InstallConfirmDialog skill={makeSkill()} open installing={false} onConfirm={vi.fn()} onClose={vi.fn()} />,
     )
@@ -39,8 +39,6 @@ describe('InstallConfirmDialog', () => {
     expect(screen.getByTestId('security-badge-benign')).toBeInTheDocument()
     expect(screen.getByText('…/skills/demo/')).toBeInTheDocument()
     expect(screen.getByText(/new sessions/)).toBeInTheDocument()
-    expect(screen.getByRole('alertdialog')).toHaveAttribute('data-slot', 'alert-dialog-content')
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus())
   })
 
   it('warns strongly for flagged skills', () => {
@@ -87,7 +85,6 @@ describe('InstallConfirmDialog', () => {
     render(<InstallConfirmDialog skill={makeSkill()} open installing onConfirm={vi.fn()} onClose={vi.fn()} />)
 
     expect(screen.getByTestId('market-install-confirm-button')).toBeDisabled()
-    expect(screen.getByTestId('market-install-confirm-button')).toHaveAttribute('aria-busy', 'true')
     expect(screen.getByText('Cancel').closest('button')).toBeDisabled()
   })
 })

@@ -1,8 +1,5 @@
 import { useUIStore, type Toast as ToastType } from '../../stores/uiStore'
 import { useTranslation } from '../../i18n'
-import { X } from 'lucide-react'
-import { Card } from '../ui/card'
-import { IconButton } from '../ui/custom/icon-button'
 
 const typeStyles: Record<ToastType['type'], string> = {
   success: 'border-l-4 border-l-[var(--color-success)]',
@@ -17,12 +14,12 @@ function ToastItem({ toast }: { toast: ToastType }) {
   const isUrgent = toast.type === 'warning' || toast.type === 'error'
 
   return (
-    <Card
+    <div
       role={isUrgent ? 'alert' : 'status'}
       aria-live={isUrgent ? 'assertive' : 'polite'}
       aria-atomic="true"
       className={`
-        bg-[var(--color-surface)] rounded-[var(--radius-md)] shadow-[var(--shadow-dropdown)] border-0
+        bg-[var(--color-surface)] rounded-[var(--radius-md)] shadow-[var(--shadow-dropdown)]
         px-4 py-3 text-sm text-[var(--color-text-primary)]
         ${typeStyles[toast.type]}
         animate-in slide-in-from-right fade-in duration-200
@@ -30,17 +27,15 @@ function ToastItem({ toast }: { toast: ToastType }) {
     >
       <div className="flex items-center justify-between gap-2">
         <span>{toast.message}</span>
-        <IconButton
-          variant="ghost"
-          size="icon-sm"
+        <button
           onClick={() => removeToast(toast.id)}
-          label={t('common.dismissNotification')}
-          className="text-[var(--color-text-tertiary)]"
+          aria-label={t('common.dismissNotification')}
+          className="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] text-lg leading-none"
         >
-          <X size={16} aria-hidden="true" />
-        </IconButton>
+          ×
+        </button>
       </div>
-    </Card>
+    </div>
   )
 }
 

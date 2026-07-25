@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { OpenWithMenu } from './OpenWithMenu'
 import type { OpenWithItem } from '../../lib/openWithItems'
@@ -61,11 +61,12 @@ describe('OpenWithMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('pointer down outside the menu calls onClose', async () => {
+  it('mousedown outside the menu calls onClose', () => {
     const onClose = vi.fn()
     render(<OpenWithMenu items={makeItems()} anchor={anchor} onClose={onClose} />)
-    fireEvent.pointerDown(document.body, { button: 0, pointerType: 'mouse' })
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    // Simulate mousedown on document body (outside the menu)
+    fireEvent.mouseDown(document.body)
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('scrolling the viewport calls onClose', () => {
@@ -96,7 +97,7 @@ describe('OpenWithMenu', () => {
       document.body.removeChild(trigger)
     })
 
-    it('STILL calls onClose for true outside clicks (not menu, not trigger)', async () => {
+    it('STILL calls onClose for true outside clicks (not menu, not trigger)', () => {
       const trigger = document.createElement('button')
       document.body.appendChild(trigger)
       const outside = document.createElement('div')
@@ -104,8 +105,8 @@ describe('OpenWithMenu', () => {
       const onClose = vi.fn()
       render(<OpenWithMenu items={makeItems()} anchor={anchor} onClose={onClose} triggerEl={trigger} />)
 
-      fireEvent.pointerDown(outside, { button: 0, pointerType: 'mouse' })
-      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+      fireEvent.mouseDown(outside)
+      expect(onClose).toHaveBeenCalledTimes(1)
 
       document.body.removeChild(trigger)
       document.body.removeChild(outside)
@@ -134,10 +135,17 @@ describe('OpenWithMenu', () => {
     })
   })
 
-  it('delegates viewport collision handling to the anchored shadcn menu', () => {
+  it('flips above the anchor when it would overflow the viewport bottom', () => {
+    // The trigger often sits right above the composer; the menu must not render off-screen below it.
+    Object.defineProperty(window, 'innerHeight', { value: 300, configurable: true })
+    Object.defineProperty(window, 'innerWidth', { value: 1000, configurable: true })
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      height: 200, width: 220, top: 0, left: 0, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect)
+    // anchor near the bottom: top:260/bottom:270. Down would be 276, 276+200=476 > 300-8 ⇒ flip up.
     render(<OpenWithMenu items={makeItems()} anchor={{ top: 260, bottom: 270, left: 20, right: 120 }} onClose={vi.fn()} />)
-    const menuAnchor = document.querySelector<HTMLElement>('[data-slot="pointer-dropdown-anchor"]')
-    expect(menuAnchor).toHaveStyle({ top: '260px', left: '20px', width: '100px', height: '10px' })
-    expect(screen.getByRole('menu')).toHaveAttribute('data-slot', 'dropdown-menu-content')
+    // flipped top = anchor.top - height - 6 = 260 - 200 - 6 = 54
+    expect(screen.getByRole('menu').style.top).toBe('54px')
+    rectSpy.mockRestore()
   })
 })

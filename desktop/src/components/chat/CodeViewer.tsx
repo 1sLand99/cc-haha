@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from 'react'
 import { Highlight, type PrismTheme } from 'prism-react-renderer'
 import { CopyButton } from '../shared/CopyButton'
-import { Button } from '../ui/button'
 
 type Props = {
   code: string
@@ -318,15 +317,12 @@ export function CodeViewer({ code, language, maxLines = 20, showLineNumbers = fa
 
       {/* Expand/collapse toggle */}
       {showExpandToggle && (
-        <Button
-          variant="ghost"
-          size="sm"
+        <button
           onClick={() => setExpanded((value) => !value)}
-          aria-expanded={expanded}
-          className="h-auto w-full rounded-none border-t border-[var(--color-outline-variant)]/40 bg-[var(--color-surface-container)] py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-container-high)] hover:text-[var(--color-text-primary)] active:translate-y-0"
+          className="w-full border-t border-[var(--color-outline-variant)]/40 bg-[var(--color-surface-container)] py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-container-high)] hover:text-[var(--color-text-primary)]"
         >
           {expanded ? 'Collapse' : `Show ${allLines.length - maxLines} more lines`}
-        </Button>
+        </button>
       )}
     </div>
   )

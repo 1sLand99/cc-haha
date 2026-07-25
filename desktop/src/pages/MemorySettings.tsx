@@ -1,27 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode, RefObject } from 'react'
-import { BookOpenText, ChevronRight, Database, FileText, FolderGit2, PencilLine, RefreshCw, RotateCcw, Save, Search, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
+import { BookOpenText, ChevronDown, ChevronRight, Database, FileText, Folder, FolderGit2, PencilLine, RefreshCw, RotateCcw, Save, Search, X } from 'lucide-react'
+import { Button } from '../components/shared/Button'
 import { MarkdownRenderer } from '../components/markdown/MarkdownRenderer'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../components/ui/alert-dialog'
-import { Alert, AlertDescription } from '../components/ui/alert'
-import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
-import { Card } from '../components/ui/card'
-import { IconButton } from '../components/ui/custom/icon-button'
-import { LoadingButton } from '../components/ui/custom/loading-button'
-import { MemoryResourceTree } from '../components/ui/custom/memory-resource-tree'
-import { Input } from '../components/ui/input'
-import { Skeleton } from '../components/ui/skeleton'
-import { Textarea } from '../components/ui/textarea'
 import { useTranslation } from '../i18n'
 import { formatBytes } from '../lib/formatBytes'
 import { useMemoryStore } from '../stores/memoryStore'
@@ -30,12 +11,6 @@ import { useUIStore } from '../stores/uiStore'
 import type { MemoryFile, MemoryProject } from '../types/memory'
 
 const DEFAULT_MEMORY_PATH = 'MEMORY.md'
-
-type MemoryNavigationIntent =
-  | { kind: 'cwd'; cwd?: string }
-  | { kind: 'refresh'; cwd?: string; projectId: string | null }
-  | { kind: 'project'; projectId: string }
-  | { kind: 'file'; projectId: string; path: string; clearPendingPath?: boolean }
 
 export function MemorySettings() {
   const t = useTranslation()
@@ -66,13 +41,6 @@ export function MemorySettings() {
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const [isEditing, setIsEditing] = useState(false)
-  const [pendingNavigation, setPendingNavigation] = useState<MemoryNavigationIntent | null>(null)
-  const navigationTriggerRef = useRef<HTMLElement | null>(null)
-  const pendingOpenAttemptRef = useRef<string | null>(null)
-  const discardCancelRef = useRef<HTMLButtonElement | null>(null)
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
-  const editorRef = useRef<HTMLTextAreaElement | null>(null)
-  const editButtonRef = useRef<HTMLButtonElement | null>(null)
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId),
@@ -89,64 +57,16 @@ export function MemorySettings() {
     () => filterFiles(files, resourceQuery),
     [files, resourceQuery],
   )
+  const fileTree = useMemo(
+    () => buildMemoryFileTree(filteredFiles),
+    [filteredFiles],
+  )
   const previewContent = stripMarkdownFrontmatter(draftContent)
   const selectedFilePath = selectedFile?.path ?? null
 
-  const performNavigation = useCallback((intent: MemoryNavigationIntent) => {
-    if (intent.kind === 'cwd') {
-      void fetchProjects(intent.cwd)
-      return
-    }
-    if (intent.kind === 'refresh') {
-      void fetchProjects(intent.cwd)
-      if (intent.projectId) void fetchFiles(intent.projectId)
-      return
-    }
-    if (intent.kind === 'project') {
-      setExpandedProjectId(intent.projectId)
-      if (intent.projectId !== selectedProjectId) {
-        selectProject(intent.projectId)
-      }
-      return
-    }
-    void openFile(intent.projectId, intent.path).then((opened) => {
-      if (opened && intent.clearPendingPath) {
-        setPendingMemoryPath(null)
-      }
-    })
-  }, [
-    fetchFiles,
-    fetchProjects,
-    openFile,
-    selectProject,
-    selectedProjectId,
-    setPendingMemoryPath,
-  ])
-
-  const requestNavigation = useCallback((
-    intent: MemoryNavigationIntent,
-    trigger?: HTMLElement | null,
-  ) => {
-    if (isSaving) return
-    if (isEditing && isDirty) {
-      const activeElement = document.activeElement
-      navigationTriggerRef.current =
-        trigger ??
-        (activeElement instanceof HTMLElement ? activeElement : null)
-      setPendingNavigation(intent)
-      return
-    }
-    performNavigation(intent)
-  }, [isDirty, isEditing, isSaving, performNavigation])
-
-  const requestNavigationRef = useRef(requestNavigation)
   useEffect(() => {
-    requestNavigationRef.current = requestNavigation
-  }, [requestNavigation])
-
-  useEffect(() => {
-    requestNavigationRef.current({ kind: 'cwd', cwd: activeCwd })
-  }, [activeCwd])
+    void fetchProjects(activeCwd)
+  }, [activeCwd, fetchProjects])
 
   useEffect(() => {
     if (!selectedProjectId) return
@@ -163,10 +83,6 @@ export function MemorySettings() {
   }, [selectedFilePath])
 
   useEffect(() => {
-    if (isEditing) editorRef.current?.focus()
-  }, [isEditing])
-
-  useEffect(() => {
     if (!selectedProjectId || selectedFile || isLoadingFiles || isLoadingFile) return
     if (pendingMemoryPath) return
     const firstFile = files[0]
@@ -176,75 +92,67 @@ export function MemorySettings() {
   }, [files, isLoadingFile, isLoadingFiles, openFile, pendingMemoryPath, selectedFile, selectedProjectId])
 
   useEffect(() => {
-    if (!pendingMemoryPath) {
-      pendingOpenAttemptRef.current = null
-      return
-    }
-    if (
-      pendingNavigation ||
-      isLoadingProjects ||
-      projects.length === 0
-    ) return
+    if (!pendingMemoryPath || isLoadingProjects || projects.length === 0) return
     const target = resolveMemoryFileTarget(projects, pendingMemoryPath)
     if (!target) {
       setPendingMemoryPath(null)
       return
     }
     if (selectedProjectId !== target.projectId) {
-      requestNavigation({ kind: 'project', projectId: target.projectId })
+      selectProject(target.projectId)
       return
     }
     if (selectedFile?.path === target.path && !isLoadingFile) {
       setPendingMemoryPath(null)
       return
     }
-    if (pendingOpenAttemptRef.current === pendingMemoryPath) return
-    pendingOpenAttemptRef.current = pendingMemoryPath
-    requestNavigation({
-      kind: 'file',
-      projectId: target.projectId,
-      path: target.path,
-      clearPendingPath: true,
+    void openFile(target.projectId, target.path).then(() => {
+      setPendingMemoryPath(null)
     })
   }, [
     isLoadingFile,
     isLoadingProjects,
+    openFile,
     pendingMemoryPath,
-    pendingNavigation,
     projects,
-    requestNavigation,
+    selectProject,
     selectedFile?.path,
     selectedProjectId,
     setPendingMemoryPath,
   ])
 
-  const handleRefresh = (trigger: HTMLButtonElement) => {
-    pendingOpenAttemptRef.current = null
-    requestNavigation({
-      kind: 'refresh',
-      cwd: activeCwd,
-      projectId: selectedProjectId,
-    }, trigger)
+  const canLeaveDirtyEdit = () => {
+    if (!isEditing || !isDirty) return true
+    return window.confirm(t('settings.memory.discardUnsavedConfirm'))
   }
 
-  const handleProjectToggle = (projectId: string, trigger: HTMLButtonElement) => {
+  const handleRefresh = () => {
+    if (!canLeaveDirtyEdit()) return
+    void fetchProjects(activeCwd)
+    if (selectedProjectId) {
+      void fetchFiles(selectedProjectId)
+    }
+  }
+
+  const handleProjectToggle = (projectId: string) => {
     if (expandedProjectId === projectId) {
       setExpandedProjectId(null)
       return
     }
-    requestNavigation({ kind: 'project', projectId }, trigger)
+    if (projectId !== selectedProjectId && !canLeaveDirtyEdit()) return
+    setExpandedProjectId(projectId)
+    if (projectId !== selectedProjectId) {
+      selectProject(projectId)
+    }
   }
 
-  const handleFileOpen = (file: MemoryFile, trigger: HTMLButtonElement) => {
+  const handleFileOpen = (file: MemoryFile) => {
     if (!selectedProjectId || file.path === selectedFile?.path) return
-    requestNavigation({
-      kind: 'file',
-      projectId: selectedProjectId,
-      path: file.path,
-    }, trigger)
+    if (!canLeaveDirtyEdit()) return
+    void openFile(selectedProjectId, file.path)
   }
 
-  const handleSave = useCallback(async () => {
+  const handleSave = async () => {
     if (!selectedFile) return
     if (!isDirty) {
       setIsEditing(false)
@@ -253,12 +161,11 @@ export function MemorySettings() {
     const saved = await saveFile()
     if (saved) {
       setIsEditing(false)
-      requestAnimationFrame(() => editButtonRef.current?.focus())
     }
-  }, [isDirty, saveFile, selectedFile])
+  }
 
   useEffect(() => {
-    if (!isEditing || !selectedFile || isSaving) return
+    if (!isEditing || !selectedFile) return
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's') return
       event.preventDefault()
@@ -266,7 +173,7 @@ export function MemorySettings() {
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isEditing, isSaving, selectedFile, handleSave])
+  })
 
   const handlePreviewLinkClick = (href: string): boolean => {
     if (!selectedProjectId || !selectedFile) return false
@@ -277,11 +184,8 @@ export function MemorySettings() {
       files,
     )
     if (!targetPath || targetPath === selectedFile.path) return false
-    requestNavigation({
-      kind: 'file',
-      projectId: selectedProjectId,
-      path: targetPath,
-    })
+    if (!canLeaveDirtyEdit()) return true
+    void openFile(selectedProjectId, targetPath)
     return true
   }
 
@@ -304,20 +208,10 @@ export function MemorySettings() {
       updateDraft(selectedFile.content)
     }
     setIsEditing(false)
-    requestAnimationFrame(() => editButtonRef.current?.focus())
-  }
-
-  const handleDiscardNavigation = () => {
-    if (!pendingNavigation) return
-    const intent = pendingNavigation
-    if (selectedFile) updateDraft(selectedFile.content)
-    setIsEditing(false)
-    setPendingNavigation(null)
-    performNavigation(intent)
   }
 
   return (
-    <Card className="flex h-full min-h-[640px] flex-col overflow-hidden bg-[var(--color-surface-container-lowest)]">
+    <div className="flex h-full min-h-[640px] flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)]">
       <header className="grid min-h-[58px] border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] lg:grid-cols-[280px_minmax(0,1fr)]">
         <div className="flex min-w-0 items-center gap-3 border-b border-[var(--color-border)] px-4 py-3 lg:border-b-0 lg:border-r">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-brand)]">
@@ -340,26 +234,24 @@ export function MemorySettings() {
             fallbackFile={t('settings.memory.noFileSelected')}
           />
           <div className="flex shrink-0 flex-wrap gap-2">
-            <LoadingButton
+            <Button
+              type="button"
               variant="secondary"
               size="sm"
-              onClick={(event) => handleRefresh(event.currentTarget)}
-              disabled={isSaving}
+              onClick={handleRefresh}
               loading={isLoadingProjects || isLoadingFiles}
+              icon={<RefreshCw size={15} aria-hidden="true" />}
             >
-              <RefreshCw size={15} aria-hidden="true" />
               {t('settings.memory.refresh')}
-            </LoadingButton>
+            </Button>
           </div>
         </div>
       </header>
 
       {error && (
-        <Alert variant="destructive" className="m-3 w-auto">
-          <AlertDescription className="break-words text-[var(--color-error)]">
-            {error}
-          </AlertDescription>
-        </Alert>
+        <div className="m-3 rounded-[var(--radius-md)] border border-[var(--color-error)]/30 bg-[var(--color-error)]/10 px-3 py-2 text-sm text-[var(--color-error)]">
+          {error}
+        </div>
       )}
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[280px_minmax(0,1fr)]">
@@ -372,7 +264,6 @@ export function MemorySettings() {
             />
             <div className="px-3 py-3">
               <SearchField
-                inputRef={searchInputRef}
                 value={resourceQuery}
                 onChange={setResourceQuery}
                 placeholder={t('settings.memory.resourceSearchPlaceholder')}
@@ -381,32 +272,35 @@ export function MemorySettings() {
               />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-              {isLoadingProjects && projects.length === 0 ? (
-                <div className="grid gap-2 px-2 py-2" aria-label={t('common.loading')}>
-                  <Skeleton className="h-9 w-full" />
-                  <Skeleton className="h-9 w-5/6" />
-                  <Skeleton className="h-9 w-full" />
-                </div>
-              ) : projects.length === 0 ? (
+              {projects.length === 0 && !isLoadingProjects ? (
                 <EmptyState icon={<FolderGit2 size={18} />} text={t('settings.memory.emptyProjects')} />
               ) : filteredProjects.length === 0 ? (
                 <EmptyState icon={<Search size={18} />} text={t('settings.memory.noProjectMatches')} />
               ) : (
-                <MemoryResourceTree
-                  projects={filteredProjects}
-                  selectedProjectId={selectedProjectId}
-                  expandedProjectId={expandedProjectId}
-                  loadingProjectId={isLoadingFiles ? selectedProjectId : null}
-                  files={filteredFiles}
-                  activePath={selectedFile?.path ?? null}
-                  collapsedFolders={collapsedFolders}
-                  forceExpanded={forceExpandFiles}
-                  disabled={isSaving || isLoadingFile}
-                  onProjectToggle={handleProjectToggle}
-                  onToggleFolder={toggleFolder}
-                  onFileSelect={handleFileOpen}
-                  emptyText={t('settings.memory.emptyFiles')}
-                />
+                <div className="py-1">
+                  {filteredProjects.map((project) => {
+                    const isExpanded = project.id === expandedProjectId
+                    const isSelected = project.id === selectedProjectId
+                    const visibleFileTree = isSelected ? fileTree : []
+                    return (
+                      <ProjectTreeRow
+                        key={project.id}
+                        project={project}
+                        expanded={isExpanded}
+                        active={isSelected}
+                        loading={isSelected && isLoadingFiles}
+                        fileTree={visibleFileTree}
+                        activePath={selectedFile?.path ?? null}
+                        collapsedFolders={collapsedFolders}
+                        forceExpanded={forceExpandFiles}
+                        onToggle={() => handleProjectToggle(project.id)}
+                        onToggleFolder={toggleFolder}
+                        onFileSelect={handleFileOpen}
+                        emptyText={t('settings.memory.emptyFiles')}
+                      />
+                    )
+                  })}
+                </div>
               )}
             </div>
           </section>
@@ -419,8 +313,8 @@ export function MemorySettings() {
                 <h3 className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
                   {selectedFile?.path ? fileNameFromPath(selectedFile.path) : t('settings.memory.noFileSelected')}
                 </h3>
-                {isDirty && <Badge variant="secondary">{t('settings.memory.unsaved')}</Badge>}
-                {lastSavedAt && !isDirty && <Badge variant="secondary">{t('settings.memory.saved')}</Badge>}
+                {isDirty && <Badge>{t('settings.memory.unsaved')}</Badge>}
+                {lastSavedAt && !isDirty && <Badge>{t('settings.memory.saved')}</Badge>}
               </div>
               <p className="mt-1 truncate text-xs text-[var(--color-text-tertiary)]">
                 {selectedProject?.memoryDir ?? t('settings.memory.selectProject')}
@@ -446,6 +340,7 @@ export function MemorySettings() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2 normal-case">
                     <Button
+                      type="button"
                       variant="ghost"
                       size="sm"
                       disabled={isSaving}
@@ -454,34 +349,33 @@ export function MemorySettings() {
                       {t('common.cancel')}
                     </Button>
                     <Button
+                      type="button"
                       variant="ghost"
                       size="sm"
                       disabled={!isDirty || isSaving}
                       onClick={() => selectedFile && updateDraft(selectedFile.content)}
+                      icon={<RotateCcw size={14} aria-hidden="true" />}
                     >
-                      <RotateCcw size={14} aria-hidden="true" />
                       {t('settings.memory.revert')}
                     </Button>
-                    <LoadingButton
+                    <Button
+                      type="button"
                       size="sm"
                       disabled={isSaving}
                       loading={isSaving}
                       onClick={() => void handleSave()}
+                      icon={<Save size={14} aria-hidden="true" />}
                     >
-                      <Save size={14} aria-hidden="true" />
                       {t('common.save')}
-                    </LoadingButton>
+                    </Button>
                   </div>
                 </div>
-                <Textarea
-                  ref={editorRef}
+                <textarea
                   aria-label={t('settings.memory.editor')}
                   value={draftContent}
                   onChange={(event) => updateDraft(event.target.value)}
-                  readOnly={isSaving}
-                  aria-busy={isSaving || undefined}
                   spellCheck={false}
-                  className="min-h-0 flex-1 resize-none overflow-auto rounded-none border-0 bg-transparent p-5 font-mono text-[13px] leading-6 shadow-none focus-visible:border-transparent focus-visible:shadow-none"
+                  className="min-h-0 flex-1 w-full resize-none overflow-auto bg-transparent p-5 font-mono text-[13px] leading-6 text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
                 />
               </div>
             ) : (
@@ -491,15 +385,15 @@ export function MemorySettings() {
                     <span>{t('settings.memory.preview')}</span>
                     <span>{t('settings.memory.rendered')}</span>
                   </div>
-                  <IconButton
-                    ref={editButtonRef}
+                  <Button
+                    type="button"
                     variant="ghost"
-                    label={t('settings.memory.edit')}
-                    disabled={isSaving || isLoadingFile}
+                    size="sm"
+                    aria-label={t('settings.memory.edit')}
+                    title={t('settings.memory.edit')}
                     onClick={() => setIsEditing(true)}
-                  >
-                    <PencilLine size={14} aria-hidden="true" />
-                  </IconButton>
+                    icon={<PencilLine size={14} aria-hidden="true" />}
+                  />
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto p-6">
                   <MarkdownRenderer
@@ -512,59 +406,12 @@ export function MemorySettings() {
             )
           ) : (
             <div className="flex min-h-0 flex-1 items-center justify-center p-8">
-              {isLoadingFile ? (
-                <div className="grid w-full max-w-xl gap-3" aria-label={t('common.loading')}>
-                  <Skeleton className="h-6 w-40" />
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-4 w-5/6" />
-                </div>
-              ) : (
-                <EmptyState icon={<FileText size={20} />} text={t('settings.memory.selectFile')} />
-              )}
+              <EmptyState icon={<FileText size={20} />} text={isLoadingFile ? t('common.loading') : t('settings.memory.selectFile')} />
             </div>
           )}
         </section>
       </div>
-
-      <AlertDialog
-        open={pendingNavigation !== null}
-        onOpenChange={(open) => {
-          if (!open) setPendingNavigation(null)
-        }}
-      >
-        <AlertDialogContent
-          onOpenAutoFocus={(event) => {
-            event.preventDefault()
-            discardCancelRef.current?.focus()
-          }}
-          onCloseAutoFocus={(event) => {
-            const target = navigationTriggerRef.current
-            navigationTriggerRef.current = null
-            if (!target?.isConnected) return
-            event.preventDefault()
-            target.focus()
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.memory.unsaved')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('settings.memory.discardUnsavedConfirm')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel ref={discardCancelRef}>
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-[var(--color-error)] text-white hover:opacity-90"
-              onClick={handleDiscardNavigation}
-            >
-              {t('settings.memory.discardUnsavedAction')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </Card>
+    </div>
   )
 }
 
@@ -599,14 +446,12 @@ function Breadcrumb({
 }
 
 function SearchField({
-  inputRef,
   value,
   onChange,
   placeholder,
   ariaLabel,
   clearLabel,
 }: {
-  inputRef: RefObject<HTMLInputElement>
   value: string
   onChange: (value: string) => void
   placeholder: string
@@ -620,26 +465,22 @@ function SearchField({
         className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]"
         aria-hidden="true"
       />
-      <Input
-        ref={inputRef}
+      <input
         aria-label={ariaLabel}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="pl-9 pr-9"
+        className="h-10 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] pl-9 pr-9 text-sm text-[var(--color-text-primary)] outline-none transition-colors duration-150 placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-border-focus)] focus:shadow-[var(--shadow-focus-ring)]"
       />
       {value ? (
-        <IconButton
-          label={clearLabel}
-          variant="ghost"
-          onClick={() => {
-            onChange('')
-            inputRef.current?.focus()
-          }}
-          className="absolute right-2 top-1/2 -translate-y-1/2"
+        <button
+          type="button"
+          aria-label={clearLabel}
+          onClick={() => onChange('')}
+          className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
         >
-          <X aria-hidden="true" />
-        </IconButton>
+          <X size={14} aria-hidden="true" />
+        </button>
       ) : null}
     </div>
   )
@@ -654,6 +495,183 @@ function PanelHeader({ icon, title, meta }: { icon?: ReactNode; title: string; m
       </h3>
       {meta ? <span className="text-xs text-[var(--color-text-tertiary)]">{meta}</span> : null}
     </div>
+  )
+}
+
+function ProjectTreeRow({
+  project,
+  expanded,
+  active,
+  loading,
+  fileTree,
+  activePath,
+  collapsedFolders,
+  forceExpanded,
+  onToggle,
+  onToggleFolder,
+  onFileSelect,
+  emptyText,
+}: {
+  project: MemoryProject
+  expanded: boolean
+  active: boolean
+  loading: boolean
+  fileTree: MemoryTreeNode[]
+  activePath: string | null
+  collapsedFolders: Set<string>
+  forceExpanded: boolean
+  onToggle: () => void
+  onToggleFolder: (path: string) => void
+  onFileSelect: (file: MemoryFile) => void
+  emptyText: string
+}) {
+  const t = useTranslation()
+  const display = projectDisplayName(project.label)
+  return (
+    <div className="mb-1">
+      <button
+        type="button"
+        data-testid="memory-project-row"
+        onClick={onToggle}
+        title={project.label}
+        aria-expanded={expanded}
+        aria-label={t('settings.memory.toggleFolder', { name: display })}
+        className={`group flex min-h-9 w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors focus:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] ${
+          active
+            ? 'bg-[var(--color-memory-surface)] text-[var(--color-text-primary)] ring-1 ring-inset ring-[var(--color-memory-border)]'
+            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]'
+        }`}
+      >
+        <Folder size={15} className="shrink-0 text-[var(--color-brand)]" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{display}</span>
+        {!project.exists ? (
+          <span className="shrink-0 text-xs text-[var(--color-text-tertiary)]">{t('settings.memory.missing')}</span>
+        ) : null}
+      </button>
+
+      {expanded ? (
+        <div className="ml-[18px] mt-1.5 border-l border-[var(--color-border)] pl-2.5">
+          {loading ? (
+            <div className="px-2 py-1.5 text-xs text-[var(--color-text-tertiary)]">{t('common.loading')}</div>
+          ) : fileTree.length === 0 ? (
+            <div className="px-2 py-1.5 text-xs text-[var(--color-text-tertiary)]">{emptyText}</div>
+          ) : (
+            fileTree.map((node) => (
+              <MemoryTreeRow
+                key={node.id}
+                node={node}
+                depth={1}
+                activePath={activePath}
+                collapsedFolders={collapsedFolders}
+                forceExpanded={forceExpanded}
+                onToggleFolder={onToggleFolder}
+                onFileSelect={onFileSelect}
+              />
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function FileRow({
+  file,
+  active,
+  onSelect,
+  depth = 0,
+}: {
+  file: MemoryFile
+  active: boolean
+  onSelect: () => void
+  depth?: number
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      style={{ paddingLeft: `${4 + Math.max(depth - 1, 0) * 16}px` }}
+      className={`mb-1 flex min-h-8 w-full items-center gap-1.5 rounded-md border py-1 pr-2 text-left transition-colors focus:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] ${
+        active
+          ? 'border-[var(--color-memory-border)] bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]'
+          : 'border-transparent text-[var(--color-text-secondary)] hover:border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]'
+      }`}
+    >
+      <FileText size={14} className="shrink-0 text-[var(--color-text-tertiary)]" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-sm">{file.title}</span>
+    </button>
+  )
+}
+
+function MemoryTreeRow({
+  node,
+  depth,
+  activePath,
+  collapsedFolders,
+  forceExpanded,
+  onToggleFolder,
+  onFileSelect,
+}: {
+  node: MemoryTreeNode
+  depth: number
+  activePath: string | null
+  collapsedFolders: Set<string>
+  forceExpanded: boolean
+  onToggleFolder: (path: string) => void
+  onFileSelect: (file: MemoryFile) => void
+}) {
+  const t = useTranslation()
+  if (node.kind === 'file') {
+    return (
+      <FileRow
+        file={node.file}
+        active={node.file.path === activePath}
+        depth={depth}
+        onSelect={() => onFileSelect(node.file)}
+      />
+    )
+  }
+
+  const isCollapsed = !forceExpanded && collapsedFolders.has(node.path)
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => onToggleFolder(node.path)}
+        aria-expanded={!isCollapsed}
+        aria-label={t('settings.memory.toggleFolder', { name: node.name })}
+        className="mb-1 flex min-h-8 w-full items-center gap-1.5 rounded-md border border-transparent py-1 pr-2 text-left text-sm text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus:outline-none focus-visible:shadow-[var(--shadow-focus-ring)]"
+        style={{ paddingLeft: `${4 + Math.max(depth - 1, 0) * 16}px` }}
+      >
+        {isCollapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+        <Folder size={14} className="shrink-0 text-[var(--color-brand)]" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
+      </button>
+      {!isCollapsed ? (
+        <div className="ml-[18px] mt-1 border-l border-[var(--color-border)] pl-2.5">
+          {node.children.map((child) => (
+            <MemoryTreeRow
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              activePath={activePath}
+              collapsedFolders={collapsedFolders}
+              forceExpanded={forceExpanded}
+              onToggleFolder={onToggleFolder}
+              onFileSelect={onFileSelect}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function Badge({ children }: { children: string }) {
+  return (
+    <span className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)]">
+      {children}
+    </span>
   )
 }
 
@@ -797,6 +815,83 @@ function stripMarkdownLinkSuffix(value: string): string {
 function findMemoryFileByPath(files: MemoryFile[], path: string): string | null {
   const normalized = normalizeFsPath(path)
   return files.find((file) => normalizeFsPath(file.path) === normalized)?.path ?? null
+}
+
+type MemoryTreeNode =
+  | {
+      kind: 'folder'
+      id: string
+      name: string
+      path: string
+      fileCount: number
+      children: MemoryTreeNode[]
+    }
+  | {
+      kind: 'file'
+      id: string
+      name: string
+      path: string
+      file: MemoryFile
+    }
+
+type MutableFolderNode = Extract<MemoryTreeNode, { kind: 'folder' }>
+
+function buildMemoryFileTree(files: MemoryFile[]): MemoryTreeNode[] {
+  const root: MutableFolderNode = {
+    kind: 'folder',
+    id: '__root__',
+    name: '__root__',
+    path: '',
+    fileCount: 0,
+    children: [],
+  }
+
+  const folders = new Map<string, MutableFolderNode>([['', root]])
+  for (const file of files) {
+    const parts = file.path.split('/').filter(Boolean)
+    let parent = root
+    parts.slice(0, -1).forEach((part, index) => {
+      const folderPath = parts.slice(0, index + 1).join('/')
+      let folder = folders.get(folderPath)
+      if (!folder) {
+        folder = {
+          kind: 'folder',
+          id: `folder:${folderPath}`,
+          name: part,
+          path: folderPath,
+          fileCount: 0,
+          children: [],
+        }
+        folders.set(folderPath, folder)
+        parent.children.push(folder)
+      }
+      folder.fileCount += 1
+      parent = folder
+    })
+    parent.children.push({
+      kind: 'file',
+      id: `file:${file.path}`,
+      name: parts[parts.length - 1] ?? file.name,
+      path: file.path,
+      file,
+    })
+  }
+
+  sortMemoryTree(root.children)
+  return root.children
+}
+
+function sortMemoryTree(nodes: MemoryTreeNode[]): void {
+  nodes.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1
+    const aIndex = a.kind === 'file' ? a.file.isIndex : false
+    const bIndex = b.kind === 'file' ? b.file.isIndex : false
+    if (aIndex !== bIndex) return aIndex ? -1 : 1
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+  })
+  for (const node of nodes) {
+    if (node.kind === 'folder') sortMemoryTree(node.children)
+  }
 }
 
 function fileNameFromPath(path: string): string {

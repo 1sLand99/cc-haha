@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type Ref } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   ArrowLeft,
   Bot,
@@ -6,6 +6,8 @@ import {
   Boxes,
   Bolt,
   Braces,
+  Check,
+  ChevronDown,
   CircleAlert,
   Folder,
   Hammer,
@@ -33,44 +35,13 @@ import { useAgentStore } from '../../stores/agentStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { getSessionBrowsablePath } from '../../lib/sessionWorkspace'
 import { useUIStore } from '../../stores/uiStore'
-import { MarkdownRenderer, markdownToPlainText } from '../markdown/MarkdownRenderer'
+import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
+import { Button } from '../shared/Button'
+import { ConfirmDialog } from '../shared/ConfirmDialog'
 import { DirectoryPicker } from '../shared/DirectoryPicker'
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../ui/alert-dialog'
-import { Alert, AlertTitle } from '../ui/alert'
-import { Badge } from '../ui/badge'
-import { Button } from '../ui/button'
-import { Card, CardContent, CardHeader } from '../ui/card'
-import { Checkbox } from '../ui/checkbox'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '../ui/dialog'
-import { Input } from '../ui/input'
-import { Label } from '../ui/label'
-import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../ui/select'
-import { Skeleton } from '../ui/skeleton'
-import { Textarea } from '../ui/textarea'
-import { LoadingButton } from '../ui/custom/loading-button'
-import { SettingField } from '../ui/custom/setting-field'
+import { Dropdown } from '../shared/Dropdown'
+import { Input } from '../shared/Input'
+import { Modal } from '../shared/Modal'
 
 const AGENT_COLORS: Record<string, string> = {
   red: '#ef4444',
@@ -138,8 +109,6 @@ export function AgentManager() {
     mutationWarning,
     selectedAgent,
     selectedAgentReturnTab,
-    isContextStale,
-    resolvedCwd,
     fetchAgents,
     retryMutationRefresh,
     selectAgent,
@@ -147,39 +116,17 @@ export function AgentManager() {
   const sessions = useSessionStore((state) => state.sessions)
   const activeSessionId = useSessionStore((state) => state.activeSessionId)
   const t = useTranslation()
-  const [formState, setFormState] = useState<{
-    mode: 'create' | 'edit'
-    agent?: AgentDefinition
-    contextPath?: string
-    contextSessionId?: string
-  } | null>(null)
-  const [deleteState, setDeleteState] = useState<{
-    agent: AgentDefinition
-    contextPath?: string
-    contextSessionId?: string
-  } | null>(null)
-  const detailHeadingRef = useRef<HTMLHeadingElement | null>(null)
-  const pendingListFocusRef = useRef<string | null>(null)
-  const formReturnFocusRef = useRef<HTMLElement | null>(null)
-  const shouldRestoreFormFocusRef = useRef(false)
+  const [formState, setFormState] = useState<{ mode: 'create' | 'edit'; agent?: AgentDefinition } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<AgentDefinition | null>(null)
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const currentWorkDir = getSessionBrowsablePath(activeSession)
   const [agentContextPath, setAgentContextPath] = useState<string | undefined>(currentWorkDir)
-  const displayContextStale = isContextStale || (
-    resolvedCwd !== undefined &&
-    resolvedCwd !== (agentContextPath ?? null)
-  )
   const contextSessionId = sessions.find(
     (session) => getSessionBrowsablePath(session) === agentContextPath,
   )?.id
 
-  useLayoutEffect(() => {
-    pendingListFocusRef.current = null
-    if (!useAgentStore.getState().isMutating) {
-      setFormState(null)
-      setDeleteState(null)
-    }
+  useEffect(() => {
     setAgentContextPath(currentWorkDir)
     void fetchAgents(currentWorkDir)
   }, [fetchAgents, currentWorkDir])
@@ -193,38 +140,8 @@ export function AgentManager() {
   }, [allAgents])
 
   const sourceCount = AGENT_SOURCE_ORDER.filter((source) => (groupedAgents[source] ?? []).length > 0).length
-  useEffect(() => {
-    if (selectedAgent) {
-      detailHeadingRef.current?.focus()
-      return
-    }
-
-    const pendingKey = pendingListFocusRef.current
-    if (!pendingKey) return
-    const target = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-agent-open-key]'))
-      .find((element) => element.dataset.agentOpenKey === pendingKey)
-    if (!target) return
-    pendingListFocusRef.current = null
-    target.focus()
-  }, [selectedAgent, allAgents])
-
-  useEffect(() => {
-    if (formState || !shouldRestoreFormFocusRef.current) return
-    shouldRestoreFormFocusRef.current = false
-    const target = formReturnFocusRef.current?.isConnected
-      ? formReturnFocusRef.current
-      : document.querySelector<HTMLElement>('[data-agent-create]')
-    target?.focus()
-  }, [formState])
-
-  const handleAgentOpen = (agent: AgentDefinition) => {
-    pendingListFocusRef.current = getAgentIdentityKey(agent)
-    selectAgent(agent, 'agents')
-  }
-
   const handleAgentBack = () => {
     const returnTab = selectedAgentReturnTab
-    if (returnTab === 'plugins') pendingListFocusRef.current = null
     selectAgent(null)
     if (returnTab === 'plugins') useUIStore.getState().setPendingSettingsTab('plugins')
   }
@@ -232,50 +149,37 @@ export function AgentManager() {
   return (
     <div className="w-full min-w-0">
       {mutationWarning && (
-        <Alert
+        <div
           className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--color-warning)]/30 bg-[var(--color-warning-container)] px-4 py-3"
           role="status"
         >
           <div className="flex min-w-0 items-start gap-2">
             <CircleAlert size={17} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
             <div className="min-w-0">
-              <AlertTitle className="text-sm text-[var(--color-text-primary)]">
+              <p className="text-sm font-medium text-[var(--color-text-primary)]">
                 {t('settings.agents.refreshWarning')}
-              </AlertTitle>
+              </p>
             </div>
           </div>
           <Button
             variant="secondary"
             size="sm"
+            icon={<RefreshCw size={14} />}
             onClick={() => void retryMutationRefresh(
               agentContextPath,
               contextSessionId,
             )}
           >
-            <RefreshCw size={14} />
             {t('common.retry')}
           </Button>
-        </Alert>
+        </div>
       )}
-      {!displayContextStale && selectedAgent ? (
+      {selectedAgent ? (
         <AgentDetailView
           agent={selectedAgent}
-          headingRef={detailHeadingRef}
           onBack={handleAgentBack}
-          onEdit={(trigger) => {
-            formReturnFocusRef.current = trigger
-            setFormState({
-              mode: 'edit',
-              agent: selectedAgent,
-              contextPath: agentContextPath,
-              contextSessionId,
-            })
-          }}
-          onDelete={() => setDeleteState({
-            agent: selectedAgent,
-            contextPath: agentContextPath,
-            contextSessionId,
-          })}
+          onEdit={() => setFormState({ mode: 'edit', agent: selectedAgent })}
+          onDelete={() => setDeleteTarget(selectedAgent)}
         />
       ) : (
         <>
@@ -288,57 +192,37 @@ export function AgentManager() {
                 {t('settings.agents.description')}
               </p>
             </div>
-            <Button
-              data-agent-create
-              onClick={(event) => {
-                formReturnFocusRef.current = event.currentTarget
-                setFormState({
-                  mode: 'create',
-                  contextPath: agentContextPath,
-                  contextSessionId,
-                })
-              }}
-            >
-              <Plus size={16} />
+            <Button icon={<Plus size={16} />} onClick={() => setFormState({ mode: 'create' })}>
               {t('settings.agents.create')}
             </Button>
           </div>
 
-          {(displayContextStale && !error) || (isLoading && allAgents.length === 0) ? (
-            <Card role="status" aria-label={t('common.loading')} className="border-dashed">
-              <CardContent className="space-y-4 px-5 py-8">
-                <div className="grid gap-3 sm:grid-cols-3" aria-hidden="true">
-                  <Skeleton className="h-16" />
-                  <Skeleton className="h-16" />
-                  <Skeleton className="h-16" />
-                </div>
-                <Skeleton className="h-24" aria-hidden="true" />
-              </CardContent>
-            </Card>
+          {isLoading && allAgents.length === 0 ? (
+            <div className="flex justify-center py-12" role="status" aria-label={t('common.loading')}>
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-brand)] border-t-transparent" />
+            </div>
           ) : error ? (
-            <Alert variant="destructive" className="px-5 py-10 text-center">
-              <AlertTitle className="mb-3 text-sm">{t('settings.agents.loadError')}</AlertTitle>
+            <div className="rounded-2xl border border-[var(--color-error)]/30 bg-[var(--color-error)]/5 px-5 py-10 text-center">
+              <p className="mb-3 text-sm text-[var(--color-error)]">{t('settings.agents.loadError')}</p>
               <Button
                 variant="secondary"
                 size="sm"
+                icon={<RefreshCw size={14} />}
                 onClick={() => void fetchAgents(agentContextPath)}
               >
-                <RefreshCw size={14} />
                 {t('common.retry')}
               </Button>
-            </Alert>
+            </div>
           ) : allAgents.length === 0 ? (
-            <Card className="border-dashed">
-              <CardContent className="px-4 py-12 text-center">
-                <Bot className="mx-auto mb-3 text-[var(--color-text-tertiary)]" size={40} />
-                <p className="mb-1 text-sm text-[var(--color-text-secondary)]">{t('settings.agents.empty')}</p>
-                <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.agents.emptyHint')}</p>
-              </CardContent>
-            </Card>
+            <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-12 text-center">
+              <Bot className="mx-auto mb-3 text-[var(--color-text-tertiary)]" size={40} />
+              <p className="mb-1 text-sm text-[var(--color-text-secondary)]">{t('settings.agents.empty')}</p>
+              <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.agents.emptyHint')}</p>
+            </div>
           ) : (
             <div className="flex min-w-0 flex-col gap-6">
-              <Card>
-                <CardContent className="grid min-w-0 gap-4 px-5 py-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)] xl:items-end">
+              <section className="overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
+                <div className="grid min-w-0 gap-4 px-5 py-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)] xl:items-end">
                   <div className="min-w-0">
                     <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-tertiary)]">
                       {t('settings.agents.browserEyebrow')}
@@ -355,8 +239,8 @@ export function AgentManager() {
                     <SummaryCard label={t('settings.agents.summary.activeAgents')} value={String(activeAgents.length)} icon={<Bolt size={14} />} />
                     <SummaryCard label={t('settings.agents.summary.sources')} value={String(sourceCount)} icon={<Layers size={14} />} className="col-span-2 sm:col-span-1" />
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </section>
 
               <div className={`grid gap-4 ${sourceCount >= 2 ? 'xl:grid-cols-2' : ''}`}>
                 {AGENT_SOURCE_ORDER.map((source) => {
@@ -364,8 +248,8 @@ export function AgentManager() {
                   if (!group?.length) return null
                   const sourceLabel = t(`settings.agents.source.${source}`)
                   return (
-                    <Card key={source} className="min-w-0 overflow-hidden bg-[var(--color-surface)]">
-                      <CardHeader className="gap-0 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-5 py-4">
+                    <section key={source} className="min-w-0 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+                      <div className="border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-5 py-4">
                         <div className="mb-1 flex flex-wrap items-center gap-2">
                           <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${getAgentSourceAccentClass(source)}`}>
                             {getAgentSourceIcon(source)}
@@ -376,16 +260,13 @@ export function AgentManager() {
                         <p className="text-xs leading-5 text-[var(--color-text-tertiary)]">
                           {t('settings.agents.groupHint', { source: sourceLabel, count: String(group.length) })}
                         </p>
-                      </CardHeader>
-                      <CardContent className="flex flex-col p-2">
+                      </div>
+                      <div className="flex flex-col p-2">
                         {group.map((agent, index) => (
-                          <Button
+                          <button
                             key={`${agent.source}-${agent.agentType}-${agent.target ?? agent.baseDir ?? index}`}
-                            variant="ghost"
-                            onClick={() => handleAgentOpen(agent)}
-                            data-agent-open-key={getAgentIdentityKey(agent)}
-                            aria-label={`${agent.agentType} · ${sourceLabel} · ${index + 1}`}
-                            className="group h-auto w-full justify-start whitespace-normal rounded-xl border border-transparent px-3 py-3 text-left hover:border-[var(--color-border-focus)]"
+                            onClick={() => selectAgent(agent, 'agents')}
+                            className="group rounded-xl border border-transparent px-3 py-3 text-left transition-all hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
                           >
                             <div className="flex items-start gap-3">
                               <Bot size={18} className="mt-0.5 shrink-0" style={{ color: getAgentDotColor(agent.color) }} />
@@ -400,9 +281,9 @@ export function AgentManager() {
                                     <MetaPill>{t('settings.agents.overriddenBy', { source: t(`settings.agents.source.${agent.overriddenBy}`) })}</MetaPill>
                                   )}
                                 </div>
-                                <p className="mt-1 break-words text-xs leading-5 text-[var(--color-text-secondary)]">
-                                  {markdownToPlainText(agent.description || t('settings.agents.noDescription'))}
-                                </p>
+                                <div className="mt-1 break-words text-xs leading-5 text-[var(--color-text-secondary)] [&_.prose]:text-xs [&_.prose]:leading-5 [&_.prose]:text-[var(--color-text-secondary)]">
+                                  <MarkdownRenderer content={agent.description || t('settings.agents.noDescription')} />
+                                </div>
                                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-tertiary)]">
                                   <span>{agent.tools === undefined
                                     ? t('settings.agents.noTools')
@@ -413,10 +294,10 @@ export function AgentManager() {
                                 </div>
                               </div>
                             </div>
-                          </Button>
+                          </button>
                         ))}
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </section>
                   )
                 })}
               </div>
@@ -429,23 +310,17 @@ export function AgentManager() {
         <AgentFormModal
           mode={formState.mode}
           agent={formState.agent}
-          cwd={formState.contextPath}
-          sessionId={formState.contextSessionId}
-          returnFocus={formReturnFocusRef.current}
-          onProjectContextChange={(path) => {
-            if (agentContextPath === formState.contextPath) setAgentContextPath(path)
-          }}
-          onClose={() => {
-            shouldRestoreFormFocusRef.current = true
-            setFormState(null)
-          }}
+          cwd={agentContextPath}
+          sessionId={contextSessionId}
+          onProjectContextChange={setAgentContextPath}
+          onClose={() => setFormState(null)}
         />
       )}
       <AgentDeleteDialog
-        agent={deleteState?.agent ?? null}
-        cwd={deleteState?.contextPath}
-        sessionId={deleteState?.contextSessionId}
-        onClose={() => setDeleteState(null)}
+        agent={deleteTarget}
+        cwd={agentContextPath}
+        sessionId={contextSessionId}
+        onClose={() => setDeleteTarget(null)}
       />
     </div>
   )
@@ -453,15 +328,13 @@ export function AgentManager() {
 
 function AgentDetailView({
   agent,
-  headingRef,
   onBack,
   onEdit,
   onDelete,
 }: {
   agent: AgentDefinition
-  headingRef: Ref<HTMLHeadingElement>
   onBack: () => void
-  onEdit: (trigger: HTMLButtonElement) => void
+  onEdit: () => void
   onDelete: () => void
 }) {
   const t = useTranslation()
@@ -472,18 +345,15 @@ function AgentDetailView({
   return (
     <div className="flex h-full min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft size={16} />
+        <Button variant="ghost" size="sm" icon={<ArrowLeft size={16} />} onClick={onBack}>
           {t('settings.agents.backToList')}
         </Button>
         {editable ? (
           <div className="flex items-center gap-2">
-            <Button variant="secondary" size="sm" onClick={(event) => onEdit(event.currentTarget)}>
-              <Pencil size={14} />
+            <Button variant="secondary" size="sm" icon={<Pencil size={14} />} onClick={onEdit}>
               {t('settings.agents.edit')}
             </Button>
-            <Button variant="destructive" size="sm" onClick={onDelete}>
-              <Trash2 size={14} />
+            <Button variant="danger" size="sm" icon={<Trash2 size={14} />} onClick={onDelete}>
               {t('settings.agents.delete')}
             </Button>
           </div>
@@ -492,19 +362,13 @@ function AgentDetailView({
         )}
       </div>
 
-      <Card className="overflow-hidden">
-        <CardContent className="grid gap-4 px-5 py-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(340px,1fr)] lg:items-start">
+      <section className="overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
+        <div className="grid gap-4 px-5 py-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(340px,1fr)] lg:items-start">
           <div className="min-w-0">
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-tertiary)]">{t('settings.agents.entryEyebrow')}</div>
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: getAgentDotColor(agent.color) }} />
-              <h2
-                ref={headingRef}
-                tabIndex={-1}
-                className="break-all text-[22px] font-semibold leading-tight text-[var(--color-text-primary)]"
-              >
-                {agent.agentType}
-              </h2>
+              <h3 className="break-all text-[22px] font-semibold leading-tight text-[var(--color-text-primary)]">{agent.agentType}</h3>
               <MetaPill>{sourceLabel}</MetaPill>
               <MetaPill>{agent.isActive ? t('settings.agents.status.active') : t('settings.agents.status.available')}</MetaPill>
               {agent.overriddenBy && (
@@ -512,10 +376,7 @@ function AgentDetailView({
               )}
             </div>
             <div className="max-w-4xl text-sm leading-6 text-[var(--color-text-secondary)]">
-              <MarkdownRenderer
-                blockExternalResources
-                content={agent.description || t('settings.agents.noDescription')}
-              />
+              <MarkdownRenderer content={agent.description || t('settings.agents.noDescription')} />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -534,22 +395,20 @@ function AgentDetailView({
               {t('settings.agents.detail.effortHint')}
             </p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
       {agent.tools && agent.tools.length > 0 && (
-        <Card className="bg-[var(--color-surface)]">
-          <CardContent className="px-5 py-4">
-            <div className="mb-3 flex items-center gap-2">
-              <Wrench size={18} className="text-[var(--color-text-tertiary)]" />
-              <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t('settings.agents.tools')}</h4>
-            </div>
-            <div className="flex flex-wrap gap-2">{agent.tools.map((tool) => <MetaPill key={tool}>{tool}</MetaPill>)}</div>
-          </CardContent>
-        </Card>
+        <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Wrench size={18} className="text-[var(--color-text-tertiary)]" />
+            <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">{t('settings.agents.tools')}</h4>
+          </div>
+          <div className="flex flex-wrap gap-2">{agent.tools.map((tool) => <MetaPill key={tool}>{tool}</MetaPill>)}</div>
+        </section>
       )}
 
-      <Card className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[var(--color-surface)]">
+      <section className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3">
             <div className="min-w-0">
@@ -558,27 +417,17 @@ function AgentDetailView({
             </div>
             <MetaPill>{t('settings.agents.systemPrompt')}</MetaPill>
           </div>
-          <div
-            role="region"
-            aria-label={t('settings.agents.systemPrompt')}
-            tabIndex={0}
-            className="min-h-0 flex-1 overflow-y-auto bg-[var(--color-surface-container-lowest)] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]"
-          >
+          <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--color-surface-container-lowest)]">
             {agent.systemPrompt ? (
               <div className="px-6 py-5 lg:px-8">
-                <MarkdownRenderer
-                  blockExternalResources
-                  content={agent.systemPrompt}
-                  variant="document"
-                  className="mx-auto max-w-[72ch]"
-                />
+                <MarkdownRenderer content={agent.systemPrompt} variant="document" className="mx-auto max-w-[72ch]" />
               </div>
             ) : (
               <div className="px-6 py-10 text-center text-sm text-[var(--color-text-tertiary)]">{t('settings.agents.noSystemPrompt')}</div>
             )}
           </div>
         </div>
-      </Card>
+      </section>
     </div>
   )
 }
@@ -588,7 +437,6 @@ function AgentFormModal({
   agent,
   cwd,
   sessionId,
-  returnFocus,
   onProjectContextChange,
   onClose,
 }: {
@@ -596,7 +444,6 @@ function AgentFormModal({
   agent?: AgentDefinition
   cwd?: string
   sessionId?: string
-  returnFocus: HTMLElement | null
   onProjectContextChange: (path: string) => void
   onClose: () => void
 }) {
@@ -645,22 +492,8 @@ function AgentFormModal({
   const [color, setColor] = useState(agent?.color || '')
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const nameRef = useRef<HTMLInputElement | null>(null)
-  const descriptionRef = useRef<HTMLInputElement | null>(null)
-  const submitInFlightRef = useRef(false)
 
-  const clearFieldError = (field: string) => {
-    setFieldErrors((currentErrors) => {
-      if (!currentErrors[field]) return currentErrors
-      const nextErrors = { ...currentErrors }
-      delete nextErrors[field]
-      return nextErrors
-    })
-  }
-
-  const handleSubmit = async (event?: FormEvent<HTMLFormElement>) => {
-    event?.preventDefault()
-    if (submitInFlightRef.current) return
+  const handleSubmit = async () => {
     const nextErrors: Record<string, string> = {}
     const trimmedName = name.trim()
     if (!NAME_PATTERN.test(trimmedName)) nextErrors.name = t('settings.agents.form.nameError')
@@ -670,21 +503,7 @@ function AgentFormModal({
     if (toolAccess === 'custom' && parsedTools.length === 0) nextErrors.tools = t('settings.agents.form.toolsCustomRequired')
     if (scope === 'project' && !projectPath) nextErrors.scope = t('settings.agents.form.projectUnavailable')
     setFieldErrors(nextErrors)
-    if (Object.keys(nextErrors).length > 0) {
-      const invalidFieldTargets: Array<[string, string]> = [
-        ['scope', '#agent-scope-user'],
-        ['name', '#agent-name'],
-        ['description', '#agent-description'],
-        ['systemPrompt', '#agent-system-prompt'],
-        ['customModel', '#agent-custom-model'],
-        ['tools', '#agent-custom-tools'],
-      ]
-      const firstInvalidField = invalidFieldTargets.find(([field]) => nextErrors[field])
-      if (firstInvalidField) {
-        document.querySelector<HTMLElement>(firstInvalidField[1])?.focus()
-      }
-      return
-    }
+    if (Object.keys(nextErrors).length > 0) return
 
     const toolSelectionIsUnchanged = mode === 'edit' &&
       toolAccess === initialToolAccess &&
@@ -718,7 +537,6 @@ function AgentFormModal({
     }
 
     setSubmitError(null)
-    submitInFlightRef.current = true
     try {
       const targetSessionId = scope === 'project'
         ? sessions.find((session) => getSessionBrowsablePath(session) === projectPath)?.id
@@ -732,105 +550,53 @@ function AgentFormModal({
       onClose()
     } catch {
       setSubmitError(t('settings.agents.form.saveError'))
-    } finally {
-      submitInFlightRef.current = false
     }
   }
 
   return (
-    <Dialog
+    <Modal
       open
-      onOpenChange={(open) => {
-        if (!open && !isMutating) onClose()
-      }}
+      onClose={isMutating ? () => {} : onClose}
+      title={mode === 'edit' ? t('settings.agents.editTitle') : t('settings.agents.createTitle')}
+      width={680}
+      footer={(
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={isMutating}>{t('common.cancel')}</Button>
+          <Button onClick={() => void handleSubmit()} loading={isMutating}>{t('common.save')}</Button>
+        </>
+      )}
     >
-      <DialogContent
-        className="flex max-h-[min(92vh,900px)] w-[min(94vw,680px)] max-w-none flex-col gap-0 overflow-hidden p-0"
-        showCloseButton={!isMutating}
-        onEscapeKeyDown={(event) => {
-          if (isMutating) event.preventDefault()
-        }}
-        onPointerDownOutside={(event) => {
-          if (isMutating) event.preventDefault()
-        }}
-        onOpenAutoFocus={(event) => {
-          event.preventDefault()
-          const target = mode === 'create' ? nameRef.current : descriptionRef.current
-          target?.focus()
-        }}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault()
-          const target = returnFocus?.isConnected
-            ? returnFocus
-            : document.querySelector<HTMLElement>('[data-agent-create]')
-          target?.focus()
-        }}
-      >
-        <DialogHeader className="border-b border-[var(--color-border)] px-6 py-5">
-          <DialogTitle>
-            {mode === 'edit' ? t('settings.agents.editTitle') : t('settings.agents.createTitle')}
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            {t('settings.agents.description')}
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex min-h-0 flex-1 flex-col"
-          noValidate
-          onSubmit={(event) => void handleSubmit(event)}
-        >
-          <fieldset
-            disabled={isMutating}
-            className="min-h-0 flex-1 overflow-y-auto border-0 px-6 py-5"
-          >
-            <div className="grid gap-4">
-        <Field
-          label={t('settings.agents.form.scope')}
-          error={fieldErrors.scope}
-          errorId="agent-scope-error"
-          required
-        >
-          <RadioGroup
-            value={scope}
-            onValueChange={(value) => {
-              setScope(value as AgentScope)
-              clearFieldError('scope')
-            }}
-            disabled={mode === 'edit'}
-            className="grid grid-cols-2 gap-2"
-            aria-label={t('settings.agents.form.scope')}
-            aria-describedby={fieldErrors.scope ? 'agent-scope-error' : undefined}
-          >
+      <div className="grid gap-4">
+        <Field label={t('settings.agents.form.scope')} error={fieldErrors.scope} required>
+          <div className="grid grid-cols-2 gap-2" role="group" aria-label={t('settings.agents.form.scope')}>
             {([
               { value: 'user' as const, label: t('settings.agents.form.scopeUser'), icon: <User size={16} /> },
               { value: 'project' as const, label: t('settings.agents.form.scopeProject'), icon: <Folder size={16} /> },
             ]).map((option) => {
               const selected = scope === option.value
               return (
-                <Label
+                <button
                   key={option.value}
-                  htmlFor={`agent-scope-${option.value}`}
-                  className={`flex min-h-16 cursor-pointer items-center gap-3 rounded-[var(--radius-lg)] border px-4 py-3 text-left transition-colors ${
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={mode === 'edit'}
+                  onClick={() => setScope(option.value)}
+                  className={`flex min-h-16 items-center gap-3 rounded-[var(--radius-lg)] border px-4 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                     selected
                       ? 'border-[var(--color-border-focus)] bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]'
                       : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
-                  } ${mode === 'edit' ? 'cursor-not-allowed opacity-60' : ''}`}
+                  }`}
                 >
                   <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
                     selected ? 'bg-[var(--color-primary-fixed)] text-[var(--color-brand)]' : 'bg-[var(--color-surface-container-high)]'
                   }`}>
                     {option.icon}
                   </span>
-                  <span className="min-w-0 flex-1 text-sm font-semibold">{option.label}</span>
-                  <RadioGroupItem
-                    id={`agent-scope-${option.value}`}
-                    value={option.value}
-                    aria-label={option.label}
-                  />
-                </Label>
+                  <span className="text-sm font-semibold">{option.label}</span>
+                </button>
               )
             })}
-          </RadioGroup>
+          </div>
           {scope === 'project' && (
             <div className="mt-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -842,67 +608,43 @@ function AgentFormModal({
                   </p>
                 </div>
                 {mode === 'create' && (
-                  <DirectoryPicker
-                    value={projectPath}
-                    onChange={(value) => {
-                      setProjectPath(value)
-                      clearFieldError('scope')
-                    }}
-                  />
+                  <DirectoryPicker value={projectPath} onChange={setProjectPath} />
                 )}
               </div>
             </div>
           )}
         </Field>
 
-        <SettingField
-          id="agent-name"
-          ref={nameRef}
+        <Input
           label={t('settings.agents.form.name')}
           required
           value={name}
           disabled={mode === 'edit'}
           error={fieldErrors.name}
           placeholder={t('settings.agents.form.namePlaceholder')}
-          onChange={(event) => {
-            setName(event.target.value)
-            clearFieldError('name')
-          }}
+          onChange={(event) => setName(event.target.value)}
         />
-        <SettingField
-          id="agent-description"
-          ref={descriptionRef}
+        <Input
           label={t('settings.agents.form.description')}
           required
           value={description}
           error={fieldErrors.description}
           placeholder={t('settings.agents.form.descriptionPlaceholder')}
-          onChange={(event) => {
-            setDescription(event.target.value)
-            clearFieldError('description')
-          }}
+          onChange={(event) => setDescription(event.target.value)}
         />
 
         <Field
           label={t('settings.agents.form.systemPrompt')}
           error={fieldErrors.systemPrompt}
-          errorId="agent-system-prompt-error"
-          htmlFor="agent-system-prompt"
           required={mode === 'create'}
         >
-          <Textarea
-            id="agent-system-prompt"
+          <textarea
             aria-label={t('settings.agents.form.systemPrompt')}
-            aria-invalid={Boolean(fieldErrors.systemPrompt) || undefined}
-            aria-describedby={fieldErrors.systemPrompt ? 'agent-system-prompt-error' : undefined}
             value={systemPrompt}
             rows={7}
             placeholder={t('settings.agents.form.systemPromptPlaceholder')}
-            onChange={(event) => {
-              setSystemPrompt(event.target.value)
-              clearFieldError('systemPrompt')
-            }}
-            className="min-h-40"
+            onChange={(event) => setSystemPrompt(event.target.value)}
+            className={`${textAreaClassName} ${fieldErrors.systemPrompt ? 'border-[var(--color-error)]' : ''}`}
           />
         </Field>
 
@@ -934,16 +676,12 @@ function AgentFormModal({
         </div>
 
         {modelChoice === 'custom' && (
-          <SettingField
-            id="agent-custom-model"
+          <Input
             label={t('settings.agents.form.customModelId')}
             required
             value={customModel}
             error={fieldErrors.customModel}
-            onChange={(event) => {
-              setCustomModel(event.target.value)
-              clearFieldError('customModel')
-            }}
+            onChange={(event) => setCustomModel(event.target.value)}
           />
         )}
 
@@ -951,10 +689,7 @@ function AgentFormModal({
           <AgentSelect<ToolAccessMode>
             label={t('settings.agents.form.tools')}
             value={toolAccess}
-            onChange={(value) => {
-              setToolAccess(value)
-              clearFieldError('tools')
-            }}
+            onChange={setToolAccess}
             items={[
               { value: 'inherit', label: t('settings.agents.form.toolsInherit') },
               { value: 'none', label: t('settings.agents.form.toolsNone') },
@@ -978,12 +713,10 @@ function AgentFormModal({
             onSelectedToolsChange={(nextTools) => {
               setSelectedBuiltInTools(nextTools)
               setToolsDirty(true)
-              clearFieldError('tools')
             }}
             onCustomToolsChange={(value) => {
               setCustomTools(value)
               setToolsDirty(true)
-              clearFieldError('tools')
             }}
           />
         )}
@@ -1005,23 +738,12 @@ function AgentFormModal({
         </Field>
 
         {submitError && (
-          <Alert variant="destructive">
-            <AlertTitle>{submitError}</AlertTitle>
-          </Alert>
+          <div role="alert" className="rounded-lg border border-[var(--color-error)]/30 bg-[var(--color-error)]/5 px-3 py-2 text-sm text-[var(--color-error)]">
+            {submitError}
+          </div>
         )}
-            </div>
-          </fieldset>
-          <DialogFooter className="border-t border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6 py-4">
-            <Button type="button" variant="secondary" onClick={onClose} disabled={isMutating}>
-              {t('common.cancel')}
-            </Button>
-            <LoadingButton type="submit" loading={isMutating}>
-              {t('common.save')}
-            </LoadingButton>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </Modal>
   )
 }
 
@@ -1064,101 +786,101 @@ function ToolPicker({
   }
 
   return (
-    <Card className="bg-[var(--color-surface-container-low)]">
-      <CardContent className="p-3">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="text-sm font-semibold text-[var(--color-text-primary)]">
-              {t('settings.agents.form.builtInTools')}
-            </p>
-            <p className="mt-0.5 text-xs text-[var(--color-text-tertiary)]">
-              {t('settings.agents.form.builtInToolsHint')}
-            </p>
+    <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+            {t('settings.agents.form.builtInTools')}
+          </p>
+          <p className="mt-0.5 text-xs text-[var(--color-text-tertiary)]">
+            {t('settings.agents.form.builtInToolsHint')}
+          </p>
+        </div>
+        <span className="rounded-full bg-[var(--color-primary-fixed)] px-2.5 py-1 text-xs font-medium text-[var(--color-brand)]">
+          {t('settings.agents.form.toolsSelectedCount', { count: selectedTools.length })}
+        </span>
+      </div>
+
+      {availableTools.length > 0 ? (
+        <>
+          <label className="relative mb-3 block">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]" />
+            <input
+              type="search"
+              aria-label={t('settings.agents.form.toolsSearch')}
+              value={query}
+              placeholder={t('settings.agents.form.toolsSearchPlaceholder')}
+              onChange={(event) => setQuery(event.target.value)}
+              className="h-9 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] pl-9 pr-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[var(--color-brand)]/15"
+            />
+          </label>
+          <div className="max-h-64 space-y-3 overflow-y-auto pr-1">
+            {groupedTools.map(({ category, tools }) => (
+              <section key={category} aria-label={t(`settings.agents.form.toolCategory.${category}`)}>
+                <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+                  {t(`settings.agents.form.toolCategory.${category}`)}
+                </h4>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {tools.map((tool) => {
+                    const selected = selectedTools.includes(tool)
+                    const description = t(TOOL_METADATA[tool]?.description ?? 'settings.agents.form.toolDescription.generic')
+                    return (
+                      <button
+                        key={tool}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={selected}
+                        aria-label={`${tool} — ${description}`}
+                        onClick={() => toggleTool(tool)}
+                        className={`flex min-h-14 items-start gap-2.5 rounded-[var(--radius-md)] border px-3 py-2.5 text-left transition-colors ${
+                          selected
+                            ? 'border-[var(--color-border-focus)] bg-[var(--color-surface-selected)]'
+                            : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
+                        }`}
+                      >
+                        <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                          selected
+                            ? 'border-[var(--color-brand)] bg-[var(--color-brand)] text-white'
+                            : 'border-[var(--color-border-strong)] bg-[var(--color-surface)]'
+                        }`}>
+                          {selected && <Check size={12} strokeWidth={3} />}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block font-mono text-xs font-semibold text-[var(--color-text-primary)]">{tool}</span>
+                          <span className="mt-0.5 block text-[11px] leading-4 text-[var(--color-text-tertiary)]">{description}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            ))}
+            {groupedTools.length === 0 && (
+              <p className="py-5 text-center text-xs text-[var(--color-text-tertiary)]">
+                {t('settings.agents.form.toolsNoResults')}
+              </p>
+            )}
           </div>
-          <Badge className="rounded-full px-2.5 py-1 text-xs">
-            {t('settings.agents.form.toolsSelectedCount', { count: selectedTools.length })}
-          </Badge>
-        </div>
+        </>
+      ) : (
+        <p className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-4 text-center text-xs text-[var(--color-text-tertiary)]">
+          {t('settings.agents.form.toolsUnavailable')}
+        </p>
+      )}
 
-        {availableTools.length > 0 ? (
-          <>
-            <label className="relative mb-3 block">
-              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]" />
-              <Input
-                type="search"
-                aria-label={t('settings.agents.form.toolsSearch')}
-                value={query}
-                placeholder={t('settings.agents.form.toolsSearchPlaceholder')}
-                onChange={(event) => setQuery(event.target.value)}
-                className="h-9 pl-9"
-              />
-            </label>
-            <div className="max-h-64 space-y-3 overflow-y-auto pr-1">
-              {groupedTools.map(({ category, tools }) => (
-                <section key={category} aria-label={t(`settings.agents.form.toolCategory.${category}`)}>
-                  <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
-                    {t(`settings.agents.form.toolCategory.${category}`)}
-                  </h4>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {tools.map((tool) => {
-                      const selected = selectedTools.includes(tool)
-                      const description = t(TOOL_METADATA[tool]?.description ?? 'settings.agents.form.toolDescription.generic')
-                      const toolId = `agent-tool-${tool.replace(/[^a-zA-Z0-9_-]/g, '-')}`
-                      return (
-                        <Label
-                          key={tool}
-                          htmlFor={toolId}
-                          className={`flex min-h-14 cursor-pointer items-start gap-2.5 rounded-[var(--radius-md)] border px-3 py-2.5 text-left transition-colors ${
-                            selected
-                              ? 'border-[var(--color-border-focus)] bg-[var(--color-surface-selected)]'
-                              : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
-                          }`}
-                        >
-                          <Checkbox
-                            id={toolId}
-                            checked={selected}
-                            aria-label={`${tool} — ${description}`}
-                            onCheckedChange={() => toggleTool(tool)}
-                            className="mt-0.5"
-                          />
-                          <span className="min-w-0">
-                            <span className="block font-mono text-xs font-semibold text-[var(--color-text-primary)]">{tool}</span>
-                            <span className="mt-0.5 block text-[11px] leading-4 text-[var(--color-text-tertiary)]">{description}</span>
-                          </span>
-                        </Label>
-                      )
-                    })}
-                  </div>
-                </section>
-              ))}
-              {groupedTools.length === 0 && (
-                <p className="py-5 text-center text-xs text-[var(--color-text-tertiary)]">
-                  {t('settings.agents.form.toolsNoResults')}
-                </p>
-              )}
-            </div>
-          </>
-        ) : (
-          <p className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-4 text-center text-xs text-[var(--color-text-tertiary)]">
-            {t('settings.agents.form.toolsUnavailable')}
-          </p>
-        )}
-
-        <div className="mt-3 border-t border-[var(--color-border)] pt-3">
-          <SettingField
-            id="agent-custom-tools"
-            label={t('settings.agents.form.toolsCustomLabel')}
-            value={customTools}
-            error={error}
-            placeholder={t('settings.agents.form.toolsPlaceholder')}
-            onChange={(event) => onCustomToolsChange(event.target.value)}
-          />
-          <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
-            {t('settings.agents.form.toolsCustomHint')}
-          </p>
-        </div>
-      </CardContent>
-    </Card>
+      <div className="mt-3 border-t border-[var(--color-border)] pt-3">
+        <Input
+          label={t('settings.agents.form.toolsCustomLabel')}
+          value={customTools}
+          error={error}
+          placeholder={t('settings.agents.form.toolsPlaceholder')}
+          onChange={(event) => onCustomToolsChange(event.target.value)}
+        />
+        <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+          {t('settings.agents.form.toolsCustomHint')}
+        </p>
+      </div>
+    </div>
   )
 }
 
@@ -1177,14 +899,10 @@ function AgentDeleteDialog({
   const deleteAgent = useAgentStore((state) => state.deleteAgent)
   const isMutating = useAgentStore((state) => state.isMutating)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const returnFocusRef = useRef<HTMLElement | null>(null)
   const scope = agent ? getEditableScope(agent) : null
 
   useEffect(() => {
     setDeleteError(null)
-    if (agent && document.activeElement instanceof HTMLElement) {
-      returnFocusRef.current = document.activeElement
-    }
   }, [agent])
 
   const handleDelete = async () => {
@@ -1199,56 +917,26 @@ function AgentDeleteDialog({
   }
 
   return (
-    <AlertDialog
+    <ConfirmDialog
       open={Boolean(agent)}
-      onOpenChange={(open) => {
-        if (!open && !isMutating) onClose()
-      }}
-    >
-      <AlertDialogContent
-        onEscapeKeyDown={(event) => {
-          if (isMutating) event.preventDefault()
-        }}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault()
-          const target = returnFocusRef.current?.isConnected
-            ? returnFocusRef.current
-            : document.querySelector<HTMLElement>('[data-agent-create]')
-          target?.focus()
-        }}
-      >
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t('settings.agents.deleteTitle')}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-3">
-              <p>{t('settings.agents.deleteBody', { name: agent?.agentType || '' })}</p>
-              {agent?.target && (
-                <p className="break-all font-mono text-xs text-[var(--color-text-tertiary)]">
-                  {t('settings.agents.deleteTarget', { target: agent.target })}
-                </p>
-              )}
-              {deleteError && (
-                <Alert variant="destructive">
-                  <AlertTitle>{deleteError}</AlertTitle>
-                </Alert>
-              )}
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isMutating}>
-            {t('common.cancel')}
-          </AlertDialogCancel>
-          <LoadingButton
-            variant="destructive"
-            loading={isMutating}
-            onClick={() => void handleDelete()}
-          >
-            {t('settings.agents.deleteConfirm')}
-          </LoadingButton>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      onClose={isMutating ? () => {} : onClose}
+      onConfirm={handleDelete}
+      title={t('settings.agents.deleteTitle')}
+      body={(
+        <div className="space-y-3">
+          <p>{t('settings.agents.deleteBody', { name: agent?.agentType || '' })}</p>
+          {agent?.target && (
+            <p className="break-all font-mono text-xs text-[var(--color-text-tertiary)]">
+              {t('settings.agents.deleteTarget', { target: agent.target })}
+            </p>
+          )}
+          {deleteError && <p role="alert" className="text-sm text-[var(--color-error)]">{deleteError}</p>}
+        </div>
+      )}
+      confirmLabel={t('settings.agents.deleteConfirm')}
+      cancelLabel={t('common.cancel')}
+      loading={isMutating}
+    />
   )
 }
 
@@ -1295,10 +983,6 @@ function getAgentDotColor(color?: string) {
   return color && AGENT_COLORS[color] ? AGENT_COLORS[color] : 'var(--color-text-tertiary)'
 }
 
-function getAgentIdentityKey(agent: AgentDefinition) {
-  return [agent.source, agent.agentType, agent.target ?? agent.baseDir ?? ''].join(':')
-}
-
 function getAgentSourceIcon(source: AgentSource) {
   const iconProps = { size: 16 }
   switch (source) {
@@ -1335,92 +1019,67 @@ function AgentSelect<T extends string>({
   value: T
   onChange: (value: T) => void
 }) {
-  const emptyValue = '__agent_empty_value__'
+  const selected = items.find((item) => item.value === value) ?? items[0]
   return (
-    <Select
-      value={value || emptyValue}
-      onValueChange={(nextValue) => onChange((nextValue === emptyValue ? '' : nextValue) as T)}
-    >
-      <SelectTrigger aria-label={label}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent
-        position="popper"
-        side="top"
-        align="start"
-        className="z-[100] max-h-[280px]"
-      >
-        {items.map((item) => (
-          <SelectItem key={item.value || emptyValue} value={item.value || emptyValue}>
-            <span className="flex min-w-0 items-center gap-2">
-              {item.icon && <span className="shrink-0">{item.icon}</span>}
-              <span className="truncate">{item.label}</span>
-            </span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <Dropdown<T>
+      items={items}
+      value={value}
+      onChange={onChange}
+      width="100%"
+      maxHeight={280}
+      placement="top"
+      className="block w-full"
+      trigger={(
+        <button
+          type="button"
+          aria-label={label}
+          className="flex h-10 w-full items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-left text-sm text-[var(--color-text-primary)] outline-none transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-container-low)] focus-visible:border-[var(--color-border-focus)] focus-visible:shadow-[var(--shadow-focus-ring)]"
+        >
+          {selected?.icon && <span className="shrink-0">{selected.icon}</span>}
+          <span className="min-w-0 flex-1 truncate">{selected?.label ?? value}</span>
+          <ChevronDown size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
+        </button>
+      )}
+    />
   )
 }
 
-function Field({
-  label,
-  error,
-  errorId,
-  htmlFor,
-  required,
-  children,
-}: {
-  label: string
-  error?: string
-  errorId?: string
-  htmlFor?: string
-  required?: boolean
-  children: ReactNode
-}) {
+function Field({ label, error, required, children }: { label: string; error?: string; required?: boolean; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={htmlFor}>
+    <div className="flex flex-col gap-1">
+      <span className="text-sm font-medium text-[var(--color-text-primary)]">
         {label}{required && <span className="ml-0.5 text-[var(--color-error)]">*</span>}
-      </Label>
+      </span>
       {children}
-      {error && <p id={errorId} className="text-xs text-[var(--color-error)]">{error}</p>}
+      {error && <p className="text-xs text-[var(--color-error)]">{error}</p>}
     </div>
   )
 }
 
 function MetaPill({ children }: { children: ReactNode }) {
   return (
-    <Badge
-      variant="secondary"
-      className="gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-tertiary)]"
-    >
+    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-tertiary)]">
       {children}
-    </Badge>
+    </span>
   )
 }
 
 function SummaryCard({ label, value, icon, className = '' }: { label: string; value: string; icon: ReactNode; className?: string }) {
   return (
-    <Card className={`min-w-0 bg-[var(--color-surface)] ${className}`}>
-      <CardContent className="px-3 py-3">
-        <div className="flex min-h-8 min-w-0 items-start gap-1.5 text-[10px] uppercase leading-4 tracking-[0.08em] text-[var(--color-text-tertiary)]">
-          {icon}
-          <span className="min-w-0 break-words">{label}</span>
-        </div>
-        <div className="mt-1 text-lg font-semibold text-[var(--color-text-primary)]">{value}</div>
-      </CardContent>
-    </Card>
+    <div className={`min-w-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3 ${className}`}>
+      <div className="flex min-w-0 items-center gap-1.5 text-[11px] uppercase tracking-[0.12em] text-[var(--color-text-tertiary)]">{icon}<span className="truncate">{label}</span></div>
+      <div className="mt-2 truncate text-lg font-semibold text-[var(--color-text-primary)]">{value}</div>
+    </div>
   )
 }
 
 function DetailStat({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
   return (
-    <Card className="bg-[var(--color-surface)]">
-      <CardContent className="px-3 py-3">
-        <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-tertiary)]">{icon}<span>{label}</span></div>
-        <div className="mt-2 break-all text-base font-semibold text-[var(--color-text-primary)]">{value}</div>
-      </CardContent>
-    </Card>
+    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3">
+      <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-tertiary)]">{icon}<span>{label}</span></div>
+      <div className="mt-2 break-all text-base font-semibold text-[var(--color-text-primary)]">{value}</div>
+    </div>
   )
 }
+
+const textAreaClassName = 'min-h-32 resize-y rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-border-focus)] focus:shadow-[var(--shadow-focus-ring)]'

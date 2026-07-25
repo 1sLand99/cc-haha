@@ -71,8 +71,6 @@ describe('GrokOfficialLogin', () => {
     expect(open).toHaveBeenCalled()
     expect(screen.getByText(/Unable to open browser/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Copy authorization link' })).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveAttribute('data-slot', 'alert')
-    expect(screen.getByRole('button', { name: 'Copy authorization link' })).toHaveAttribute('data-slot', 'button')
   })
 
   it('opens the local success page when authorization completes', async () => {

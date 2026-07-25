@@ -1489,7 +1489,6 @@ describe('MessageList nested tool calls', () => {
 
     const divider = screen.getByTestId('compact-status-divider')
     expect(within(divider).getByText('Context automatically compacted')).toBeTruthy()
-    expect(within(divider).getByRole('button').getAttribute('data-slot')).toBe('button')
     expect(divider.textContent).not.toContain('123k tokens before compact')
     expect(divider.textContent).not.toContain('Built the invoice import flow')
 
@@ -1693,9 +1692,7 @@ describe('MessageList nested tool calls', () => {
     expect(screen.queryByText('preferences.md')).toBeNull()
     expect(screen.queryByText('Tool details')).toBeNull()
 
-    const memoryTrigger = screen.getByRole('button', { name: /Saved 1 memory item/i })
-    expect(memoryTrigger.getAttribute('data-slot')).toBe('button')
-    fireEvent.click(memoryTrigger)
+    fireEvent.click(screen.getByRole('button', { name: /Saved 1 memory item/i }))
 
     expect(screen.getByText('preferences.md')).toBeTruthy()
     expect(screen.getByText('Tool details')).toBeTruthy()
@@ -2290,12 +2287,8 @@ describe('MessageList nested tool calls', () => {
 
     render(<MessageList />)
 
-    const agentTrigger = screen.getByRole('button', { name: /dispatched an agent/i })
-    expect(agentTrigger.getAttribute('data-slot')).toBe('button')
-    fireEvent.click(agentTrigger)
-    const openRunButton = screen.getByRole('button', { name: 'Open run Inspect src/components' })
-    expect(openRunButton.getAttribute('data-slot')).toBe('button')
-    fireEvent.click(openRunButton)
+    fireEvent.click(screen.getByRole('button', { name: /dispatched an agent/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open run Inspect src/components' }))
 
     const expectedTabId = '__subagent__active-tab__agent-1'
     expect(useTabStore.getState().activeTabId).toBe(expectedTabId)
@@ -2609,7 +2602,6 @@ describe('MessageList nested tool calls', () => {
     await selectMessageText(userText, 'workspace selection behavior')
     const floatingAddButton = screen.getByRole('button', { name: 'Add to chat' })
 
-    expect(floatingAddButton.getAttribute('data-slot')).toBe('floating-selection-action')
     expect(floatingAddButton.style.left).toBe('141px')
     expect(floatingAddButton.style.top).toBe('26px')
 
@@ -5000,7 +4992,7 @@ describe('MessageList nested tool calls', () => {
 
     await screen.findByText('live.ts')
     fireEvent.click(screen.getByRole('button', { name: 'Undo current turn changes' }))
-    const dialog = await screen.findByRole('alertdialog', { name: 'Undo current turn?' })
+    const dialog = await screen.findByRole('dialog', { name: 'Undo current turn?' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Undo current turn' }))
 
     await waitFor(() => {
@@ -5327,7 +5319,7 @@ describe('MessageList nested tool calls', () => {
     )
 
     expect(sessionsApi.rewind).not.toHaveBeenCalled()
-    const dialog = await screen.findByRole('alertdialog', { name: 'Rewind to before this turn?' })
+    const dialog = await screen.findByRole('dialog', { name: 'Rewind to before this turn?' })
     expect(
       within(dialog).getByText(
         'This will rewind the conversation to before this turn and restore tracked files for that checkpoint.',

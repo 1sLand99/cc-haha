@@ -3,8 +3,6 @@ import { useTranslation } from '../../../i18n'
 import type { TraceSpan, TraceViewModel } from '../../../lib/traceViewModel'
 import { formatDurationMs, formatTokenCount } from '../../../lib/trace/formatters'
 import { StatusGlyph, TypeIcon, spanDisplayTitle } from '../TraceBadges'
-import { Button } from '../../ui/button'
-import { Card, CardContent } from '../../ui/card'
 
 type OverviewStats = {
   llmCalls: number
@@ -35,7 +33,7 @@ export function SessionOverview({
 
   return (
     <div className="px-4 py-3" data-testid="trace-overview">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-3">
         <Stat label={t('trace.llmCalls')} value={String(stats.llmCalls)} />
         <Stat label={t('trace.toolCalls')} value={String(stats.toolCalls)} />
         <Stat label={t('trace.errors')} value={String(stats.errors)} tone={stats.errors > 0 ? 'danger' : 'default'} />
@@ -56,11 +54,11 @@ export function SessionOverview({
           </div>
           <div className="divide-y divide-[var(--color-border)]/60">
             {children.map((child) => (
-              <Button
+              <button
                 key={child.id}
-                variant="ghost"
+                type="button"
                 onClick={() => onSelect(child.id)}
-                className="h-[34px] w-full justify-start gap-2 rounded-none px-1 text-left"
+                className="flex h-[34px] w-full items-center gap-2 text-left transition-colors hover:bg-[var(--color-surface-container-low)]"
               >
                 <TypeIcon span={child} />
                 <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[var(--color-text-secondary)]">
@@ -72,7 +70,7 @@ export function SessionOverview({
                   </span>
                 ) : null}
                 <StatusGlyph status={child.status} />
-              </Button>
+              </button>
             ))}
           </div>
         </div>
@@ -83,14 +81,12 @@ export function SessionOverview({
 
 function Stat({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'danger' }) {
   return (
-    <Card className="min-w-0 rounded-[var(--radius-md)] bg-[var(--color-surface-container-low)]">
-      <CardContent className="px-3 py-2">
-        <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">{label}</div>
-        <div className={`mt-0.5 truncate font-mono text-xs ${tone === 'danger' ? 'text-[var(--color-error)]' : 'text-[var(--color-text-primary)]'}`} title={value}>
-          {value}
-        </div>
-      </CardContent>
-    </Card>
+    <div className="min-w-0">
+      <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">{label}</div>
+      <div className={`mt-0.5 truncate font-mono text-xs ${tone === 'danger' ? 'text-[var(--color-error)]' : 'text-[var(--color-text-primary)]'}`}>
+        {value}
+      </div>
+    </div>
   )
 }
 

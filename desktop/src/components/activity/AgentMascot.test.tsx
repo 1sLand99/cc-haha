@@ -5,7 +5,7 @@ import {
   AGENT_MASCOT_VARIANTS,
   AgentMascot,
   resolveAgentMascotSpec,
-} from '../ui/custom/agent-mascot'
+} from './AgentMascot'
 
 describe('AgentMascot', () => {
   it('resolves the same seed to a stable mascot variant across statuses', () => {

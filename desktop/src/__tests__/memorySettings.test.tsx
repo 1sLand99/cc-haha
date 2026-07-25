@@ -221,7 +221,8 @@ describe('MemorySettings', () => {
     expect(screen.queryByText('Changed Memory')).not.toBeInTheDocument()
   })
 
-  it('guards unsaved file navigation with an accessible dialog and restores focus on cancel', async () => {
+  it('keeps unsaved edits when file switching is not confirmed', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     memoryApiMock.listFiles.mockResolvedValue({
       files: [
         {
@@ -263,31 +264,13 @@ describe('MemorySettings', () => {
       target: { value: '# Unsaved Memory\n' },
     })
 
-    const manualButton = screen.getByRole('button', { name: 'Manual' })
-    manualButton.focus()
-    fireEvent.click(manualButton)
+    fireEvent.click(screen.getByText('Manual'))
 
-    expect(await screen.findByRole('alertdialog')).toBeInTheDocument()
-    const cancelButton = screen.getByRole('button', { name: 'Cancel' })
-    await waitFor(() => {
-      expect(cancelButton).toHaveFocus()
-    })
-    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' })
-
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-      expect(manualButton).toHaveFocus()
-    })
+    expect(confirmSpy).toHaveBeenCalled()
     expect(memoryApiMock.readFile).not.toHaveBeenCalledWith('-workspace-demo', 'notes/manual.md')
     expect(screen.getByLabelText('Editor')).toHaveValue('# Unsaved Memory\n')
 
-    fireEvent.click(manualButton)
-    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }))
-
-    await waitFor(() => {
-      expect(memoryApiMock.readFile).toHaveBeenCalledWith('-workspace-demo', 'notes/manual.md')
-    })
-    expect(await screen.findByTestId('markdown-preview')).toHaveTextContent('Manual')
+    confirmSpy.mockRestore()
   })
 
   it('saves with the platform shortcut while editing and returns to preview mode', async () => {
@@ -541,143 +524,5 @@ describe('MemorySettings', () => {
     expect(memoryApiMock.readFile).toHaveBeenCalledWith('-workspace-other', 'preferences.md')
     expect(useMemoryStore.getState().selectedProjectId).toBe('-workspace-other')
     expect(useUIStore.getState().pendingMemoryPath).toBeNull()
-  })
-
-  it('uses the shared shadcn surfaces for the memory feature', async () => {
-    const { container } = render(<MemorySettings />)
-
-    expect(await screen.findByTestId('markdown-preview')).toBeInTheDocument()
-    expect(container.querySelector('[data-slot="card"]')).toBeInTheDocument()
-    expect(container.querySelector('[data-slot="input"]')).toBeInTheDocument()
-    expect(container.querySelector('[data-slot="button"]')).toBeInTheDocument()
-    expect(container.querySelector('[data-slot="collapsible"]')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
-    const editor = await screen.findByLabelText('Editor')
-    expect(editor).toHaveAttribute('data-slot', 'textarea')
-    fireEvent.change(editor, { target: { value: '# Changed\n' } })
-    expect(screen.getByText('Unsaved')).toHaveAttribute('data-slot', 'badge')
-  })
-
-  it('returns focus to search after clearing the query', async () => {
-    render(<MemorySettings />)
-    await screen.findByTestId('markdown-preview')
-
-    const search = screen.getByLabelText('Search projects or memory files...')
-    fireEvent.change(search, { target: { value: 'demo' } })
-    const clear = screen.getByRole('button', { name: 'Clear search' })
-    fireEvent.click(clear)
-
-    expect(search).toHaveValue('')
-    expect(search).toHaveFocus()
-  })
-
-  it('keeps the editor and draft visible when save fails', async () => {
-    memoryApiMock.saveFile.mockRejectedValue(new Error('Fixture save failed'))
-    render(<MemorySettings />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
-    const editor = await screen.findByLabelText('Editor')
-    fireEvent.change(editor, { target: { value: '# Unsaved after failure\n' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Fixture save failed')
-    expect(screen.getByLabelText('Editor')).toHaveValue('# Unsaved after failure\n')
-    expect(screen.getByText('Unsaved')).toBeInTheDocument()
-  })
-
-  it('locks editing and navigation while a save is in progress', async () => {
-    let resolveSave!: (value: {
-      ok: true
-      file: { path: string; updatedAt: string; bytes: number }
-    }) => void
-    memoryApiMock.saveFile.mockReturnValue(new Promise((resolve) => {
-      resolveSave = resolve
-    }))
-    render(<MemorySettings />)
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
-    const editor = await screen.findByLabelText('Editor')
-    fireEvent.change(editor, { target: { value: '# Saving once\n' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Editor')).toHaveAttribute('readonly')
-      expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute('aria-busy', 'true')
-      expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled()
-    })
-    fireEvent.keyDown(document, { key: 's', metaKey: true })
-    fireEvent.keyDown(document, { key: 's', ctrlKey: true })
-    expect(memoryApiMock.saveFile).toHaveBeenCalledTimes(1)
-
-    resolveSave({
-      ok: true,
-      file: {
-        path: 'MEMORY.md',
-        updatedAt: '2026-05-01T00:01:00.000Z',
-        bytes: 14,
-      },
-    })
-    expect(await screen.findByTestId('markdown-preview')).toHaveTextContent('Saving once')
-  })
-
-  it('routes refresh through the same unsaved-change dialog', async () => {
-    render(<MemorySettings />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
-    fireEvent.change(screen.getByLabelText('Editor'), {
-      target: { value: '# Dirty before refresh\n' },
-    })
-
-    const refresh = screen.getByRole('button', { name: 'Refresh' })
-    fireEvent.click(refresh)
-    expect(await screen.findByRole('alertdialog')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(memoryApiMock.listProjects).toHaveBeenCalledTimes(1)
-    expect(screen.getByLabelText('Editor')).toHaveValue('# Dirty before refresh\n')
-
-    fireEvent.click(refresh)
-    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }))
-    await waitFor(() => {
-      expect(memoryApiMock.listProjects).toHaveBeenCalledTimes(2)
-    })
-    expect(screen.queryByLabelText('Editor')).not.toBeInTheDocument()
-  })
-
-  it('keeps a pending chat memory path when opening the target fails', async () => {
-    const pendingPath = '/tmp/claude/projects/-workspace-demo/memory/MEMORY.md'
-    useUIStore.setState({ pendingMemoryPath: pendingPath })
-    memoryApiMock.readFile.mockRejectedValue(new Error('Fixture read failed'))
-
-    render(<MemorySettings />)
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Fixture read failed')
-    expect(useUIStore.getState().pendingMemoryPath).toBe(pendingPath)
-  })
-
-  it('shows loading skeletons before deciding whether the project list is empty', async () => {
-    let resolveProjects!: (value: Awaited<ReturnType<typeof memoryApiMock.listProjects>>) => void
-    memoryApiMock.listProjects.mockReturnValue(new Promise((resolve) => {
-      resolveProjects = resolve
-    }))
-
-    const { container } = render(<MemorySettings />)
-
-    expect(container.querySelector('[data-slot="skeleton"]')).toBeInTheDocument()
-    expect(screen.queryByText('No projects match this search.')).not.toBeInTheDocument()
-    expect(screen.queryByText('No memory projects found.')).not.toBeInTheDocument()
-
-    resolveProjects({
-      projects: [
-        {
-          id: '-workspace-demo',
-          label: '/workspace/demo',
-          memoryDir: '/tmp/claude/projects/-workspace-demo/memory',
-          exists: true,
-          fileCount: 1,
-          isCurrent: true,
-        },
-      ],
-    })
-    expect(await screen.findByTestId('markdown-preview')).toBeInTheDocument()
   })
 })

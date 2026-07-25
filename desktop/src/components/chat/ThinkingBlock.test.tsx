@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
 import { ThinkingBlock } from './ThinkingBlock'
@@ -17,16 +17,8 @@ describe('ThinkingBlock', () => {
 
   it('shows the in-progress label while thinking is active', () => {
     render(<ThinkingBlock content="reasoning..." isActive />)
-    const trigger = screen.getByRole('button')
-    expect(trigger).toHaveAttribute('data-slot', 'collapsible-trigger')
-    expect(trigger).toHaveAttribute('data-variant', 'ghost')
-    expect(trigger).toHaveAttribute('data-state', 'closed')
-    expect(trigger).toHaveTextContent('思考中')
-    expect(trigger).not.toHaveTextContent('已思考')
-
-    fireEvent.click(trigger)
-    expect(trigger).toHaveAttribute('data-state', 'open')
-    expect(screen.getByText('reasoning...')).toBeInTheDocument()
+    expect(screen.getByRole('button')).toHaveTextContent('思考中')
+    expect(screen.getByRole('button')).not.toHaveTextContent('已思考')
   })
 
   it('shows the done label once thinking has completed', () => {

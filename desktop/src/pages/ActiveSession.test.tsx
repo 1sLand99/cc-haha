@@ -76,12 +76,8 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useTabStore } from '../stores/tabStore'
 import { useTeamStore } from '../stores/teamStore'
-import {
-  WORKSPACE_PANEL_DEFAULT_WIDTH,
-  WORKSPACE_PANEL_MAX_WIDTH,
-  WORKSPACE_PANEL_MIN_WIDTH,
-  useWorkspacePanelStore,
-} from '../stores/workspacePanelStore'
+import { useWorkspacePanelStore } from '../stores/workspacePanelStore'
+import { WORKSPACE_PANEL_DEFAULT_WIDTH } from '../stores/workspacePanelStore'
 import { useTerminalPanelStore } from '../stores/terminalPanelStore'
 import { useActivityPanelStore } from '../stores/activityPanelStore'
 import {
@@ -632,7 +628,7 @@ describe('ActiveSession task polling', () => {
     const panel = screen.getByTestId('session-activity-panel')
     expect(chatColumn).not.toContainElement(panel)
     expect(panel).toHaveAttribute('data-placement', 'rail')
-    expect(panel).toHaveAttribute('role', 'complementary')
+    expect(panel).toHaveAttribute('role', 'dialog')
     expect(within(panel).getByText('Implement panel')).toBeInTheDocument()
     expect(within(panel).getAllByText('Run smoke checks')).not.toHaveLength(0)
     expect(within(panel).getAllByText('Explore repo')).not.toHaveLength(0)
@@ -1452,7 +1448,6 @@ describe('ActiveSession task polling', () => {
     expect(queryByTestId('session-task-bar')).not.toBeInTheDocument()
     expect(queryByTestId('session-activity-panel')).not.toBeInTheDocument()
     expect(fetchSessionTasks).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: /Back to Leader/ })).toHaveAttribute('data-slot', 'button')
 
     unmount()
     useCLITaskStore.setState(originalCliTaskState)
@@ -1523,9 +1518,6 @@ describe('ActiveSession task polling', () => {
     expect(contentRow.children[0]).toBe(chatColumn)
     expect(contentRow.children[1]).toBe(resizeHandle)
     expect(contentRow.children[2]).toBe(workbenchPanel)
-    expect(resizeHandle).toHaveAttribute('data-slot', 'resizable-separator')
-    expect(resizeHandle).toHaveAttribute('aria-valuemin', `${WORKSPACE_PANEL_MIN_WIDTH}`)
-    expect(resizeHandle).toHaveAttribute('aria-valuemax', `${WORKSPACE_PANEL_MAX_WIDTH}`)
 
     act(() => {
       fireEvent.keyDown(resizeHandle, { key: 'ArrowLeft' })

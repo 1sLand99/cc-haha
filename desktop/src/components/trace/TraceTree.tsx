@@ -4,13 +4,6 @@ import { useTranslation } from '../../i18n'
 import { previewTraceValue, type TraceSpan, type TraceViewModel } from '../../lib/traceViewModel'
 import { formatDurationMs } from '../../lib/trace/formatters'
 import { StatusGlyph, TypeIcon, spanDisplayTitle, turnDisplayTitle } from './TraceBadges'
-import { Badge } from '../ui/badge'
-import { Button } from '../ui/button'
-import { Collapsible, CollapsibleContent } from '../ui/collapsible'
-import { Input } from '../ui/input'
-import { Label } from '../ui/label'
-import { ScrollArea } from '../ui/scroll-area'
-import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
 
 export type TraceTreeFilter = 'all' | 'llm' | 'tool' | 'error'
 
@@ -56,11 +49,6 @@ export function TraceTree({
     return ids
   }, [groups, collapsedTurns])
 
-  const selectWithTreeFocus = (spanId: string) => {
-    onSelect(spanId)
-    scrollRef.current?.focus({ preventScroll: true })
-  }
-
   useEffect(() => {
     if (!selectedId) return
     const container = scrollRef.current
@@ -70,41 +58,15 @@ export function TraceTree({
   }, [selectedId])
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
     if (navigableIds.length === 0) return
-    const currentIndex = selectedId ? navigableIds.indexOf(selectedId) : -1
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
-      event.preventDefault()
-      const nextIndex = event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? navigableIds.length - 1
-          : event.key === 'ArrowDown'
-            ? Math.min(navigableIds.length - 1, currentIndex + 1)
-            : Math.max(0, currentIndex <= 0 ? 0 : currentIndex - 1)
-      const nextId = navigableIds[nextIndex]
-      if (nextId && nextId !== selectedId) onSelect(nextId)
-      return
-    }
-
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-    const selectedGroup = groups.find((group) =>
-      group.turnId === selectedId || group.rows.some((row) => row.span.id === selectedId),
-    )
-    if (!selectedGroup) return
     event.preventDefault()
-    const isTurnSelected = selectedId === selectedGroup.turnId
-    const isCollapsed = collapsedTurns.has(selectedGroup.turnId)
-    if (event.key === 'ArrowLeft') {
-      if (isTurnSelected && !isCollapsed) toggleTurn(selectedGroup.turnId)
-      else if (!isTurnSelected) onSelect(selectedGroup.turnId)
-      return
-    }
-    if (isTurnSelected && isCollapsed) {
-      toggleTurn(selectedGroup.turnId)
-    } else if (isTurnSelected) {
-      const firstRowId = selectedGroup.rows[0]?.span.id
-      if (firstRowId) onSelect(firstRowId)
-    }
+    const currentIndex = selectedId ? navigableIds.indexOf(selectedId) : -1
+    const nextIndex = event.key === 'ArrowDown'
+      ? Math.min(navigableIds.length - 1, currentIndex + 1)
+      : Math.max(0, currentIndex <= 0 ? 0 : currentIndex - 1)
+    const nextId = navigableIds[nextIndex]
+    if (nextId && nextId !== selectedId) onSelect(nextId)
   }
 
   const toggleTurn = (turnId: string) => {
@@ -119,48 +81,39 @@ export function TraceTree({
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface-container-lowest)]" data-testid="trace-tree">
       <div className="shrink-0 border-b border-[var(--color-border)] px-3 py-2.5">
-        <Label htmlFor="trace-span-search" className="sr-only">{t('trace.searchSpans')}</Label>
-        <div className="relative">
-          <Search size={13} strokeWidth={2} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]" aria-hidden="true" />
-          <Input
-            id="trace-span-search"
+        <label className="flex h-7 items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text-tertiary)]">
+          <Search size={13} strokeWidth={2} />
+          <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t('trace.searchSpans')}
-            className="h-8 pl-8 text-xs"
+            className="min-w-0 flex-1 bg-transparent text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
           />
-        </div>
-        <ToggleGroup
-          type="single"
-          value={filter}
-          onValueChange={(value) => {
-            if (value) setFilter(value as TraceTreeFilter)
-          }}
-          variant="default"
-          size="sm"
-          aria-label={t('trace.filter.aria')}
-          className="mt-2 w-fit flex-wrap gap-1"
-        >
+        </label>
+        <div className="mt-2 flex flex-wrap gap-1">
           {(['all', 'llm', 'tool', 'error'] as const).map((value) => (
-            <ToggleGroupItem
+            <button
               key={value}
-              value={value}
-              aria-label={filterLabel(value, t)}
-              className="h-6 rounded-[var(--radius-sm)] px-2 text-[10px]"
+              type="button"
+              onClick={() => setFilter(value)}
+              className={`rounded-[var(--radius-sm)] px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                filter === value
+                  ? 'bg-[var(--color-primary-container)] text-[var(--color-on-primary-container)]'
+                  : 'border border-[var(--color-border)] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]'
+              }`}
             >
               {filterLabel(value, t)}
-            </ToggleGroupItem>
+            </button>
           ))}
-        </ToggleGroup>
+        </div>
       </div>
-      <ScrollArea
+      <div
         ref={scrollRef}
         role="tree"
         aria-label={t('trace.tree.aria')}
-        aria-activedescendant={selectedId ? treeItemDomId(selectedId) : undefined}
         tabIndex={0}
         onKeyDown={onKeyDown}
-        className="min-h-0 flex-1 pb-2 outline-none focus-visible:shadow-[var(--shadow-focus-ring)]"
+        className="min-h-0 flex-1 overflow-y-auto pb-2 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)]"
       >
         {groups.length > 0 ? (
           groups.map((group) => (
@@ -169,16 +122,16 @@ export function TraceTree({
               group={group}
               collapsed={collapsedTurns.has(group.turnId)}
               selectedId={selectedId}
-              onSelect={selectWithTreeFocus}
+              onSelect={onSelect}
               onToggle={() => toggleTurn(group.turnId)}
             />
           ))
         ) : (
-          <div role="status" className="px-4 py-8 text-center text-xs text-[var(--color-text-tertiary)]">
+          <div className="px-4 py-8 text-center text-xs text-[var(--color-text-tertiary)]">
             {t('trace.noMatchingSpans')}
           </div>
         )}
-      </ScrollArea>
+      </div>
     </div>
   )
 }
@@ -204,39 +157,28 @@ function TurnGroup({
   const preview = turnPreview(turnSpan, t)
 
   return (
-    <Collapsible open={!collapsed} onOpenChange={(open) => {
-      if (open === collapsed) onToggle()
-    }}>
+    <section>
       <div
         className={`sticky top-0 z-10 flex items-center gap-1 border-b border-[var(--color-border)]/60 bg-[var(--color-surface-container-lowest)] py-1.5 pl-1.5 pr-3 ${
           selected ? 'shadow-[inset_2px_0_0_var(--color-brand)]' : ''
         }`}
       >
-        <Button
-          size="icon-sm"
-          variant="ghost"
+        <button
+          type="button"
           onClick={onToggle}
-          tabIndex={-1}
           aria-label={t('trace.tree.toggleTurn')}
           aria-expanded={!collapsed}
-          className="size-7 shrink-0 rounded-[var(--radius-sm)]"
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)]"
         >
           {collapsed
             ? <ChevronRight size={13} strokeWidth={2} />
             : <ChevronDown size={13} strokeWidth={2} />}
-        </Button>
-        <Button
-          variant="ghost"
+        </button>
+        <button
           type="button"
           onClick={() => onSelect(group.turnId)}
-          role="treeitem"
-          aria-selected={selected}
-          aria-level={1}
-          tabIndex={-1}
-          id={treeItemDomId(group.turnId)}
           data-span-id={group.turnId}
-          onMouseDown={(event) => event.preventDefault()}
-          className="h-7 min-w-0 flex-1 justify-start gap-1.5 px-1 text-left"
+          className="flex min-w-0 flex-1 items-baseline gap-1.5 text-left"
         >
           <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] ${
             selected ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)]'
@@ -246,24 +188,22 @@ function TurnGroup({
           {preview && preview !== turnLabel ? (
             <span className="truncate text-[11px] text-[var(--color-text-tertiary)]">{preview}</span>
           ) : null}
-        </Button>
+        </button>
         {group.errorCount > 0 ? (
-          <Badge variant="destructive" className="min-h-4 shrink-0 rounded-[var(--radius-sm)] px-1.5 py-0 font-mono text-[10px]">
+          <span className="shrink-0 font-mono text-[10px] font-semibold text-[var(--color-error)]">
             {group.errorCount}
-          </Badge>
+          </span>
         ) : null}
       </div>
-      <CollapsibleContent>
-        {group.rows.map((row) => (
-          <TreeRowButton
-            key={row.span.id}
-            row={row}
-            selected={selectedId === row.span.id}
-            onSelect={() => onSelect(row.span.id)}
-          />
-        ))}
-      </CollapsibleContent>
-    </Collapsible>
+      {!collapsed ? group.rows.map((row) => (
+        <TreeRowButton
+          key={row.span.id}
+          row={row}
+          selected={selectedId === row.span.id}
+          onSelect={() => onSelect(row.span.id)}
+        />
+      )) : null}
+    </section>
   )
 }
 
@@ -274,18 +214,14 @@ function TreeRowButton({ row, selected, onSelect }: { row: TreeRow; selected: bo
   const duration = span.durationMs !== undefined ? formatDurationMs(span.durationMs) : null
 
   return (
-    <Button
+    <button
       type="button"
-      variant="ghost"
       role="treeitem"
       aria-selected={selected}
       aria-level={row.depth + 1}
-      tabIndex={-1}
-      id={treeItemDomId(span.id)}
       data-span-id={span.id}
-      onMouseDown={(event) => event.preventDefault()}
       onClick={onSelect}
-      className={`trace-row-cv relative flex h-[34px] w-full justify-start gap-2 rounded-none pr-3 text-left transition-colors ${
+      className={`trace-row-cv relative flex h-[34px] w-full items-center gap-2 pr-3 text-left transition-colors ${
         selected
           ? 'bg-[var(--color-surface-container-high)]'
           : 'hover:bg-[var(--color-surface-container-low)]'
@@ -304,16 +240,16 @@ function TreeRowButton({ row, selected, onSelect }: { row: TreeRow; selected: bo
           <span className="truncate text-[11px] text-[var(--color-text-tertiary)]">{preview}</span>
         ) : null}
         {span.isSidechain ? (
-          <Badge variant="outline" className="min-h-4 shrink-0 rounded-[var(--radius-sm)] px-1 py-0 text-[9px] text-[var(--color-text-tertiary)]">
+          <span className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1 text-[9px] text-[var(--color-text-tertiary)]">
             {t('trace.sidechain')}
-          </Badge>
+          </span>
         ) : null}
       </span>
       {duration ? (
         <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-tertiary)]">{duration}</span>
       ) : null}
       <StatusGlyph status={span.status} />
-    </Button>
+    </button>
   )
 }
 
@@ -422,8 +358,4 @@ function filterLabel(filter: TraceTreeFilter, t: ReturnType<typeof useTranslatio
     case 'error': return t('trace.filter.errors')
     default: return t('trace.filter.all')
   }
-}
-
-function treeItemDomId(spanId: string): string {
-  return `trace-tree-item-${spanId.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 }

@@ -113,9 +113,8 @@ describe('GeneralSettings output style', () => {
     expect(settingsApiMock.getOutputStyles).toHaveBeenCalledWith('/repo')
     expect(screen.getByText('Saved to .claude/settings.local.json for the active project.')).toBeInTheDocument()
 
-    const outputStyleSelect = screen.getByRole('combobox', { name: 'Select output style' })
-    fireEvent.keyDown(outputStyleSelect, { key: 'ArrowDown' })
-    fireEvent.click(await screen.findByRole('option', { name: /Learning/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Select output style' }))
+    fireEvent.click(screen.getByText('Learning'))
 
     await waitFor(() => {
       expect(settingsApiMock.setOutputStyle).toHaveBeenCalledWith('Learning', '/repo')
@@ -159,9 +158,9 @@ describe('GeneralSettings output style', () => {
 
     expect(await screen.findByText('Claude 会高效完成编码任务，并提供简洁回复')).toBeInTheDocument()
 
-    fireEvent.keyDown(screen.getByRole('combobox', { name: '选择输出风格' }), { key: 'ArrowDown' })
+    fireEvent.click(screen.getByRole('button', { name: '选择输出风格' }))
 
-    expect(await screen.findByText('Claude 会暂停并请你编写小段代码进行实战练习 · 内置')).toBeInTheDocument()
+    expect(screen.getByText('Claude 会暂停并请你编写小段代码进行实战练习 · 内置')).toBeInTheDocument()
     expect(screen.getByText('Project custom voice · 项目风格')).toBeInTheDocument()
     expect(screen.queryByText(/Claude completes coding tasks efficiently/)).not.toBeInTheDocument()
   })

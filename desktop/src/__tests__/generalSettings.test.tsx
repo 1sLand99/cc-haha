@@ -42,7 +42,6 @@ const providerStoreState = {
   isLoading: false,
   fetchProviders: vi.fn(),
   deleteProvider: MOCK_DELETE_PROVIDER,
-  reorderProviders: vi.fn(),
   activateProvider: vi.fn(),
   activateOfficial: vi.fn(),
   testProvider: vi.fn(),
@@ -199,7 +198,6 @@ describe('Settings > General tab', () => {
     providerStoreState.presets = []
     providerStoreState.isLoading = false
     providerStoreState.fetchProviders = vi.fn()
-    providerStoreState.reorderProviders = vi.fn()
     providerStoreState.activateProvider = vi.fn()
     providerStoreState.activateOfficial = vi.fn()
     providerStoreState.testProvider = vi.fn()
@@ -389,48 +387,17 @@ describe('Settings > General tab', () => {
     expect(screen.getByLabelText('Skip WebFetch domain preflight')).toBeInTheDocument()
   })
 
-  it('uses shadcn buttons for the reachable About external actions', () => {
-    useUIStore.setState({ activeSettingsTab: 'about' })
-    render(<Settings />)
-
-    expect(screen.getByRole('button', { name: /NanmiCoder\/cc-haha/ })).toHaveAttribute('data-slot', 'button')
-    for (const creatorLink of screen.getAllByRole('button', { name: /程序员阿江-Relakkes/ })) {
-      expect(creatorLink).toHaveAttribute('data-slot', 'button')
-    }
-    expect(screen.getByRole('button', { name: /Report an Issue|反馈问题/ })).toHaveAttribute('data-slot', 'button')
-  })
-
-  it('uses a vertical tablist with arrow-key navigation', async () => {
-    render(<Settings />)
-
-    const tablist = screen.getByRole('tablist', { name: 'Settings' })
-    const providersTab = screen.getByRole('tab', { name: 'Providers' })
-    const generalTab = screen.getByRole('tab', { name: 'General' })
-
-    expect(tablist).toHaveAttribute('aria-orientation', 'vertical')
-    expect(providersTab).toHaveAttribute('aria-selected', 'true')
-
-    act(() => providersTab.focus())
-    fireEvent.keyDown(providersTab, { key: 'ArrowDown' })
-
-    await waitFor(() => {
-      expect(generalTab).toHaveFocus()
-      expect(generalTab).toHaveAttribute('aria-selected', 'true')
-    })
-    expect(screen.getByLabelText('Skip WebFetch domain preflight')).toBeInTheDocument()
-  })
-
   it('offers the pure white appearance theme', () => {
     render(<Settings />)
 
     fireEvent.click(screen.getByText('General'))
-    const pureWhite = screen.getByRole('radio', { name: 'Pure White' })
-    const warmClassic = screen.getByRole('radio', { name: 'Warm Classic' })
-    const dark = screen.getByRole('radio', { name: 'Dark' })
+    const pureWhite = screen.getByRole('button', { name: 'Pure White' })
+    const warmClassic = screen.getByRole('button', { name: 'Warm Classic' })
+    const dark = screen.getByRole('button', { name: 'Dark' })
 
     expect((pureWhite.compareDocumentPosition(warmClassic) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true)
     expect((warmClassic.compareDocumentPosition(dark) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true)
-    fireEvent.click(pureWhite)
+    fireEvent.click(screen.getByRole('button', { name: 'Pure White' }))
 
     expect(useSettingsStore.getState().setTheme).toHaveBeenCalledWith('white')
   })
@@ -441,8 +408,8 @@ describe('Settings > General tab', () => {
 
     fireEvent.click(screen.getByText('General'))
 
-    expect(screen.getByRole('radio', { name: 'Pure White' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('radio', { name: 'Warm Classic' })).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('button', { name: 'Pure White' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Warm Classic' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('keeps UI zoom below system notifications because it is a secondary setting', () => {
@@ -464,23 +431,22 @@ describe('Settings > General tab', () => {
     render(<Settings />)
 
     fireEvent.click(screen.getByText('General'))
-    const modifierEnter = screen.getByRole('radio', { name: /Ctrl\/Cmd\+Enter sends/i })
-    fireEvent.click(modifierEnter)
+    fireEvent.click(screen.getByRole('button', { name: /Ctrl\/Cmd\+Enter sends/i }))
 
     await waitFor(() => {
       expect(useSettingsStore.getState().setChatSendBehavior).toHaveBeenCalledWith('modifierEnter')
     })
-    expect(modifierEnter).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Ctrl\/Cmd\+Enter sends/i })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('saves provider network timeout and manual proxy from General settings', async () => {
     render(<Settings />)
 
     fireEvent.click(screen.getByText('General'))
-    expect(screen.getByRole('radio', { name: /Direct connection/i })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('radio', { name: /System proxy/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Direct connection/i })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /System proxy/i })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('radio', { name: /^Manual proxy/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Manual proxy/i }))
     const proxyInput = screen.getByLabelText('Proxy URL')
     const saveButton = screen.getAllByRole('button', { name: 'Save' })[0]!
 
@@ -686,7 +652,7 @@ describe('Settings > General tab', () => {
     expect(screen.getByText('The storage change has been saved. Restart the app for the new data directory to take effect.')).toBeInTheDocument()
   })
 
-  it('supports precise keyboard UI zoom changes and reset with the shared slider', async () => {
+  it('previews UI zoom while dragging and applies it once on release', async () => {
     render(<Settings />)
 
     fireEvent.click(screen.getByText('General'))
@@ -695,21 +661,30 @@ describe('Settings > General tab', () => {
     expect(screen.getByText('Windows / Linux')).toBeInTheDocument()
     expect(screen.getByText('0 resets zoom to 100%.')).toBeInTheDocument()
 
-    const slider = screen.getByRole('slider', { name: 'UI Zoom' })
-    const sliderRoot = slider.closest('[data-slot="slider"]')
-    expect(slider).toHaveAttribute('aria-valuemin', '0.5')
-    expect(slider).toHaveAttribute('aria-valuemax', '2')
-    expect(slider).toHaveAttribute('aria-valuenow', '1')
-    expect(sliderRoot).toHaveClass('settings-zoom-range')
-    expect(sliderRoot?.closest('.settings-zoom-control')).toHaveStyle({ '--settings-zoom-range-progress': '33.3%' })
+    const slider = screen.getByLabelText('UI Zoom')
+    expect(slider).toHaveAttribute('step', '0.01')
 
+    fireEvent.pointerDown(slider, { pointerId: 1 })
     await act(async () => {
-      fireEvent.keyDown(slider, { key: 'ArrowRight' })
+      fireEvent.change(slider, {
+        target: { value: '1.25', valueAsNumber: 1.25 },
+      })
     })
 
-    expect(slider).toHaveAttribute('aria-valuenow', '1.01')
-    expect(screen.getAllByText('101%')).toHaveLength(2)
-    expect(useSettingsStore.getState().setUiZoom).toHaveBeenCalledWith(1.01)
+    expect(screen.getAllByText('125%')).toHaveLength(2)
+    expect(useSettingsStore.getState().setUiZoom).not.toHaveBeenCalledWith(1.25)
+    expect(useSettingsStore.getState().uiZoom).toBe(1)
+    expect(slider).toHaveValue('1.25')
+    expect(slider).toHaveClass('settings-zoom-range')
+    expect(slider.closest('.settings-zoom-control')).toHaveClass('is-dragging')
+    expect(slider.closest('.settings-zoom-control')).toHaveStyle({ '--settings-zoom-range-progress': '50%' })
+
+    await act(async () => {
+      fireEvent.pointerUp(slider, { pointerId: 1 })
+    })
+
+    expect(useSettingsStore.getState().setUiZoom).toHaveBeenCalledWith(1.25)
+    expect(slider.closest('.settings-zoom-control')).not.toHaveClass('is-dragging')
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reset UI zoom to 100%' }))
@@ -723,13 +698,13 @@ describe('Settings > General tab', () => {
 
     fireEvent.click(screen.getByText('General'))
 
-    const slider = screen.getByRole('slider', { name: 'UI Zoom' })
+    const slider = screen.getByLabelText('UI Zoom')
 
     await act(async () => {
       useSettingsStore.setState({ uiZoom: 1.1 })
     })
 
-    expect(slider).toHaveAttribute('aria-valuenow', '1.1')
+    expect(slider).toHaveValue('1.1')
     expect(screen.getAllByText('110%')).toHaveLength(2)
     expect(slider.closest('.settings-zoom-control')).toHaveStyle({ '--settings-zoom-range-progress': '40%' })
   })
@@ -791,8 +766,8 @@ describe('Settings > General tab', () => {
       await Promise.resolve()
     })
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Ask permissions' }), { key: 'Enter' })
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /Bypass permissions/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Bypass permissions/ }))
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Enable bypass' }))
       await Promise.resolve()
@@ -810,11 +785,11 @@ describe('Settings > General tab', () => {
       await Promise.resolve()
     })
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Ask permissions' }), { key: 'Enter' })
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /Auto mode/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Auto mode/ }))
 
     expect(useSettingsStore.getState().setPermissionMode).not.toHaveBeenCalledWith('auto')
-    const dialog = screen.getByRole('alertdialog', { name: 'Enable Auto mode?' })
+    const dialog = screen.getByRole('dialog', { name: 'Enable Auto mode?' })
 
     await act(async () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Enable Auto mode' }))
@@ -835,7 +810,7 @@ describe('Settings > General tab', () => {
     fireEvent.click(toggle)
 
     expect(useSettingsStore.getState().setAutoDreamEnabled).not.toHaveBeenCalled()
-    const dialog = screen.getByRole('alertdialog', { name: 'Enable Auto-dream?' })
+    const dialog = screen.getByRole('dialog', { name: 'Enable Auto-dream?' })
     expect(within(dialog).getByText(/Keep the desktop app running/i)).toBeInTheDocument()
     expect(within(dialog).getByText(/uses additional model tokens/i)).toBeInTheDocument()
 
@@ -856,11 +831,11 @@ describe('Settings > General tab', () => {
       fireEvent.click(screen.getByLabelText('Enable Auto-dream'))
     })
 
-    expect(screen.queryByRole('alertdialog', { name: 'Enable Auto-dream?' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Enable Auto-dream?' })).not.toBeInTheDocument()
     expect(useSettingsStore.getState().setAutoDreamEnabled).toHaveBeenCalledWith(false)
   })
 
-  it('uses shared switch rows for migrated General toggles', () => {
+  it('keeps General checkbox inputs anchored inside their visible rows', () => {
     render(<Settings />)
 
     fireEvent.click(screen.getByText('General'))
@@ -873,12 +848,12 @@ describe('Settings > General tab', () => {
       'Skip WebFetch domain preflight',
     ]) {
       const toggle = screen.getByLabelText(label)
-      const row = toggle.closest('[data-slot="setting-switch-row"]')
-      expect(toggle).toHaveAttribute('role', 'switch')
-      expect(toggle).toHaveAttribute('data-slot', 'switch')
+      const row = toggle.closest('label') as HTMLElement | null
+      expect(toggle).toHaveClass('settings-checkbox-input')
+      expect(toggle).not.toHaveClass('sr-only')
       expect(row).not.toBeNull()
+      expect(row!).toHaveClass('relative')
     }
-
   })
 
   it('lets the user disable Agent Trace collection without leaving General settings', async () => {
@@ -897,26 +872,18 @@ describe('Settings > General tab', () => {
     expect(screen.getByText('Message Sending')).toBeInTheDocument()
   })
 
-  it('uses the shared shadcn select for response language with keyboard focus restoration', async () => {
+  it('uses the shared dropdown for response language', () => {
     render(<Settings />)
 
     fireEvent.click(screen.getByText('General'))
 
-    const trigger = screen.getByRole('combobox', { name: 'Response Language' })
-    expect(trigger).toHaveTextContent('Default (English)')
-    trigger.focus()
-    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: '中文 (Chinese)' })).toBeInTheDocument()
-    })
-    fireEvent.keyDown(screen.getByRole('option', { name: '中文 (Chinese)' }), { key: 'Escape' })
-    await waitFor(() => {
-      expect(screen.queryByRole('option', { name: '中文 (Chinese)' })).not.toBeInTheDocument()
-      expect(trigger).toHaveFocus()
-    })
+    expect(screen.queryByRole('combobox', { name: 'Response Language' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('radiogroup', { name: 'Response Language' })).not.toBeInTheDocument()
 
-    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
-    fireEvent.click(await screen.findByRole('option', { name: '中文 (Chinese)' }))
+    const trigger = screen.getByRole('button', { name: 'Response Language' })
+    expect(trigger).toHaveTextContent('Default (English)')
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('button', { name: '中文 (Chinese)' }))
 
     expect(useSettingsStore.getState().setResponseLanguage).toHaveBeenCalledWith('chinese')
   })
@@ -987,9 +954,7 @@ describe('Settings > General tab', () => {
     expect(desktopNotificationsMock.openDesktopNotificationSettings).not.toHaveBeenCalled()
 
     await act(async () => {
-      const openSettingsButton = screen.getByRole('button', { name: 'Open Settings' })
-      expect(openSettingsButton).toHaveAttribute('data-slot', 'button')
-      fireEvent.click(openSettingsButton)
+      fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }))
     })
 
     expect(desktopNotificationsMock.openDesktopNotificationSettings).toHaveBeenCalledTimes(1)
@@ -1007,15 +972,8 @@ describe('Settings > General tab', () => {
     fireEvent.click(h5Tab)
 
     const section = screen.getByRole('region', { name: 'H5 Access' })
-    const enabledCheckbox = within(section).getByLabelText('Enable H5 access')
-    expect(enabledCheckbox).not.toBeChecked()
-    expect(enabledCheckbox).toHaveAttribute('data-slot', 'checkbox')
-    expect(enabledCheckbox.closest('[data-slot="card"]')).not.toBeNull()
-    expect(within(section).getByLabelText('Access host / IP')).toHaveAttribute(
-      'data-slot',
-      'input',
-    )
-    expect(within(section).getByText('Disabled')).toHaveAttribute('data-slot', 'badge')
+    expect(within(section).getByLabelText('Enable H5 access')).not.toBeChecked()
+    expect(within(section).getByText('Disabled')).toBeInTheDocument()
     expect(within(section).queryByText('Token preview')).not.toBeInTheDocument()
     expect(within(section).queryByRole('button', { name: 'Regenerate token' })).not.toBeInTheDocument()
     expect(within(section).queryByLabelText('Allowed origins')).not.toBeInTheDocument()
@@ -1038,22 +996,9 @@ describe('Settings > General tab', () => {
     fireEvent.click(screen.getByText('H5 Access'))
     const section = screen.getByRole('region', { name: 'H5 Access' })
 
-    const enabledCheckbox = within(section).getByLabelText('Enable H5 access')
-    enabledCheckbox.focus()
-    fireEvent.click(enabledCheckbox)
-    let dialog = screen.getByRole('alertdialog', { name: 'Enable LAN H5 access?' })
-    expect(dialog).toHaveAttribute('data-slot', 'alert-dialog-content')
+    fireEvent.click(within(section).getByLabelText('Enable H5 access'))
+    const dialog = screen.getByRole('dialog', { name: 'Enable LAN H5 access?' })
     expect(within(dialog).getByText(/desktop H5 app on your LAN address and port/i)).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus()
-
-    fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog', { name: 'Enable LAN H5 access?' })).not.toBeInTheDocument()
-      expect(enabledCheckbox).toHaveFocus()
-    })
-
-    fireEvent.click(enabledCheckbox)
-    dialog = screen.getByRole('alertdialog', { name: 'Enable LAN H5 access?' })
 
     await act(async () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Enable H5 access' }))
@@ -1062,51 +1007,6 @@ describe('Settings > General tab', () => {
     expect(useSettingsStore.getState().enableH5Access).toHaveBeenCalledTimes(1)
     expect(await within(section).findByAltText('H5 access QR code')).toBeInTheDocument()
     expect(within(section).getByText('http://192.168.0.102:3456/?serverUrl=http%3A%2F%2F192.168.0.102%3A3456&h5Token=h5_default_generated_token')).toBeInTheDocument()
-  })
-
-  it('locks the H5 enable alert dialog until the async action finishes', async () => {
-    let resolveEnable: ((token: string) => void) | undefined
-    const enableH5Access = vi.fn(() => new Promise<string>((resolve) => {
-      resolveEnable = resolve
-    }))
-    useSettingsStore.setState({
-      h5Access: {
-        enabled: false,
-        token: null,
-        tokenPreview: null,
-        allowedOrigins: [],
-        publicBaseUrl: 'http://192.168.0.102:3456',
-        fixedPort: null,
-        disconnectGraceSeconds: null,
-      },
-      enableH5Access,
-    })
-    render(<Settings />)
-
-    fireEvent.click(screen.getByText('H5 Access'))
-    const section = screen.getByRole('region', { name: 'H5 Access' })
-    const enabledCheckbox = within(section).getByLabelText('Enable H5 access')
-    fireEvent.click(enabledCheckbox)
-    const dialog = screen.getByRole('alertdialog', { name: 'Enable LAN H5 access?' })
-    const confirmButton = within(dialog).getByRole('button', { name: 'Enable H5 access' })
-
-    fireEvent.click(confirmButton)
-    expect(enableH5Access).toHaveBeenCalledTimes(1)
-    expect(confirmButton).toBeDisabled()
-    expect(confirmButton).toHaveAttribute('aria-busy', 'true')
-    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled()
-
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(screen.getByRole('alertdialog', { name: 'Enable LAN H5 access?' })).toBeInTheDocument()
-
-    await act(async () => {
-      resolveEnable?.('h5_pending_test_token')
-      await Promise.resolve()
-    })
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog', { name: 'Enable LAN H5 access?' })).not.toBeInTheDocument()
-      expect(enabledCheckbox).toHaveFocus()
-    })
   })
 
   it('copies the QR launch URL with the generated H5 token', async () => {
@@ -1128,7 +1028,7 @@ describe('Settings > General tab', () => {
     fireEvent.click(within(section).getByLabelText('Enable H5 access'))
 
     await act(async () => {
-      fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Enable LAN H5 access?' })).getByRole('button', { name: 'Enable H5 access' }))
+      fireEvent.click(within(screen.getByRole('dialog', { name: 'Enable LAN H5 access?' })).getByRole('button', { name: 'Enable H5 access' }))
     })
 
     await within(section).findByAltText('H5 access QR code')
@@ -1362,7 +1262,6 @@ describe('Settings > General tab', () => {
     const section = screen.getByRole('region', { name: 'H5 Access' })
 
     const note = within(section).getByTestId('h5-access-fixed-port-restart-note')
-    expect(note).toHaveAttribute('data-slot', 'alert')
     expect(note.textContent).toContain('28670')
     expect(note.textContent).toContain('54064')
   })
@@ -1386,7 +1285,7 @@ describe('Settings > General tab', () => {
     fireEvent.click(within(section).getByLabelText('Enable H5 access'))
 
     await act(async () => {
-      fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Enable LAN H5 access?' })).getByRole('button', { name: 'Enable H5 access' }))
+      fireEvent.click(within(screen.getByRole('dialog', { name: 'Enable LAN H5 access?' })).getByRole('button', { name: 'Enable H5 access' }))
     })
 
     fireEvent.click(within(section).getByRole('button', { name: 'Show token' }))
@@ -1430,7 +1329,7 @@ describe('Settings > General tab', () => {
     fireEvent.click(screen.getByText('H5 Access'))
 
     const section = screen.getByRole('region', { name: 'H5 Access' })
-    expect(within(section).getByText('H5 unavailable').closest('[data-slot="alert"]')).not.toBeNull()
+    expect(within(section).getByText('H5 unavailable')).toBeInTheDocument()
   })
 
   it('updates H5 host by reusing the current service port', async () => {
@@ -1451,37 +1350,6 @@ describe('Settings > General tab', () => {
 
     const section = screen.getByRole('region', { name: 'H5 Access' })
     expect(within(section).getByLabelText('Current port')).toHaveValue('54064')
-    fireEvent.change(within(section).getByLabelText('Access host / IP'), {
-      target: { value: '192.168.1.100' },
-    })
-
-    await act(async () => {
-      fireEvent.click(within(section).getByRole('button', { name: 'Save H5 settings' }))
-    })
-
-    expect(useSettingsStore.getState().updateH5AccessSettings).toHaveBeenCalledWith({
-      publicBaseUrl: 'http://192.168.1.100:54064',
-      fixedPort: null,
-      disconnectGraceSeconds: null,
-    })
-  })
-
-  it('builds an initial H5 URL from a bare host and the active service port', async () => {
-    useSettingsStore.setState({
-      h5AccessDiagnostics: {
-        storedHostStaleness: 'unset',
-        storedPublicBaseUrl: null,
-        effectivePublicBaseUrl: null,
-        suggestedHost: null,
-        localInterfaceHosts: ['192.168.1.100'],
-        activePort: 54064,
-      },
-    })
-    render(<Settings />)
-
-    fireEvent.click(screen.getByText('H5 Access'))
-
-    const section = screen.getByRole('region', { name: 'H5 Access' })
     fireEvent.change(within(section).getByLabelText('Access host / IP'), {
       target: { value: '192.168.1.100' },
     })
@@ -1553,7 +1421,7 @@ describe('Settings > General tab', () => {
 
     const section = screen.getByRole('region', { name: 'H5 Access' })
     const banner = within(section).getByTestId('h5-access-stale-host-banner')
-    expect(banner).toHaveAttribute('data-slot', 'alert')
+    expect(banner).toBeInTheDocument()
     expect(banner.textContent).toContain('192.168.1.207')
     expect(within(section).queryByTestId('h5-access-proxy-note')).toBeNull()
 
@@ -1589,10 +1457,7 @@ describe('Settings > General tab', () => {
     fireEvent.click(screen.getByText('H5 Access'))
 
     const section = screen.getByRole('region', { name: 'H5 Access' })
-    expect(within(section).getByTestId('h5-access-proxy-note')).toHaveAttribute(
-      'data-slot',
-      'alert',
-    )
+    expect(within(section).getByTestId('h5-access-proxy-note')).toBeInTheDocument()
     expect(within(section).queryByTestId('h5-access-stale-host-banner')).toBeNull()
   })
 
@@ -1640,7 +1505,7 @@ describe('Settings > General tab', () => {
 
     fireEvent.click(screen.getByText('General'))
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Tavily' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Tavily' }))
     fireEvent.change(screen.getByLabelText('Tavily API key'), {
       target: { value: 'tvly-test-key' },
     })
@@ -1782,31 +1647,6 @@ describe('Settings > Providers tab', () => {
     ])
   })
 
-  it('uses shared cards, badges, and icon buttons for provider rows', () => {
-    render(<Settings />)
-
-    const savedProvider = screen.getByTestId('provider-provider-1')
-    const officialProvider = screen.getByTestId('claude-official-provider')
-    const dragHandle = within(savedProvider).getByRole('button', { name: 'Drag to reorder' })
-
-    expect(savedProvider).toHaveAttribute('data-slot', 'card')
-    expect(officialProvider).toHaveAttribute('data-slot', 'card')
-    expect(within(savedProvider).getByText('OpenAI Chat')).toHaveAttribute('data-slot', 'badge')
-    expect(within(officialProvider).getByText('Default')).toHaveAttribute('data-slot', 'badge')
-    expect(dragHandle).toHaveAttribute('data-slot', 'tooltip-trigger')
-    expect(dragHandle).toHaveAttribute('data-variant', 'ghost')
-  })
-
-  it('shows shared skeletons while the provider list is loading', () => {
-    providerStoreState.providers = []
-    providerStoreState.isLoading = true
-
-    render(<Settings />)
-
-    const loading = screen.getByRole('status', { name: 'Loading...' })
-    expect(loading.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(2)
-  })
-
   it('falls back to the default provider order when stored order is missing', () => {
     providerStoreState.providerOrder = undefined as unknown as string[]
 
@@ -1831,33 +1671,16 @@ describe('Settings > Providers tab', () => {
     })
 
     expect(MOCK_DELETE_PROVIDER).not.toHaveBeenCalled()
-    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByText('Delete provider "MiniMax-M2.7-highspeed(openai)"? This cannot be undone.')).toBeInTheDocument()
 
-    const dialog = screen.getByRole('alertdialog')
+    const dialog = screen.getByRole('dialog')
     await act(async () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
       await Promise.resolve()
     })
 
     expect(MOCK_DELETE_PROVIDER).toHaveBeenCalledWith('provider-1')
-  })
-
-  it('cancels provider deletion and restores focus to the delete action', async () => {
-    render(<Settings />)
-
-    const deleteButton = screen.getByRole('button', { name: 'Delete' })
-    deleteButton.focus()
-    fireEvent.click(deleteButton)
-
-    const dialog = screen.getByRole('alertdialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
-
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-      expect(deleteButton).toHaveFocus()
-    })
-    expect(MOCK_DELETE_PROVIDER).not.toHaveBeenCalled()
   })
 
   it('keeps custom provider creation available when presets are unavailable', () => {
@@ -1875,7 +1698,7 @@ describe('Settings > Providers tab', () => {
     expect(within(dialog).getByLabelText(/Base URL/i)).toBeEnabled()
   })
 
-  it('uses shadcn Select for API format in the provider form', async () => {
+  it('uses the shared dropdown for API format in the provider form', () => {
     providerStoreState.presets = [
       {
         id: 'custom',
@@ -1898,173 +1721,13 @@ describe('Settings > Providers tab', () => {
     fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }))
 
     const dialog = screen.getByRole('dialog')
-    const formatSelect = within(dialog).getByRole('combobox', { name: 'API Format' })
-    expect(formatSelect).toHaveAttribute('data-slot', 'select-trigger')
-    expect(within(dialog).getByRole('combobox', { name: 'Auth Variable' })).toHaveAttribute(
-      'data-slot',
-      'select-trigger',
-    )
+    expect(within(dialog).queryByRole('combobox')).not.toBeInTheDocument()
 
-    fireEvent.click(formatSelect)
-    fireEvent.click(await screen.findByRole('option', {
-      name: /OpenAI Responses API \(proxy\)/i,
-    }))
+    fireEvent.click(within(dialog).getByRole('button', { name: /Anthropic Messages \(native\)/i }))
+    fireEvent.click(within(dialog).getByRole('button', { name: /OpenAI Responses API \(proxy\)/i }))
 
-    expect(formatSelect).toHaveTextContent('OpenAI Responses API (proxy)')
-    expect(within(dialog).queryByRole('combobox', { name: 'Auth Variable' })).not.toBeInTheDocument()
-    expect(within(dialog).getByRole('checkbox', { name: 'Enable Tool Search' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: /OpenAI Responses API \(proxy\)/i })).toBeInTheDocument()
     expect(within(dialog).getByText('Requests will be translated via the local proxy')).toBeInTheDocument()
-  })
-
-  it('composes the provider form from shadcn primitives and restores focus on Escape', async () => {
-    providerStoreState.presets = [
-      {
-        id: 'custom',
-        name: 'Custom',
-        baseUrl: 'https://api.example.com/anthropic',
-        apiFormat: 'anthropic',
-        defaultModels: {
-          main: 'custom-main',
-          haiku: '',
-          sonnet: '',
-          opus: '',
-        },
-        needsApiKey: true,
-        websiteUrl: '',
-      },
-    ]
-
-    render(<Settings />)
-
-    const addButton = screen.getByRole('button', { name: /Add Provider/i })
-    addButton.focus()
-    fireEvent.click(addButton)
-
-    const dialog = screen.getByRole('dialog')
-    expect(dialog).toHaveAttribute('data-slot', 'dialog-content')
-    expect(within(dialog).getByLabelText(/Name/i)).toHaveAttribute('data-slot', 'input')
-    expect(within(dialog).getByLabelText('Settings JSON')).toHaveAttribute(
-      'data-slot',
-      'textarea',
-    )
-    expect(within(dialog).getAllByRole('checkbox')[0]).toHaveAttribute(
-      'data-slot',
-      'checkbox',
-    )
-    expect(within(dialog).getByRole('button', { name: 'Close dialog' })).toHaveFocus()
-
-    const contextTrigger = within(dialog).getByRole('button', {
-      name: /Context and auto-compact/i,
-    })
-    expect(contextTrigger).toHaveAttribute('data-slot', 'collapsible-trigger')
-    expect(contextTrigger.closest('[data-slot="card"]')).not.toBeNull()
-    fireEvent.click(contextTrigger)
-    expect(dialog.querySelector('[data-slot="collapsible-content"]')).toBeInTheDocument()
-
-    fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-      expect(addButton).toHaveFocus()
-    })
-  })
-
-  it('marks invalid provider JSON and context values with accessible errors', async () => {
-    providerStoreState.presets = [
-      {
-        id: 'custom',
-        name: 'Custom',
-        baseUrl: 'https://api.example.com/anthropic',
-        apiFormat: 'anthropic',
-        defaultModels: {
-          main: 'custom-main',
-          haiku: '',
-          sonnet: '',
-          opus: '',
-        },
-        needsApiKey: true,
-        websiteUrl: '',
-      },
-    ]
-
-    render(<Settings />)
-    fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }))
-
-    const dialog = screen.getByRole('dialog')
-    const jsonTextarea = await waitFor(() => {
-      const textarea = within(dialog).getByLabelText('Settings JSON')
-      expect((textarea as HTMLTextAreaElement).value).toContain('"ANTHROPIC_MODEL"')
-      return textarea
-    })
-    const addButton = within(dialog).getByRole('button', { name: 'Add' })
-    fireEvent.change(within(dialog).getByPlaceholderText('sk-...'), {
-      target: { value: 'sk-test' },
-    })
-    expect(addButton).toBeEnabled()
-
-    fireEvent.change(jsonTextarea, { target: { value: '{' } })
-    expect(jsonTextarea).toHaveAttribute('aria-invalid', 'true')
-    expect(jsonTextarea).toHaveAttribute(
-      'aria-describedby',
-      'provider-settings-json-error provider-settings-json-description',
-    )
-    expect(addButton).toBeDisabled()
-    expect(within(dialog).getByText(/JSON syntax error/i)).toBeInTheDocument()
-
-    fireEvent.change(jsonTextarea, { target: { value: '{}' } })
-    expect(jsonTextarea).not.toHaveAttribute('aria-invalid')
-    expect(addButton).toBeEnabled()
-
-    fireEvent.click(within(dialog).getByRole('button', {
-      name: /Context and auto-compact/i,
-    }))
-    const compactInput = within(dialog).getByLabelText('Unknown Model Fallback Window')
-    fireEvent.change(compactInput, { target: { value: 'abc' } })
-    expect(compactInput).toHaveAttribute('aria-invalid', 'true')
-    expect(within(dialog).getByText('Enter an integer.')).toBeInTheDocument()
-    expect(addButton).toBeDisabled()
-
-    fireEvent.click(within(dialog).getByRole('button', {
-      name: /Context and auto-compact/i,
-    }))
-    expect(within(dialog).getByLabelText('Unknown Model Fallback Window')).toBeVisible()
-  })
-
-  it('renders provider connectivity and proxy results in a shadcn Alert', async () => {
-    providerStoreState.presets = [
-      {
-        id: 'custom',
-        name: 'Custom',
-        baseUrl: 'http://127.0.0.1:9/anthropic',
-        apiFormat: 'anthropic',
-        defaultModels: {
-          main: 'custom-main',
-          haiku: '',
-          sonnet: '',
-          opus: '',
-        },
-        needsApiKey: true,
-        websiteUrl: '',
-      },
-    ]
-    providerStoreState.testConfig = vi.fn().mockResolvedValue({
-      connectivity: { success: true, latencyMs: 12 },
-      proxy: { success: false, latencyMs: 18, error: 'loopback rejected' },
-    })
-
-    render(<Settings />)
-    fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }))
-
-    const dialog = screen.getByRole('dialog')
-    fireEvent.change(within(dialog).getByPlaceholderText('sk-...'), {
-      target: { value: 'sk-test' },
-    })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Test Connection' }))
-
-    const alert = await within(dialog).findByRole('alert')
-    expect(alert).toHaveAttribute('data-slot', 'alert')
-    expect(alert.className).toContain('color-error')
-    expect(within(alert).getByText('① Connectivity (12ms)')).toBeInTheDocument()
-    expect(within(alert).getByText('② Proxy failed: loopback rejected')).toBeInTheDocument()
   })
 
   it('localizes the main model placeholder in the provider form', () => {
@@ -2299,10 +1962,8 @@ describe('Settings > Providers tab', () => {
 
     const cancelButton = within(dialog).getByRole('button', { name: /Cancel|取消/i })
     expect(cancelButton).toBeDisabled()
-    expect(within(dialog).getByRole('button', { name: 'Close dialog' })).toBeDisabled()
 
     fireEvent.click(cancelButton)
-    fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.click(within(dialog).getByRole('button', { name: /Save|Add|保存|添加/i }))
 
     expect(screen.getByRole('dialog')).toBeInTheDocument()
@@ -2618,12 +2279,9 @@ describe('Settings > About tab', () => {
   it('renders release notes with markdown formatting', async () => {
     render(<Settings />)
 
-    const updateHeading = await screen.findByRole('heading', { name: /App updates/i })
-    expect(updateHeading.closest('[data-slot="card"]')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Claude Code Haha v0.1.5' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Claude Code Haha v0.1.5' })).toBeInTheDocument()
     expect(screen.getByText('Fixed updater rendering')).toBeInTheDocument()
     expect(screen.getByText('Added markdown support')).toBeInTheDocument()
-    expect(screen.getByText('0.1.5')).toHaveAttribute('data-slot', 'badge')
   })
 
   it('does not show a fake fallback app version when desktop version IPC fails', async () => {
@@ -2682,89 +2340,20 @@ describe('Settings > About tab', () => {
 
     expect(await screen.findByText('Downloading update... 1.5 KB downloaded')).toBeInTheDocument()
     expect(screen.queryByText('Downloading update... 0%')).not.toBeInTheDocument()
-    expect(screen.getByRole('progressbar')).toHaveAttribute('data-state', 'indeterminate')
-    expect(document.querySelector('[data-slot="progress-indicator"]')).toHaveAttribute('data-indeterminate', 'true')
   })
-
-  it('exposes known download progress and status through the shared progress component', async () => {
-    useUpdateStore.setState({
-      status: 'downloading',
-      availableVersion: '0.1.5',
-      releaseNotes: null,
-      progressPercent: 25,
-      downloadedBytes: 25,
-      totalBytes: 100,
-      error: null,
-      checkedAt: null,
-      shouldPrompt: false,
-    })
-
-    render(<Settings />)
-
-    const progress = await screen.findByRole('progressbar', { name: 'Downloading update... 25%' })
-    expect(progress).toHaveAttribute('data-slot', 'progress')
-    expect(progress).toHaveAttribute('aria-valuenow', '25')
-    expect(screen.getByRole('status')).toHaveTextContent('Downloading update... 25%')
-  })
-
-  it('uses shared update actions and an alert for a retryable failure', async () => {
-    const checkForUpdates = vi.fn().mockResolvedValue(null)
-    const installUpdate = vi.fn().mockResolvedValue(undefined)
-    useUpdateStore.setState({
-      status: 'downloaded',
-      availableVersion: '0.1.5',
-      releaseNotes: null,
-      error: 'installer failed',
-      checkForUpdates,
-      installUpdate,
-    })
-
-    render(<Settings />)
-
-    const checkButton = await screen.findByRole('button', { name: 'Check now' })
-    const installButton = screen.getByRole('button', { name: 'Install and restart' })
-    expect(checkButton).toHaveAttribute('data-slot', 'button')
-    expect(installButton).toHaveAttribute('data-slot', 'button')
-    expect(screen.getByRole('alert')).toHaveTextContent('Update failed: installer failed')
-
-    await act(async () => {
-      fireEvent.click(checkButton)
-      fireEvent.click(installButton)
-    })
-
-    expect(checkForUpdates).toHaveBeenCalledTimes(1)
-    expect(installUpdate).toHaveBeenCalledTimes(1)
-  })
-
-  it.each(['installing', 'restarting'] as const)(
-    'keeps check-now disabled while the updater is %s',
-    async (status) => {
-      useUpdateStore.setState({ status })
-
-      render(<Settings />)
-
-      expect(await screen.findByRole('button', { name: 'Check now' })).toBeDisabled()
-    },
-  )
 
   it('saves a manual update proxy from the advanced update controls', async () => {
     render(<Settings />)
 
-    const advancedTrigger = screen.getByRole('button', { name: /Advanced update proxy/i })
-    expect(advancedTrigger).toHaveAttribute('data-slot', 'collapsible-trigger')
-    expect(advancedTrigger).toHaveAttribute('data-variant', 'ghost')
-    fireEvent.click(advancedTrigger)
-    expect(screen.getByRole('radio', { name: /System proxy/i })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(screen.getByRole('button', { name: /Advanced update proxy/i }))
+    expect(screen.getByRole('button', { name: /System proxy/i })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByText('This only affects app update checks and downloads.')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('radio', { name: /Manual proxy/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Manual proxy/i }))
     const proxyInput = screen.getByLabelText('Proxy URL')
     const saveButton = screen.getByRole('button', { name: 'Save' })
 
     expect(screen.getByText('Enter a proxy URL.')).toBeInTheDocument()
-    expect(proxyInput).toHaveAttribute('data-slot', 'input')
-    expect(proxyInput).toHaveAttribute('aria-invalid', 'true')
-    expect(proxyInput).toHaveAttribute('aria-describedby', 'update-proxy-url-description')
     expect(saveButton).toBeDisabled()
 
     fireEvent.change(proxyInput, { target: { value: 'socks5://127.0.0.1:7890' } })
@@ -2791,9 +2380,9 @@ describe('Settings > About tab', () => {
     render(<Settings />)
 
     fireEvent.click(screen.getByRole('button', { name: /Advanced update proxy/i }))
-    expect(screen.getByRole('radio', { name: /Manual proxy/i })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: /Manual proxy/i })).toHaveAttribute('aria-pressed', 'true')
 
-    fireEvent.click(screen.getByRole('radio', { name: /System proxy/i }))
+    fireEvent.click(screen.getByRole('button', { name: /System proxy/i }))
     const saveButton = screen.getByRole('button', { name: 'Save' })
 
     await act(async () => {
@@ -2804,21 +2393,5 @@ describe('Settings > About tab', () => {
       mode: 'system',
       url: 'http://127.0.0.1:7890',
     })
-  })
-
-  it('supports arrow-key selection for update proxy modes', async () => {
-    render(<Settings />)
-
-    fireEvent.click(screen.getByRole('button', { name: /Advanced update proxy/i }))
-    const systemMode = screen.getByRole('radio', { name: /System proxy/i })
-    await act(async () => {
-      systemMode.focus()
-      fireEvent.keyDown(systemMode, { key: 'ArrowRight' })
-    })
-
-    await waitFor(() => {
-      expect(screen.getByRole('radio', { name: /Manual proxy/i })).toHaveAttribute('aria-checked', 'true')
-    })
-    expect(await screen.findByLabelText('Proxy URL')).toBeInTheDocument()
   })
 })

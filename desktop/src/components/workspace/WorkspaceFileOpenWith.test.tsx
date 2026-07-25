@@ -1,14 +1,8 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { render, fireEvent } from '@testing-library/react'
-import type { ComponentProps } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { browserHost } from '../../lib/desktopHost/browserHost'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from '../ui/dropdown-menu'
 
 const openTarget = vi.hoisted(() => vi.fn())
 const shellOpen = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
@@ -49,17 +43,6 @@ vi.mock('../../stores/workspacePanelStore', () => ({
 
 import { WorkspaceFileOpenWith } from './WorkspaceFileOpenWith'
 
-function renderOpenWith(props: ComponentProps<typeof WorkspaceFileOpenWith>) {
-  return render(
-    <DropdownMenu open>
-      <DropdownMenuTrigger>Open</DropdownMenuTrigger>
-      <DropdownMenuContent>
-        <WorkspaceFileOpenWith {...props} />
-      </DropdownMenuContent>
-    </DropdownMenu>,
-  )
-}
-
 describe('WorkspaceFileOpenWith', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -79,7 +62,9 @@ describe('WorkspaceFileOpenWith', () => {
   })
 
   it('renders only IDE and file-manager items', () => {
-    const { getAllByRole } = renderOpenWith({ absolutePath: '/w/report.md' })
+    const { getAllByRole } = render(
+      <WorkspaceFileOpenWith absolutePath="/w/report.md" />,
+    )
 
     const menuItems = getAllByRole('menuitem')
     expect(menuItems).toHaveLength(2)
@@ -92,10 +77,9 @@ describe('WorkspaceFileOpenWith', () => {
 
   it('clicking the IDE item calls openTarget and onAfterSelect', () => {
     const onAfter = vi.fn()
-    const { getAllByRole } = renderOpenWith({
-      absolutePath: '/w/report.md',
-      onAfterSelect: onAfter,
-    })
+    const { getAllByRole } = render(
+      <WorkspaceFileOpenWith absolutePath="/w/report.md" onAfterSelect={onAfter} />,
+    )
 
     const menuItems = getAllByRole('menuitem')
     const ideItem = menuItems.find((el) => el.textContent?.includes('VS Code'))
@@ -108,17 +92,19 @@ describe('WorkspaceFileOpenWith', () => {
   })
 
   it('does not call shell open from the file open-with menu', () => {
-    renderOpenWith({ absolutePath: '/w/report.md' })
+    render(<WorkspaceFileOpenWith absolutePath="/w/report.md" />)
     expect(shellOpen).not.toHaveBeenCalled()
     expect(hostOpenPath).not.toHaveBeenCalled()
   })
 
   it('offers workspace preview and in-app browser for generated html files with session context', () => {
-    const { getAllByRole } = renderOpenWith({
-      absolutePath: '/w/66estmutl_files/index.html',
-      sessionId: 's1',
-      workspacePath: '66estmutl_files/index.html',
-    })
+    const { getAllByRole } = render(
+      <WorkspaceFileOpenWith
+        absolutePath="/w/66estmutl_files/index.html"
+        sessionId="s1"
+        workspacePath="66estmutl_files/index.html"
+      />,
+    )
 
     const menuItems = getAllByRole('menuitem')
     const labels = menuItems.map((el) => el.textContent)
@@ -129,11 +115,13 @@ describe('WorkspaceFileOpenWith', () => {
   })
 
   it('opens the in-app browser preview URL from workspace html files', () => {
-    const { getAllByRole } = renderOpenWith({
-      absolutePath: '/w/66estmutl_files/index.html',
-      sessionId: 's1',
-      workspacePath: '66estmutl_files/index.html',
-    })
+    const { getAllByRole } = render(
+      <WorkspaceFileOpenWith
+        absolutePath="/w/66estmutl_files/index.html"
+        sessionId="s1"
+        workspacePath="66estmutl_files/index.html"
+      />,
+    )
 
     const menuItems = getAllByRole('menuitem')
     const inAppItem = menuItems.find((el) => el.textContent?.includes('openWith.inAppBrowser'))
@@ -148,11 +136,13 @@ describe('WorkspaceFileOpenWith', () => {
   })
 
   it('opens the workspace preview for workspace files with session context', () => {
-    const { getAllByRole } = renderOpenWith({
-      absolutePath: '/w/report.md',
-      sessionId: 's1',
-      workspacePath: 'report.md',
-    })
+    const { getAllByRole } = render(
+      <WorkspaceFileOpenWith
+        absolutePath="/w/report.md"
+        sessionId="s1"
+        workspacePath="report.md"
+      />,
+    )
 
     const menuItems = getAllByRole('menuitem')
     const previewItem = menuItems.find((el) => el.textContent?.includes('openWith.workspacePreview'))

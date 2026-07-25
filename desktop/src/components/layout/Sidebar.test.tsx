@@ -514,9 +514,8 @@ describe('Sidebar', () => {
     render(<Sidebar />)
 
     expect(screen.getByTestId('sidebar-projects-header')).toBeInTheDocument()
-    fireEvent.keyDown(screen.getByRole('button', { name: 'New project' }), { key: 'ArrowDown' })
+    fireEvent.click(screen.getByRole('button', { name: 'New project' }))
     expect(screen.getByRole('menuitem', { name: 'New blank project' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: 'New blank project' }).closest('[data-slot="dropdown-menu-content"]')).toBeInTheDocument()
 
     await act(async () => {
       fireEvent.click(screen.getByRole('menuitem', { name: 'New blank project' }))
@@ -543,9 +542,9 @@ describe('Sidebar', () => {
 
     expect(projectGroupNames().slice(0, 2)).toEqual(['alpha', 'beta'])
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Project menu' }), { key: 'ArrowDown' })
-    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Sort condition' }), { key: 'ArrowRight' })
-    fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Created time' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Project menu' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Sort condition' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Created time' }))
 
     await waitFor(() => {
       expect(desktopUiPreferencesApiMock.updateSidebarPreferences).toHaveBeenCalledWith({
@@ -571,12 +570,11 @@ describe('Sidebar', () => {
 
     render(<Sidebar />)
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Project menu' }), { key: 'ArrowDown' })
+    fireEvent.click(screen.getByRole('button', { name: 'Project menu' }))
 
     expect(screen.queryByRole('menuitem', { name: 'Archive all chats' })).not.toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: 'Organize sidebar' })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: 'Sort condition' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: 'Organize sidebar' })).toHaveAttribute('data-slot', 'dropdown-menu-sub-trigger')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
@@ -605,10 +603,9 @@ describe('Sidebar', () => {
 
     render(<Sidebar />)
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Project actions for alpha' }), { key: 'ArrowDown' })
+    fireEvent.click(screen.getByRole('button', { name: 'Project actions for alpha' }))
 
     expect(screen.getByRole('menuitem', { name: 'Pin Project' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: 'Pin Project' }).closest('[data-slot="dropdown-menu-content"]')).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: 'Open in Finder' })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: 'Hide from Sidebar' })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: 'Create Permanent Worktree' })).not.toBeInTheDocument()
@@ -636,7 +633,7 @@ describe('Sidebar', () => {
 
     expect(projectGroupNames().slice(0, 2)).toEqual(['alpha', 'beta'])
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Project actions for beta' }), { key: 'ArrowDown' })
+    fireEvent.click(screen.getByRole('button', { name: 'Project actions for beta' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Pin Project' }))
 
     await waitFor(() => {
@@ -656,7 +653,7 @@ describe('Sidebar', () => {
 
     render(<Sidebar />)
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Project actions for beta' }), { key: 'ArrowDown' })
+    fireEvent.click(screen.getByRole('button', { name: 'Project actions for beta' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Hide from Sidebar' }))
 
     await waitFor(() => {
@@ -704,7 +701,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('alpha')).toBeInTheDocument()
     expect(screen.queryByText('beta')).not.toBeInTheDocument()
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Project menu' }), { key: 'ArrowDown' })
+    fireEvent.click(screen.getByRole('button', { name: 'Project menu' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Restore hidden projects (1)' }))
 
     await waitFor(() => {
@@ -1034,12 +1031,10 @@ describe('Sidebar', () => {
 
     fireEvent.contextMenu(screen.getByRole('button', { name: /Open Session/ }))
 
-    const deleteMenuItem = screen.getByRole('menuitem', { name: 'Delete' })
-    expect(deleteMenuItem.closest('[data-slot="context-menu-content"]')).toBeInTheDocument()
-    fireEvent.click(deleteMenuItem)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
 
     expect(deleteSession).not.toHaveBeenCalled()
-    const dialog = screen.getByRole('alertdialog')
+    const dialog = screen.getByRole('dialog')
     expect(dialog).toBeInTheDocument()
     expect(screen.getByText('Delete this session? This cannot be undone.')).toBeInTheDocument()
 
@@ -1104,7 +1099,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('2 selected')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete selected (2)' }))
-    const dialog = screen.getByRole('alertdialog')
+    const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByText('Delete 2 sessions? This cannot be undone.')).toBeInTheDocument()
     expect(within(dialog).getByText('First Session')).toBeInTheDocument()
     expect(within(dialog).getByText('Second Session')).toBeInTheDocument()

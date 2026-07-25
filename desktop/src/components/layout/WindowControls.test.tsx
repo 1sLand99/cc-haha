@@ -94,8 +94,6 @@ describe('WindowControls', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Minimize window' })).toBeInTheDocument()
     })
-    expect(screen.getByRole('button', { name: 'Minimize window' })).toHaveAttribute('data-slot', 'button')
-    expect(screen.getByRole('button', { name: 'Close window' })).toHaveAttribute('data-window-control', 'close')
     await waitFor(() => expect(hostOnResized).toHaveBeenCalledTimes(1))
 
     const handleResize = hostOnResized.mock.calls[0]?.[0]

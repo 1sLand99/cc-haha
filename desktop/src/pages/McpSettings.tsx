@@ -1,29 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Button } from '../components/shared/Button'
 import { DirectoryPicker } from '../components/shared/DirectoryPicker'
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../components/ui/alert-dialog'
-import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
-import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
-import { Card, CardContent } from '../components/ui/card'
-import { IconButton } from '../components/ui/custom/icon-button'
-import { LoadingButton } from '../components/ui/custom/loading-button'
-import { SettingField } from '../components/ui/custom/setting-field'
-import { SettingRadioCard } from '../components/ui/custom/setting-radio-card'
-import { Input } from '../components/ui/input'
-import { Label } from '../components/ui/label'
-import { RadioGroup } from '../components/ui/radio-group'
-import { Separator } from '../components/ui/separator'
-import { Skeleton } from '../components/ui/skeleton'
-import { Switch } from '../components/ui/switch'
-import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group'
+import { Input } from '../components/shared/Input'
+import { ConfirmDialog } from '../components/shared/ConfirmDialog'
 import { useTranslation } from '../i18n'
 import { useUIStore } from '../stores/uiStore'
 import { useMcpStore } from '../stores/mcpStore'
@@ -43,14 +22,12 @@ type TransportKind = 'stdio' | 'http' | 'sse'
 type StringRow = {
   id: string
   value: string
-  containsSensitiveValue?: boolean
 }
 
 type KeyValueRow = {
   id: string
   key: string
   value: string
-  containsSensitiveValue?: boolean
 }
 
 type McpDraft = {
@@ -139,14 +116,12 @@ function redactMcpDisplayValue(value: unknown): unknown {
 function displayMcpArgumentValue(rows: StringRow[], index: number): string {
   const row = rows[index]
   if (!row) return ''
-  if (row.containsSensitiveValue) return REDACTED_INPUT_VALUE
   const previous = rows[index - 1]?.value
   if (row.value && previous && SENSITIVE_CLI_FLAG.test(previous.trim())) return REDACTED_INPUT_VALUE
   return redactSensitiveText(row.value)
 }
 
 function displayMcpKeyValueRowValue(row: KeyValueRow): string {
-  if (row.containsSensitiveValue) return REDACTED_INPUT_VALUE
   if (row.value && SENSITIVE_MCP_FIELD.test(row.key)) return REDACTED_INPUT_VALUE
   return redactSensitiveText(row.value)
 }
@@ -156,12 +131,12 @@ function createId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-function createStringRow(value = '', containsSensitiveValue = false): StringRow {
-  return { id: createId(), value, containsSensitiveValue }
+function createStringRow(value = ''): StringRow {
+  return { id: createId(), value }
 }
 
-function createKeyValueRow(key = '', value = '', containsSensitiveValue = false): KeyValueRow {
-  return { id: createId(), key, value, containsSensitiveValue }
+function createKeyValueRow(key = '', value = ''): KeyValueRow {
+  return { id: createId(), key, value }
 }
 
 function createEmptyDraft(): McpDraft {
@@ -208,20 +183,12 @@ function draftFromServer(server: McpServerRecord): McpDraft {
   base.projectPath = scopeRequiresProject(base.scope) ? server.projectPath ?? '' : ''
 
   if (isStdioConfig(server.config)) {
-    const args = server.config.args.length ? server.config.args : ['']
     return {
       ...base,
       transport: 'stdio',
       command: server.config.command,
-      args: args.map((value, index) => createStringRow(
-        value,
-        (index > 0 && SENSITIVE_CLI_FLAG.test(args[index - 1] ?? '')) || redactSensitiveText(value) !== value,
-      )),
-      env: Object.entries(server.config.env ?? {}).map(([key, value]) => createKeyValueRow(
-        key,
-        value,
-        SENSITIVE_MCP_FIELD.test(key) || redactSensitiveText(value) !== value,
-      )).concat(
+      args: (server.config.args.length ? server.config.args : ['']).map((value) => createStringRow(value)),
+      env: Object.entries(server.config.env ?? {}).map(([key, value]) => createKeyValueRow(key, value)).concat(
         Object.keys(server.config.env ?? {}).length === 0 ? [createKeyValueRow()] : [],
       ),
     }
@@ -232,11 +199,7 @@ function draftFromServer(server: McpServerRecord): McpDraft {
       ...base,
       transport: server.config.type,
       url: server.config.url,
-      headers: Object.entries(server.config.headers ?? {}).map(([key, value]) => createKeyValueRow(
-        key,
-        value,
-        SENSITIVE_MCP_FIELD.test(key) || redactSensitiveText(value) !== value,
-      )).concat(
+      headers: Object.entries(server.config.headers ?? {}).map(([key, value]) => createKeyValueRow(key, value)).concat(
         Object.keys(server.config.headers ?? {}).length === 0 ? [createKeyValueRow()] : [],
       ),
       headersHelper: server.config.headersHelper ?? '',
@@ -342,12 +305,9 @@ function scopeLabel(server: McpServerRecord, t: ReturnType<typeof useTranslation
 
 function StatusBadge({ server }: { server: McpServerRecord }) {
   return (
-    <Badge
-      variant="outline"
-      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${STATUS_TONE[server.status]}`}
-    >
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${STATUS_TONE[server.status]}`}>
       {server.statusLabel}
-    </Badge>
+    </span>
   )
 }
 
@@ -357,6 +317,35 @@ function getServerIdentityKey(server: Pick<McpServerRecord, 'name' | 'scope' | '
   }
 
   return `${server.scope}:${server.name}`
+}
+
+function ToggleSwitch({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean
+  disabled?: boolean
+  onChange: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onChange}
+      className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${
+        checked ? 'bg-[var(--color-switch-checked-bg)]' : 'bg-[var(--color-border)]'
+      } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+    >
+      <span
+        className={`inline-block h-6 w-6 transform rounded-full bg-[var(--color-switch-thumb)] shadow-sm transition-transform ${
+          checked ? 'translate-x-7' : 'translate-x-1'
+        }`}
+      />
+    </button>
+  )
 }
 
 function ArraySection({
@@ -369,7 +358,6 @@ function ArraySection({
   valuePlaceholder,
   singleValue = false,
   addLabel,
-  removeLabel,
   displayValue,
 }: {
   title: string
@@ -381,117 +369,71 @@ function ArraySection({
   valuePlaceholder: string
   singleValue?: boolean
   addLabel: string
-  removeLabel: string
   displayValue?: (row: KeyValueRow | StringRow, index: number) => string
 }) {
-  const rowInputRefs = useRef(new Map<string, HTMLInputElement>())
-  const addButtonRef = useRef<HTMLButtonElement | null>(null)
-  const previousRowIdsRef = useRef(rows.map((row) => row.id))
-  const pendingFocusRef = useRef<string | 'add' | null>(null)
-
-  useEffect(() => {
-    const previousIds = new Set(previousRowIdsRef.current)
-    const addedRow = rows.find((row) => !previousIds.has(row.id))
-    const focusTarget = pendingFocusRef.current ?? addedRow?.id ?? null
-    previousRowIdsRef.current = rows.map((row) => row.id)
-    pendingFocusRef.current = null
-
-    if (focusTarget === 'add') {
-      addButtonRef.current?.focus()
-    } else if (focusTarget) {
-      rowInputRefs.current.get(focusTarget)?.focus()
-    }
-  }, [rows])
-
   return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="text-sm font-semibold text-[var(--color-text-primary)] mb-4">{title}</div>
-        <div className="space-y-3">
-          {rows.map((row, index) => (
-            <div key={row.id} className={`grid gap-3 ${singleValue ? 'grid-cols-[minmax(0,1fr)_32px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px]'}`}>
-              {!singleValue && 'key' in row && (
-                <Input
-                  ref={(element) => {
-                    if (element) rowInputRefs.current.set(row.id, element)
-                    else rowInputRefs.current.delete(row.id)
-                  }}
-                  value={row.key}
-                  onChange={(event) => onChange(row.id, 'key', event.target.value)}
-                  placeholder={keyPlaceholder}
-                  aria-label={`${title} ${keyPlaceholder} ${index + 1}`}
-                />
-              )}
+    <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+      <div className="text-sm font-semibold text-[var(--color-text-primary)] mb-4">{title}</div>
+      <div className="space-y-3">
+        {rows.map((row, index) => (
+          <div key={row.id} className={`grid gap-3 ${singleValue ? 'grid-cols-[minmax(0,1fr)_32px]' : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px]'}`}>
+            {!singleValue && 'key' in row && (
               <Input
-                ref={(element) => {
-                  if (singleValue && element) rowInputRefs.current.set(row.id, element)
-                  else if (singleValue) rowInputRefs.current.delete(row.id)
-                }}
-                value={displayValue ? displayValue(row, index) : row.value}
-                onChange={(event) => onChange(row.id, 'value', event.target.value)}
-                placeholder={valuePlaceholder}
-                aria-label={`${title} ${valuePlaceholder} ${index + 1}`}
+                value={row.key}
+                onChange={(event) => onChange(row.id, 'key', event.target.value)}
+                placeholder={keyPlaceholder}
               />
-              <IconButton
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => {
-                  pendingFocusRef.current = rows[index + 1]?.id ?? rows[index - 1]?.id ?? 'add'
-                  onRemove(row.id)
-                }}
-                className="mt-1 text-[var(--color-text-tertiary)]"
-                label={`${removeLabel} ${title} ${index + 1}`}
-              >
-                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
-              </IconButton>
-            </div>
-          ))}
-          <Button
-            ref={addButtonRef}
-            variant="secondary"
-            onClick={onAdd}
-            className="h-12 w-full"
-          >
-            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>
-            {addLabel}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+            )}
+            <Input
+              value={displayValue ? displayValue(row, index) : row.value}
+              onChange={(event) => onChange(row.id, 'value', event.target.value)}
+              placeholder={valuePlaceholder}
+            />
+            <button
+              type="button"
+              onClick={() => onRemove(row.id)}
+              className="mt-1 flex h-10 w-8 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+              aria-label={addLabel}
+            >
+              <span className="material-symbols-outlined text-[18px]">delete</span>
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={onAdd}
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-[var(--radius-lg)] bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+        >
+          <span className="material-symbols-outlined text-[18px]">add</span>
+          {addLabel}
+        </button>
+      </div>
+    </section>
   )
 }
 
 function StatCard({ label, value, icon }: { label: string; value: number; icon: string }) {
   return (
-    <Card>
-      <CardContent className="px-5 py-4">
-        <div className="mb-2 flex items-center gap-2 text-[var(--color-text-tertiary)]">
-          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{icon}</span>
-          <span className="text-xs font-semibold uppercase tracking-[0.18em]">{label}</span>
-        </div>
-        <div className="text-3xl font-semibold text-[var(--color-text-primary)]">{value}</div>
-      </CardContent>
-    </Card>
+    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-5 py-4">
+      <div className="flex items-center gap-2 text-[var(--color-text-tertiary)] mb-2">
+        <span className="material-symbols-outlined text-[18px]">{icon}</span>
+        <span className="text-xs uppercase tracking-[0.18em] font-semibold">{label}</span>
+      </div>
+      <div className="text-3xl font-semibold text-[var(--color-text-primary)]">{value}</div>
+    </div>
   )
 }
 
 function LoadingState({ label }: { label: string }) {
   return (
-    <Card
+    <div
       role="status"
       aria-live="polite"
-      className="min-h-[220px] border-dashed"
+      className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] text-center"
     >
-      <CardContent className="flex min-h-[218px] flex-col justify-center gap-4">
-        <div className="grid gap-4 md:grid-cols-3" aria-hidden="true">
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-        </div>
-        <Skeleton className="h-12 w-full" aria-hidden="true" />
-        <div className="text-center text-sm font-medium text-[var(--color-text-secondary)]">{label}</div>
-      </CardContent>
-    </Card>
+      <div className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--color-brand)] border-t-transparent" />
+      <div className="text-sm font-medium text-[var(--color-text-secondary)]">{label}</div>
+    </div>
   )
 }
 
@@ -516,48 +458,37 @@ function ServerRow({
           <StatusBadge server={server} />
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-tertiary)]">
-          <Badge variant="secondary" className="rounded-full">
+          <span className="rounded-full bg-[var(--color-surface-hover)] px-2 py-1 font-medium text-[var(--color-text-secondary)]">
             {transportLabel(server.transport, t)}
-          </Badge>
-          <Badge variant="secondary" className="rounded-full">
+          </span>
+          <span className="rounded-full bg-[var(--color-surface-hover)] px-2 py-1 font-medium text-[var(--color-text-secondary)]">
             {scopeLabel(server, t)}
-          </Badge>
+          </span>
           {serverHasProjectContext(server) && (
-            <Badge
-              variant="secondary"
-              className="max-w-full truncate rounded-full font-[var(--font-mono)] text-[11px] text-[var(--color-text-tertiary)]"
+            <span
+              className="max-w-full truncate rounded-full bg-[var(--color-surface-hover)] px-2 py-1 font-[var(--font-mono)] text-[11px] text-[var(--color-text-tertiary)]"
               title={server.projectPath}
             >
               {server.projectPath}
-            </Badge>
+            </span>
           )}
           <span className="truncate">{redactSensitiveText(server.summary)}</span>
         </div>
         {server.statusDetail && (
-          <div className="mt-2 text-xs text-[var(--color-text-tertiary)] truncate">
-            {redactSensitiveText(server.statusDetail)}
-          </div>
+          <div className="mt-2 text-xs text-[var(--color-text-tertiary)] truncate">{server.statusDetail}</div>
         )}
       </div>
 
-      <IconButton
-        variant="ghost"
-        size="icon"
+      <button
+        type="button"
         onClick={onOpen}
-        label={`Open ${server.name}`}
-        data-mcp-open-key={getServerIdentityKey(server)}
-        className="rounded-full"
+        className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+        aria-label={`Open ${server.name}`}
       >
-        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">settings</span>
-      </IconButton>
+        <span className="material-symbols-outlined text-[20px]">settings</span>
+      </button>
 
-      <Switch
-        checked={server.enabled}
-        disabled={isBusy || !server.canToggle}
-        aria-busy={isBusy || undefined}
-        onCheckedChange={onToggle}
-        aria-label={server.name}
-      />
+      <ToggleSwitch checked={server.enabled} disabled={isBusy || !server.canToggle} onChange={onToggle} />
     </div>
   )
 }
@@ -575,13 +506,8 @@ export function McpSettings() {
   const [busyServerKey, setBusyServerKey] = useState<string | null>(null)
   const [pendingDeleteServer, setPendingDeleteServer] = useState<McpServerRecord | null>(null)
   const [isInitialLoading, setIsInitialLoading] = useState(true)
-  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const addServerTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const editorHeadingRef = useRef<HTMLHeadingElement | null>(null)
-  const pendingListFocusRef = useRef<string | 'add' | null>(null)
   const projectPathsForFetchRef = useRef<string[] | undefined>(undefined)
   const refreshInFlightRef = useRef(new Set<string>())
-  const selectedServerIdentityRef = useRef<string | null>(null)
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const currentWorkDir = activeSession?.workDir || undefined
@@ -638,43 +564,12 @@ export function McpSettings() {
   }), [servers])
   const showListLoading = (isInitialLoading || isLoading) && servers.length === 0
 
-  useEffect(() => {
-    if (view.type !== 'list' || !pendingListFocusRef.current) return
-
-    const focusTarget = pendingListFocusRef.current
-    const target = focusTarget === 'add'
-      ? addServerTriggerRef.current
-      : Array.from(document.querySelectorAll<HTMLButtonElement>('[data-mcp-open-key]'))
-          .find((element) => element.dataset.mcpOpenKey === focusTarget) ?? null
-
-    if (!target) return
-    pendingListFocusRef.current = null
-    target.focus()
-  }, [view.type, servers])
-
-  useEffect(() => {
-    if (view.type !== 'create') return
-    document.getElementById('mcp-name')?.focus()
-  }, [view.type])
-
-  useEffect(() => {
-    if (view.type !== 'edit' && view.type !== 'details') return
-    editorHeadingRef.current?.focus()
-  }, [view.type])
-
-  const returnToList = (focusTarget: string | 'add') => {
-    pendingListFocusRef.current = focusTarget
-    setView({ type: 'list' })
-    selectServer(null)
-  }
-
   const beginCreate = () => {
     setDraft(createEmptyDraft())
     setView({ type: 'create' })
   }
 
   const beginEdit = (server: McpServerRecord) => {
-    selectedServerIdentityRef.current = getServerIdentityKey(server)
     selectServer(server)
     if (!server.canEdit) {
       setView({ type: 'details', server })
@@ -685,17 +580,9 @@ export function McpSettings() {
   }
 
   useEffect(() => {
-    if (!selectedServer) {
-      selectedServerIdentityRef.current = null
-      return
-    }
-
-    const identity = getServerIdentityKey(selectedServer)
-    const isSameSelection = selectedServerIdentityRef.current === identity
-    selectedServerIdentityRef.current = identity
-
+    if (!selectedServer) return
     if (selectedServer.canEdit) {
-      if (!isSameSelection) setDraft(draftFromServer(selectedServer))
+      setDraft(draftFromServer(selectedServer))
       setView({ type: 'edit', server: selectedServer })
     } else {
       setView({ type: 'details', server: selectedServer })
@@ -758,7 +645,7 @@ export function McpSettings() {
     } catch (error) {
       addToast({
         type: 'error',
-        message: error instanceof Error ? redactSensitiveText(error.message) : t('settings.mcp.toast.toggleFailed'),
+        message: error instanceof Error ? error.message : t('settings.mcp.toast.toggleFailed'),
       })
     } finally {
       setBusyServerKey(null)
@@ -766,8 +653,6 @@ export function McpSettings() {
   }
 
   const handleReconnect = async (server: McpServerRecord) => {
-    if (busyServerKey || isSaving || isDeleting) return
-
     const optimistic = {
       ...server,
       status: 'checking' as const,
@@ -787,7 +672,7 @@ export function McpSettings() {
         type: updated.status === 'connected' ? 'success' : 'warning',
         message: updated.status === 'connected'
           ? t('settings.mcp.toast.reconnected', { name: server.name })
-          : redactSensitiveText(updated.statusDetail || updated.statusLabel),
+          : updated.statusDetail || updated.statusLabel,
       })
       if (view.type === 'edit') setView({ type: 'edit', server: updated })
       if (view.type === 'details') setView({ type: 'details', server: updated })
@@ -799,7 +684,7 @@ export function McpSettings() {
       })
       addToast({
         type: 'error',
-        message: error instanceof Error ? redactSensitiveText(error.message) : t('settings.mcp.toast.reconnectFailed'),
+        message: error instanceof Error ? error.message : t('settings.mcp.toast.reconnectFailed'),
       })
     } finally {
       setBusyServerKey(null)
@@ -807,13 +692,12 @@ export function McpSettings() {
   }
 
   const handleDelete = (server: McpServerRecord) => {
-    if (busyServerKey || isSaving || isDeleting) return
     setPendingDeleteServer(server)
   }
 
   const confirmDelete = async () => {
     const server = pendingDeleteServer
-    if (!server || busyServerKey || isSaving || isDeleting) return
+    if (!server) return
     setIsDeleting(true)
     try {
       await deleteServer(server, resolveOperationCwd(server))
@@ -821,12 +705,13 @@ export function McpSettings() {
         type: 'success',
         message: t('settings.mcp.toast.deleted', { name: server.name }),
       })
-      returnToList('add')
+      setView({ type: 'list' })
+      selectServer(null)
       setPendingDeleteServer(null)
     } catch (error) {
       addToast({
         type: 'error',
-        message: error instanceof Error ? redactSensitiveText(error.message) : t('settings.mcp.toast.deleteFailed'),
+        message: error instanceof Error ? error.message : t('settings.mcp.toast.deleteFailed'),
       })
     } finally {
       setIsDeleting(false)
@@ -834,42 +719,24 @@ export function McpSettings() {
   }
 
   const deleteModal = (
-    <AlertDialog
+    <ConfirmDialog
       open={pendingDeleteServer !== null}
-      onOpenChange={(open) => {
-        if (!open && !isDeleting) setPendingDeleteServer(null)
+      onClose={() => {
+        if (isDeleting) return
+        setPendingDeleteServer(null)
       }}
-    >
-      <AlertDialogContent
-        onCloseAutoFocus={(event) => {
-          event.preventDefault()
-          deleteTriggerRef.current?.focus()
-        }}
-      >
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t('settings.mcp.form.deleteTitle')}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {pendingDeleteServer ? t('settings.mcp.form.deleteConfirmBody', { name: pendingDeleteServer.name }) : ''}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isDeleting}>
-            {t('settings.mcp.form.cancel')}
-          </AlertDialogCancel>
-          <LoadingButton
-            variant="destructive"
-            loading={isDeleting}
-            onClick={() => void confirmDelete()}
-          >
-            {t('settings.mcp.form.confirmDelete')}
-          </LoadingButton>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      title={t('settings.mcp.form.deleteTitle')}
+      body={pendingDeleteServer ? t('settings.mcp.form.deleteConfirmBody', { name: pendingDeleteServer.name }) : ''}
+      confirmLabel={t('settings.mcp.form.confirmDelete')}
+      cancelLabel={t('settings.mcp.form.cancel')}
+      confirmVariant="danger"
+      loading={isDeleting}
+      onConfirm={confirmDelete}
+    />
   )
 
   const handleSave = async () => {
-    if (!isDraftValid(draft) || busyServerKey || isSaving || isDeleting) return
+    if (!isDraftValid(draft)) return
     setIsSaving(true)
     try {
       const payload = buildPayload(draft)
@@ -884,11 +751,12 @@ export function McpSettings() {
           ? t('settings.mcp.toast.saved', { name: saved.name })
           : t('settings.mcp.toast.created', { name: saved.name }),
       })
-      returnToList(getServerIdentityKey(saved))
+      setView({ type: 'list' })
+      selectServer(null)
     } catch (error) {
       addToast({
         type: 'error',
-        message: error instanceof Error ? redactSensitiveText(error.message) : t('settings.mcp.toast.saveFailed'),
+        message: error instanceof Error ? error.message : t('settings.mcp.toast.saveFailed'),
       })
     } finally {
       setIsSaving(false)
@@ -902,24 +770,14 @@ export function McpSettings() {
   const updateStringRows = (key: 'args', id: string, value: string) => {
     setDraft((current) => ({
       ...current,
-      [key]: current[key].map((row) => (
-        row.id === id ? { ...row, value, containsSensitiveValue: false } : row
-      )),
+      [key]: current[key].map((row) => (row.id === id ? { ...row, value } : row)),
     }))
   }
 
   const updateKeyValueRows = (key: 'env' | 'headers', id: string, field: 'key' | 'value', value: string) => {
     setDraft((current) => ({
       ...current,
-      [key]: current[key].map((row) => (
-        row.id === id
-          ? {
-              ...row,
-              [field]: value,
-              ...(field === 'value' ? { containsSensitiveValue: false } : {}),
-            }
-          : row
-      )),
+      [key]: current[key].map((row) => (row.id === id ? { ...row, [field]: value } : row)),
     }))
   }
 
@@ -945,67 +803,51 @@ export function McpSettings() {
     return (
       <>
         <div className="max-w-5xl min-w-0">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={busyServerKey === getServerIdentityKey(server)}
+          <button
+            type="button"
             onClick={() => {
-              returnToList(getServerIdentityKey(server))
+              setView({ type: 'list' })
+              selectServer(null)
             }}
-            className="mb-5"
+            className="mb-5 inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
           >
-            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
+            <span className="material-symbols-outlined text-[18px]">arrow_back</span>
             {t('settings.mcp.form.back')}
-          </Button>
+          </button>
 
           <div className="flex items-start justify-between gap-4 mb-8">
             <div>
-              <h2
-                ref={editorHeadingRef}
-                tabIndex={-1}
-                className="text-[2.2rem] font-semibold tracking-[-0.03em] text-[var(--color-text-primary)]"
-              >
-                {server.name}
-              </h2>
+              <h2 className="text-[2.2rem] font-semibold tracking-[-0.03em] text-[var(--color-text-primary)]">{server.name}</h2>
               <p className="mt-3 text-base text-[var(--color-text-secondary)]">{redactSensitiveText(server.summary)}</p>
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <StatusBadge server={server} />
                 {server.statusDetail && (
-                  <span className="text-sm text-[var(--color-text-tertiary)]">
-                    {redactSensitiveText(server.statusDetail)}
-                  </span>
+                  <span className="text-sm text-[var(--color-text-tertiary)]">{server.statusDetail}</span>
                 )}
               </div>
             </div>
             {server.canReconnect && (
-              <LoadingButton
-                variant="secondary"
-                onClick={() => void handleReconnect(server)}
-                loading={busyServerKey === getServerIdentityKey(server)}
-              >
-                <span className="material-symbols-outlined text-[16px]" aria-hidden="true">sync</span>
+              <Button variant="secondary" onClick={() => handleReconnect(server)} loading={busyServerKey === getServerIdentityKey(server)}>
+                <span className="material-symbols-outlined text-[16px]">sync</span>
                 {t('settings.mcp.form.reconnect')}
-              </LoadingButton>
+              </Button>
             )}
           </div>
 
-          <Card>
-            <CardContent className="p-6">
-              <div className="grid gap-4 md:grid-cols-2">
-                <InfoPair label={t('settings.mcp.form.transport')} value={transportLabel(server.transport, t)} />
-                <InfoPair label={t('settings.mcp.form.scope')} value={scopeLabel(server, t)} />
-                <InfoPair label={t('settings.mcp.form.status')} value={server.statusLabel} />
-                <InfoPair label={t('settings.mcp.form.location')} value={server.configLocation} />
-              </div>
-              <Separator className="my-5" />
-              <div>
-                <div className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">{t('settings.mcp.form.rawConfig')}</div>
-                <pre className="overflow-x-auto rounded-[var(--radius-lg)] bg-[var(--color-surface-hover)] p-4 text-xs text-[var(--color-text-secondary)]">
-                  {JSON.stringify(redactMcpDisplayValue(server.config), null, 2)}
-                </pre>
-              </div>
-            </CardContent>
-          </Card>
+          <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
+            <div className="grid gap-4 md:grid-cols-2">
+              <InfoPair label={t('settings.mcp.form.transport')} value={transportLabel(server.transport, t)} />
+              <InfoPair label={t('settings.mcp.form.scope')} value={scopeLabel(server, t)} />
+              <InfoPair label={t('settings.mcp.form.status')} value={server.statusLabel} />
+              <InfoPair label={t('settings.mcp.form.location')} value={server.configLocation} />
+            </div>
+            <div className="mt-5">
+              <div className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">{t('settings.mcp.form.rawConfig')}</div>
+              <pre className="overflow-x-auto rounded-[var(--radius-lg)] bg-[var(--color-surface-hover)] p-4 text-xs text-[var(--color-text-secondary)]">
+                {JSON.stringify(redactMcpDisplayValue(server.config), null, 2)}
+              </pre>
+            </div>
+          </section>
         </div>
         {deleteModal}
       </>
@@ -1016,10 +858,7 @@ export function McpSettings() {
     const editing = view.type === 'edit'
     const targetServer = editing ? view.server : null
     const transportLocked = editing
-    const targetMutationBusy = targetServer
-      ? busyServerKey === getServerIdentityKey(targetServer)
-      : busyServerKey !== null
-    const isBusy = isSaving || isDeleting || targetMutationBusy
+    const isBusy = isSaving || isDeleting
     const targetProjectPath = draft.projectPath.trim()
     const needsProjectTarget = scopeRequiresProject(draft.scope)
     const targetProjectHint = draft.scope === 'local'
@@ -1039,26 +878,21 @@ export function McpSettings() {
     return (
       <>
         <div className="max-w-5xl min-w-0">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={isBusy}
+          <button
+            type="button"
             onClick={() => {
-              returnToList(targetServer ? getServerIdentityKey(targetServer) : 'add')
+              setView({ type: 'list' })
+              selectServer(null)
             }}
-            className="mb-5"
+            className="mb-5 inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
           >
-            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
+            <span className="material-symbols-outlined text-[18px]">arrow_back</span>
             {t('settings.mcp.form.back')}
-          </Button>
+          </button>
 
           <div className="flex items-start justify-between gap-4 mb-8">
             <div>
-              <h2
-                ref={editorHeadingRef}
-                tabIndex={-1}
-                className="text-[2.2rem] font-semibold tracking-[-0.03em] text-[var(--color-text-primary)]"
-              >
+              <h2 className="text-[2.2rem] font-semibold tracking-[-0.03em] text-[var(--color-text-primary)]">
                 {editing ? t('settings.mcp.form.editTitle', { name: targetServer!.name }) : t('settings.mcp.form.createTitle')}
               </h2>
               <p className="mt-3 text-base text-[var(--color-text-secondary)]">
@@ -1068,9 +902,7 @@ export function McpSettings() {
                 <div className="mt-4 flex flex-wrap items-center gap-3">
                   <StatusBadge server={targetServer} />
                   {targetServer.statusDetail && (
-                    <span className="text-sm text-[var(--color-text-tertiary)]">
-                      {redactSensitiveText(targetServer.statusDetail)}
-                    </span>
+                    <span className="text-sm text-[var(--color-text-tertiary)]">{targetServer.statusDetail}</span>
                   )}
                 </div>
               )}
@@ -1078,122 +910,106 @@ export function McpSettings() {
 
             <div className="flex items-center gap-3">
               {editing && targetServer?.canReconnect && (
-                <LoadingButton
-                  variant="secondary"
-                  onClick={() => void handleReconnect(targetServer)}
-                  loading={busyServerKey === getServerIdentityKey(targetServer)}
-                  disabled={isSaving || isDeleting}
-                >
-                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">sync</span>
+                <Button variant="secondary" onClick={() => handleReconnect(targetServer)} loading={busyServerKey === getServerIdentityKey(targetServer)}>
+                  <span className="material-symbols-outlined text-[16px]">sync</span>
                   {t('settings.mcp.form.reconnect')}
-                </LoadingButton>
+                </Button>
               )}
               {editing && targetServer?.canRemove && (
-                <LoadingButton
-                  ref={deleteTriggerRef}
-                  variant="destructive"
+                <Button
+                  variant="ghost"
+                  className="text-[var(--color-error)] hover:text-[var(--color-error)] hover:bg-[var(--color-error)]/8"
                   onClick={() => handleDelete(targetServer)}
                   loading={isDeleting}
-                  disabled={isSaving || targetMutationBusy}
                 >
-                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">delete</span>
+                  <span className="material-symbols-outlined text-[16px]">delete</span>
                   {t('settings.mcp.form.uninstall')}
-                </LoadingButton>
+                </Button>
               )}
             </div>
           </div>
 
-          <fieldset
-            disabled={isBusy}
-            aria-busy={isBusy || undefined}
-            className="space-y-4"
-          >
-          <Card>
-            <CardContent className="p-5">
-              <SettingField
-                id="mcp-name"
-                label={t('settings.mcp.form.name')}
-                value={draft.name}
-                onChange={(event) => setDraftField('name', event.target.value)}
-                placeholder={t('settings.mcp.form.namePlaceholder')}
-                disabled={editing}
-                required
-                aria-invalid={draft.name.length > 0 && !isMcpServerNameValid(draft.name)}
-              />
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+          <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+            <Input
+              label={t('settings.mcp.form.name')}
+              value={draft.name}
+              onChange={(event) => setDraftField('name', event.target.value)}
+              placeholder={t('settings.mcp.form.namePlaceholder')}
+              disabled={editing}
+              required
+            />
+          </section>
 
-          <Card>
-            <CardContent className="p-5">
-              <Label id="mcp-scope-label" className="mb-3">
-                {t('settings.mcp.form.scope')}
-              </Label>
-              <RadioGroup
-                value={draft.scope}
-                onValueChange={(value) => setDraftField('scope', value as McpWritableScope)}
-                aria-labelledby="mcp-scope-label"
-                className="grid gap-2 md:grid-cols-3"
-              >
+          <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+            <div className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">
+              {t('settings.mcp.form.scope')}
+            </div>
+            <div className="grid gap-2 md:grid-cols-3">
               {WRITABLE_SCOPES.map((scope) => {
+                const active = draft.scope === scope
                 return (
-                  <SettingRadioCard
+                  <button
                     key={scope}
-                    value={scope}
-                    label={t(`settings.mcp.scope.${scope}`)}
-                    description={t(`settings.mcp.scopeDesc.${scope}`)}
-                  />
+                    type="button"
+                    onClick={() => setDraftField('scope', scope)}
+                    className={`rounded-[var(--radius-md)] border p-3 text-left transition-colors ${
+                      active
+                        ? 'border-[var(--color-border-focus)] bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold">{t(`settings.mcp.scope.${scope}`)}</span>
+                    <span className="mt-1 block text-xs leading-5 text-[var(--color-text-tertiary)]">
+                      {t(`settings.mcp.scopeDesc.${scope}`)}
+                    </span>
+                  </button>
                 )
               })}
-              </RadioGroup>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
-          <Card>
-            <CardContent className="p-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-                    {needsProjectTarget ? t('settings.mcp.targetProject.title') : t('settings.mcp.targetProject.globalTitle')}
-                  </div>
-                  <p className="mt-1 text-xs leading-5 text-[var(--color-text-tertiary)]">
-                    {targetProjectHint}
-                  </p>
+          <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-[var(--color-text-primary)]">
+                  {needsProjectTarget ? t('settings.mcp.targetProject.title') : t('settings.mcp.targetProject.globalTitle')}
                 </div>
-                {needsProjectTarget && (
-                  <DirectoryPicker
-                    value={draft.projectPath}
-                    onChange={(path) => setDraftField('projectPath', path)}
-                  />
-                )}
+                <p className="mt-1 text-xs leading-5 text-[var(--color-text-tertiary)]">
+                  {targetProjectHint}
+                </p>
               </div>
-            </CardContent>
-          </Card>
+              {needsProjectTarget && (
+                <DirectoryPicker
+                  value={draft.projectPath}
+                  onChange={(path) => setDraftField('projectPath', path)}
+                />
+              )}
+            </div>
+          </section>
 
-          <Card className="overflow-hidden">
-            <ToggleGroup
-              type="single"
-              value={draft.transport}
-              onValueChange={(value) => {
-                if (value) setDraftField('transport', value as TransportKind)
-              }}
-              disabled={transportLocked}
-              aria-label={t('settings.mcp.form.transport')}
-              className="grid grid-cols-3 gap-0"
-            >
+          <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+            <div className="grid grid-cols-3">
               {(['stdio', 'http', 'sse'] as TransportKind[]).map((transport) => {
+                const active = draft.transport === transport
                 return (
-                  <ToggleGroupItem
+                  <button
                     key={transport}
-                    value={transport}
-                    size="lg"
-                    className="h-14 rounded-none border-0 bg-[var(--color-surface)] text-sm first:border-r last:border-l data-[state=on]:bg-[var(--color-surface-selected)] data-[state=on]:text-[var(--color-text-primary)] data-[state=on]:shadow-none"
+                    type="button"
+                    disabled={transportLocked}
+                    onClick={() => setDraftField('transport', transport)}
+                    className={`h-14 text-sm font-semibold transition-colors ${
+                      active
+                        ? 'bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]'
+                        : 'bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+                    } ${transportLocked ? 'cursor-not-allowed opacity-70' : ''}`}
                   >
                     {transport === 'stdio' ? 'STDIO' : transportLabel(transport, t)}
-                  </ToggleGroupItem>
+                  </button>
                 )
               })}
-            </ToggleGroup>
-          </Card>
+            </div>
+          </section>
 
           {editing && (
             <div className="text-sm text-[var(--color-text-tertiary)]">
@@ -1203,21 +1019,18 @@ export function McpSettings() {
 
           {draft.transport === 'stdio' ? (
             <>
-              <Card>
-                <CardContent className="p-5">
-                  <SettingField
-                    id="mcp-command"
-                    label={t('settings.mcp.form.command')}
-                    value={draft.command}
-                    onChange={(event) => setDraftField('command', event.target.value)}
-                    placeholder={t('settings.mcp.form.commandPlaceholder')}
-                    required
-                  />
-                  <p className="mt-2 text-xs leading-5 text-[var(--color-text-tertiary)]">
-                    {t('settings.mcp.form.commandHostHint')}
-                  </p>
-                </CardContent>
-              </Card>
+              <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+                <Input
+                  label={t('settings.mcp.form.command')}
+                  value={draft.command}
+                  onChange={(event) => setDraftField('command', event.target.value)}
+                  placeholder={t('settings.mcp.form.commandPlaceholder')}
+                  required
+                />
+                <p className="mt-2 text-xs leading-5 text-[var(--color-text-tertiary)]">
+                  {t('settings.mcp.form.commandHostHint')}
+                </p>
+              </section>
 
               <ArraySection
                 title={t('settings.mcp.form.arguments')}
@@ -1229,7 +1042,6 @@ export function McpSettings() {
                 displayValue={(_row, index) => displayMcpArgumentValue(draft.args, index)}
                 valuePlaceholder={t('settings.mcp.form.argumentPlaceholder')}
                 addLabel={t('settings.mcp.form.addArgument')}
-                removeLabel={t('common.delete')}
               />
 
               <ArraySection
@@ -1242,23 +1054,19 @@ export function McpSettings() {
                 keyPlaceholder={t('settings.mcp.form.keyPlaceholder')}
                 valuePlaceholder={t('settings.mcp.form.valuePlaceholder')}
                 addLabel={t('settings.mcp.form.addEnv')}
-                removeLabel={t('common.delete')}
               />
             </>
           ) : (
             <>
-              <Card>
-                <CardContent className="p-5">
-                  <SettingField
-                    id="mcp-url"
-                    label={draft.transport === 'http' ? t('settings.mcp.form.url') : t('settings.mcp.form.sseUrl')}
-                    value={draft.url}
-                    onChange={(event) => setDraftField('url', event.target.value)}
-                    placeholder={t('settings.mcp.form.urlPlaceholder')}
-                    required
-                  />
-                </CardContent>
-              </Card>
+              <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+                <Input
+                  label={draft.transport === 'http' ? t('settings.mcp.form.url') : t('settings.mcp.form.sseUrl')}
+                  value={draft.url}
+                  onChange={(event) => setDraftField('url', event.target.value)}
+                  placeholder={t('settings.mcp.form.urlPlaceholder')}
+                  required
+                />
+              </section>
 
               <ArraySection
                 title={t('settings.mcp.form.headers')}
@@ -1270,51 +1078,41 @@ export function McpSettings() {
                 keyPlaceholder={t('settings.mcp.form.keyPlaceholder')}
                 valuePlaceholder={t('settings.mcp.form.valuePlaceholder')}
                 addLabel={t('settings.mcp.form.addHeader')}
-                removeLabel={t('common.delete')}
               />
 
-              <Card>
-                <CardContent className="p-5">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <SettingField
-                      id="mcp-oauth-client-id"
-                      label={t('settings.mcp.form.oauthClientId')}
-                      value={draft.oauthClientId}
-                      onChange={(event) => setDraftField('oauthClientId', event.target.value)}
-                      placeholder={t('settings.mcp.form.oauthClientIdPlaceholder')}
-                    />
-                    <SettingField
-                      id="mcp-oauth-callback-port"
-                      label={t('settings.mcp.form.oauthCallbackPort')}
-                      value={draft.oauthCallbackPort}
-                      onChange={(event) => setDraftField('oauthCallbackPort', event.target.value)}
-                      placeholder={t('settings.mcp.form.oauthCallbackPortPlaceholder')}
-                    />
-                  </div>
-                  <div className="mt-4">
-                    <SettingField
-                      id="mcp-headers-helper"
-                      label={t('settings.mcp.form.headersHelper')}
-                      value={draft.headersHelper}
-                      onChange={(event) => setDraftField('headersHelper', event.target.value)}
-                      placeholder={t('settings.mcp.form.headersHelperPlaceholder')}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
+              <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Input
+                    label={t('settings.mcp.form.oauthClientId')}
+                    value={draft.oauthClientId}
+                    onChange={(event) => setDraftField('oauthClientId', event.target.value)}
+                    placeholder={t('settings.mcp.form.oauthClientIdPlaceholder')}
+                  />
+                  <Input
+                    label={t('settings.mcp.form.oauthCallbackPort')}
+                    value={draft.oauthCallbackPort}
+                    onChange={(event) => setDraftField('oauthCallbackPort', event.target.value)}
+                    placeholder={t('settings.mcp.form.oauthCallbackPortPlaceholder')}
+                  />
+                </div>
+                <div className="mt-4">
+                  <Input
+                    label={t('settings.mcp.form.headersHelper')}
+                    value={draft.headersHelper}
+                    onChange={(event) => setDraftField('headersHelper', event.target.value)}
+                    placeholder={t('settings.mcp.form.headersHelperPlaceholder')}
+                  />
+                </div>
+              </section>
             </>
           )}
 
           <div className="flex justify-end pt-2">
-            <LoadingButton
-              onClick={() => void handleSave()}
-              disabled={!isDraftValid(draft) || isBusy}
-              loading={isSaving}
-            >
+            <Button onClick={handleSave} disabled={!isDraftValid(draft) || isBusy} loading={isSaving}>
               {t('settings.mcp.form.save')}
-            </LoadingButton>
+            </Button>
           </div>
-          </fieldset>
+        </div>
         </div>
         {deleteModal}
       </>
@@ -1332,8 +1130,8 @@ export function McpSettings() {
             {t('settings.mcp.description')}
           </p>
         </div>
-        <Button ref={addServerTriggerRef} variant="secondary" size="lg" onClick={beginCreate}>
-          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>
+        <Button variant="secondary" size="lg" onClick={beginCreate}>
+          <span className="material-symbols-outlined text-[18px]">add</span>
           {t('settings.mcp.addServer')}
         </Button>
       </div>
@@ -1349,26 +1147,23 @@ export function McpSettings() {
           </div>
 
           {error ? (
-            <Alert variant="destructive" className="place-items-center border-dashed py-12 text-center">
-              <span className="material-symbols-outlined text-[40px]" aria-hidden="true">error</span>
-              <AlertTitle>{error}</AlertTitle>
-              <AlertDescription>
-                <Button
-                  variant="link"
-                  onClick={() => void fetchServers(projectPathsForFetchRef.current, currentWorkDir)}
-                >
-                  {t('common.retry')}
-                </Button>
-              </AlertDescription>
-            </Alert>
+            <div className="text-center py-16 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
+              <span className="material-symbols-outlined text-[40px] text-[var(--color-error)] mb-3 block">error</span>
+              <p className="text-sm text-[var(--color-error)] mb-3">{error}</p>
+              <button
+                type="button"
+                onClick={() => void fetchServers(projectPathsForFetchRef.current, currentWorkDir)}
+                className="text-sm text-[var(--color-text-accent)] hover:underline"
+              >
+                {t('common.retry')}
+              </button>
+            </div>
           ) : servers.length === 0 ? (
-            <Card className="border-dashed">
-              <CardContent className="py-16 text-center">
-                <span className="material-symbols-outlined mb-3 block text-[40px] text-[var(--color-text-tertiary)]" aria-hidden="true">dns</span>
-                <p className="mb-1 text-sm text-[var(--color-text-secondary)]">{t('settings.mcp.empty')}</p>
-                <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.mcp.emptyHint')}</p>
-              </CardContent>
-            </Card>
+            <div className="text-center py-16 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
+              <span className="material-symbols-outlined text-[40px] text-[var(--color-text-tertiary)] mb-3 block">dns</span>
+              <p className="text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.mcp.empty')}</p>
+              <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.mcp.emptyHint')}</p>
+            </div>
           ) : (
             <div className="flex flex-col gap-6">
               {MCP_GROUP_ORDER.map((group) => {
@@ -1383,20 +1178,18 @@ export function McpSettings() {
                       </div>
                       <div className="text-sm text-[var(--color-text-tertiary)]">{groupServers.length}</div>
                     </div>
-                    <Card className="overflow-hidden rounded-[28px] bg-[var(--color-surface)]">
-                      <CardContent className="p-0">
-                        {groupServers.map((server) => (
-                          <ServerRow
-                            key={getServerIdentityKey(server)}
-                            server={server}
-                            isBusy={busyServerKey === getServerIdentityKey(server)}
-                            onOpen={() => beginEdit(server)}
-                            onToggle={() => void handleToggle(server)}
-                            t={t}
-                          />
-                        ))}
-                      </CardContent>
-                    </Card>
+                    <div className="rounded-[28px] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+                      {groupServers.map((server) => (
+                        <ServerRow
+                          key={getServerIdentityKey(server)}
+                          server={server}
+                          isBusy={busyServerKey === getServerIdentityKey(server)}
+                          onOpen={() => beginEdit(server)}
+                          onToggle={() => void handleToggle(server)}
+                          t={t}
+                        />
+                      ))}
+                    </div>
                   </section>
                 )
               })}

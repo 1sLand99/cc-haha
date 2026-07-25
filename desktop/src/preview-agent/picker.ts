@@ -1,5 +1,4 @@
 import { climb as climbEl, descend as descendEl } from './treeNav'
-import { applyPreviewAgentTheme } from './theme'
 
 type PickerDeps = { onSelect: (el: Element) => void }
 
@@ -11,10 +10,9 @@ export function createPicker(deps: PickerDeps) {
   // Shadow DOM 浮层宿主：避免被页面 CSS 影响、抗 CSP 内联限制
   const host = document.createElement('div')
   host.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647'
-  applyPreviewAgentTheme(host)
   const shadow = host.attachShadow({ mode: 'open' })
   const box = document.createElement('div')
-  box.style.cssText = 'position:fixed;border:2px solid var(--cc-haha-color-brand);background:var(--cc-haha-color-selection);border-radius:var(--cc-haha-radius-md);pointer-events:none'
+  box.style.cssText = 'position:fixed;border:2px solid #2f7bff;background:rgba(47,123,255,.12);pointer-events:none'
   box.hidden = true
   shadow.appendChild(box)
 

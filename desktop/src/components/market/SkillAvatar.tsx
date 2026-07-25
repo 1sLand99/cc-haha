@@ -1,5 +1,4 @@
 import type { NormalizedSkill } from '../../types/market'
-import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar'
 
 const AVATAR_GRADIENTS = [
   ['#9A5942', '#6F3827'],
@@ -39,25 +38,32 @@ export function SkillAvatar({
   size?: number
   className?: string
 }) {
+  if (skill.iconUrl) {
+    return (
+      <img
+        src={skill.iconUrl}
+        alt=""
+        loading="lazy"
+        style={{ width: size, height: size }}
+        className={`flex-shrink-0 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface-container)] object-cover shadow-[0_1px_2px_rgba(27,28,26,0.08)] ${className}`}
+      />
+    )
+  }
   const [from, to] = AVATAR_GRADIENTS[hashIndex(skill.name)]!
   return (
-    <Avatar
-      aria-hidden="true"
-      style={{ width: size, height: size }}
-      className={`rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface-container)] shadow-[0_1px_2px_rgba(27,28,26,0.08)] ${className}`}
+    <span
+      aria-hidden
+      data-testid="skill-avatar-fallback"
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.round(size * 0.45),
+        background: `linear-gradient(145deg, ${from}, ${to})`,
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 3px 10px rgba(27,28,26,0.12)',
+      }}
+      className={`inline-flex flex-shrink-0 select-none items-center justify-center rounded-[14px] font-semibold tracking-[-0.04em] text-white ${className}`}
     >
-      {skill.iconUrl && <AvatarImage src={skill.iconUrl} alt="" />}
-      <AvatarFallback
-        data-testid="skill-avatar-fallback"
-        style={{
-          fontSize: Math.round(size * 0.45),
-          background: `linear-gradient(145deg, ${from}, ${to})`,
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 3px 10px rgba(27,28,26,0.12)',
-        }}
-        className="select-none rounded-[13px] font-semibold tracking-[-0.04em] text-white"
-      >
-        {initialOf(skill.name)}
-      </AvatarFallback>
-    </Avatar>
+      {initialOf(skill.name)}
+    </span>
   )
 }

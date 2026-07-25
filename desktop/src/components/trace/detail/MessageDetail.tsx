@@ -8,7 +8,6 @@ import { normalizeContentBlock } from '../../../lib/trace/sse'
 import { CodeViewer } from '../../chat/CodeViewer'
 import { Section } from './Section'
 import { MessageBlocks } from './MessageBlocks'
-import { Alert } from '../../ui/alert'
 
 export function MessageDetail({ span }: { span: TraceSpan }) {
   const t = useTranslation()
@@ -26,9 +25,9 @@ export function MessageDetail({ span }: { span: TraceSpan }) {
         {normalized.content.length > 0 ? (
           <MessageBlocks message={normalized} />
         ) : (
-          <Alert className="border-dashed text-xs text-[var(--color-text-tertiary)]">
+          <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-tertiary)]">
             {t('trace.noData')}
-          </Alert>
+          </div>
         )}
       </Section>
       <Section sectionKey="message.raw" title={t('trace.section.raw')}>

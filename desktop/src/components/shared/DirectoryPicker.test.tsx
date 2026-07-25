@@ -122,7 +122,7 @@ describe('DirectoryPicker', () => {
     expect(screen.getByRole('button').querySelector('svg')).toBeInTheDocument()
   })
 
-  it('uses the collision-aware shadcn popover instead of manual viewport coordinates', async () => {
+  it('keeps the recent-project menu inside the viewport when the trigger is near the right edge', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 })
     vi.mocked(sessionsApi.getRecentProjects).mockResolvedValue({ projects: [] })
 
@@ -149,26 +149,7 @@ describe('DirectoryPicker', () => {
     fireEvent.click(trigger)
 
     const menu = await screen.findByTestId('directory-picker-menu')
-    expect(menu).toHaveAttribute('data-slot', 'popover-content')
-    expect(menu.className).toContain('w-[min(400px,calc(100vw-24px))]')
-    expect(menu.style.left).toBe('')
-    expect(menu.style.width).toBe('')
-  })
-
-  it('restores focus to the project trigger when the popover closes with Escape', async () => {
-    vi.mocked(sessionsApi.getRecentProjects).mockResolvedValue({ projects: [] })
-
-    render(<DirectoryPicker value="/workspace/project" onChange={vi.fn()} />)
-
-    const trigger = screen.getByRole('button')
-    fireEvent.click(trigger)
-    const menu = await screen.findByTestId('directory-picker-menu')
-    fireEvent.keyDown(menu, { key: 'Escape' })
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('directory-picker-menu')).not.toBeInTheDocument()
-      expect(trigger).toHaveFocus()
-    })
+    expect(menu).toHaveStyle({ left: '612px', width: '400px' })
   })
 
   it('renders browse entries without nesting interactive buttons', async () => {

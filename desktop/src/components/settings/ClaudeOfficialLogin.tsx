@@ -5,14 +5,9 @@
 // 到 haha server 后,store 的 polling 自动刷新 UI 展示"已登录"。
 
 import { useEffect } from 'react'
-import { LogIn, LogOut } from 'lucide-react'
 import { useHahaOAuthStore } from '../../stores/hahaOAuthStore'
 import { useTranslation } from '../../i18n'
 import { getDesktopHost } from '../../lib/desktopHost'
-import { Alert, AlertDescription } from '../ui/alert'
-import { Badge } from '../ui/badge'
-import { LoadingButton } from '../ui/custom/loading-button'
-import { Skeleton } from '../ui/skeleton'
 
 export function ClaudeOfficialLogin() {
   const t = useTranslation()
@@ -52,16 +47,14 @@ export function ClaudeOfficialLogin() {
   if (status === null) {
     if (error) {
       return (
-        <Alert data-testid="claude-official-login" variant="destructive" className="py-2">
-          <AlertDescription className="text-[var(--color-error)]">
-            {t('settings.claudeOfficialLogin.errorPrefix')}{error}
-          </AlertDescription>
-        </Alert>
+        <div className="text-xs text-[var(--color-error)]">
+          {t('settings.claudeOfficialLogin.errorPrefix')}{error}
+        </div>
       )
     }
     return (
-      <div data-testid="claude-official-login" role="status" aria-label={t('common.loading')}>
-        <Skeleton className="h-5 w-32" />
+      <div className="text-xs text-[var(--color-text-tertiary)]">
+        {t('common.loading')}
       </div>
     )
   }
@@ -71,46 +64,43 @@ export function ClaudeOfficialLogin() {
       ? status.subscriptionType.toUpperCase()
       : t('settings.claudeOfficialLogin.subTypeUnknown')
     return (
-      <div data-testid="claude-official-login" className="flex flex-wrap items-center gap-3 text-sm">
-        <Badge variant="outline" className="border-[var(--color-success)]/35 text-[var(--color-success)]">
+      <div className="flex items-center gap-3 text-sm">
+        <span className="text-[var(--color-success)]">
           ✓ {t('settings.claudeOfficialLogin.loggedInPrefix')} {subTypeLabel})
-        </Badge>
-        <LoadingButton
-          variant="secondary"
-          size="sm"
+        </span>
+        <button
+          type="button"
           onClick={logout}
-          loading={isLoading}
+          disabled={isLoading}
+          className="px-3 py-1 text-xs rounded-md border border-[var(--color-border-separator)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 transition-colors"
         >
-          <LogOut aria-hidden="true" />
           {isLoading
             ? t('settings.claudeOfficialLogin.logoutProcessing')
             : t('settings.claudeOfficialLogin.logoutButton')}
-        </LoadingButton>
+        </button>
       </div>
     )
   }
 
   return (
-    <div data-testid="claude-official-login" className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2">
       <div className="text-sm text-[var(--color-text-secondary)]">
         {t('settings.claudeOfficialLogin.intro')}
       </div>
-      <LoadingButton
-        className="self-start"
+      <button
+        type="button"
         onClick={handleLogin}
-        loading={isLoading}
+        disabled={isLoading}
+        className="self-start rounded-md bg-[image:var(--gradient-btn-primary)] px-4 py-2 text-sm text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)] hover:brightness-105 disabled:opacity-50 transition-opacity"
       >
-        <LogIn aria-hidden="true" />
         {isLoading
           ? t('settings.claudeOfficialLogin.loginStarting')
           : t('settings.claudeOfficialLogin.loginButton')}
-      </LoadingButton>
+      </button>
       {error && (
-        <Alert variant="destructive" className="py-2">
-          <AlertDescription className="text-[var(--color-error)]">
-            {t('settings.claudeOfficialLogin.errorPrefix')}{error}
-          </AlertDescription>
-        </Alert>
+        <div className="text-xs text-[var(--color-error)]">
+          {t('settings.claudeOfficialLogin.errorPrefix')}{error}
+        </div>
       )}
     </div>
   )

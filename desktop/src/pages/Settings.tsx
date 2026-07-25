@@ -17,82 +17,15 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import {
-  ChevronDown,
-  ChevronUp,
-  Copy,
-  ExternalLink,
-  Eye,
-  EyeOff,
-  GripVertical,
-  KeyRound,
-  Lightbulb,
-  Paintbrush,
-  PowerOff,
-  QrCode,
-  RotateCw,
-  Shrink,
-  X,
-} from 'lucide-react'
+import { Copy, Eye, EyeOff, GripVertical, PowerOff, QrCode, RotateCw } from 'lucide-react'
 import { useSettingsStore, UI_ZOOM_DEFAULT, UI_ZOOM_MIN, UI_ZOOM_MAX, UI_ZOOM_STEP } from '../stores/settingsStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useTranslation, type TranslationKey } from '../i18n'
+import { Modal } from '../components/shared/Modal'
 import { ConfirmDialog } from '../components/shared/ConfirmDialog'
-import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../components/ui/alert-dialog'
-import { Badge } from '../components/ui/badge'
-import { Button as ShadcnButton } from '../components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-} from '../components/ui/card'
-import { Checkbox } from '../components/ui/checkbox'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '../components/ui/collapsible'
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '../components/ui/dialog'
-import { Input as ShadcnInput } from '../components/ui/input'
-import { Label } from '../components/ui/label'
-import { Progress } from '../components/ui/progress'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../components/ui/select'
-import { Slider } from '../components/ui/slider'
-import { Skeleton } from '../components/ui/skeleton'
-import { Separator } from '../components/ui/separator'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
-import { Textarea } from '../components/ui/textarea'
-import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group'
-import { RadioGroup } from '../components/ui/radio-group'
-import { SettingRadioCard } from '../components/ui/custom/setting-radio-card'
-import { SettingField } from '../components/ui/custom/setting-field'
-import { SettingSwitchRow } from '../components/ui/custom/setting-switch-row'
-import { LoadingButton } from '../components/ui/custom/loading-button'
-import { IconButton } from '../components/ui/custom/icon-button'
+import { Input } from '../components/shared/Input'
+import { Button } from '../components/shared/Button'
+import { Dropdown } from '../components/shared/Dropdown'
 import { PermissionModeSelector } from '../components/controls/PermissionModeSelector'
 import type { ThemeMode, UpdateProxyMode, NetworkProxyMode, WebSearchMode, AppMode, ChatSendBehavior, OutputStyleSource } from '../types/settings'
 import type { Locale } from '../i18n'
@@ -115,7 +48,7 @@ import { TraceList } from './TraceList'
 import { ActivitySettings } from './ActivitySettings'
 import { MemorySettings } from './MemorySettings'
 import { PetSettings } from '../features/pets/PetSettings'
-import { useUIStore, type SettingsTab } from '../stores/uiStore'
+import { useUIStore } from '../stores/uiStore'
 import { ClaudeOfficialLogin } from '../components/settings/ClaudeOfficialLogin'
 import { ChatGPTOfficialLogin } from '../components/settings/ChatGPTOfficialLogin'
 import { GrokOfficialLogin } from '../components/settings/GrokOfficialLogin'
@@ -152,7 +85,7 @@ import { copyTextToClipboard } from '../components/chat/clipboard'
 const NETWORK_TIMEOUT_MIN_SECONDS = 30
 const NETWORK_TIMEOUT_MAX_SECONDS = 1800
 const NETWORK_TIMEOUT_STEP_SECONDS = 30
-const DEFAULT_RESPONSE_LANGUAGE_SELECT_VALUE = '__default__'
+const SETTINGS_CHECKBOX_INPUT_CLASS = 'settings-checkbox-input peer'
 const BUILT_IN_OUTPUT_STYLE_TRANSLATION_KEYS = {
   default: {
     label: 'settings.general.outputStyleBuiltin.default.label',
@@ -248,28 +181,20 @@ function parseH5GraceDraft(draft: string): number | null | 'invalid' {
   return seconds >= 5 && seconds <= 86400 ? seconds : 'invalid'
 }
 
-function buildH5PublicBaseUrlFromHostDraft(
-  draft: string,
-  currentBaseUrl: string | null,
-  fallbackPort: string | null,
-): string | null {
+function buildH5PublicBaseUrlFromHostDraft(draft: string, currentBaseUrl: string | null): string | null {
   const trimmed = draft.trim()
   if (!trimmed) return null
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed
 
   try {
     const current = currentBaseUrl ? new URL(currentBaseUrl) : null
-    if (!current) {
-      const port = fallbackPort ? `:${fallbackPort}` : ''
-      return `http://${trimmed}${port}`
-    }
+    if (!current) return trimmed
 
     const port = current.port ? `:${current.port}` : ''
     const path = current.pathname === '/' ? '' : current.pathname.replace(/\/+$/, '')
     return `${current.protocol}//${trimmed}${port}${path}`
   } catch {
-    const port = fallbackPort ? `:${fallbackPort}` : ''
-    return `http://${trimmed}${port}`
+    return trimmed
   }
 }
 
@@ -287,106 +212,69 @@ export function Settings() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-[var(--color-surface)]">
-      <Tabs
-        value={activeTab}
-        onValueChange={(value) => setActiveTab(value as SettingsTab)}
-        orientation="vertical"
-        className="flex-1 gap-0 overflow-hidden"
-      >
+      <div className="flex-1 flex overflow-hidden">
         {/* Tab navigation */}
-        <TabsList
-          aria-label={t('settings.title')}
-          className="h-auto w-[180px] flex-shrink-0 flex-col items-stretch justify-start rounded-none border-r border-[var(--color-border)] bg-transparent py-3"
-        >
+        <div className="w-[180px] border-r border-[var(--color-border)] py-3 flex-shrink-0 flex flex-col">
           <div className="flex-1">
-            <SettingsTabTrigger value="providers" icon="dns" label={t('settings.tab.providers')} active={activeTab === 'providers'} />
-            <SettingsTabTrigger value="general" icon="tune" label={t('settings.tab.general')} active={activeTab === 'general'} />
-            <SettingsTabTrigger value="h5Access" icon="qr_code_2" label={t('settings.tab.h5Access')} active={activeTab === 'h5Access'} />
-            <SettingsTabTrigger value="adapters" icon="chat" label={t('settings.tab.adapters')} active={activeTab === 'adapters'} />
-            <SettingsTabTrigger value="terminal" icon="terminal" label={t('settings.tab.terminal')} active={activeTab === 'terminal'} />
-            <SettingsTabTrigger value="mcp" icon="dns" label={t('settings.tab.mcp')} active={activeTab === 'mcp'} />
-            <SettingsTabTrigger value="agents" icon="smart_toy" label={t('settings.tab.agents')} active={activeTab === 'agents'} />
-            <SettingsTabTrigger value="skills" icon="auto_awesome" label={t('settings.tab.skills')} active={activeTab === 'skills'} />
-            <SettingsTabTrigger value="memory" icon="history_edu" label={t('settings.tab.memory')} active={activeTab === 'memory'} />
-            <SettingsTabTrigger value="plugins" icon="extension" label={t('settings.tab.plugins')} active={activeTab === 'plugins'} />
-            <SettingsTabTrigger value="pets" icon="pets" label={t('settings.tab.pets')} active={activeTab === 'pets'} />
-            <SettingsTabTrigger value="computerUse" icon="mouse" label={t('settings.tab.computerUse')} active={activeTab === 'computerUse'} />
-            <SettingsTabTrigger value="activity" icon="monitoring" label={t('settings.tab.activity')} active={activeTab === 'activity'} />
-            <SettingsTabTrigger value="trace" icon="account_tree" label={t('settings.tab.trace')} active={activeTab === 'trace'} />
-            <SettingsTabTrigger value="diagnostics" icon="monitor_heart" label={t('settings.tab.diagnostics')} active={activeTab === 'diagnostics'} />
+            <TabButton icon="dns" label={t('settings.tab.providers')} active={activeTab === 'providers'} onClick={() => setActiveTab('providers')} />
+            <TabButton icon="tune" label={t('settings.tab.general')} active={activeTab === 'general'} onClick={() => setActiveTab('general')} />
+            <TabButton icon="qr_code_2" label={t('settings.tab.h5Access')} active={activeTab === 'h5Access'} onClick={() => setActiveTab('h5Access')} />
+            <TabButton icon="chat" label={t('settings.tab.adapters')} active={activeTab === 'adapters'} onClick={() => setActiveTab('adapters')} />
+            <TabButton icon="terminal" label={t('settings.tab.terminal')} active={activeTab === 'terminal'} onClick={() => setActiveTab('terminal')} />
+            <TabButton icon="dns" label={t('settings.tab.mcp')} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
+            <TabButton icon="smart_toy" label={t('settings.tab.agents')} active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />
+            <TabButton icon="auto_awesome" label={t('settings.tab.skills')} active={activeTab === 'skills'} onClick={() => setActiveTab('skills')} />
+            <TabButton icon="history_edu" label={t('settings.tab.memory')} active={activeTab === 'memory'} onClick={() => setActiveTab('memory')} />
+            <TabButton icon="extension" label={t('settings.tab.plugins')} active={activeTab === 'plugins'} onClick={() => setActiveTab('plugins')} />
+            <TabButton icon="pets" label={t('settings.tab.pets')} active={activeTab === 'pets'} onClick={() => setActiveTab('pets')} />
+            <TabButton icon="mouse" label={t('settings.tab.computerUse')} active={activeTab === 'computerUse'} onClick={() => setActiveTab('computerUse')} />
+            <TabButton icon="monitoring" label={t('settings.tab.activity')} active={activeTab === 'activity'} onClick={() => setActiveTab('activity')} />
+            <TabButton icon="account_tree" label={t('settings.tab.trace')} active={activeTab === 'trace'} onClick={() => setActiveTab('trace')} />
+            <TabButton icon="monitor_heart" label={t('settings.tab.diagnostics')} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
           </div>
           <div className="border-t border-[var(--color-border)]/40 pt-1">
-            <SettingsTabTrigger value="about" icon="info" label={t('settings.tab.about')} active={activeTab === 'about'} />
+            <TabButton icon="info" label={t('settings.tab.about')} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
           </div>
-        </TabsList>
+        </div>
 
         {/* Tab content; trace embeds a full-bleed page that manages its own scroll */}
-        <SettingsTabContent value="providers"><ProviderSettings /></SettingsTabContent>
-        <SettingsTabContent value="activity"><ActivitySettings /></SettingsTabContent>
-        <SettingsTabContent value="general"><GeneralSettings /></SettingsTabContent>
-        <SettingsTabContent value="h5Access"><H5AccessSettings /></SettingsTabContent>
-        <SettingsTabContent value="adapters"><AdapterSettings /></SettingsTabContent>
-        <SettingsTabContent value="terminal"><TerminalSettings showPreferences /></SettingsTabContent>
-        <SettingsTabContent value="mcp"><McpSettings /></SettingsTabContent>
-        <SettingsTabContent value="agents"><AgentManager /></SettingsTabContent>
-        <SettingsTabContent value="skills"><SkillSettings /></SettingsTabContent>
-        <SettingsTabContent value="memory"><MemorySettings /></SettingsTabContent>
-        <SettingsTabContent value="plugins"><PluginSettings /></SettingsTabContent>
-        <SettingsTabContent value="pets"><PetSettings /></SettingsTabContent>
-        <SettingsTabContent value="computerUse"><ComputerUseSettings /></SettingsTabContent>
-        <SettingsTabContent value="trace" fullBleed><TraceList /></SettingsTabContent>
-        <SettingsTabContent value="diagnostics"><DiagnosticsSettings /></SettingsTabContent>
-        <SettingsTabContent value="about"><AboutSettings /></SettingsTabContent>
-      </Tabs>
+        <div className={activeTab === 'trace' ? 'flex-1 flex min-h-0 flex-col overflow-hidden' : 'flex-1 overflow-y-auto px-8 py-6'}>
+          {activeTab === 'providers' && <ProviderSettings />}
+          {activeTab === 'activity' && <ActivitySettings />}
+          {activeTab === 'general' && <GeneralSettings />}
+          {activeTab === 'h5Access' && <H5AccessSettings />}
+          {activeTab === 'adapters' && <AdapterSettings />}
+          {activeTab === 'terminal' && <TerminalSettings showPreferences />}
+          {activeTab === 'mcp' && <McpSettings />}
+          {activeTab === 'agents' && <AgentManager />}
+          {activeTab === 'skills' && <SkillSettings />}
+          {activeTab === 'memory' && <MemorySettings />}
+          {activeTab === 'plugins' && <PluginSettings />}
+          {activeTab === 'pets' && <PetSettings />}
+          {activeTab === 'computerUse' && <ComputerUseSettings />}
+          {activeTab === 'trace' && <TraceList />}
+          {activeTab === 'diagnostics' && <DiagnosticsSettings />}
+          {activeTab === 'about' && <AboutSettings />}
+        </div>
+      </div>
     </div>
   )
 }
 
-function SettingsTabTrigger({
-  value,
-  icon,
-  label,
-  active,
-}: {
-  value: SettingsTab
-  icon: string
-  label: string
-  active: boolean
-}) {
+function TabButton({ icon, label, active, onClick }: { icon: string; label: string; active: boolean; onClick: () => void }) {
   return (
-    <TabsTrigger
-      value={value}
+    <button
+      onClick={onClick}
       aria-current={active ? 'page' : undefined}
-      onClick={() => {
-        const state = useUIStore.getState()
-        if (state.activeSettingsTab !== value) state.setActiveSettingsTab(value)
-      }}
-      className="w-full justify-start rounded-none px-4 py-2.5 text-left"
+      className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left transition-colors ${
+        active
+          ? 'bg-[var(--color-surface-selected)] text-[var(--color-text-primary)] font-medium'
+          : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+      }`}
     >
       <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{icon}</span>
       {label}
-    </TabsTrigger>
-  )
-}
-
-function SettingsTabContent({
-  value,
-  fullBleed = false,
-  children,
-}: {
-  value: SettingsTab
-  fullBleed?: boolean
-  children: ReactNode
-}) {
-  return (
-    <TabsContent
-      value={value}
-      className={fullBleed
-        ? 'min-h-0 flex-1 flex-col overflow-hidden data-[state=active]:flex'
-        : 'flex-1 overflow-y-auto px-8 py-6'}
-    >
-      {children}
-    </TabsContent>
+    </button>
   )
 }
 
@@ -485,8 +373,6 @@ function ProviderSettings() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [pendingDeleteProvider, setPendingDeleteProvider] = useState<SavedProvider | null>(null)
   const [isDeletingProvider, setIsDeletingProvider] = useState(false)
-  const deleteProviderTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const providerFormTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [testResults, setTestResults] = useState<Record<string, { loading: boolean; result?: ProviderTestResult }>>({})
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -506,30 +392,9 @@ function ProviderSettings() {
     [presets],
   )
 
-  const handleDelete = (provider: SavedProvider, trigger: HTMLButtonElement) => {
+  const handleDelete = async (provider: SavedProvider) => {
     if (activeId === provider.id) return
-    deleteProviderTriggerRef.current = trigger
     setPendingDeleteProvider(provider)
-  }
-
-  const restoreProviderFormFocus = () => {
-    window.setTimeout(() => providerFormTriggerRef.current?.focus(), 0)
-  }
-
-  const closeCreateProvider = () => {
-    setShowCreateModal(false)
-    restoreProviderFormFocus()
-  }
-
-  const closeEditProvider = () => {
-    setEditingProvider(null)
-    restoreProviderFormFocus()
-  }
-
-  const closeDeleteDialog = () => {
-    if (isDeletingProvider) return
-    setPendingDeleteProvider(null)
-    window.setTimeout(() => deleteProviderTriggerRef.current?.focus(), 0)
   }
 
   const confirmDelete = async () => {
@@ -593,16 +458,10 @@ function ProviderSettings() {
           <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('settings.providers.title')}</h2>
           <p className="text-sm text-[var(--color-text-tertiary)] mt-0.5">{t('settings.providers.description')}</p>
         </div>
-        <ShadcnButton
-          size="sm"
-          onClick={(event) => {
-            providerFormTriggerRef.current = event.currentTarget
-            setShowCreateModal(true)
-          }}
-        >
+        <Button size="sm" onClick={() => setShowCreateModal(true)}>
           <span className="material-symbols-outlined text-[16px]">add</span>
           {t('settings.providers.addProvider')}
-        </ShadcnButton>
+        </Button>
       </div>
 
       <DndContext
@@ -627,7 +486,7 @@ function ProviderSettings() {
                     title={t('settings.providers.officialName')}
                     subtitle={t('settings.providers.officialDesc')}
                     badges={isClaudeOfficialActive ? (
-                      <Badge variant="outline" className="min-h-0 border-[var(--color-brand)]/20 bg-[var(--color-brand)]/10 px-1.5 py-0.5 text-[10px] font-bold leading-none text-[var(--color-brand)]">{t('settings.providers.default')}</Badge>
+                      <span className="rounded border border-[var(--color-brand)]/18 bg-[var(--color-brand)]/12 px-1.5 py-0.5 text-[10px] font-bold leading-none text-[var(--color-brand)]">{t('settings.providers.default')}</span>
                     ) : null}
                     details={isClaudeOfficialActive ? (
                       <div className="border-t border-[var(--color-border-separator)] px-4 pb-4 pt-3">
@@ -649,7 +508,7 @@ function ProviderSettings() {
                     title={t('settings.providers.openaiOfficialName')}
                     subtitle={t('settings.providers.openaiOfficialDesc')}
                     badges={isOpenAIOfficialActive ? (
-                      <Badge variant="outline" className="min-h-0 border-[var(--color-brand)]/20 bg-[var(--color-brand)]/10 px-1.5 py-0.5 text-[10px] font-bold leading-none text-[var(--color-brand)]">{t('settings.providers.default')}</Badge>
+                      <span className="rounded border border-[var(--color-brand)]/18 bg-[var(--color-brand)]/12 px-1.5 py-0.5 text-[10px] font-bold leading-none text-[var(--color-brand)]">{t('settings.providers.default')}</span>
                     ) : null}
                     details={isOpenAIOfficialActive ? (
                       <div className="border-t border-[var(--color-border-separator)] px-4 pb-4 pt-3">
@@ -671,7 +530,7 @@ function ProviderSettings() {
                     title={t('settings.providers.grokOfficialName')}
                     subtitle={t('settings.providers.grokOfficialDesc')}
                     badges={isGrokOfficialActive ? (
-                      <Badge variant="outline" className="min-h-0 border-[var(--color-brand)]/20 bg-[var(--color-brand)]/10 px-1.5 py-0.5 text-[10px] font-bold leading-none text-[var(--color-brand)]">{t('settings.providers.default')}</Badge>
+                      <span className="rounded border border-[var(--color-brand)]/18 bg-[var(--color-brand)]/12 px-1.5 py-0.5 text-[10px] font-bold leading-none text-[var(--color-brand)]">{t('settings.providers.default')}</span>
                     ) : null}
                     details={isGrokOfficialActive ? (
                       <div className="border-t border-[var(--color-border-separator)] px-4 pb-4 pt-3">
@@ -699,23 +558,20 @@ function ProviderSettings() {
                   badges={(
                     <>
                       {preset && preset.id !== 'custom' && (
-                        <Badge variant="secondary" className="min-h-0 px-1.5 py-0.5 text-[10px] leading-none">{preset.name}</Badge>
+                        <span className="rounded bg-[var(--color-surface-container-high)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--color-text-tertiary)]">{preset.name}</span>
                       )}
                       {provider.apiFormat && provider.apiFormat !== 'anthropic' && (
-                        <Badge variant="secondary" className="min-h-0 px-1.5 py-0.5 text-[10px] leading-none text-[var(--color-warning)]">
+                        <span className="rounded bg-[var(--color-surface-container-high)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--color-warning)]">
                           {provider.apiFormat === 'openai_chat' ? 'OpenAI Chat' : 'OpenAI Responses'}
-                        </Badge>
+                        </span>
                       )}
                       {isActive && (
-                        <Badge variant="outline" className="min-h-0 border-[var(--color-brand)]/20 bg-[var(--color-brand)]/10 px-1.5 py-0.5 text-[10px] font-bold leading-none text-[var(--color-brand)]">{t('settings.providers.default')}</Badge>
+                        <span className="rounded border border-[var(--color-brand)]/18 bg-[var(--color-brand)]/12 px-1.5 py-0.5 text-[10px] font-bold leading-none text-[var(--color-brand)]">{t('settings.providers.default')}</span>
                       )}
                     </>
                   )}
                   result={test && !test.loading && test.result ? (
-                    <Alert
-                      variant={test.result.connectivity.success && (!test.result.proxy || test.result.proxy.success) ? 'default' : 'destructive'}
-                      className="mt-2 gap-0.5 px-2 py-1.5 text-xs"
-                    >
+                    <div className="mt-1 flex flex-col gap-0.5 text-xs">
                       <span className={test.result.connectivity.success ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}>
                         {test.result.connectivity.success
                           ? t('settings.providers.connectivityOk', { latency: String(test.result.connectivity.latencyMs) })
@@ -728,26 +584,17 @@ function ProviderSettings() {
                             : t('settings.providers.proxyFailed', { error: test.result.proxy.error || '' })}
                         </span>
                       )}
-                    </Alert>
+                    </div>
                   ) : null}
                   actions={(
                     <>
                       {!isActive && (
-                        <ShadcnButton variant="ghost" size="sm" onClick={() => handleActivate(provider.id)}>{t('settings.providers.setDefault')}</ShadcnButton>
+                        <Button variant="ghost" size="sm" onClick={() => handleActivate(provider.id)}>{t('settings.providers.setDefault')}</Button>
                       )}
-                      <LoadingButton variant="ghost" size="sm" onClick={() => handleTest(provider)} loading={test?.loading}>{t('settings.providers.test')}</LoadingButton>
-                      <ShadcnButton
-                        variant="ghost"
-                        size="sm"
-                        onClick={(event) => {
-                          providerFormTriggerRef.current = event.currentTarget
-                          setEditingProvider(provider)
-                        }}
-                      >
-                        {t('settings.providers.edit')}
-                      </ShadcnButton>
+                      <Button variant="ghost" size="sm" onClick={() => handleTest(provider)} loading={test?.loading}>{t('settings.providers.test')}</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setEditingProvider(provider)}>{t('settings.providers.edit')}</Button>
                       {!isActive && (
-                        <ShadcnButton variant="ghost" size="sm" onClick={(event) => handleDelete(provider, event.currentTarget)} className="text-[var(--color-error)] hover:text-[var(--color-error)]">{t('common.delete')}</ShadcnButton>
+                        <Button variant="ghost" size="sm" onClick={() => handleDelete(provider)} className="text-[var(--color-error)] hover:text-[var(--color-error)]">{t('common.delete')}</Button>
                       )}
                     </>
                   )}
@@ -759,53 +606,35 @@ function ProviderSettings() {
       </DndContext>
 
       {isLoading && providers.length === 0 ? (
-        <div className="grid gap-2 py-2" role="status" aria-label={t('common.loading')}>
-          <Skeleton className="h-[66px] w-full" />
-          <Skeleton className="h-[66px] w-full" />
+        <div className="flex justify-center py-8">
+          <div className="animate-spin w-5 h-5 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
         </div>
       ) : null}
 
       {/* Create Modal — conditionally rendered so state resets on close */}
       {showCreateModal && (
-        <ProviderFormModal open={true} onClose={closeCreateProvider} mode="create" presets={presets} />
+        <ProviderFormModal open={true} onClose={() => setShowCreateModal(false)} mode="create" presets={presets} />
       )}
 
       {/* Edit Modal */}
       {editingProvider && (
-        <ProviderFormModal key={editingProvider.id} open={true} onClose={closeEditProvider} mode="edit" provider={editingProvider} presets={presets} />
+        <ProviderFormModal key={editingProvider.id} open={true} onClose={() => setEditingProvider(null)} mode="edit" provider={editingProvider} presets={presets} />
       )}
 
-      <AlertDialog
+      <ConfirmDialog
         open={pendingDeleteProvider !== null}
-        onOpenChange={(open) => {
-          if (open) return
-          closeDeleteDialog()
+        onClose={() => {
+          if (isDeletingProvider) return
+          setPendingDeleteProvider(null)
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('common.delete')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingDeleteProvider ? t('settings.providers.confirmDelete', { name: pendingDeleteProvider.name }) : ''}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeletingProvider}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction asChild>
-              <LoadingButton
-                variant="destructive"
-                loading={isDeletingProvider}
-                onClick={(event) => {
-                  event.preventDefault()
-                  void confirmDelete()
-                }}
-              >
-                {t('common.delete')}
-              </LoadingButton>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onConfirm={confirmDelete}
+        title={t('common.delete')}
+        body={pendingDeleteProvider ? t('settings.providers.confirmDelete', { name: pendingDeleteProvider.name }) : ''}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        confirmVariant="danger"
+        loading={isDeletingProvider}
+      />
     </div>
   )
 }
@@ -850,34 +679,33 @@ function SortableProviderCard({
   }
 
   return (
-    <Card
+    <div
       ref={setNodeRef}
       style={style}
       data-testid={providerItemTestId(item)}
-      className={`group relative flex flex-col overflow-visible rounded-[8px] transition-colors ${
+      className={`group relative flex flex-col rounded-[8px] border transition-colors ${
         isActive
           ? 'border-[var(--color-border-focus)] bg-[var(--color-surface-container-low)]'
           : 'border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)]'
       } ${isDragging ? 'shadow-[var(--shadow-dropdown)] opacity-90' : ''}`}
     >
       <div className="flex items-center gap-2 px-3 py-3">
-        <IconButton
+        <button
+          type="button"
           {...attributes}
           {...listeners}
-          label={dragLabel}
-          tooltip={dragLabel}
-          variant="ghost"
-          className="h-8 w-8 cursor-grab rounded-[6px] text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-container-high)] hover:text-[var(--color-text-secondary)] active:cursor-grabbing"
+          aria-label={dragLabel}
+          title={dragLabel}
+          className="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded-[6px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-container-high)] hover:text-[var(--color-text-secondary)] focus:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] active:cursor-grabbing"
           style={{ touchAction: 'none' }}
         >
-          <GripVertical className="h-4 w-4" aria-hidden="true" />
-        </IconButton>
-        <ShadcnButton
-          variant="ghost"
+          <GripVertical className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
           onClick={onActivate}
           aria-disabled={!onActivate}
-          disabled={!onActivate}
-          className={`h-auto min-w-0 flex-1 items-center justify-start gap-3 rounded-[6px] px-0 py-0 text-left whitespace-normal disabled:opacity-100 ${
+          className={`flex min-w-0 flex-1 items-center gap-3 rounded-[6px] text-left focus:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] ${
             onActivate ? 'cursor-pointer' : 'cursor-default'
           }`}
         >
@@ -890,7 +718,7 @@ function SortableProviderCard({
             <span className="mt-0.5 block truncate text-xs text-[var(--color-text-tertiary)]">{subtitle}</span>
             {result}
           </span>
-        </ShadcnButton>
+        </button>
         {actions && (
           <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
             {actions}
@@ -898,7 +726,7 @@ function SortableProviderCard({
         )}
       </div>
       {details}
-    </Card>
+    </div>
   )
 }
 
@@ -1593,7 +1421,6 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
     ? [...configuredContextSummary, fallbackContextSummary].join(' · ')
     : t('settings.providers.contextSummaryAuto')
   const shouldShowContextFields = showContextSettings || modelContextWindowErrorSlots.length > 0 || !!autoCompactWindowErrorKey
-  const testPassed = !!testResult?.connectivity.success && (testResult.proxy?.success ?? true)
   const handleAutoCompactWindowChange = (value: string) => {
     setAutoCompactWindow(value)
     setSettingsJson((current) => updateSettingsJsonAutoCompactWindow(current, value))
@@ -1665,21 +1492,17 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
     ))
   }
   const renderPresetButton = (preset: ProviderPreset) => (
-    <ShadcnButton
+    <button
       key={preset.id}
-      type="button"
-      variant="outline"
-      size="sm"
       onClick={() => handlePresetChange(preset)}
-      aria-pressed={selectedPreset.id === preset.id}
-      className={`rounded-full ${
+      className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-all ${
         selectedPreset.id === preset.id
           ? 'border-[var(--color-brand)] bg-[var(--color-surface-container-high)] text-[var(--color-brand)] shadow-[var(--shadow-focus-ring)]'
-          : ''
+          : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)]'
       }`}
     >
       {preset.name}
-    </ShadcnButton>
+    </button>
   )
 
   const handleSubmit = async () => {
@@ -1784,461 +1607,274 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
     }
   }
 
-  const handleSettingsJsonChange = (raw: string) => {
-    try {
-      const parsed = restoreSettingsJsonSecrets(JSON.parse(raw), settingsJson, apiKey)
-      setSettingsJson(JSON.stringify(parsed, null, 2))
-      setSettingsJsonError(null)
-      const env = parsed.env as Record<string, string> | undefined
-      if (!env) return
-
-      if (env.ANTHROPIC_BASE_URL) {
-        setBaseUrl(env.ANTHROPIC_BASE_URL)
-        if (mode === 'create') {
-          const matchedPreset = availablePresets.find(
-            (preset) => preset.id !== 'custom' && preset.baseUrl === env.ANTHROPIC_BASE_URL,
-          )
-          const targetPreset = requirePreset(
-            matchedPreset ?? availablePresets.find((preset) => preset.id === 'custom'),
-          )
-          if (targetPreset.id !== selectedPreset.id) {
-            jsonPastedRef.current = true
-            setSelectedPreset(targetPreset)
-          }
-        }
-      }
-
-      const nextApiKey = env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY
-      if (
-        nextApiKey
-        && nextApiKey !== '(your API key)'
-        && nextApiKey !== API_KEY_JSON_PLACEHOLDER
-      ) {
-        setApiKey(nextApiKey)
-      }
-      const nextAuthStrategy = inferAuthStrategyFromEnv(env)
-      if (nextAuthStrategy) setAuthStrategy(nextAuthStrategy)
-      setToolSearchEnabled(readToolSearchEnabledFromEnv(env))
-      setDisableExperimentalBetas(readDisableExperimentalBetasFromEnv(env))
-      setAutoCompactWindow(
-        env[AUTO_COMPACT_WINDOW_ENV_KEY] !== undefined
-          ? String(env[AUTO_COMPACT_WINDOW_ENV_KEY])
-          : '',
-      )
-
-      let parsedContextWindows: Record<string, number> = {}
-      if (typeof env[MODEL_CONTEXT_WINDOWS_ENV_KEY] === 'string') {
-        try {
-          const parsedContext = JSON.parse(
-            env[MODEL_CONTEXT_WINDOWS_ENV_KEY],
-          ) as Record<string, unknown>
-          parsedContextWindows = Object.fromEntries(
-            Object.entries(parsedContext)
-              .filter(([, value]) => typeof value === 'number' && Number.isInteger(value)),
-          ) as Record<string, number>
-        } catch {
-          parsedContextWindows = {}
-        }
-      }
-
-      const newModels = readModelMappingFromSettingsEnv(env)
-      if (Object.keys(newModels).length > 0) {
-        setModels((previousModels) => {
-          const mergedModels = { ...previousModels, ...newModels }
-          const nextModel1mSupport = {
-            main: hasModel1mMarker(mergedModels.main),
-            haiku: hasModel1mMarker(mergedModels.haiku),
-            sonnet: hasModel1mMarker(mergedModels.sonnet),
-            opus: hasModel1mMarker(mergedModels.opus),
-          }
-          const nextModels = stripModel1mMarkers(mergedModels)
-          setModel1mSupport(nextModel1mSupport)
-          setModelContextInputs(apply1mSupportToContextInputs(
-            getModelContextInputs(nextModels, {
-              ...selectedPreset,
-              modelContextWindows: parsedContextWindows,
-            }),
-            nextModel1mSupport,
-          ))
-          return nextModels
-        })
-      } else if (Object.keys(parsedContextWindows).length > 0) {
-        setModelContextInputs(getModelContextInputs(models, {
-          ...selectedPreset,
-          modelContextWindows: parsedContextWindows,
-        }))
-      }
-    } catch (error) {
-      setSettingsJson(raw)
-      setSettingsJsonError(error instanceof Error ? error.message : 'Invalid JSON')
-    }
-  }
-
   return (
-    <Dialog
+    <Modal
       open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) handleClose()
-      }}
+      onClose={handleClose}
+      title={mode === 'create' ? t('settings.providers.addTitle') : t('settings.providers.editTitle')}
+      width={720}
+      footer={
+        <>
+          <Button variant="secondary" onClick={handleClose} disabled={isSubmitting}>{t('common.cancel')}</Button>
+          <Button onClick={handleSubmit} disabled={!canSubmit || isSubmitting} loading={isSubmitting}>
+            {mode === 'create' ? t('common.add') : t('common.save')}
+          </Button>
+        </>
+      }
     >
-      <DialogContent
-        showCloseButton={false}
-        aria-describedby={undefined}
-        className="flex max-h-[85vh] w-[min(92vw,720px)] flex-col gap-0 overflow-hidden p-0"
-        onEscapeKeyDown={(event) => {
-          if (isSubmitting) event.preventDefault()
-        }}
-        onInteractOutside={(event) => {
-          if (isSubmitting) event.preventDefault()
-        }}
-      >
-        <DialogHeader className="flex-row items-center justify-between px-6 pb-4 pt-6">
-          <DialogTitle>
-            {mode === 'create'
-              ? t('settings.providers.addTitle')
-              : t('settings.providers.editTitle')}
-          </DialogTitle>
-          <DialogClose asChild>
-            <ShadcnButton
-              variant="ghost"
-              size="icon"
-              disabled={isSubmitting}
-              aria-label="Close dialog"
-              className="rounded-full"
-            >
-              <X aria-hidden="true" />
-            </ShadcnButton>
-          </DialogClose>
-        </DialogHeader>
-
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 pb-4">
-          {mode === 'create' && (
-            <div data-slot="provider-presets">
-              <Label className="mb-2">{t('settings.providers.preset')}</Label>
-              <div className="flex flex-col gap-2">
-                <div className="flex flex-wrap gap-2">
-                  {regularPresets.map(renderPresetButton)}
-                </div>
-                {featuredPresets.length > 0 && (
-                  <div className="flex flex-wrap gap-2 border-t border-[var(--color-border)]/60 pt-2">
-                    {featuredPresets.map(renderPresetButton)}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <SettingField
-            id="provider-name"
-            label={t('settings.providers.name')}
-            required
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder={t('settings.providers.namePlaceholder')}
-          />
-
-          <SettingField
-            id="provider-notes"
-            label={t('settings.providers.notes')}
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            placeholder={t('settings.providers.notesPlaceholder')}
-          />
-
-          <SettingField
-            id="provider-base-url"
-            label={t('settings.providers.baseUrl')}
-            required
-            value={baseUrl}
-            onChange={(event) => handleBaseUrlChange(event.target.value)}
-            placeholder={t('settings.providers.baseUrlPlaceholder')}
-          />
-
-          {(isCustom || mode === 'edit') ? (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="provider-api-format">
-                {t('settings.providers.apiFormat')}
-              </Label>
-              <Select
-                value={apiFormat}
-                onValueChange={(value) => handleApiFormatChange(value as ApiFormat)}
-              >
-                <SelectTrigger
-                  id="provider-api-format"
-                  aria-label={t('settings.providers.apiFormat')}
-                >
-                  <SelectValue>{selectedApiFormatLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {apiFormatItems.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      <span className="inline-flex items-center gap-2">
-                        {item.icon}
-                        <span>{item.label}</span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {apiFormat !== 'anthropic' && (
-                <p className="text-[11px] text-[var(--color-text-tertiary)]">
-                  {t('settings.providers.proxyHint')}
-                </p>
-              )}
-            </div>
-          ) : apiFormat !== 'anthropic' ? (
-            <div className="flex flex-col gap-1.5">
-              <Label>{t('settings.providers.apiFormat')}</Label>
-              <Badge variant="outline" className="min-h-9 w-full justify-start px-3">
-                {apiFormat === 'openai_chat'
-                  ? t('settings.providers.apiFormatOpenaiChat')
-                  : t('settings.providers.apiFormatOpenaiResponses')}
-              </Badge>
-            </div>
-          ) : null}
-
-          {apiFormat === 'anthropic' && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="provider-auth-strategy">
-                {t('settings.providers.authStrategy')}
-              </Label>
-              <Select
-                value={authStrategy}
-                onValueChange={(value) => (
-                  handleAuthStrategyChange(value as ProviderAuthStrategy)
-                )}
-              >
-                <SelectTrigger
-                  id="provider-auth-strategy"
-                  aria-label={t('settings.providers.authStrategy')}
-                >
-                  <SelectValue>{selectedAuthStrategyLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {authStrategyItems.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      <span className="inline-flex items-center gap-2">
-                        {item.icon}
-                        <span>{item.label}</span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] leading-5 text-[var(--color-text-tertiary)]">
-                {authStrategyItems.find((item) => item.value === authStrategy)?.description}
-              </p>
-            </div>
-          )}
-
-          <Card
-            className={`flex items-start gap-3 p-3 ${
-              toolSearchUnsupported
-                ? 'opacity-70'
-                : 'transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)]'
-            }`}
-          >
-            <Checkbox
-              id="provider-tool-search"
-              checked={toolSearchEnabled && !toolSearchUnsupported}
-              disabled={toolSearchUnsupported}
-              onCheckedChange={(checked) => handleToolSearchToggle(checked === true)}
-              aria-label={t('settings.providers.toolSearchEnabled')}
-              className="mt-0.5"
-            />
-            <Label
-              htmlFor="provider-tool-search"
-              className={toolSearchUnsupported ? 'cursor-not-allowed' : 'cursor-pointer'}
-            >
-              <span className="min-w-0">
-                <span className="block text-sm font-medium">
-                  {t('settings.providers.toolSearchEnabled')}
-                </span>
-                <span className="mt-1 block text-xs font-normal leading-5 text-[var(--color-text-tertiary)]">
-                  {toolSearchDescription}
-                </span>
-              </span>
-            </Label>
-          </Card>
-
-          <Card className="flex items-start gap-3 p-3 transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)]">
-            <Checkbox
-              id="provider-disable-betas"
-              checked={disableExperimentalBetas}
-              onCheckedChange={(checked) => (
-                handleDisableExperimentalBetasToggle(checked === true)
-              )}
-              aria-label={t('settings.providers.disableExperimentalBetas')}
-              className="mt-0.5"
-            />
-            <Label htmlFor="provider-disable-betas" className="cursor-pointer">
-              <span className="min-w-0">
-                <span className="block text-sm font-medium">
-                  {t('settings.providers.disableExperimentalBetas')}
-                </span>
-                <span className="mt-1 block text-xs font-normal leading-5 text-[var(--color-text-tertiary)]">
-                  {t('settings.providers.disableExperimentalBetasDesc')}
-                </span>
-              </span>
-            </Label>
-          </Card>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="provider-api-key">
-              {t('settings.providers.apiKey')}
-              {mode === 'create' && requiresApiKey && (
-                <span className="text-[var(--color-error)]">*</span>
-              )}
-            </Label>
-            <div className="relative">
-              <ShadcnInput
-                id="provider-api-key"
-                type={showApiKey ? 'text' : 'password'}
-                value={apiKey}
-                onChange={(event) => handleApiKeyChange(event.target.value)}
-                placeholder="sk-..."
-                className="pr-10"
-              />
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                label={showApiKey ? 'Hide API Key' : 'Show API Key'}
-                onClick={() => setShowApiKey((visible) => !visible)}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2"
-              >
-                {showApiKey
-                  ? <EyeOff aria-hidden="true" />
-                  : <Eye aria-hidden="true" />}
-              </IconButton>
-            </div>
-          </div>
-
-          {(apiKeyUrl || promoText) && (
-            <div className="-mt-2 flex flex-col gap-2">
-              {apiKeyUrl && (
-                <ShadcnButton
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openExternalUrl(apiKeyUrl)}
-                  className="w-fit text-[var(--color-brand)]"
-                >
-                  <KeyRound aria-hidden="true" />
-                  {t('settings.providers.getApiKey')}
-                  <ExternalLink aria-hidden="true" />
-                </ShadcnButton>
-              )}
-              {promoText && (
-                apiKeyUrl ? (
-                  <ShadcnButton
-                    type="button"
-                    variant="outline"
-                    onClick={() => openExternalUrl(apiKeyUrl)}
-                    className="h-auto w-full justify-start whitespace-normal border-[var(--color-brand)]/25 bg-[var(--color-brand)]/8 px-3 py-2 text-left text-xs font-normal leading-5"
-                  >
-                    <Lightbulb className="mt-0.5 self-start text-[var(--color-brand)]" aria-hidden="true" />
-                    <span className="flex-1">{promoText}</span>
-                    <ExternalLink className="self-start text-[var(--color-brand)]" aria-hidden="true" />
-                  </ShadcnButton>
-                ) : (
-                  <Alert>
-                    <AlertDescription>{promoText}</AlertDescription>
-                  </Alert>
-                )
-              )}
-            </div>
-          )}
-
+      <div className="flex flex-col gap-4">
+        {/* Preset chips */}
+        {mode === 'create' && (
           <div>
-            <Label className="mb-2">{t('settings.providers.modelMapping')}</Label>
-            <div className="grid grid-cols-2 gap-3">
-              {MODEL_SLOTS.map((slot) => {
-                const labelKey = slot === 'main'
-                  ? 'settings.providers.mainModel'
-                  : slot === 'haiku'
-                    ? 'settings.providers.haikuModel'
-                    : slot === 'sonnet'
-                      ? 'settings.providers.sonnetModel'
-                      : 'settings.providers.opusModel'
-                const label = t(labelKey)
-                const checkboxId = `provider-model-1m-${slot}`
-                return (
-                  <div key={slot} className="min-w-0">
-                    <SettingField
-                      id={`provider-model-${slot}`}
-                      label={label}
-                      required={slot === 'main'}
-                      value={models[slot]}
-                      onChange={(event) => handleModelChange(slot, event.target.value)}
-                      placeholder={
-                        slot === 'main'
-                          ? t('settings.providers.modelIdPlaceholder')
-                          : t('settings.providers.sameAsMain')
-                      }
-                    />
-                    <div className="mt-1 flex h-6 items-center gap-1.5 px-1">
-                      <Checkbox
-                        id={checkboxId}
-                        checked={model1mSupport[slot]}
-                        onCheckedChange={(checked) => (
-                          handleModel1mSupportChange(slot, checked === true)
-                        )}
-                        aria-label={`1M support: ${slot}`}
-                        className="size-3.5"
-                      />
-                      <Label
-                        htmlFor={checkboxId}
-                        className="cursor-pointer text-xs font-normal text-[var(--color-text-secondary)]"
-                      >
-                        {t('settings.providers.model1mSupportShort')}
-                      </Label>
-                    </div>
-                  </div>
-                )
-              })}
+            <label className="text-sm font-medium text-[var(--color-text-primary)] mb-2 block">{t('settings.providers.preset')}</label>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap gap-2">
+                {regularPresets.map(renderPresetButton)}
+              </div>
+              {featuredPresets.length > 0 && (
+                <div className="flex flex-wrap gap-2 border-t border-[var(--color-border)]/60 pt-2">
+                  {featuredPresets.map(renderPresetButton)}
+                </div>
+              )}
             </div>
           </div>
+        )}
 
-          <Collapsible
-            open={shouldShowContextFields}
-            onOpenChange={setShowContextSettings}
-          >
-            <Card className="overflow-hidden">
-              <CollapsibleTrigger asChild>
-                <ShadcnButton
+        <Input label={t('settings.providers.name')} required value={name} onChange={(e) => setName(e.target.value)} placeholder={t('settings.providers.namePlaceholder')} />
+
+        <Input label={t('settings.providers.notes')} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('settings.providers.notesPlaceholder')} />
+
+        <Input label={t('settings.providers.baseUrl')} required value={baseUrl} onChange={(e) => handleBaseUrlChange(e.target.value)} placeholder={t('settings.providers.baseUrlPlaceholder')} />
+
+        {/* API Format */}
+        {(isCustom || mode === 'edit') ? (
+          <div>
+            <label className="text-sm font-medium text-[var(--color-text-primary)] mb-1 block">{t('settings.providers.apiFormat')}</label>
+            <Dropdown<ApiFormat>
+              items={apiFormatItems}
+              value={apiFormat}
+              onChange={handleApiFormatChange}
+              width="100%"
+              className="block w-full"
+              trigger={
+                <button
                   type="button"
-                  variant="ghost"
-                  className="h-auto w-full items-start justify-start rounded-none px-3 py-3 text-left"
+                  className="flex h-10 w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-left text-sm text-[var(--color-text-primary)] outline-none transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-container-low)] focus-visible:border-[var(--color-border-focus)] focus-visible:shadow-[var(--shadow-focus-ring)]"
                 >
-                  <Shrink className="mt-0.5 text-[var(--color-brand)]" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 whitespace-normal">
-                    <span className="block text-sm font-medium">
-                      {t('settings.providers.contextSettingsTitle')}
-                    </span>
-                    <span className="mt-1 block truncate text-xs font-normal text-[var(--color-text-secondary)]">
-                      {contextSummary}
-                    </span>
-                    <span className="mt-1 block text-[11px] font-normal leading-5 text-[var(--color-text-tertiary)]">
-                      {t('settings.providers.contextSettingsDesc')}
-                    </span>
-                  </span>
-                  <span className="mt-0.5 inline-flex items-center gap-1 text-xs text-[var(--color-brand)]">
-                    {shouldShowContextFields
-                      ? t('settings.providers.contextSettingsHide')
-                      : t('settings.providers.contextSettingsEdit')}
-                    {shouldShowContextFields
-                      ? <ChevronUp aria-hidden="true" />
-                      : <ChevronDown aria-hidden="true" />}
-                  </span>
-                </ShadcnButton>
-              </CollapsibleTrigger>
+                  <span className="min-w-0 flex-1 truncate">{selectedApiFormatLabel}</span>
+                  <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">expand_more</span>
+                </button>
+              }
+            />
+            {apiFormat !== 'anthropic' && (
+              <p className="text-[11px] text-[var(--color-text-tertiary)] mt-1">{t('settings.providers.proxyHint')}</p>
+            )}
+          </div>
+        ) : apiFormat !== 'anthropic' ? (
+          <div>
+            <label className="text-sm font-medium text-[var(--color-text-primary)] mb-1 block">{t('settings.providers.apiFormat')}</label>
+            <div className="text-xs text-[var(--color-text-tertiary)] px-3 py-2 rounded-[var(--radius-md)] bg-[var(--color-surface-container-low)] border border-[var(--color-border)]">
+              {apiFormat === 'openai_chat' ? t('settings.providers.apiFormatOpenaiChat') : t('settings.providers.apiFormatOpenaiResponses')}
+            </div>
+          </div>
+        ) : null}
 
-              <CollapsibleContent className="border-t border-[var(--color-border)] px-3 pb-3 pt-3">
-                <Label className="mb-2">
-                  {t('settings.providers.modelContextWindows')}
-                </Label>
-                <div className="grid grid-cols-2 gap-3">
+        {apiFormat === 'anthropic' && (
+          <div>
+            <label className="text-sm font-medium text-[var(--color-text-primary)] mb-1 block">{t('settings.providers.authStrategy')}</label>
+            <Dropdown<ProviderAuthStrategy>
+              items={authStrategyItems}
+              value={authStrategy}
+              onChange={handleAuthStrategyChange}
+              width="100%"
+              className="block w-full"
+              trigger={
+                <button
+                  type="button"
+                  className="flex min-h-10 w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-left text-sm text-[var(--color-text-primary)] outline-none transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-container-low)] focus-visible:border-[var(--color-border-focus)] focus-visible:shadow-[var(--shadow-focus-ring)]"
+                >
+                  <span className="min-w-0 flex-1 truncate">{selectedAuthStrategyLabel}</span>
+                  <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">expand_more</span>
+                </button>
+              }
+            />
+          </div>
+        )}
+
+        <label
+          className={`relative flex items-start gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-3 transition-colors ${
+            toolSearchUnsupported
+              ? 'cursor-not-allowed opacity-70'
+              : 'cursor-pointer hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)]'
+          }`}
+        >
+          <input
+            type="checkbox"
+            aria-label={t('settings.providers.toolSearchEnabled')}
+            checked={toolSearchEnabled && !toolSearchUnsupported}
+            disabled={toolSearchUnsupported}
+            onChange={(e) => handleToolSearchToggle(e.target.checked)}
+            className={SETTINGS_CHECKBOX_INPUT_CLASS}
+          />
+          <SettingsCheckboxMark checked={toolSearchEnabled && !toolSearchUnsupported} disabled={toolSearchUnsupported} />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">
+              {t('settings.providers.toolSearchEnabled')}
+            </div>
+            <div className="mt-1 text-xs leading-5 text-[var(--color-text-tertiary)]">
+              {toolSearchDescription}
+            </div>
+          </div>
+        </label>
+
+        <label className="relative flex cursor-pointer items-start gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-3 transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)]">
+          <input
+            type="checkbox"
+            aria-label={t('settings.providers.disableExperimentalBetas')}
+            checked={disableExperimentalBetas}
+            onChange={(e) => handleDisableExperimentalBetasToggle(e.target.checked)}
+            className={SETTINGS_CHECKBOX_INPUT_CLASS}
+          />
+          <SettingsCheckboxMark checked={disableExperimentalBetas} />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">
+              {t('settings.providers.disableExperimentalBetas')}
+            </div>
+            <div className="mt-1 text-xs leading-5 text-[var(--color-text-tertiary)]">
+              {t('settings.providers.disableExperimentalBetasDesc')}
+            </div>
+          </div>
+        </label>
+
+        <div className="flex flex-col gap-1">
+          <label htmlFor="provider-api-key" className="text-sm font-medium text-[var(--color-text-primary)]">
+            {t('settings.providers.apiKey')}
+            {mode === 'create' && requiresApiKey && <span className="text-[var(--color-error)] ml-0.5">*</span>}
+          </label>
+          <div className="relative">
+            <input
+              id="provider-api-key"
+              type={showApiKey ? 'text' : 'password'}
+              value={apiKey}
+              onChange={(e) => handleApiKeyChange(e.target.value)}
+              placeholder="sk-..."
+              className="h-10 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 pr-10 text-sm text-[var(--color-text-primary)] outline-none transition-colors duration-150 placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-border-focus)] focus:shadow-[var(--shadow-focus-ring)]"
+            />
+            <button
+              type="button"
+              onClick={() => setShowApiKey((visible) => !visible)}
+              aria-label={showApiKey ? 'Hide API Key' : 'Show API Key'}
+              className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus:outline-none focus:shadow-[var(--shadow-focus-ring)]"
+            >
+              <span className="material-symbols-outlined text-[16px]">
+                {showApiKey ? 'visibility_off' : 'visibility'}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {(apiKeyUrl || promoText) && (
+          <div className="-mt-2 flex flex-col gap-1.5">
+            {apiKeyUrl && (
+              <button
+                type="button"
+                onClick={() => openExternalUrl(apiKeyUrl)}
+                className="group inline-flex h-6 w-fit cursor-pointer items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1.5 text-[11px] font-medium leading-none text-[var(--color-brand)] transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus:outline-none focus:shadow-[var(--shadow-focus-ring)]"
+              >
+                <span className="material-symbols-outlined text-[13px]">key</span>
+                {t('settings.providers.getApiKey')}
+                <span className="material-symbols-outlined text-[9px] opacity-60 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5">arrow_outward</span>
+              </button>
+            )}
+            {promoText && (
+              <button
+                type="button"
+                onClick={() => apiKeyUrl && openExternalUrl(apiKeyUrl)}
+                disabled={!apiKeyUrl}
+                className="group flex w-full cursor-pointer items-start gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-brand)]/25 bg-[var(--color-brand)]/8 px-2.5 py-1.5 text-left text-[11px] leading-5 text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-brand)]/45 hover:bg-[var(--color-brand)]/12 focus:outline-none focus:shadow-[var(--shadow-focus-ring)] disabled:cursor-default disabled:hover:border-[var(--color-brand)]/25 disabled:hover:bg-[var(--color-brand)]/8"
+              >
+                <span className="material-symbols-outlined mt-0.5 text-[13px] text-[var(--color-brand)]">tips_and_updates</span>
+                <span>{promoText}</span>
+                {apiKeyUrl && (
+                  <span className="material-symbols-outlined ml-auto mt-1 text-[10px] text-[var(--color-brand)] opacity-45 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5">arrow_outward</span>
+                )}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Model Mapping */}
+        <div>
+          <label className="text-sm font-medium text-[var(--color-text-primary)] mb-2 block">{t('settings.providers.modelMapping')}</label>
+          <div className="grid grid-cols-2 gap-2">
+            {MODEL_SLOTS.map((slot) => {
+              const labelKey = slot === 'main'
+                ? 'settings.providers.mainModel'
+                : slot === 'haiku'
+                  ? 'settings.providers.haikuModel'
+                  : slot === 'sonnet'
+                    ? 'settings.providers.sonnetModel'
+                    : 'settings.providers.opusModel'
+              const label = t(labelKey)
+              return (
+                <div key={slot} className="min-w-0">
+                  <Input
+                    label={label}
+                    required={slot === 'main'}
+                    value={models[slot]}
+                    onChange={(e) => handleModelChange(slot, e.target.value)}
+                    placeholder={slot === 'main' ? t('settings.providers.modelIdPlaceholder') : t('settings.providers.sameAsMain')}
+                  />
+                  <label className="mt-1 inline-flex h-6 w-fit cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-1 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]">
+                    <input
+                      type="checkbox"
+                      checked={model1mSupport[slot]}
+                      onChange={(e) => handleModel1mSupportChange(slot, e.target.checked)}
+                      aria-label={`1M support: ${slot}`}
+                      className="h-3.5 w-3.5 rounded border-[var(--color-border)] text-[var(--color-brand)] accent-[var(--color-brand)] focus:ring-[var(--color-brand)]"
+                    />
+                    <span>{t('settings.providers.model1mSupportShort')}</span>
+                  </label>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
+          <button
+            type="button"
+            onClick={() => setShowContextSettings((visible) => !visible)}
+            className="flex w-full items-start gap-3 px-3 py-3 text-left outline-none transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:shadow-[var(--shadow-focus-ring)]"
+            aria-expanded={shouldShowContextFields}
+          >
+            <span className="material-symbols-outlined mt-0.5 text-[18px] text-[var(--color-brand)]">compress</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-[var(--color-text-primary)]">
+                {t('settings.providers.contextSettingsTitle')}
+              </span>
+              <span className="mt-1 block truncate text-xs text-[var(--color-text-secondary)]">
+                {contextSummary}
+              </span>
+              <span className="mt-1 block text-[11px] leading-5 text-[var(--color-text-tertiary)]">
+                {t('settings.providers.contextSettingsDesc')}
+              </span>
+            </span>
+            <span className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-[var(--color-brand)]">
+              {shouldShowContextFields
+                ? t('settings.providers.contextSettingsHide')
+                : t('settings.providers.contextSettingsEdit')}
+              <span className="material-symbols-outlined text-[16px]">
+                {shouldShowContextFields ? 'expand_less' : 'expand_more'}
+              </span>
+            </span>
+          </button>
+
+          {shouldShowContextFields && (
+            <div className="border-t border-[var(--color-border)] px-3 pb-3 pt-3">
+              <div>
+                <label className="text-sm font-medium text-[var(--color-text-primary)] mb-2 block">{t('settings.providers.modelContextWindows')}</label>
+                <div className="grid grid-cols-2 gap-2">
                   {MODEL_SLOTS.map((slot) => {
                     const errorKey = getModelContextWindowErrorKey(modelContextInputs[slot])
                     const labelKey = slot === 'main'
@@ -2248,162 +1884,179 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
                         : slot === 'sonnet'
                           ? 'settings.providers.sonnetContextWindow'
                           : 'settings.providers.opusContextWindow'
-                    const error = errorKey === 'number'
-                      ? t('settings.providers.modelContextWindowNumberError')
-                      : errorKey === 'range'
-                        ? t('settings.providers.modelContextWindowRangeError')
-                        : undefined
                     return (
-                      <SettingField
-                        key={slot}
-                        id={`provider-context-${slot}`}
-                        label={t(labelKey)}
-                        value={modelContextInputs[slot]}
-                        onChange={(event) => (
-                          handleModelContextWindowChange(slot, event.target.value)
+                      <div key={slot}>
+                        <Input
+                          label={t(labelKey)}
+                          value={modelContextInputs[slot]}
+                          onChange={(e) => handleModelContextWindowChange(slot, e.target.value)}
+                          placeholder={t('settings.providers.contextWindowPlaceholder')}
+                        />
+                        {errorKey && (
+                          <p className="text-[11px] text-[var(--color-error)] mt-1">
+                            {errorKey === 'number'
+                              ? t('settings.providers.modelContextWindowNumberError')
+                              : t('settings.providers.modelContextWindowRangeError')}
+                          </p>
                         )}
-                        placeholder={t('settings.providers.contextWindowPlaceholder')}
-                        error={error}
-                        inputMode="numeric"
-                      />
+                      </div>
                     )
                   })}
                 </div>
-                <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
+                <p className="text-[11px] text-[var(--color-text-tertiary)] mt-1">
                   {t('settings.providers.modelContextWindowsDesc')}
                 </p>
+              </div>
 
-                <div className="mt-3">
-                  <SettingField
-                    id="provider-auto-compact-window"
-                    label={t('settings.providers.autoCompactWindow')}
-                    value={autoCompactWindow}
-                    onChange={(event) => handleAutoCompactWindowChange(event.target.value)}
-                    placeholder={t('settings.providers.autoCompactWindowPlaceholder')}
-                    inputMode="numeric"
-                    error={
-                      autoCompactWindowErrorKey === 'number'
-                        ? t('settings.providers.autoCompactWindowNumberError')
-                        : autoCompactWindowErrorKey === 'range'
-                          ? t('settings.providers.autoCompactWindowRangeError')
-                          : undefined
-                    }
-                  />
-                </div>
-                {!autoCompactWindowErrorKey && (
-                  <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
+              <div className="mt-3">
+                <Input
+                  label={t('settings.providers.autoCompactWindow')}
+                  value={autoCompactWindow}
+                  onChange={(e) => handleAutoCompactWindowChange(e.target.value)}
+                  placeholder={t('settings.providers.autoCompactWindowPlaceholder')}
+                />
+                {autoCompactWindowErrorKey ? (
+                  <p className="text-[11px] text-[var(--color-error)] mt-1">
+                    {autoCompactWindowErrorKey === 'number'
+                      ? t('settings.providers.autoCompactWindowNumberError')
+                      : t('settings.providers.autoCompactWindowRangeError')}
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-[var(--color-text-tertiary)] mt-1">
                     {t('settings.providers.autoCompactWindowDesc')}
                   </p>
                 )}
-              </CollapsibleContent>
-            </Card>
-          </Collapsible>
-
-          <div className="flex flex-col gap-2">
-            <LoadingButton
-              variant="secondary"
-              size="sm"
-              loading={isTesting}
-              onClick={() => void handleTest()}
-              disabled={!baseUrl.trim() || !models.main.trim()}
-              className="w-fit"
-            >
-              {t('settings.providers.testConnection')}
-            </LoadingButton>
-            {testResult && (
-              <Alert
-                variant={testPassed ? 'default' : 'destructive'}
-                className={
-                  testPassed
-                    ? 'border-[var(--color-success)]/35 bg-[var(--color-success)]/8'
-                    : undefined
-                }
-              >
-                <AlertDescription
-                  className={
-                    testPassed
-                      ? 'text-[var(--color-success)]'
-                      : 'text-[var(--color-error)]'
-                  }
-                >
-                  <span className="block">
-                    {testResult.connectivity.success
-                      ? t('settings.providers.connectivityOk', {
-                        latency: String(testResult.connectivity.latencyMs),
-                      })
-                      : t('settings.providers.connectivityFailed', {
-                        error: testResult.connectivity.error || '',
-                      })}
-                  </span>
-                  {testResult.proxy && (
-                    <span className="mt-1 block">
-                      {testResult.proxy.success
-                        ? t('settings.providers.proxyOk', {
-                          latency: String(testResult.proxy.latencyMs),
-                        })
-                        : t('settings.providers.proxyFailed', {
-                          error: testResult.proxy.error || '',
-                        })}
-                    </span>
-                  )}
-                </AlertDescription>
-              </Alert>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="provider-settings-json">
-              {t('settings.providers.settingsJson')}
-            </Label>
-            <Textarea
-              id="provider-settings-json"
-              value={displayedSettingsJson}
-              onChange={(event) => handleSettingsJsonChange(event.target.value)}
-              rows={16}
-              spellCheck={false}
-              aria-invalid={settingsJsonError ? true : undefined}
-              aria-describedby={
-                settingsJsonError
-                  ? 'provider-settings-json-error provider-settings-json-description'
-                  : 'provider-settings-json-description'
-              }
-              className="min-h-[18rem] bg-[var(--color-surface-container-low)] font-mono text-xs leading-relaxed text-[var(--color-text-secondary)]"
-            />
-            {settingsJsonError && (
-              <p
-                id="provider-settings-json-error"
-                className="text-[11px] text-[var(--color-error)]"
-              >
-                {t('settings.providers.jsonError', { error: settingsJsonError })}
-              </p>
-            )}
-            <p
-              id="provider-settings-json-description"
-              className="text-[11px] text-[var(--color-text-tertiary)]"
-            >
-              {t('settings.providers.settingsJsonDesc')}
-            </p>
-          </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        <DialogFooter className="border-t border-[var(--color-border)] px-6 py-4">
-          <ShadcnButton
-            variant="secondary"
-            onClick={handleClose}
-            disabled={isSubmitting}
-          >
-            {t('common.cancel')}
-          </ShadcnButton>
-          <LoadingButton
-            onClick={() => void handleSubmit()}
-            disabled={!canSubmit || isSubmitting}
-            loading={isSubmitting}
-          >
-            {mode === 'create' ? t('common.add') : t('common.save')}
-          </LoadingButton>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        {/* Test connection */}
+        <div className="flex items-center gap-3">
+          <Button variant="secondary" size="sm" onClick={handleTest} loading={isTesting} disabled={!baseUrl.trim() || !models.main.trim()}>
+            {t('settings.providers.testConnection')}
+          </Button>
+          {testResult && (
+            <div className="flex flex-col gap-0.5">
+              <span className={`text-xs ${testResult.connectivity.success ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}`}>
+                {testResult.connectivity.success
+                  ? t('settings.providers.connectivityOk', { latency: String(testResult.connectivity.latencyMs) })
+                  : t('settings.providers.connectivityFailed', { error: testResult.connectivity.error || '' })}
+              </span>
+              {testResult.proxy && (
+                <span className={`text-xs ${testResult.proxy.success ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}`}>
+                  {testResult.proxy.success
+                    ? t('settings.providers.proxyOk', { latency: String(testResult.proxy.latencyMs) })
+                    : t('settings.providers.proxyFailed', { error: testResult.proxy.error || '' })}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Settings JSON — editable, shown for all presets including official */}
+        <div>
+          <label className="text-sm font-medium text-[var(--color-text-primary)] mb-2 block">{t('settings.providers.settingsJson')}</label>
+          <textarea
+            value={displayedSettingsJson}
+            onChange={(e) => {
+              const raw = e.target.value
+              try {
+                const parsed = restoreSettingsJsonSecrets(JSON.parse(raw), settingsJson, apiKey)
+                setSettingsJson(JSON.stringify(parsed, null, 2))
+                setSettingsJsonError(null)
+                // Auto-fill form fields from parsed JSON env
+                const env = parsed.env as Record<string, string> | undefined
+                if (env) {
+                  if (env.ANTHROPIC_BASE_URL) {
+                    setBaseUrl(env.ANTHROPIC_BASE_URL)
+                    // Auto-switch to matching preset or Custom
+                    if (mode === 'create') {
+                      const matchedPreset = availablePresets.find((p) => p.id !== 'custom' && p.baseUrl === env.ANTHROPIC_BASE_URL)
+                      const targetPreset = requirePreset(
+                        matchedPreset ?? availablePresets.find((p) => p.id === 'custom'),
+                      )
+                      if (targetPreset.id !== selectedPreset.id) {
+                        jsonPastedRef.current = true
+                        setSelectedPreset(targetPreset)
+                      }
+                    }
+                  }
+                  const nextApiKey = env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY
+                  if (nextApiKey && nextApiKey !== '(your API key)' && nextApiKey !== API_KEY_JSON_PLACEHOLDER) {
+                    setApiKey(nextApiKey)
+                  }
+                  const nextAuthStrategy = inferAuthStrategyFromEnv(env)
+                  if (nextAuthStrategy) {
+                    setAuthStrategy(nextAuthStrategy)
+                  }
+                  setToolSearchEnabled(readToolSearchEnabledFromEnv(env))
+                  setDisableExperimentalBetas(readDisableExperimentalBetasFromEnv(env))
+                  if (env[AUTO_COMPACT_WINDOW_ENV_KEY] !== undefined) {
+                    setAutoCompactWindow(String(env[AUTO_COMPACT_WINDOW_ENV_KEY]))
+                  } else {
+                    setAutoCompactWindow('')
+                  }
+                  let parsedContextWindows: Record<string, number> = {}
+                  if (typeof env[MODEL_CONTEXT_WINDOWS_ENV_KEY] === 'string') {
+                    try {
+                      const parsedContext = JSON.parse(env[MODEL_CONTEXT_WINDOWS_ENV_KEY]) as Record<string, unknown>
+                      parsedContextWindows = Object.fromEntries(
+                        Object.entries(parsedContext)
+                          .filter(([, value]) => typeof value === 'number' && Number.isInteger(value)),
+                      ) as Record<string, number>
+                    } catch {
+                      parsedContextWindows = {}
+                    }
+                  }
+                  const newModels = readModelMappingFromSettingsEnv(env)
+                  if (Object.keys(newModels).length > 0) {
+                    setModels((prev) => {
+                      const mergedModels = { ...prev, ...newModels }
+                      const nextModel1mSupport = {
+                        main: hasModel1mMarker(mergedModels.main),
+                        haiku: hasModel1mMarker(mergedModels.haiku),
+                        sonnet: hasModel1mMarker(mergedModels.sonnet),
+                        opus: hasModel1mMarker(mergedModels.opus),
+                      }
+                      const nextModels = stripModel1mMarkers(mergedModels)
+                      setModel1mSupport(nextModel1mSupport)
+                      setModelContextInputs(apply1mSupportToContextInputs(
+                        getModelContextInputs(nextModels, {
+                          ...selectedPreset,
+                          modelContextWindows: parsedContextWindows,
+                        }),
+                        nextModel1mSupport,
+                      ))
+                      return nextModels
+                    })
+                  } else if (Object.keys(parsedContextWindows).length > 0) {
+                    setModelContextInputs(getModelContextInputs(models, {
+                      ...selectedPreset,
+                      modelContextWindows: parsedContextWindows,
+                    }))
+                  }
+                }
+              } catch (err) {
+                setSettingsJson(raw)
+                setSettingsJsonError(err instanceof Error ? err.message : 'Invalid JSON')
+              }
+            }}
+            rows={16}
+            spellCheck={false}
+            className={`w-full text-xs px-3 py-3 rounded-[var(--radius-md)] bg-[var(--color-surface-container-low)] border font-mono leading-relaxed resize-y text-[var(--color-text-secondary)] outline-none ${
+              settingsJsonError
+                ? 'border-[var(--color-error)] focus:border-[var(--color-error)]'
+                : 'border-[var(--color-border)] focus:border-[var(--color-border-focus)]'
+            }`}
+          />
+          {settingsJsonError && (
+            <p className="text-[11px] text-[var(--color-error)] mt-1">{t('settings.providers.jsonError', { error: settingsJsonError })}</p>
+          )}
+          <p className="text-[11px] text-[var(--color-text-tertiary)] mt-1">{t('settings.providers.settingsJsonDesc')}</p>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -2896,21 +2549,20 @@ export function GeneralSettings() {
           <span className="min-w-[48px] rounded-md bg-[var(--color-surface-container-low)] px-2 py-1 text-center text-sm font-medium text-[var(--color-text-secondary)]">
             {uiZoomPercent}%
           </span>
-          <ShadcnButton
+          <button
+            type="button"
             aria-label={t('settings.general.uiZoomReset')}
             title={t('settings.general.uiZoomReset')}
-            size="sm"
-            variant="secondary"
             onClick={() => {
               setIsUiZoomDragging(false)
               setUiZoomDraft(UI_ZOOM_DEFAULT)
               setUiZoom(UI_ZOOM_DEFAULT)
             }}
-            className="h-8"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
           >
             <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
             100%
-          </ShadcnButton>
+          </button>
         </div>
       </div>
       <div
@@ -2922,30 +2574,33 @@ export function GeneralSettings() {
           <div className="settings-zoom-preview" aria-hidden="true">
             {uiZoomPercent}%
           </div>
-          <Slider
+          <input
+            type="range"
             aria-label={t('settings.general.uiZoom')}
             min={UI_ZOOM_MIN}
             max={UI_ZOOM_MAX}
             step={UI_ZOOM_STEP}
-            value={[uiZoomDraft]}
+            value={uiZoomDraft}
             onPointerDown={() => {
               setUiZoomDraggingState(true)
             }}
-            onValueCommit={([value]) => commitUiZoom(value ?? UI_ZOOM_DEFAULT)}
+            onPointerUp={(e) => commitUiZoom(e.currentTarget.valueAsNumber)}
             onPointerCancel={() => {
               setUiZoomDraggingState(false)
               setUiZoomDraft(uiZoom)
             }}
-            onValueChange={([value]) => {
-              const nextZoom = Number.isFinite(value) ? value! : UI_ZOOM_DEFAULT
+            onChange={(e) => {
+              const nextZoom = Number.isFinite(e.currentTarget.valueAsNumber)
+                ? e.currentTarget.valueAsNumber
+                : UI_ZOOM_DEFAULT
               setUiZoomDraft(nextZoom)
               if (!isUiZoomDraggingRef.current) {
                 setUiZoom(nextZoom)
               }
             }}
-            onBlur={() => {
+            onBlur={(e) => {
               if (uiZoomDraft !== uiZoom) {
-                commitUiZoom(uiZoomDraft)
+                commitUiZoom(e.currentTarget.valueAsNumber)
               } else {
                 setUiZoomDraggingState(false)
               }
@@ -2963,155 +2618,124 @@ export function GeneralSettings() {
       {/* Appearance selector */}
       <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.appearanceTitle')}</h2>
       <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.appearanceDescription')}</p>
-      <ToggleGroup
-        type="single"
-        value={theme}
-        onValueChange={(value) => {
-          if (value) void setTheme(value as ThemeMode)
-        }}
-        aria-label={t('settings.general.appearanceTitle')}
-        className="mb-8"
-      >
+      <div className="flex gap-2 mb-8">
         {THEMES.map(({ value, label }) => (
-          <ToggleGroupItem
+          <button
             key={value}
-            value={value}
-            aria-label={label}
-            className="flex-1"
+            onClick={() => void setTheme(value)}
+            aria-pressed={theme === value}
+            className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-all ${
+              theme === value
+                ? 'bg-[image:var(--gradient-btn-primary)] text-[var(--color-btn-primary-fg)] border-transparent shadow-[var(--shadow-button-primary)]'
+                : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+            }`}
           >
             {label}
-          </ToggleGroupItem>
+          </button>
         ))}
-      </ToggleGroup>
+      </div>
 
       {/* Language selector */}
       <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.languageTitle')}</h2>
       <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.languageDescription')}</p>
-      <ToggleGroup
-        type="single"
-        value={locale}
-        onValueChange={(value) => {
-          if (value) setLocale(value as Locale)
-        }}
-        aria-label={t('settings.general.languageTitle')}
-        className="mb-8"
-      >
+      <div className="flex gap-2 mb-8">
         {LANGUAGES.map(({ value, label }) => (
-          <ToggleGroupItem
+          <button
             key={value}
-            value={value}
-            aria-label={label}
-            className="flex-1 data-[state=on]:bg-none data-[state=on]:bg-[var(--color-brand)]"
+            onClick={() => setLocale(value)}
+            className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-all ${
+              locale === value
+                ? 'bg-[var(--color-brand)] text-[var(--color-on-primary)] border-[var(--color-brand)]'
+                : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+            }`}
           >
             {label}
-          </ToggleGroupItem>
+          </button>
         ))}
-      </ToggleGroup>
+      </div>
 
       {/* Response Language */}
       <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.responseLangTitle')}</h2>
       <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.responseLangDescription')}</p>
-      <Select
-        value={responseLanguage || DEFAULT_RESPONSE_LANGUAGE_SELECT_VALUE}
-        onValueChange={(value) => {
-          void setResponseLanguage(
-            value === DEFAULT_RESPONSE_LANGUAGE_SELECT_VALUE ? '' : value,
-          )
-        }}
-      >
-        <SelectTrigger
-          aria-label={t('settings.general.responseLangTitle')}
-          className="mb-8"
-        >
-          <SelectValue className="min-w-0 flex-1 truncate">
-            {selectedResponseLanguageLabel}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent className="max-h-[320px]" align="start">
-          {RESPONSE_LANGUAGES.map((item) => (
-            <SelectItem
-              key={item.value || DEFAULT_RESPONSE_LANGUAGE_SELECT_VALUE}
-              value={item.value || DEFAULT_RESPONSE_LANGUAGE_SELECT_VALUE}
-            >
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <Dropdown<string>
+        items={RESPONSE_LANGUAGES}
+        value={responseLanguage}
+        onChange={(value) => void setResponseLanguage(value)}
+        width="100%"
+        maxHeight={320}
+        className="mb-8 block w-full"
+        trigger={
+          <button
+            type="button"
+            aria-label={t('settings.general.responseLangTitle')}
+            className="flex h-10 w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-left text-sm text-[var(--color-text-primary)] outline-none transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-container-low)] focus-visible:border-[var(--color-border-focus)] focus-visible:shadow-[var(--shadow-focus-ring)]"
+          >
+            <span className="min-w-0 flex-1 truncate">{selectedResponseLanguageLabel}</span>
+            <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">expand_more</span>
+          </button>
+        }
+      />
 
       {/* Output style */}
       <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.outputStyleTitle')}</h2>
       <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.outputStyleDescription')}</p>
-      <Card className="mb-8">
-        <CardContent>
-          <Select
-            value={outputStyle}
-            onValueChange={(value) => void handleOutputStyleChange(value)}
-          >
-            <SelectTrigger
+      <div className="mb-8 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-4">
+        <Dropdown<string>
+          items={outputStyleItems}
+          value={outputStyle}
+          onChange={(value) => void handleOutputStyleChange(value)}
+          width="100%"
+          maxHeight={360}
+          className="block w-full"
+          trigger={
+            <button
+              type="button"
               aria-label={t('settings.general.outputStyleSelectLabel')}
               disabled={outputStylesLoading}
+              className="flex min-h-10 w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-left text-sm text-[var(--color-text-primary)] outline-none transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-container-low)] focus-visible:border-[var(--color-border-focus)] focus-visible:shadow-[var(--shadow-focus-ring)] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Paintbrush
-                className="size-[18px] flex-shrink-0 text-[var(--color-text-secondary)]"
-                aria-hidden="true"
-              />
-              <SelectValue className="min-w-0 flex-1">
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">
-                    {outputStylesLoading
-                      ? t('settings.general.outputStyleLoading')
-                      : selectedOutputStyleLabel}
-                  </span>
-                  {selectedOutputStyleDescription && (
-                    <span className="mt-0.5 block truncate text-xs text-[var(--color-text-tertiary)]">
-                      {selectedOutputStyleDescription}
-                    </span>
-                  )}
+              <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">format_paint</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">
+                  {outputStylesLoading
+                    ? t('settings.general.outputStyleLoading')
+                    : selectedOutputStyleLabel}
                 </span>
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent className="max-h-[360px]" align="start">
-              {outputStyleItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate font-medium">{item.label}</span>
-                    <span className="mt-0.5 truncate text-xs text-[var(--color-text-tertiary)]">
-                      {item.description}
-                    </span>
+                {selectedOutputStyleDescription && (
+                  <span className="mt-0.5 block truncate text-xs text-[var(--color-text-tertiary)]">
+                    {selectedOutputStyleDescription}
                   </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-tertiary)]">
-            <Badge variant="secondary">
-              {outputStyleScopeLabel}
-            </Badge>
-            {selectedOutputStyle && (
-              <Badge variant="outline">
-                {getOutputStyleSourceLabel(selectedOutputStyle.source, t)}
-              </Badge>
-            )}
-            <span className="min-w-0 flex-1 leading-5">{outputStyleScopeHint}</span>
-          </div>
-          <p className="mt-2 text-xs leading-5 text-[var(--color-text-tertiary)]">
-            {t('settings.general.outputStyleRestartHint')}
-          </p>
-          {outputStyleError && (
-            <Alert variant="destructive" className="mt-2">
-              <AlertDescription className="text-[var(--color-error)]">
-                {outputStyleError}
-              </AlertDescription>
-            </Alert>
+                )}
+              </span>
+              <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">expand_more</span>
+            </button>
+          }
+        />
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-tertiary)]">
+          <span className="inline-flex items-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 font-medium text-[var(--color-text-secondary)]">
+            {outputStyleScopeLabel}
+          </span>
+          {selectedOutputStyle && (
+            <span className="inline-flex items-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1">
+              {getOutputStyleSourceLabel(selectedOutputStyle.source, t)}
+            </span>
           )}
-        </CardContent>
-      </Card>
+          <span className="min-w-0 flex-1 leading-5">{outputStyleScopeHint}</span>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-[var(--color-text-tertiary)]">
+          {t('settings.general.outputStyleRestartHint')}
+        </p>
+        {outputStyleError && (
+          <p className="mt-2 text-xs leading-5 text-[var(--color-error)]">
+            {outputStyleError}
+          </p>
+        )}
+      </div>
 
       <div className="mt-8">
         <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.defaultPermissionTitle')}</h2>
         <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.defaultPermissionDescription')}</p>
-        <Card className="px-4 py-4">
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="text-sm font-medium text-[var(--color-text-primary)]">
@@ -3128,68 +2752,116 @@ export function GeneralSettings() {
               menuPlacement="bottom"
             />
           </div>
-        </Card>
+        </div>
       </div>
 
       <div className="mt-8">
         <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.thinkingTitle')}</h2>
         <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.thinkingDescription')}</p>
-        <SettingSwitchRow
-          checked={thinkingEnabled}
-          onCheckedChange={(checked) => void setThinkingEnabled(checked)}
-          label={t('settings.general.thinkingEnabled')}
-          description={t('settings.general.thinkingHint')}
-        />
+        <label className="relative flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3 cursor-pointer hover:border-[var(--color-border-focus)] transition-colors">
+          <input
+            type="checkbox"
+            aria-label={t('settings.general.thinkingEnabled')}
+            checked={thinkingEnabled}
+            onChange={(e) => void setThinkingEnabled(e.target.checked)}
+            className={SETTINGS_CHECKBOX_INPUT_CLASS}
+          />
+          <SettingsCheckboxMark checked={thinkingEnabled} />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">
+              {t('settings.general.thinkingEnabled')}
+            </div>
+            <div className="text-xs text-[var(--color-text-tertiary)] mt-1 leading-5">
+              {t('settings.general.thinkingHint')}
+            </div>
+          </div>
+        </label>
       </div>
 
       <div className="mt-8">
         <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.autoDreamTitle')}</h2>
         <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.autoDreamDescription')}</p>
-        <SettingSwitchRow
-          checked={autoDreamEnabled}
-          onCheckedChange={handleAutoDreamToggle}
-          label={t('settings.general.autoDreamEnabled')}
-          description={autoDreamEnabled
-            ? t('settings.general.autoDreamHintOn')
-            : t('settings.general.autoDreamHintOff')}
-        />
+        <label className="relative flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3 cursor-pointer hover:border-[var(--color-border-focus)] transition-colors">
+          <input
+            type="checkbox"
+            aria-label={t('settings.general.autoDreamEnabled')}
+            checked={autoDreamEnabled}
+            onChange={(e) => handleAutoDreamToggle(e.target.checked)}
+            className={SETTINGS_CHECKBOX_INPUT_CLASS}
+          />
+          <SettingsCheckboxMark checked={autoDreamEnabled} />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">
+              {t('settings.general.autoDreamEnabled')}
+            </div>
+            <div className="text-xs text-[var(--color-text-tertiary)] mt-1 leading-5">
+              {autoDreamEnabled
+                ? t('settings.general.autoDreamHintOn')
+                : t('settings.general.autoDreamHintOff')}
+            </div>
+          </div>
+        </label>
       </div>
 
       <div className="mt-8">
         <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.traceTitle')}</h2>
         <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.traceDescription')}</p>
-        <SettingSwitchRow
-          checked={traceCapture.enabled}
-          onCheckedChange={(checked) => void setTraceCaptureEnabled(checked)}
-          label={t('settings.general.traceEnabled')}
-          description={traceCapture.enabled ? t('settings.general.traceHintOn') : t('settings.general.traceHintOff')}
-        >
-          {traceCapture.storageDir && (
-            <div className="mt-2 truncate rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 font-mono text-[11px] text-[var(--color-text-secondary)]">
-              {traceCapture.storageDir}
+        <label className="relative flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3 cursor-pointer hover:border-[var(--color-border-focus)] transition-colors">
+          <input
+            type="checkbox"
+            aria-label={t('settings.general.traceEnabled')}
+            checked={traceCapture.enabled}
+            onChange={(e) => void setTraceCaptureEnabled(e.target.checked)}
+            className={SETTINGS_CHECKBOX_INPUT_CLASS}
+          />
+          <SettingsCheckboxMark checked={traceCapture.enabled} />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">
+              {t('settings.general.traceEnabled')}
             </div>
-          )}
-        </SettingSwitchRow>
+            <div className="text-xs text-[var(--color-text-tertiary)] mt-1 leading-5">
+              {traceCapture.enabled ? t('settings.general.traceHintOn') : t('settings.general.traceHintOff')}
+            </div>
+            {traceCapture.storageDir && (
+              <div className="mt-2 truncate rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 font-mono text-[11px] text-[var(--color-text-secondary)]">
+                {traceCapture.storageDir}
+              </div>
+            )}
+          </div>
+        </label>
       </div>
 
       <div className="mt-8">
         <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.notificationsTitle')}</h2>
         <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.notificationsDescription')}</p>
-        <SettingSwitchRow
-          checked={desktopNotificationsEnabled}
-          onCheckedChange={(checked) => void handleDesktopNotificationsToggle(checked)}
-          label={t('settings.general.notificationsEnabled')}
-          description={desktopNotificationsEnabled
-            ? t('settings.general.notificationsHintOn')
-            : t('settings.general.notificationsHintOff')}
-        >
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3">
+          <label className="relative flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              aria-label={t('settings.general.notificationsEnabled')}
+              checked={desktopNotificationsEnabled}
+              onChange={(e) => void handleDesktopNotificationsToggle(e.target.checked)}
+              className={SETTINGS_CHECKBOX_INPUT_CLASS}
+            />
+            <SettingsCheckboxMark checked={desktopNotificationsEnabled} />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-[var(--color-text-primary)]">
+                {t('settings.general.notificationsEnabled')}
+              </div>
+              <div className="text-xs text-[var(--color-text-tertiary)] mt-1 leading-5">
+                {desktopNotificationsEnabled
+                  ? t('settings.general.notificationsHintOn')
+                  : t('settings.general.notificationsHintOff')}
+              </div>
+            </div>
+          </label>
           {desktopNotificationsEnabled && (
             <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--color-border)]/60 pt-3">
               <div className="min-w-0 text-xs text-[var(--color-text-tertiary)]">
                 {t('settings.general.notificationsStatus')}: {notificationStatusLabel[notificationPermission]}
               </div>
               {notificationPermission !== 'granted' && notificationPermission !== 'unsupported' && (
-                <ShadcnButton
+                <Button
                   size="sm"
                   variant="secondary"
                   className="px-3 whitespace-nowrap"
@@ -3199,31 +2871,36 @@ export function GeneralSettings() {
                   {notificationPermission === 'denied'
                     ? t('settings.general.notificationsOpenSettings')
                     : t('settings.general.notificationsAuthorize')}
-                </ShadcnButton>
+                </Button>
               )}
             </div>
           )}
-        </SettingSwitchRow>
+        </div>
       </div>
 
       <div className="mt-8">
         <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.chatSendBehaviorTitle')}</h2>
         <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.chatSendBehaviorDescription')}</p>
-        <RadioGroup
-          value={chatSendBehavior}
-          onValueChange={(value) => void setChatSendBehavior(value as ChatSendBehavior)}
-          aria-label={t('settings.general.chatSendBehaviorTitle')}
-          className="grid grid-cols-2 gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-2"
-        >
+        <div className="grid grid-cols-2 gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-2">
           {CHAT_SEND_BEHAVIORS.map((option) => (
-            <SettingRadioCard
+            <button
               key={option.value}
-              value={option.value}
-              label={option.label}
-              description={option.description}
-            />
+              type="button"
+              onClick={() => void setChatSendBehavior(option.value)}
+              aria-pressed={chatSendBehavior === option.value}
+              className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                chatSendBehavior === option.value
+                  ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]'
+                  : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+              }`}
+            >
+              <div className="text-xs font-semibold">{option.label}</div>
+              <div className="mt-1 text-[11px] leading-4 text-[var(--color-text-tertiary)]">
+                {option.description}
+              </div>
+            </button>
           ))}
-        </RadioGroup>
+        </div>
       </div>
 
       {uiZoomSection}
@@ -3231,32 +2908,37 @@ export function GeneralSettings() {
       <div className="mt-8">
         <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.networkTitle')}</h2>
         <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.networkDescription')}</p>
-        <Card className="px-4 py-4">
-          <RadioGroup
-            value={networkDraft.proxy.mode}
-            onValueChange={(value) => {
-              setNetworkDraft((current) => ({
-                ...current,
-                proxy: { ...current.proxy, mode: value as NetworkProxyMode },
-              }))
-              setNetworkSaveError(null)
-            }}
-            aria-label={t('settings.general.networkTitle')}
-            className="grid grid-cols-2 gap-2"
-          >
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-4">
+          <div className="grid grid-cols-2 gap-2">
             {NETWORK_PROXY_MODES.map((mode) => (
-              <SettingRadioCard
+              <button
                 key={mode.value}
-                value={mode.value}
-                label={mode.label}
-                description={mode.description}
-              />
+                type="button"
+                onClick={() => {
+                  setNetworkDraft((current) => ({
+                    ...current,
+                    proxy: { ...current.proxy, mode: mode.value },
+                  }))
+                  setNetworkSaveError(null)
+                }}
+                aria-pressed={networkDraft.proxy.mode === mode.value}
+                className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                  networkDraft.proxy.mode === mode.value
+                    ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]'
+                    : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+                }`}
+              >
+                <div className="text-xs font-semibold">{mode.label}</div>
+                <div className="mt-1 text-[11px] leading-4 text-[var(--color-text-tertiary)]">
+                  {mode.description}
+                </div>
+              </button>
             ))}
-          </RadioGroup>
+          </div>
 
           {networkDraft.proxy.mode === 'manual' && (
             <div className="mt-4">
-              <SettingField
+              <Input
                 id="network-proxy-url"
                 label={t('settings.general.networkProxyUrl')}
                 value={networkDraft.proxy.url}
@@ -3286,7 +2968,8 @@ export function GeneralSettings() {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <LoadingButton
+              <Button
+                type="button"
                 size="sm"
                 variant="secondary"
                 className="h-10 w-10 px-0"
@@ -3294,9 +2977,9 @@ export function GeneralSettings() {
                 onClick={() => setNetworkTimeoutSeconds((parsedNetworkTimeoutSeconds ?? timeoutSeconds) - NETWORK_TIMEOUT_STEP_SECONDS)}
               >
                 -30
-              </LoadingButton>
+              </Button>
               <div className="relative min-w-0 flex-1">
-                <ShadcnInput
+                <input
                   id="network-timeout-seconds"
                   type="number"
                   min={NETWORK_TIMEOUT_MIN_SECONDS}
@@ -3319,13 +3002,18 @@ export function GeneralSettings() {
                     }
                     setNetworkSaveError(null)
                   }}
-                  className="pr-12"
+                  className={`h-10 w-full rounded-[var(--radius-md)] border bg-[var(--color-surface)] px-3 pr-12 text-sm text-[var(--color-text-primary)] outline-none transition-colors duration-150 placeholder:text-[var(--color-text-tertiary)] ${
+                    networkTimeoutError
+                      ? 'border-[var(--color-error)] focus:shadow-[var(--shadow-error-ring)]'
+                      : 'border-[var(--color-border)] focus:border-[var(--color-border-focus)] focus:shadow-[var(--shadow-focus-ring)]'
+                  }`}
                 />
                 <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[var(--color-text-tertiary)]">
                   {t('settings.general.networkTimeoutUnit')}
                 </span>
               </div>
-              <LoadingButton
+              <Button
+                type="button"
                 size="sm"
                 variant="secondary"
                 className="h-10 w-10 px-0"
@@ -3333,7 +3021,7 @@ export function GeneralSettings() {
                 onClick={() => setNetworkTimeoutSeconds((parsedNetworkTimeoutSeconds ?? timeoutSeconds) + NETWORK_TIMEOUT_STEP_SECONDS)}
               >
                 +30
-              </LoadingButton>
+              </Button>
             </div>
             <p
               id="network-timeout-help"
@@ -3347,7 +3035,7 @@ export function GeneralSettings() {
             <p className="min-w-0 text-[11px] leading-4 text-[var(--color-text-tertiary)]">
               {t('settings.general.networkScopeHint')}
             </p>
-            <LoadingButton
+            <Button
               size="sm"
               variant="secondary"
               className="min-w-[72px] px-4 whitespace-nowrap"
@@ -3356,7 +3044,7 @@ export function GeneralSettings() {
               onClick={() => void saveNetworkSettings()}
             >
               {t('settings.general.networkSave')}
-            </LoadingButton>
+            </Button>
           </div>
 
           {networkSaveError && (
@@ -3364,49 +3052,54 @@ export function GeneralSettings() {
               {networkSaveError}
             </p>
           )}
-        </Card>
+        </div>
       </div>
 
       <div className="mt-8">
         <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.webFetchPreflightTitle')}</h2>
         <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.webFetchPreflightDescription')}</p>
-        <SettingSwitchRow
-          checked={skipWebFetchPreflight}
-          onCheckedChange={(checked) => void setSkipWebFetchPreflight(checked)}
-          label={t('settings.general.webFetchPreflightEnabled')}
-          description={t('settings.general.webFetchPreflightHint')}
-        />
+        <label className="relative flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3 cursor-pointer hover:border-[var(--color-border-focus)] transition-colors">
+          <input
+            type="checkbox"
+            aria-label={t('settings.general.webFetchPreflightEnabled')}
+            checked={skipWebFetchPreflight}
+            onChange={(e) => void setSkipWebFetchPreflight(e.target.checked)}
+            className={SETTINGS_CHECKBOX_INPUT_CLASS}
+          />
+          <SettingsCheckboxMark checked={skipWebFetchPreflight} />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">
+              {t('settings.general.webFetchPreflightEnabled')}
+            </div>
+            <div className="text-xs text-[var(--color-text-tertiary)] mt-1 leading-5">
+              {t('settings.general.webFetchPreflightHint')}
+            </div>
+          </div>
+        </label>
       </div>
 
       <div className="mt-8">
         <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.webSearchTitle')}</h2>
         <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.webSearchDescription')}</p>
-        <Card className="px-4 py-4">
-          <ToggleGroup
-            type="single"
-            value={webSearchDraft.mode ?? 'auto'}
-            onValueChange={(value) => {
-              if (value) {
-                setWebSearchDraft({ ...webSearchDraft, mode: value as WebSearchMode })
-              }
-            }}
-            aria-label={t('settings.general.webSearchTitle')}
-            className="mb-4 grid grid-cols-5 gap-1.5"
-          >
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-4">
+          <div className="grid grid-cols-5 gap-1.5 mb-4">
             {WEB_SEARCH_MODES.map(({ value, label }) => (
-              <ToggleGroupItem
+              <button
                 key={value}
-                value={value}
-                aria-label={label}
-                className="h-9 truncate px-2 text-xs"
+                onClick={() => setWebSearchDraft({ ...webSearchDraft, mode: value })}
+                className={`h-9 px-2 text-xs font-semibold rounded-lg border transition-all truncate ${
+                  (webSearchDraft.mode ?? 'auto') === value
+                    ? 'bg-[var(--color-brand)] text-[var(--color-on-primary)] border-[var(--color-brand)]'
+                    : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+                }`}
                 title={label}
               >
                 {label}
-              </ToggleGroupItem>
+              </button>
             ))}
-          </ToggleGroup>
+          </div>
           <div className="grid grid-cols-1 gap-3">
-            <SettingField
+            <Input
               id="web-search-tavily-key"
               type="password"
               label={t('settings.general.webSearchTavilyKey')}
@@ -3432,7 +3125,7 @@ export function GeneralSettings() {
                 {t('settings.general.webSearchGetApiKey')}
               </a>
             </div>
-            <SettingField
+            <Input
               id="web-search-brave-key"
               type="password"
               label={t('settings.general.webSearchBraveKey')}
@@ -3464,7 +3157,7 @@ export function GeneralSettings() {
               {t('settings.general.webSearchHint')}
             </p>
             <div className="flex justify-end">
-              <LoadingButton
+              <Button
                 size="sm"
                 variant="secondary"
                 className="min-w-[72px] px-4 whitespace-nowrap"
@@ -3472,10 +3165,10 @@ export function GeneralSettings() {
                 onClick={() => void setWebSearch(webSearchDraft)}
               >
                 {t('settings.general.webSearchSave')}
-              </LoadingButton>
+              </Button>
             </div>
           </div>
-        </Card>
+        </div>
       </div>
 
       {isDesktopRuntime() && (
@@ -3483,10 +3176,10 @@ export function GeneralSettings() {
           <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">{t('settings.general.storageTitle')}</h2>
           <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.storageDescription')}</p>
 
-          <Card className="px-4 py-4">
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-4">
             <div className="flex flex-col gap-3">
-              <ShadcnButton
-                variant="outline"
+              <button
+                type="button"
                 onClick={() => {
                   if (isEnvironmentConfigDir) {
                     setModeError(t('settings.general.storageEnvironmentSwitchBlocked'))
@@ -3497,10 +3190,10 @@ export function GeneralSettings() {
                   }
                 }}
                 aria-pressed={appMode.mode === 'default' && !isEnvironmentConfigDir}
-                className={`h-auto w-full items-start justify-start gap-3 px-3 py-3 text-left whitespace-normal ${
+                className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-left transition-all ${
                   appMode.mode === 'default' && !isEnvironmentConfigDir
                     ? 'border-[var(--color-brand)] bg-[var(--color-surface)] shadow-[var(--shadow-focus-ring)]'
-                    : 'bg-[var(--color-surface)]'
+                    : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[var(--color-border-focus)]'
                 }`}
               >
                 <span className="material-symbols-outlined mt-0.5 text-[20px] text-[var(--color-text-secondary)]">settings_applications</span>
@@ -3508,9 +3201,9 @@ export function GeneralSettings() {
                   <span className="block text-sm font-semibold text-[var(--color-text-primary)]">{t('settings.general.storageSystemTitle')}</span>
                   <span className="mt-1 block text-xs leading-5 text-[var(--color-text-tertiary)]">{t('settings.general.storageSystemDescription')}</span>
                 </span>
-              </ShadcnButton>
+              </button>
 
-              <Card
+              <div
                 className={`rounded-lg border px-3 py-3 transition-all ${
                   appMode.mode === 'portable' && !isEnvironmentConfigDir
                     ? 'border-[var(--color-brand)] bg-[var(--color-surface)] shadow-[var(--shadow-focus-ring)]'
@@ -3527,7 +3220,7 @@ export function GeneralSettings() {
 
                 <div className="flex items-end gap-2">
                   <div className="min-w-0 flex-1">
-                    <SettingField
+                    <Input
                       id="portable-data-dir"
                       label={t('settings.general.storagePortableDirLabel')}
                       value={portableDirDraft}
@@ -3539,26 +3232,28 @@ export function GeneralSettings() {
                       className="w-full font-mono text-xs"
                     />
                   </div>
-                  <LoadingButton
+                  <Button
+                    type="button"
                     variant="secondary"
                     className="h-10 flex-shrink-0 px-3 whitespace-nowrap"
                     onClick={() => void openPortableDirPicker()}
                   >
                     {t('settings.general.storageChooseDir')}
-                  </LoadingButton>
+                  </Button>
                 </div>
 
                 <div className="mt-3 flex justify-end">
-                  <LoadingButton
+                  <Button
+                    type="button"
                     size="sm"
                     variant="secondary"
                     disabled={modeActionRunning || (appMode.mode === 'portable' && portableDirDraft.trim() === (appMode.portableDir ?? ''))}
                     onClick={() => openModeSwitchConfirm('portable')}
                   >
                     {t('settings.general.storageApplyPortable')}
-                  </LoadingButton>
+                  </Button>
                 </div>
-              </Card>
+              </div>
             </div>
 
             {activeConfigDir && (
@@ -3589,7 +3284,7 @@ export function GeneralSettings() {
                 {modeError}
               </div>
             )}
-          </Card>
+          </div>
         </div>
       )}
 
@@ -3716,7 +3411,6 @@ function H5AccessSettings() {
   const [h5EnableConfirmOpen, setH5EnableConfirmOpen] = useState(false)
   const [h5QrDataUrl, setH5QrDataUrl] = useState<string | null>(null)
   const [h5ActionRunning, setH5ActionRunning] = useState(false)
-  const h5EnableTriggerRef = useRef<HTMLButtonElement>(null)
   const h5AccessUrl = h5Access.publicBaseUrl
   // The token is persisted server-side, so the QR code and copy actions stay
   // available across desktop restarts (issue #767).
@@ -3728,11 +3422,7 @@ function H5AccessSettings() {
   const h5ActivePort = h5AccessDiagnostics?.activePort != null
     ? String(h5AccessDiagnostics.activePort)
     : extractH5AccessPort(h5AccessUrl)
-  const h5NextPublicBaseUrl = buildH5PublicBaseUrlFromHostDraft(
-    h5PublicBaseUrlDraft,
-    h5Access.publicBaseUrl,
-    h5ActivePort,
-  )
+  const h5NextPublicBaseUrl = buildH5PublicBaseUrlFromHostDraft(h5PublicBaseUrlDraft, h5Access.publicBaseUrl)
   const h5NextFixedPort = parseH5FixedPortDraft(h5FixedPortDraft)
   const h5FixedPortInvalid = h5NextFixedPort === 'invalid'
   const h5NextGrace = parseH5GraceDraft(h5GraceDraft)
@@ -3828,14 +3518,7 @@ function H5AccessSettings() {
       await enableH5Access()
       setH5TokenVisible(false)
       setH5EnableConfirmOpen(false)
-      setTimeout(() => h5EnableTriggerRef.current?.focus(), 0)
     })
-  }
-
-  const handleH5EnableConfirmClose = () => {
-    if (h5ActionRunning) return
-    setH5EnableConfirmOpen(false)
-    setTimeout(() => h5EnableTriggerRef.current?.focus(), 0)
   }
 
   const handleH5Disable = async () => {
@@ -3872,56 +3555,52 @@ function H5AccessSettings() {
           </div>
         </div>
 
-        <Card>
-          <CardContent className="p-4">
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-4">
           <div className="flex items-start justify-between gap-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <Checkbox
-                id="h5-access-enabled"
-                ref={h5EnableTriggerRef}
-                className="mt-1"
+            <label className="flex min-w-0 items-start gap-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 rounded border-[var(--color-border)] accent-[var(--color-primary)]"
                 checked={h5Access.enabled}
                 disabled={h5ActionRunning}
                 aria-label={t('settings.general.h5AccessEnabled')}
-                onCheckedChange={(checked) => {
-                  if (checked === true) {
+                onChange={(event) => {
+                  if (event.target.checked) {
                     setH5EnableConfirmOpen(true)
                   } else {
                     void handleH5Disable()
                   }
                 }}
               />
-              <Label
-                htmlFor="h5-access-enabled"
-                className="min-w-0 cursor-pointer font-normal"
-              >
+              <span className="min-w-0">
                 <span className="block text-sm font-medium text-[var(--color-text-primary)]">
                   {t('settings.general.h5AccessEnabled')}
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-[var(--color-text-tertiary)]">
                   {t('settings.general.h5AccessEnabledHint')}
                 </span>
-              </Label>
-            </div>
-            <Badge
-              variant={h5Access.enabled ? 'default' : 'secondary'}
-              className={h5Access.enabled
-                ? 'bg-[var(--color-success)] text-white'
-                : undefined}
+              </span>
+            </label>
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                h5Access.enabled
+                  ? 'bg-[var(--color-success)]/10 text-[var(--color-success)]'
+                  : 'bg-[var(--color-surface)] text-[var(--color-text-tertiary)] border border-[var(--color-border)]'
+              }`}
             >
               {h5Access.enabled ? t('settings.general.h5AccessStatusEnabled') : t('settings.general.h5AccessDisabledValue')}
-            </Badge>
+            </span>
           </div>
 
           {h5AccessDiagnostics?.storedHostStaleness === 'unreachable' && h5AccessDiagnostics.storedPublicBaseUrl ? (
-            <Alert
+            <div
               data-testid="h5-access-stale-host-banner"
-              className="mt-4 border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10"
+              className="mt-4 rounded-lg border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-3 py-3 text-xs leading-5 text-[var(--color-text-primary)]"
             >
-              <AlertTitle>
+              <div className="font-semibold">
                 {t('settings.general.h5AccessStaleHostTitle')}
-              </AlertTitle>
-              <AlertDescription className="text-[var(--color-text-secondary)]">
+              </div>
+              <div className="mt-1 text-[var(--color-text-secondary)]">
                 {h5AccessDiagnostics.suggestedHost
                   ? t('settings.general.h5AccessStaleHostBody', {
                       storedHost: extractHostnameFromUrl(h5AccessDiagnostics.storedPublicBaseUrl) ?? h5AccessDiagnostics.storedPublicBaseUrl,
@@ -3929,12 +3608,12 @@ function H5AccessSettings() {
                   : t('settings.general.h5AccessStaleHostNoSuggestion', {
                       storedHost: extractHostnameFromUrl(h5AccessDiagnostics.storedPublicBaseUrl) ?? h5AccessDiagnostics.storedPublicBaseUrl,
                     })}
-              </AlertDescription>
+              </div>
               {h5AccessDiagnostics.suggestedHost && (
                 <div className="mt-2">
-                  <LoadingButton
+                  <Button
                     size="sm"
-                    variant="default"
+                    variant="primary"
                     loading={h5ActionRunning}
                     onClick={() => void handleH5SwitchToSuggestedHost()}
                     data-testid="h5-access-stale-host-apply"
@@ -3942,31 +3621,31 @@ function H5AccessSettings() {
                     {t('settings.general.h5AccessStaleHostApply', {
                       suggestedHost: h5AccessDiagnostics.suggestedHost,
                     })}
-                  </LoadingButton>
+                  </Button>
                 </div>
               )}
-            </Alert>
+            </div>
           ) : null}
 
           {h5AccessDiagnostics?.storedHostStaleness === 'proxy' ? (
-            <Alert
+            <div
               data-testid="h5-access-proxy-note"
-              className="mt-4 bg-[var(--color-surface-container-lowest)]"
+              className="mt-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] px-3 py-2 text-xs leading-5 text-[var(--color-text-tertiary)]"
             >
-              <AlertDescription>{t('settings.general.h5AccessProxyNote')}</AlertDescription>
-            </Alert>
+              {t('settings.general.h5AccessProxyNote')}
+            </div>
           ) : null}
 
           <div className="mt-4 grid grid-cols-1 gap-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_9rem]">
-              <SettingField
+              <Input
                 id="h5-access-public-url"
                 label={t('settings.general.h5AccessPublicHost')}
                 value={h5PublicBaseUrlDraft}
                 placeholder={t('settings.general.h5AccessPublicHostPlaceholder')}
                 onChange={(event) => setH5PublicBaseUrlDraft(event.target.value)}
               />
-              <SettingField
+              <Input
                 id="h5-access-fixed-port"
                 label={t('settings.general.h5AccessFixedPort')}
                 value={h5FixedPortDraft}
@@ -3975,7 +3654,7 @@ function H5AccessSettings() {
                 error={h5FixedPortInvalid ? t('settings.general.h5AccessFixedPortInvalid') : undefined}
                 onChange={(event) => setH5FixedPortDraft(event.target.value)}
               />
-              <SettingField
+              <Input
                 id="h5-access-current-port"
                 label={t('settings.general.h5AccessCurrentPort')}
                 value={h5ActivePort ?? t('settings.general.h5AccessCurrentPortUnknown')}
@@ -3984,7 +3663,7 @@ function H5AccessSettings() {
               />
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-start">
-              <SettingField
+              <Input
                 id="h5-access-disconnect-grace"
                 label={t('settings.general.h5AccessDisconnectGrace')}
                 value={h5GraceDraft}
@@ -4003,29 +3682,26 @@ function H5AccessSettings() {
                 {' '}
                 {t('settings.general.h5AccessFixedPortHint')}
               </p>
-              <LoadingButton
+              <Button
                 size="sm"
                 variant="secondary"
-                loading={h5ActionRunning}
                 onClick={() => void handleH5SettingsSave()}
                 disabled={!h5AccessDirty || h5FixedPortInvalid || h5GraceInvalid || h5ActionRunning}
                 aria-label={t('settings.general.h5AccessSave')}
               >
                 {t('settings.general.h5AccessSave')}
-              </LoadingButton>
+              </Button>
             </div>
             {h5FixedPortPendingRestart && (
-              <Alert
+              <div
                 data-testid="h5-access-fixed-port-restart-note"
-                className="border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10"
+                className="rounded-lg border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 px-3 py-2 text-xs leading-5 text-[var(--color-text-primary)]"
               >
-                <AlertDescription className="text-[var(--color-text-primary)]">
-                  {t('settings.general.h5AccessFixedPortRestartNote', {
-                    fixedPort: String(h5Access.fixedPort),
-                    activePort: h5ActivePort ?? '',
-                  })}
-                </AlertDescription>
-              </Alert>
+                {t('settings.general.h5AccessFixedPortRestartNote', {
+                  fixedPort: String(h5Access.fixedPort),
+                  activePort: h5ActivePort ?? '',
+                })}
+              </div>
             )}
           </div>
 
@@ -4040,16 +3716,16 @@ function H5AccessSettings() {
                     {h5AccessUrl}
                   </div>
                 </div>
-                <ShadcnButton
+                <Button
                   size="sm"
                   variant="secondary"
                   className="shrink-0"
+                  icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
                   aria-label={t('settings.general.h5AccessCopyUrl')}
                   onClick={() => void handleH5UrlCopy()}
                 >
-                  <Copy aria-hidden="true" />
                   {t('settings.general.h5AccessCopy')}
-                </ShadcnButton>
+                </Button>
               </div>
             </div>
           )}
@@ -4088,24 +3764,24 @@ function H5AccessSettings() {
                     </div>
                   )}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <ShadcnButton
+                    <Button
                       size="sm"
                       variant="secondary"
+                      icon={<Copy className="h-3.5 w-3.5" aria-hidden="true" />}
                       disabled={!h5LaunchUrl || !h5Token}
                       onClick={() => void handleH5LaunchUrlCopy()}
                     >
-                      <Copy aria-hidden="true" />
                       {t('settings.general.h5AccessCopyLaunchUrl')}
-                    </ShadcnButton>
-                    <LoadingButton
+                    </Button>
+                    <Button
                       size="sm"
-                      variant={h5Token ? 'secondary' : 'default'}
+                      variant={h5Token ? 'secondary' : 'primary'}
+                      icon={<RotateCw className="h-3.5 w-3.5" aria-hidden="true" />}
                       loading={h5ActionRunning}
                       onClick={() => void handleH5Regenerate()}
                     >
-                      <RotateCw aria-hidden="true" />
                       {h5Token ? t('settings.general.h5AccessRegenerate') : t('settings.general.h5AccessGenerateToken')}
-                    </LoadingButton>
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -4126,26 +3802,24 @@ function H5AccessSettings() {
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                  <ShadcnButton
+                  <Button
                     size="sm"
                     variant="secondary"
+                    icon={h5TokenVisible ? <EyeOff className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}
                     disabled={!h5Token}
                     onClick={() => setH5TokenVisible((visible) => !visible)}
                   >
-                    {h5TokenVisible
-                      ? <EyeOff aria-hidden="true" />
-                      : <Eye aria-hidden="true" />}
                     {h5TokenVisible ? t('settings.general.h5AccessHideToken') : t('settings.general.h5AccessShowToken')}
-                  </ShadcnButton>
-                  <LoadingButton
+                  </Button>
+                  <Button
                     size="sm"
-                    variant="destructive"
+                    variant="danger"
+                    icon={<PowerOff className="h-3.5 w-3.5" aria-hidden="true" />}
                     loading={h5ActionRunning}
                     onClick={() => void handleH5Disable()}
                   >
-                    <PowerOff aria-hidden="true" />
                     {t('settings.general.h5AccessDisable')}
-                  </LoadingButton>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -4155,46 +3829,44 @@ function H5AccessSettings() {
             {t('settings.general.h5AccessSafetyNote')}
           </p>
           {h5AccessError && (
-            <Alert variant="destructive" className="mt-2">
-              <AlertDescription className="text-[var(--color-error)]">
-                {h5AccessError}
-              </AlertDescription>
-            </Alert>
+            <p className="mt-2 text-xs text-[var(--color-error)]">
+              {h5AccessError}
+            </p>
           )}
-          </CardContent>
-        </Card>
+        </div>
       </section>
 
-      <AlertDialog
+      <ConfirmDialog
         open={h5EnableConfirmOpen}
-        onOpenChange={(open) => {
-          if (!open) handleH5EnableConfirmClose()
+        onClose={() => {
+          if (!h5ActionRunning) setH5EnableConfirmOpen(false)
         }}
-      >
-        <AlertDialogContent
-          onEscapeKeyDown={(event) => {
-            if (h5ActionRunning) event.preventDefault()
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.general.h5AccessConfirmTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>{t('settings.general.h5AccessConfirmBody')}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={h5ActionRunning}>
-              {t('common.cancel')}
-            </AlertDialogCancel>
-            <LoadingButton
-              variant="destructive"
-              loading={h5ActionRunning}
-              onClick={() => void handleH5EnableConfirm()}
-            >
-              {t('settings.general.h5AccessConfirmEnable')}
-            </LoadingButton>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onConfirm={handleH5EnableConfirm}
+        title={t('settings.general.h5AccessConfirmTitle')}
+        body={t('settings.general.h5AccessConfirmBody')}
+        confirmLabel={t('settings.general.h5AccessConfirmEnable')}
+        cancelLabel={t('common.cancel')}
+        confirmVariant="danger"
+        loading={h5ActionRunning}
+      />
     </div>
+  )
+}
+
+function SettingsCheckboxMark({ checked, disabled = false }: { checked: boolean; disabled?: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-brand)]/40 ${
+        checked
+          ? 'border-[var(--color-brand)] bg-[var(--color-brand)] text-[var(--color-on-primary)] shadow-[var(--shadow-button-primary)]'
+          : 'border-[var(--color-border-focus)] bg-[var(--color-surface)] text-transparent'
+      } ${disabled ? 'opacity-50' : ''}`}
+    >
+      <span className="material-symbols-outlined text-[16px] leading-none" style={{ fontVariationSettings: "'FILL' 1" }}>
+        check
+      </span>
+    </span>
   )
 }
 
@@ -4202,130 +3874,50 @@ function H5AccessSettings() {
 
 function SkillSettings() {
   const selectedSkill = useSkillStore((s) => s.selectedSkill)
-  const selectedSkillContext = useSkillStore((s) => s.selectedSkillContext)
-  const isDetailLoading = useSkillStore((s) => s.isDetailLoading)
-  const clearSelection = useSkillStore((s) => s.clearSelection)
-  const sessions = useSessionStore((s) => s.sessions)
-  const activeSessionId = useSessionStore((s) => s.activeSessionId)
-  const [returnFocusKey, setReturnFocusKey] = useState<string | null>(null)
-  const hadDetailRef = useRef(false)
   const t = useTranslation()
-  const activeSession = sessions.find((session) => session.id === activeSessionId)
-  const currentWorkDir = activeSession?.workDir
-  const currentContext = currentWorkDir ?? ''
-  const showDetail = Boolean(selectedSkill) || isDetailLoading
 
-  useEffect(() => {
-    if (
-      (selectedSkill || isDetailLoading)
-      && selectedSkillContext !== null
-      && selectedSkillContext !== currentContext
-    ) {
-      clearSelection()
-    }
-  }, [
-    clearSelection,
-    currentContext,
-    isDetailLoading,
-    selectedSkill,
-    selectedSkillContext,
-  ])
-
-  useEffect(() => {
-    if (showDetail) {
-      hadDetailRef.current = true
-      return
-    }
-    if (!hadDetailRef.current) return
-    hadDetailRef.current = false
-
-    requestAnimationFrame(() => {
-      const skillRows = Array.from(
-        document.querySelectorAll<HTMLButtonElement>('[data-skill-key]'),
-      )
-      const target = skillRows.find((row) => row.dataset.skillKey === returnFocusKey)
-        ?? document.querySelector<HTMLInputElement>('[data-skill-search]')
-      target?.scrollIntoView?.({ block: 'nearest' })
-      target?.focus()
-    })
-  }, [returnFocusKey, showDetail])
+  if (selectedSkill) {
+    return (
+      <div className="w-full min-w-0">
+        <SkillDetail />
+      </div>
+    )
+  }
 
   return (
     <div className="w-full min-w-0">
-      {showDetail && <SkillDetail />}
-      <div hidden={showDetail}>
-        <h2 className="mb-1 text-base font-semibold text-[var(--color-text-primary)]">
-          {t('settings.skills.title')}
-        </h2>
-        <p className="mb-4 text-sm text-[var(--color-text-tertiary)]">
-          {t('settings.skills.description')}
-        </p>
-        <SkillList onOpenSkill={setReturnFocusKey} />
-      </div>
+      <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">
+        {t('settings.skills.title')}
+      </h2>
+      <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
+        {t('settings.skills.description')}
+      </p>
+      <SkillList />
     </div>
   )
 }
 
 function PluginSettings() {
   const selectedPlugin = usePluginStore((s) => s.selectedPlugin)
-  const selectedPluginContext = usePluginStore((s) => s.selectedPluginContext)
-  const isDetailLoading = usePluginStore((s) => s.isDetailLoading)
-  const clearSelection = usePluginStore((s) => s.clearSelection)
-  const sessions = useSessionStore((s) => s.sessions)
-  const activeSessionId = useSessionStore((s) => s.activeSessionId)
-  const [returnFocusKey, setReturnFocusKey] = useState<string | null>(null)
-  const hadDetailRef = useRef(false)
   const t = useTranslation()
-  const activeSession = sessions.find((session) => session.id === activeSessionId)
-  const currentContext = activeSession?.workDir ?? ''
-  const showDetail = Boolean(selectedPlugin) || isDetailLoading
 
-  useEffect(() => {
-    if (
-      showDetail
-      && selectedPluginContext !== null
-      && selectedPluginContext !== currentContext
-    ) {
-      clearSelection()
-    }
-  }, [clearSelection, currentContext, selectedPluginContext, showDetail])
-
-  useEffect(() => {
-    if (showDetail) {
-      hadDetailRef.current = true
-      return
-    }
-    if (!hadDetailRef.current) return
-    hadDetailRef.current = false
-
-    requestAnimationFrame(() => {
-      const pluginRows = Array.from(
-        document.querySelectorAll<HTMLButtonElement>('[data-plugin-key]'),
-      )
-      const target = pluginRows.find((row) => row.dataset.pluginKey === returnFocusKey)
-        ?? pluginRows[0]
-        ?? document.querySelector<HTMLElement>('[data-plugin-list-heading]')
-      target?.scrollIntoView?.({ block: 'nearest' })
-      target?.focus()
-    })
-  }, [returnFocusKey, showDetail])
+  if (selectedPlugin) {
+    return (
+      <div className="w-full min-w-0">
+        <PluginDetail />
+      </div>
+    )
+  }
 
   return (
     <div className="w-full min-w-0">
-      {showDetail && <PluginDetail />}
-      <div hidden={showDetail}>
-        <h2
-          data-plugin-list-heading
-          tabIndex={-1}
-          className="mb-1 text-base font-semibold text-[var(--color-text-primary)]"
-        >
-          {t('settings.plugins.title')}
-        </h2>
-        <p className="mb-4 text-sm text-[var(--color-text-tertiary)]">
-          {t('settings.plugins.description')}
-        </p>
-        <PluginList onOpenPlugin={setReturnFocusKey} />
-      </div>
+      <h2 className="text-base font-semibold text-[var(--color-text-primary)] mb-1">
+        {t('settings.plugins.title')}
+      </h2>
+      <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
+        {t('settings.plugins.description')}
+      </p>
+      <PluginList />
     </div>
   )
 }
@@ -4398,7 +3990,7 @@ function AboutSettings() {
   }, [updateProxy])
 
   const openUrl = (url: string) => {
-    void getDesktopHost().shell.open(url).catch(() => window.open(url, '_blank', 'noopener,noreferrer'))
+    void getDesktopHost().shell.open(url).catch(() => window.open(url, '_blank'))
   }
 
   const checkedAtText =
@@ -4457,6 +4049,7 @@ function AboutSettings() {
   const downloadedText = formatBytes(downloadedBytes)
   const updateDescription = (() => {
     if (updateStatus === 'checking') return t('update.checking')
+    if (error) return t('update.failed', { error })
     if (updateStatus === 'downloading') {
       return hasKnownProgress
         ? t('update.progress', { progress: String(progressPercent) })
@@ -4479,258 +4072,216 @@ function AboutSettings() {
         <div className="mt-1 flex items-center gap-2 text-xs text-[var(--color-text-tertiary)]">
           <span>{t('settings.about.version')} {version}</span>
           <span className="text-[var(--color-border)]">·</span>
-          <ShadcnButton
-            variant="link"
-            size="sm"
+          <button
             onClick={() => openUrl(GITHUB_RELEASES)}
-            className="h-auto rounded-[var(--radius-sm)] p-0 text-xs text-[var(--color-text-accent)] hover:text-[var(--color-brand)]"
+            className="rounded-[var(--radius-sm)] text-[var(--color-text-accent)] transition-colors hover:text-[var(--color-brand)] focus:outline-none focus:shadow-[var(--shadow-focus-ring)]"
           >
             {t('settings.about.changelog')}
-          </ShadcnButton>
+          </button>
         </div>
       )}
 
       {/* GitHub Repo */}
       <div className="mt-6 w-full">
-        <ShadcnButton
-          variant="outline"
+        <button
           onClick={() => openUrl(GITHUB_REPO)}
-          className="h-auto w-full justify-start gap-3 rounded-xl px-4 py-3"
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
         >
           <img src={publicAssetPath('icons/github.svg')} alt="GitHub" className="w-5 h-5 opacity-70" />
           <div className="flex-1 text-left">
             <div className="text-sm font-medium text-[var(--color-text-primary)]">NanmiCoder/cc-haha</div>
             <div className="text-xs text-[var(--color-text-tertiary)]">{t('settings.about.starHint')}</div>
           </div>
-        </ShadcnButton>
+        </button>
       </div>
 
-      <Card className="mt-4 w-full">
-        <CardHeader className="flex-row items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="text-sm font-medium text-[var(--color-text-primary)]">
-              {t('settings.about.updates')}
-            </h2>
-            <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+      <div className="mt-4 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.about.updates')}</div>
+            <div className="text-xs text-[var(--color-text-tertiary)] mt-1">
               {t('settings.about.updatesDesc')}
-            </p>
+            </div>
           </div>
-          <LoadingButton
+          <Button
             size="sm"
             variant="secondary"
-            loading={updateStatus === 'checking'}
-            disabled={updateStatus === 'installing' || updateStatus === 'restarting'}
             onClick={() => void checkForUpdates()}
+            loading={updateStatus === 'checking'}
           >
             {t('update.checkNow')}
-          </LoadingButton>
-        </CardHeader>
+          </Button>
+        </div>
 
-        <CardContent className="pt-0">
-          <Card className="bg-[var(--color-surface)]">
-            <CardContent className="p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs uppercase tracking-[0.14em] text-[var(--color-text-tertiary)]">
-                    {t('settings.about.version')}
-                  </div>
-                  <div className="mt-1 text-sm font-medium text-[var(--color-text-primary)]">
-                    {version || t('update.currentVersionUnknown')}
-                  </div>
-                </div>
-
-                {availableVersion && (
-                  <div className="text-right">
-                    <div className="text-xs uppercase tracking-[0.14em] text-[var(--color-text-tertiary)]">
-                      {t('update.availableLabel')}
-                    </div>
-                    <Badge className="mt-1" variant="secondary">
-                      {availableVersion}
-                    </Badge>
-                  </div>
-                )}
+        <div className="mt-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs uppercase tracking-[0.14em] text-[var(--color-text-tertiary)]">
+                {t('settings.about.version')}
               </div>
-
-              <p
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-                className="mt-3 text-sm text-[var(--color-text-secondary)]"
-              >
-                {updateDescription}
-              </p>
-
-              {error && (
-                <Alert variant="destructive" className="mt-3">
-                  <AlertDescription className="text-[var(--color-error)]">
-                    {t('update.failed', { error })}
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              {checkedAtText && (
-                <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
-                  {t('update.checkedAt', { time: checkedAtText })}
-                </p>
-              )}
-
-              <Separator className="my-3" />
-
-              <Collapsible
-                open={showUpdateProxyAdvanced}
-                onOpenChange={setShowUpdateProxyAdvanced}
-              >
-                <CollapsibleTrigger asChild>
-                  <ShadcnButton
-                    className="w-full justify-between px-1"
-                    size="sm"
-                    variant="ghost"
-                  >
-                    <span>{t('update.proxyAdvanced')}</span>
-                    {showUpdateProxyAdvanced
-                      ? <ChevronUp aria-hidden="true" />
-                      : <ChevronDown aria-hidden="true" />}
-                  </ShadcnButton>
-                </CollapsibleTrigger>
-
-                <CollapsibleContent
-                  id="update-proxy-advanced-content"
-                  className="mt-3 space-y-3"
-                >
-                  <RadioGroup
-                    aria-label={t('update.proxyAdvanced')}
-                    className="grid-cols-2"
-                    value={updateProxyDraft.mode}
-                    onValueChange={(value) => {
-                      setUpdateProxyDraft((current) => ({
-                        ...current,
-                        mode: value as UpdateProxyMode,
-                      }))
-                      setUpdateProxySaveError(null)
-                    }}
-                  >
-                    {updateProxyModes.map((mode) => (
-                      <SettingRadioCard
-                        key={mode.value}
-                        value={mode.value}
-                        label={mode.label}
-                        description={mode.description}
-                      />
-                    ))}
-                  </RadioGroup>
-
-                  {updateProxyDraft.mode === 'manual' && (
-                    <div className="space-y-1.5">
-                      <Label htmlFor="update-proxy-url">
-                        {t('update.proxyUrl')}
-                      </Label>
-                      <ShadcnInput
-                        id="update-proxy-url"
-                        value={updateProxyDraft.url}
-                        placeholder="http://127.0.0.1:7890"
-                        autoComplete="off"
-                        aria-invalid={!!manualProxyError}
-                        aria-describedby="update-proxy-url-description"
-                        onChange={(event) => {
-                          setUpdateProxyDraft((current) => ({ ...current, url: event.target.value }))
-                          setUpdateProxySaveError(null)
-                        }}
-                      />
-                      <p
-                        id="update-proxy-url-description"
-                        className={`text-[11px] leading-4 ${
-                          manualProxyError
-                            ? 'text-[var(--color-error)]'
-                            : 'text-[var(--color-text-tertiary)]'
-                        }`}
-                      >
-                        {manualProxyError ?? t('update.proxyUrlHint')}
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="min-w-0 text-[11px] leading-4 text-[var(--color-text-tertiary)]">
-                      {t('update.proxyScopeHint')}
-                    </p>
-                    <LoadingButton
-                      size="sm"
-                      variant="secondary"
-                      className="min-w-[72px] whitespace-nowrap px-4"
-                      disabled={!updateProxyDirty || !!manualProxyError}
-                      loading={isSavingUpdateProxy}
-                      onClick={() => void saveUpdateProxy()}
-                    >
-                      {t('update.proxySave')}
-                    </LoadingButton>
-                  </div>
-
-                  {updateProxySaveError && (
-                    <Alert variant="destructive">
-                      <AlertDescription className="text-[var(--color-error)]">
-                        {updateProxySaveError}
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                </CollapsibleContent>
-              </Collapsible>
-
-              {(updateStatus === 'downloading' || updateStatus === 'restarting') && (
-                <div className="mt-3">
-                  <Progress
-                    value={hasKnownProgress || updateStatus === 'restarting' ? progressPercent : null}
-                    aria-label={updateDescription}
-                    aria-valuetext={updateDescription}
-                  />
-                  {!hasKnownProgress && updateStatus === 'downloading' && downloadedBytes > 0 && (
-                    <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
-                      {downloadedText}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {releaseNotes && availableVersion && (
-                <Card className="mt-3 border-0 bg-[var(--color-surface-container-low)]">
-                  <CardContent className="p-3">
-                    <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-text-tertiary)]">
-                      {t('update.releaseNotes')}
-                    </div>
-                    <MarkdownRenderer
-                      content={releaseNotes}
-                      variant="document"
-                      className="mt-2 text-[13px] leading-6 text-[var(--color-text-secondary)] [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_p]:text-[13px] [&_p]:leading-6"
-                    />
-                  </CardContent>
-                </Card>
-              )}
-            </CardContent>
+              <div className="text-sm font-medium text-[var(--color-text-primary)] mt-1">
+                {version || t('update.currentVersionUnknown')}
+              </div>
+            </div>
 
             {availableVersion && (
-              <CardFooter className="justify-end px-3 pb-3">
-                <LoadingButton
-                  size="sm"
-                  onClick={() => void installUpdate()}
-                  loading={
-                    updateStatus === 'downloading' ||
-                    updateStatus === 'installing' ||
-                    updateStatus === 'restarting'
-                  }
-                  disabled={updateStatus === 'checking'}
-                >
-                  {updateStatus === 'downloaded'
-                    ? t('update.installAndRestart')
-                    : updateStatus === 'installing'
-                      ? t('update.installing')
-                      : updateStatus === 'restarting'
-                        ? t('update.restarting')
-                        : t('update.now')}
-                </LoadingButton>
-              </CardFooter>
+              <div className="text-right">
+                <div className="text-xs uppercase tracking-[0.14em] text-[var(--color-text-tertiary)]">
+                  {t('update.availableLabel')}
+                </div>
+                <div className="text-sm font-medium text-[var(--color-text-primary)] mt-1">
+                  {availableVersion}
+                </div>
+              </div>
             )}
-          </Card>
-        </CardContent>
-      </Card>
+          </div>
+
+          <p className={`mt-3 text-sm ${error ? 'text-[var(--color-error)]' : 'text-[var(--color-text-secondary)]'}`}>
+            {updateDescription}
+          </p>
+
+          {checkedAtText && (
+            <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+              {t('update.checkedAt', { time: checkedAtText })}
+            </p>
+          )}
+
+          <div className="mt-3 border-t border-[var(--color-border)]/60 pt-3">
+            <button
+              type="button"
+              onClick={() => setShowUpdateProxyAdvanced((value) => !value)}
+              className="flex w-full items-center justify-between gap-3 rounded-md text-left text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+              aria-expanded={showUpdateProxyAdvanced}
+            >
+              <span>{t('update.proxyAdvanced')}</span>
+              <span className="material-symbols-outlined text-[18px]">
+                {showUpdateProxyAdvanced ? 'expand_less' : 'expand_more'}
+              </span>
+            </button>
+
+            {showUpdateProxyAdvanced && (
+              <div className="mt-3 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  {updateProxyModes.map((mode) => (
+                    <button
+                      key={mode.value}
+                      type="button"
+                      onClick={() => {
+                        setUpdateProxyDraft((current) => ({ ...current, mode: mode.value }))
+                        setUpdateProxySaveError(null)
+                      }}
+                      aria-pressed={updateProxyDraft.mode === mode.value}
+                      className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                        updateProxyDraft.mode === mode.value
+                          ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]'
+                          : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+                      }`}
+                    >
+                      <div className="text-xs font-semibold">{mode.label}</div>
+                      <div className="mt-1 text-[11px] leading-4 text-[var(--color-text-tertiary)]">
+                        {mode.description}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {updateProxyDraft.mode === 'manual' && (
+                  <div>
+                    <Input
+                      id="update-proxy-url"
+                      label={t('update.proxyUrl')}
+                      value={updateProxyDraft.url}
+                      placeholder="http://127.0.0.1:7890"
+                      autoComplete="off"
+                      onChange={(event) => {
+                        setUpdateProxyDraft((current) => ({ ...current, url: event.target.value }))
+                        setUpdateProxySaveError(null)
+                      }}
+                    />
+                    <p className={`mt-1 text-[11px] leading-4 ${manualProxyError ? 'text-[var(--color-error)]' : 'text-[var(--color-text-tertiary)]'}`}>
+                      {manualProxyError ?? t('update.proxyUrlHint')}
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between gap-3">
+                  <p className="min-w-0 text-[11px] leading-4 text-[var(--color-text-tertiary)]">
+                    {t('update.proxyScopeHint')}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="min-w-[72px] px-4 whitespace-nowrap"
+                    disabled={!updateProxyDirty || !!manualProxyError || isSavingUpdateProxy}
+                    loading={isSavingUpdateProxy}
+                    onClick={() => void saveUpdateProxy()}
+                  >
+                    {t('update.proxySave')}
+                  </Button>
+                </div>
+
+                {updateProxySaveError && (
+                  <p className="text-[11px] leading-4 text-[var(--color-error)]">
+                    {updateProxySaveError}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {(updateStatus === 'downloading' || updateStatus === 'restarting') && (
+            <div className="mt-3">
+              <div className="h-1.5 bg-[var(--color-surface-container-low)] rounded-full overflow-hidden">
+                {hasKnownProgress || updateStatus === 'restarting' ? (
+                  <div
+                    className="h-full bg-[var(--color-text-accent)] transition-all duration-300"
+                    style={{ width: `${Math.min(progressPercent, 100)}%` }}
+                  />
+                ) : (
+                  <div className="h-full w-1/3 rounded-full bg-[var(--color-text-accent)]/75 animate-pulse" />
+                )}
+              </div>
+              {!hasKnownProgress && updateStatus === 'downloading' && downloadedBytes > 0 && (
+                <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+                  {downloadedText}
+                </p>
+              )}
+            </div>
+          )}
+
+          {releaseNotes && availableVersion && (
+            <div className="mt-3 rounded-lg bg-[var(--color-surface-container-low)] px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-text-tertiary)]">
+                {t('update.releaseNotes')}
+              </div>
+              <MarkdownRenderer
+                content={releaseNotes}
+                variant="document"
+                className="mt-2 text-[13px] leading-6 text-[var(--color-text-secondary)] [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_p]:text-[13px] [&_p]:leading-6"
+              />
+            </div>
+          )}
+
+          {availableVersion && (
+            <div className="mt-3 flex justify-end">
+              <Button
+                size="sm"
+                onClick={() => void installUpdate()}
+                loading={updateStatus === 'downloading' || updateStatus === 'installing' || updateStatus === 'restarting'}
+                disabled={updateStatus === 'checking' || updateStatus === 'downloading'}
+              >
+                {updateStatus === 'downloaded'
+                  ? t('update.installAndRestart')
+                  : updateStatus === 'installing'
+                    ? t('update.installing')
+                    : updateStatus === 'restarting'
+                      ? t('update.restarting')
+                      : t('update.now')}
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Divider */}
       <div className="w-full border-t border-[var(--color-border)]/40 my-6" />
@@ -4738,15 +4289,14 @@ function AboutSettings() {
       {/* Author */}
       <div className="w-full">
         <h3 className="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wider mb-3">{t('settings.about.author')}</h3>
-        <ShadcnButton
-          variant="ghost"
+        <button
           onClick={() => openUrl(AUTHOR_GITHUB)}
-          className="h-auto w-full justify-start gap-3 rounded-lg px-4 py-2.5"
+          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
         >
           <img src={publicAssetPath('icons/github.svg')} alt="GitHub" className="w-4 h-4 opacity-60" />
           <span className="text-sm text-[var(--color-text-primary)]">程序员阿江-Relakkes</span>
           <span className="text-xs text-[var(--color-text-tertiary)] ml-auto">GitHub</span>
-        </ShadcnButton>
+        </button>
       </div>
 
       {/* Social Media */}
@@ -4754,32 +4304,30 @@ function AboutSettings() {
         <h3 className="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wider mb-3">{t('settings.about.socialMedia')}</h3>
         <div className="flex flex-col gap-0.5">
           {SOCIAL_LINKS.map((link) => (
-            <ShadcnButton
-              variant="ghost"
+            <button
               key={link.name}
               onClick={() => openUrl(link.url)}
-              className="h-auto w-full justify-start gap-3 rounded-lg px-4 py-2.5"
+              className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
             >
               <img src={publicAssetPath(link.icon)} alt={link.name} className="w-4 h-4 opacity-60" />
               <span className="text-sm text-[var(--color-text-primary)]">{link.label}</span>
               <span className="text-xs text-[var(--color-text-tertiary)] ml-auto">{link.name}</span>
-            </ShadcnButton>
+            </button>
           ))}
         </div>
       </div>
 
       <div className="mt-6 w-full">
-        <ShadcnButton
-          variant="outline"
+        <button
           onClick={() => openUrl(GITHUB_ISSUES)}
-          className="h-auto w-full justify-start gap-3 rounded-xl px-4 py-3"
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
         >
-          <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-[var(--color-text-tertiary)]">feedback</span>
+          <span className="material-symbols-outlined text-[20px] text-[var(--color-text-tertiary)]">feedback</span>
           <div className="flex-1 text-left">
             <div className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.about.feedback')}</div>
             <div className="text-xs text-[var(--color-text-tertiary)]">{t('settings.about.feedbackDesc')}</div>
           </div>
-        </ShadcnButton>
+        </button>
       </div>
     </div>
   )

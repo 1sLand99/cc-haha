@@ -185,9 +185,6 @@ describe('Settings > Agents tab', () => {
       mutationWarning: null,
       selectedAgent: null,
       selectedAgentReturnTab: 'agents',
-      requestedCwd: undefined,
-      resolvedCwd: undefined,
-      isContextStale: false,
       fetchAgents: noopFetch,
       selectAgent: (agent) => useAgentStore.setState({ selectedAgent: agent }),
     })
@@ -198,13 +195,13 @@ describe('Settings > Agents tab', () => {
     expect(screen.getByText('Agents')).toBeInTheDocument()
   })
 
-  it('shows shadcn skeletons when fetching agents', () => {
+  it('shows loading spinner when fetching agents', () => {
     useAgentStore.setState({ isLoading: true, allAgents: [], activeAgents: [], fetchAgents: noopFetch })
     render(<Settings />)
     switchToAgentsTab()
 
-    const loading = screen.getByRole('status', { name: /Loading/ })
-    expect(loading.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(4)
+    const spinner = document.querySelector('.animate-spin')
+    expect(spinner).toBeInTheDocument()
   })
 
   it('uses the active session workDir even when settings tab is focused', async () => {
@@ -256,49 +253,6 @@ describe('Settings > Agents tab', () => {
     expect(screen.getByText('Writes technical documentation')).toBeInTheDocument()
     expect(screen.getByText('telegram:pairing')).toBeInTheDocument()
     expect(screen.getByText('Overridden by User')).toBeInTheDocument()
-    expect(screen.getByText('Agent Browser').closest('[data-slot="card"]')).not.toBeNull()
-    expect(screen.getByText('code-reviewer').closest('button')).toHaveAttribute('data-slot', 'button')
-    expect(screen.getAllByText('User').some((element) => element.closest('[data-slot="badge"]'))).toBe(true)
-  })
-
-  it('keeps list summaries inert and blocks automatic Agent markdown resources', () => {
-    const agent = {
-      ...MOCK_AGENTS[0]!,
-      description: [
-        '**Review safely** with [the manual](https://example.com/manual).',
-        '![tracking](http://127.0.0.1:9/description.png)',
-        '<button>Nested action</button>',
-      ].join('\n'),
-      systemPrompt: [
-        '# Safe prompt',
-        '![tracking](https://example.com/prompt.png)',
-        '<video src="http://127.0.0.1:9/prompt.mp4"></video>',
-      ].join('\n'),
-    }
-    useAgentStore.setState({
-      allAgents: [agent],
-      activeAgents: [agent],
-      isLoading: false,
-      fetchAgents: noopFetch,
-    })
-    render(<Settings />)
-    switchToAgentsTab()
-
-    const row = screen.getByRole('button', { name: 'code-reviewer · User · 1' })
-    expect(row).toHaveTextContent('Review safely with the manual. Nested action')
-    expect(row).not.toHaveTextContent('127.0.0.1')
-    expect(row.querySelector('a, button, img, video, audio, source, picture')).toBeNull()
-
-    fireEvent.click(row)
-
-    const descriptionCard = screen.getByRole('heading', { name: 'code-reviewer' }).closest('[data-slot="card"]')
-    const promptRegion = screen.getByRole('region', { name: /System prompt/i })
-    expect(descriptionCard?.querySelector('img, video, audio, source, picture, iframe, object, embed')).toBeNull()
-    expect(promptRegion.querySelector('img, video, audio, source, picture, iframe, object, embed')).toBeNull()
-    expect(promptRegion.innerHTML).not.toContain('prompt.png')
-    expect(promptRegion.innerHTML).not.toContain('127.0.0.1')
-    expect(promptRegion).toHaveAttribute('tabindex', '0')
-    expect(screen.getByRole('heading', { name: 'Safe prompt' })).toBeInTheDocument()
   })
 
   it('opens agent detail with metadata cards and document prompt', () => {
@@ -311,9 +265,7 @@ describe('Settings > Agents tab', () => {
     render(<Settings />)
     switchToAgentsTab()
 
-    const agentButton = screen.getByText('code-reviewer').closest('button')
-    expect(agentButton).not.toBeNull()
-    fireEvent.click(agentButton!)
+    fireEvent.click(screen.getByText('code-reviewer'))
 
     expect(screen.getByText('Back to list')).toBeInTheDocument()
     expect(screen.getByText('Agent Profile')).toBeInTheDocument()
@@ -323,12 +275,6 @@ describe('Settings > Agents tab', () => {
 
     const rendererRoot = screen.getByRole('heading', { name: 'Code Reviewer' }).closest('div[class*="prose"]')
     expect(rendererRoot?.className).toContain('max-w-[72ch]')
-    expect(screen.getByRole('heading', { name: 'code-reviewer' })).toHaveFocus()
-    expect(screen.getByRole('button', { name: 'Edit' })).toHaveAttribute('data-slot', 'button')
-    expect(screen.getByRole('button', { name: 'Delete' })).toHaveAttribute('data-slot', 'button')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Back to list' }))
-    expect(screen.getByText('code-reviewer').closest('button')).toHaveFocus()
   })
 
   it('shows no system prompt state when agent has no prompt', () => {
@@ -388,9 +334,7 @@ describe('Settings > Agents tab', () => {
       await Promise.resolve()
     })
 
-    expect(
-      screen.getByRole('heading', { name: 'Installed Plugins' }),
-    ).toBeInTheDocument()
+    expect(screen.getByText('Installed Plugins')).toBeInTheDocument()
   })
 })
 

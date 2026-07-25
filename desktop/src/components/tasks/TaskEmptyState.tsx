@@ -1,33 +1,30 @@
-import { Clock3, Plus } from 'lucide-react'
+import { Button } from '../shared/Button'
 import { useTranslation } from '../../i18n'
-import { Button } from '../ui/button'
-import { Card, CardContent } from '../ui/card'
 
 type Props = {
-  onCreateTask: (trigger: HTMLButtonElement) => void
+  onCreateTask: () => void
 }
 
 export function TaskEmptyState({ onCreateTask }: Props) {
   const t = useTranslation()
   return (
-    <Card className="bg-[var(--color-surface)]">
-      <CardContent className="flex flex-col items-center justify-center px-6 py-16 text-center">
-        <div className="mb-4 flex size-16 items-center justify-center rounded-full bg-[var(--color-surface-info)]">
-          <Clock3 className="size-8 text-[var(--color-text-tertiary)]" strokeWidth={1.5} aria-hidden="true" />
-        </div>
+    <div className="flex flex-col items-center justify-center py-20">
+      {/* Clock icon */}
+      <div className="w-16 h-16 rounded-full bg-[var(--color-surface-info)] flex items-center justify-center mb-4">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-tertiary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+      </div>
 
-        <h2 className="mb-1 text-sm font-medium text-[var(--color-text-primary)]">
-          {t('tasks.emptyTitle')}
-        </h2>
-        <p className="mb-4 max-w-sm text-sm text-[var(--color-text-tertiary)]">
-          {t('tasks.emptyDesc')}
-        </p>
+      <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-1">
+        {t('tasks.emptyTitle')}
+      </h3>
+      <p className="text-sm text-[var(--color-text-tertiary)] mb-4 text-center max-w-sm">
+        {t('tasks.emptyDesc')}
+      </p>
 
-        <Button onClick={(event) => onCreateTask(event.currentTarget)}>
-          <Plus aria-hidden="true" />
-          {t('tasks.newTask').replace(/^\+\s*/, '')}
-        </Button>
-      </CardContent>
-    </Card>
+      <Button onClick={onCreateTask}>{t('tasks.newTask')}</Button>
+    </div>
   )
 }

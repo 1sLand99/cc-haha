@@ -145,7 +145,7 @@ describe('Content-only pages render without errors', () => {
 
     render(<EmptySession />)
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: '/', selectionStart: 1 },
     })
 
@@ -164,7 +164,7 @@ describe('Content-only pages render without errors', () => {
 
     render(<EmptySession />)
 
-    fireEvent.change(screen.getByRole('combobox'), {
+    fireEvent.change(screen.getByRole('textbox'), {
       target: { value: '/goal', selectionStart: 5 },
     })
 
@@ -234,22 +234,12 @@ describe('Content-only pages render without errors', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
-
-    expect(screen.getByRole('combobox')).toHaveAttribute('data-slot', 'textarea')
-    expect(screen.getByRole('button', { name: 'Open composer tools' })).toHaveAttribute('data-variant', 'ghost')
-
     await act(async () => {
-      fireEvent.keyDown(screen.getByRole('button', { name: 'Open composer tools' }), { key: 'ArrowDown' })
+      fireEvent.click(screen.getByRole('button', { name: 'Open composer tools' }))
       await Promise.resolve()
     })
-
-    expect(screen.getByRole('menuitem', { name: 'Add files or photos' })).toHaveAttribute('data-slot', 'dropdown-menu-item')
-    expect(screen.getByRole('menuitem', { name: 'Slash commands' })).toHaveAttribute('data-slot', 'dropdown-menu-item')
-
-    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Open composer tools' })).toHaveFocus()
-    })
+    expect(screen.getByText('Add files or photos')).toBeInTheDocument()
+    expect(screen.getByText('Slash commands')).toBeInTheDocument()
   })
 
   it('ActiveSession renders with chat components', () => {
@@ -443,7 +433,7 @@ describe('Content-only pages render without errors', () => {
 
     render(<ActiveSession />)
 
-    const textarea = screen.getByRole('combobox')
+    const textarea = screen.getByRole('textbox')
     fireEvent.change(textarea, { target: { value: '/mcp', selectionStart: 4 } })
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' })
 
@@ -514,7 +504,7 @@ describe('Content-only pages render without errors', () => {
 
     render(<ActiveSession />)
 
-    const textarea = screen.getByRole('combobox')
+    const textarea = screen.getByRole('textbox')
     fireEvent.change(textarea, { target: { value: '/skills', selectionStart: 7 } })
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' })
 
@@ -571,7 +561,7 @@ describe('Content-only pages render without errors', () => {
 
     render(<ActiveSession />)
 
-    const textarea = screen.getByRole('combobox')
+    const textarea = screen.getByRole('textbox')
     fireEvent.change(textarea, { target: { value: '/plugin', selectionStart: 7 } })
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' })
 
@@ -634,7 +624,7 @@ describe('Content-only pages render without errors', () => {
 
     render(<ActiveSession />)
 
-    const textarea = screen.getByRole('combobox')
+    const textarea = screen.getByRole('textbox')
     fireEvent.change(textarea, { target: { value: '/help', selectionStart: 5 } })
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' })
 
@@ -692,7 +682,7 @@ describe('Content-only pages render without errors', () => {
     })
 
     const { container } = render(<ActiveSession />)
-    const textarea = screen.getByRole('combobox')
+    const textarea = screen.getByRole('textbox')
     fireEvent.change(textarea, { target: { value: '/status', selectionStart: 7 } })
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' })
 
@@ -1310,11 +1300,14 @@ describe('AppShell layout renders chrome', () => {
 })
 
 describe('Design system compliance', () => {
-  it('the production empty session uses shared shadcn controls and Lucide icons', () => {
-    const { container } = render(<EmptySession />)
-    expect(container.querySelector('[data-slot="textarea"]')).toBeInTheDocument()
-    expect(container.querySelector('[data-slot="dropdown-menu-trigger"]')).toBeInTheDocument()
-    expect(container.querySelector('.lucide-plus')).toBeInTheDocument()
+  it('Pages use Material Symbols Outlined icons', () => {
+    const pages = [EmptySession, AgentTeams, ToolInspection]
+    for (const Page of pages) {
+      const { container, unmount } = render(<Page />)
+      const icons = container.querySelectorAll('.material-symbols-outlined')
+      expect(icons.length).toBeGreaterThan(0)
+      unmount()
+    }
   })
 
   it('Current brand color is used in content pages', () => {

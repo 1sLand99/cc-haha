@@ -1,17 +1,6 @@
 import type { ReactNode } from 'react'
-import { LoaderCircle } from 'lucide-react'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '../ui/alert-dialog'
-import { buttonVariants } from '../ui/button'
-import { cn } from '../../lib/utils'
+import { Button } from './Button'
+import { Modal } from './Modal'
 
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost'
 
@@ -45,56 +34,33 @@ export function ActionDialog({
   const busy = loading || actions.some((action) => action.loading)
 
   return (
-    <AlertDialog
+    <Modal
       open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen && !busy) onClose()
-      }}
+      onClose={busy ? () => {} : onClose}
+      title={title}
+      width={width}
+      footer={(
+        <>
+          {actions.map((action) => (
+            <Button
+              key={action.label}
+              type="button"
+              variant={action.variant ?? 'secondary'}
+              onClick={() => void action.onClick()}
+              loading={action.loading}
+              disabled={busy || action.disabled}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </>
+      )}
     >
-      <AlertDialogContent style={{ maxWidth: width }}>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            {typeof body === 'string' ? (
-              <p>{body}</p>
-            ) : (
-              <div>{body}</div>
-            )}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          {actions.map((action, index) => {
-            const isCancel = index === 0
-            const Action = isCancel ? AlertDialogCancel : AlertDialogAction
-            const variant = action.variant === 'danger'
-              ? 'destructive'
-              : action.variant === 'primary'
-                ? 'default'
-                : action.variant ?? 'secondary'
-            return (
-              <Action
-                key={action.label}
-                type="button"
-                onClick={(event) => {
-                  if (action.loading || busy || action.disabled) {
-                    event.preventDefault()
-                    return
-                  }
-                  if (!isCancel) event.preventDefault()
-                  void action.onClick()
-                }}
-                disabled={busy || action.disabled}
-                className={cn(buttonVariants({ variant }), 'gap-2')}
-              >
-                {action.loading && (
-                  <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
-                )}
-                {action.label}
-              </Action>
-            )
-          })}
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      {typeof body === 'string' ? (
+        <p className="text-sm leading-6 text-[var(--color-text-secondary)]">
+          {body}
+        </p>
+      ) : body}
+    </Modal>
   )
 }
