@@ -221,6 +221,7 @@ export function MarketSkillDetail({
       banner={banner}
       meta={meta}
       description={detail.description}
+      descriptionFrontmatter={detail.descriptionFrontmatter}
       files={detail.files.map((f) => ({ path: f.path, size: f.size, language: f.language, tooBig: f.tooBig }))}
       loadFile={loadFile}
       onBack={backToList}

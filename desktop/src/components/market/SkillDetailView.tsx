@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeft, CircleSlash2, FileText, Folder } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import type {
@@ -10,8 +10,10 @@ import type {
 import { InstallStateBadge } from './InstallStateBadge'
 import { SecurityBadge } from './SecurityBadge'
 import { FilePreview, type PreviewFile, type PreviewFileContent } from './FilePreview'
+import { FrontmatterPanel } from './FrontmatterPanel'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 import { SkillAvatar } from './SkillAvatar'
+import { splitFrontmatter, type SkillFrontmatter } from '../../lib/skillFrontmatter'
 
 export type SkillDetailMetaItem = {
   label: string
@@ -34,6 +36,11 @@ export type SkillDetailViewProps = {
   banner?: ReactNode
   meta: SkillDetailMetaItem[]
   description: string
+  /**
+   * Frontmatter the caller already parsed. Used when `description` arrives with
+   * its YAML block stripped upstream, so the overview can still show it.
+   */
+  descriptionFrontmatter?: SkillFrontmatter
   files: PreviewFile[]
   loadFile: (path: string) => Promise<PreviewFileContent>
   onBack: () => void
@@ -54,12 +61,24 @@ export function SkillDetailView(props: SkillDetailViewProps) {
     headingRef.current?.focus()
   }, [])
 
+  // Some sources hand us the raw SKILL.md (frontmatter included), others strip
+  // it upstream and pass the parsed block separately. Handle both.
+  const overview = useMemo(() => splitFrontmatter(props.description), [props.description])
+  const skillFrontmatter = overview.frontmatter ?? props.descriptionFrontmatter
+
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[var(--color-surface-container-lowest)]"
+      className="min-h-0 flex-1 overflow-y-auto bg-[var(--color-surface-container-lowest)]"
       data-testid="skill-detail-view"
     >
-      <div className="mx-auto w-full max-w-[1320px] px-6 py-6 lg:px-8">
+      {/*
+        `lg:h-full` (not `min-h-full`) on purpose: a flex column sized by
+        min-height stays `height: auto`, so `flex-1`'s `flex-basis: 0%` cannot
+        resolve and the panel below falls back to content height — which is what
+        left the bottom of the page empty. A definite height makes the tab panel
+        claim the leftover space. Narrow layouts keep the page scrolling.
+      */}
+      <div className="mx-auto flex w-full max-w-[1320px] flex-col px-6 py-6 lg:h-full lg:px-8">
         <button
           type="button"
           onClick={props.onBack}
@@ -69,7 +88,7 @@ export function SkillDetailView(props: SkillDetailViewProps) {
           {props.backLabel}
         </button>
 
-        <header className="mt-5 border-b border-[var(--color-border)]/70 pb-6">
+        <header className="mt-5 flex-shrink-0 border-b border-[var(--color-border)]/70 pb-6">
           <div className="flex min-w-0 items-start gap-4 sm:gap-5">
             <SkillAvatar skill={{ name: props.name, iconUrl: props.iconUrl }} size={64} />
             <div className="min-w-0 flex-1 pt-0.5">
@@ -145,12 +164,12 @@ export function SkillDetailView(props: SkillDetailViewProps) {
           {props.banner}
         </header>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
-          <main className="min-w-0">
+        <div className="mt-6 grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-stretch">
+          <main className="flex min-w-0 flex-col lg:min-h-0">
             <div
               role="tablist"
               aria-label={props.name}
-              className="flex items-center gap-1 border-b border-[var(--color-border)]"
+              className="flex flex-shrink-0 items-center gap-1 border-b border-[var(--color-border)]"
             >
               {(['overview', 'files'] as const).map((key) => {
                 const active = tab === key
@@ -188,11 +207,11 @@ export function SkillDetailView(props: SkillDetailViewProps) {
                 id="skill-detail-overview-panel"
                 role="tabpanel"
                 aria-labelledby="skill-detail-tab-overview-trigger"
-                className="mt-5 rounded-xl border border-[var(--color-border)]/70 bg-[var(--color-surface)] px-6 py-6 sm:px-8 sm:py-7"
+                className="mt-5 rounded-xl border border-[var(--color-border)]/70 bg-[var(--color-surface)] px-6 py-6 sm:px-8 sm:py-7 lg:min-h-0 lg:flex-1 lg:overflow-y-auto"
                 data-testid="skill-detail-overview"
               >
-                {props.description.trim() ? (
-                  <MarkdownRenderer content={props.description} variant="document" className="mx-auto max-w-[72ch]" />
+                {overview.body.trim() ? (
+                  <MarkdownRenderer content={overview.body} variant="document" className="mx-auto max-w-[72ch]" />
                 ) : (
                   <p className="py-6 text-center text-sm text-[var(--color-text-tertiary)]">{t('market.detail.noDescription')}</p>
                 )}
@@ -204,7 +223,8 @@ export function SkillDetailView(props: SkillDetailViewProps) {
                 id="skill-detail-files-panel"
                 role="tabpanel"
                 aria-labelledby="skill-detail-tab-files-trigger"
-                className="mt-5"
+                className="mt-5 flex min-h-[22rem] flex-col lg:min-h-0 lg:flex-1"
+                data-testid="skill-detail-files"
               >
                 <FilePreview files={props.files} loadFile={props.loadFile} />
               </section>
@@ -213,7 +233,7 @@ export function SkillDetailView(props: SkillDetailViewProps) {
 
           <aside
             data-testid="skill-detail-sidebar"
-            className="order-first min-w-0 lg:order-none lg:sticky lg:top-5"
+            className="order-first min-w-0 lg:order-none lg:max-h-full lg:self-start lg:overflow-y-auto"
           >
             <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] shadow-[0_1px_2px_rgba(27,28,26,0.05)]">
               {props.actions && (
@@ -238,6 +258,17 @@ export function SkillDetailView(props: SkillDetailViewProps) {
                   ))}
                 </dl>
               )}
+              {/*
+                The skill's own declared attributes belong with the market ones
+                above — same kind of data, different source. Keeping them here
+                leaves the overview tab free to answer "what is this skill?"
+                first, which is what a reader opens the page for.
+              */}
+              <FrontmatterPanel
+                frontmatter={skillFrontmatter}
+                variant="sidebar"
+                className={props.actions || props.meta.length > 0 ? 'border-t border-[var(--color-border)]' : ''}
+              />
             </div>
           </aside>
         </div>

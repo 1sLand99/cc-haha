@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from '../../i18n'
 import { CodeViewer } from '../chat/CodeViewer'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
+import { splitFrontmatter } from '../../lib/skillFrontmatter'
+import { FrontmatterPanel } from './FrontmatterPanel'
 
 export type PreviewFile = {
   path: string
@@ -40,6 +42,21 @@ type LoadState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'loaded'; file: PreviewFileContent }
+
+/**
+ * Markdown body plus its structured frontmatter. SKILL.md leads with a YAML
+ * block that markdown would otherwise turn into a giant setext heading.
+ */
+function MarkdownFilePreview({ content }: { content: string }) {
+  const { frontmatter, body } = useMemo(() => splitFrontmatter(content), [content])
+
+  return (
+    <>
+      {frontmatter && <FrontmatterPanel frontmatter={frontmatter} className="mb-5" />}
+      <MarkdownRenderer content={body} variant="document" />
+    </>
+  )
+}
 
 /**
  * Two-pane file preview: file list on the left, rendered content on the
@@ -93,7 +110,7 @@ export function FilePreview({
 
   if (files.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6 py-12 text-center">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6 py-12 text-center">
         <span className="material-symbols-outlined mb-2 block text-[32px] text-[var(--color-text-tertiary)]">folder_off</span>
         <p className="text-sm text-[var(--color-text-tertiary)]">{t('market.file.noFiles')}</p>
       </div>
@@ -103,8 +120,11 @@ export function FilePreview({
   const activeFile = files.find((f) => f.path === activePath)
 
   return (
-    <div className="grid min-w-0 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]" data-testid="market-file-preview">
-      <div className="flex max-h-[520px] flex-col gap-0.5 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5">
+    <div
+      className="grid min-h-0 min-w-0 flex-1 gap-4 lg:h-full lg:grid-cols-[minmax(200px,240px)_minmax(0,1fr)]"
+      data-testid="market-file-preview"
+    >
+      <div className="flex max-h-[40vh] min-h-0 flex-col gap-0.5 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 lg:max-h-none">
         {files.map((file) => {
           const active = file.path === activePath
           return (
@@ -133,9 +153,9 @@ export function FilePreview({
         })}
       </div>
 
-      <div className="min-w-0 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
         {activeFile && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-2.5 text-[11px] text-[var(--color-text-tertiary)]">
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-2.5 text-[11px] text-[var(--color-text-tertiary)]">
             <span className="font-mono font-medium text-[var(--color-text-secondary)]">{activeFile.path}</span>
             <span>{activeFile.language}</span>
             <span>{formatSize(activeFile.size)}</span>
@@ -148,7 +168,7 @@ export function FilePreview({
           </div>
         )}
 
-        <div className="max-h-[480px] overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 max-lg:max-h-[70vh]">
           {state.kind === 'loading' && (
             <div className="flex justify-center py-10" data-testid="market-file-loading">
               <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-brand)] border-t-transparent" />
@@ -174,7 +194,7 @@ export function FilePreview({
           )}
           {state.kind === 'loaded' &&
             (state.file.language === 'markdown' ? (
-              <MarkdownRenderer content={state.file.content} variant="document" />
+              <MarkdownFilePreview content={state.file.content} />
             ) : (
               <CodeViewer
                 code={state.file.content}
