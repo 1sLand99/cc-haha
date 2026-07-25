@@ -36,6 +36,18 @@ export type PetContextMenuFactory = {
 
 export type PetWindowPosition = Pick<Point, 'x' | 'y'>
 
+/**
+ * A saved position deliberately leaves the transparent padding around the
+ * mascot off-screen, so it only means anything next to the mascot box it was
+ * clamped against. Persisting that box too lets the window reopen where the
+ * drag left it; clamping the bare position against the whole window instead
+ * lands it a padding-height away, and the renderer then visibly corrects it as
+ * soon as it reports the live region.
+ */
+export type PetWindowState = PetWindowPosition & {
+  region?: Rectangle
+}
+
 export type PetWindowDragPayload = PetWindowPosition & {
   phase: 'start' | 'move' | 'end'
 }
@@ -50,6 +62,41 @@ function isPetWindowPosition(value: unknown): value is PetWindowPosition {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
   return isFiniteScreenCoordinate(record.x) && isFiniteScreenCoordinate(record.y)
+}
+
+function isPetWindowRegion(value: unknown): value is Rectangle {
+  if (!isPetWindowPosition(value)) return false
+  const record = value as Record<string, unknown>
+  return isFiniteScreenCoordinate(record.width)
+    && isFiniteScreenCoordinate(record.height)
+    && record.width > 0
+    && record.height > 0
+}
+
+function roundPetWindowRegion(region: Rectangle): Rectangle {
+  return {
+    x: Math.round(region.x),
+    y: Math.round(region.y),
+    width: Math.round(region.width),
+    height: Math.round(region.height),
+  }
+}
+
+/**
+ * Centre of the mascot for the given saved state, used to pick the display the
+ * window belongs to. Without a region the window centre is the best guess.
+ */
+function petWindowAnchor(state: PetWindowState): Point {
+  const region = state.region ?? {
+    x: 0,
+    y: 0,
+    width: PET_WINDOW_WIDTH,
+    height: PET_WINDOW_HEIGHT,
+  }
+  return {
+    x: state.x + region.x + Math.floor(region.width / 2),
+    y: state.y + region.y + Math.floor(region.height / 2),
+  }
 }
 
 function resolveHomePath(input: string, homeDir: string): string {
@@ -75,15 +122,21 @@ export function petWindowStatePath(
 export function readPetWindowPosition(
   env: NodeJS.ProcessEnv = process.env,
   homeDir: string = os.homedir(),
-): PetWindowPosition | null {
+): PetWindowState | null {
   const statePath = petWindowStatePath(env, homeDir)
   if (!existsSync(statePath)) return null
 
   try {
     const parsed = JSON.parse(readFileSync(statePath, 'utf8')) as unknown
-    return isPetWindowPosition(parsed)
-      ? { x: Math.round(parsed.x), y: Math.round(parsed.y) }
-      : null
+    if (!isPetWindowPosition(parsed)) return null
+    // State written before the region was persisted still restores, just
+    // against the whole window the way it always did.
+    const region = (parsed as { region?: unknown }).region
+    return {
+      x: Math.round(parsed.x),
+      y: Math.round(parsed.y),
+      ...(isPetWindowRegion(region) ? { region: roundPetWindowRegion(region) } : {}),
+    }
   } catch (error) {
     console.error(`[desktop] failed to read pet window state ${statePath}:`, error)
     return null
@@ -91,18 +144,21 @@ export function readPetWindowPosition(
 }
 
 export function writePetWindowPosition(
-  position: PetWindowPosition,
+  state: PetWindowState,
   env: NodeJS.ProcessEnv = process.env,
   homeDir: string = os.homedir(),
 ): void {
-  if (!isPetWindowPosition(position)) return
+  if (!isPetWindowPosition(state)) return
   const statePath = petWindowStatePath(env, homeDir)
   const temporaryPath = `${statePath}.${process.pid}.tmp`
   try {
     mkdirSync(path.dirname(statePath), { recursive: true, mode: 0o700 })
     writeFileSync(temporaryPath, `${JSON.stringify({
-      x: Math.round(position.x),
-      y: Math.round(position.y),
+      x: Math.round(state.x),
+      y: Math.round(state.y),
+      ...(isPetWindowRegion(state.region)
+        ? { region: roundPetWindowRegion(state.region) }
+        : {}),
     }, null, 2)}\n`, { mode: 0o600 })
     renameSync(temporaryPath, statePath)
     failedPetWindowStateWritePaths.delete(statePath)
@@ -186,11 +242,11 @@ function normalizePetWindowRegion(region: Rectangle, extent: PetWindowExtent): R
 
 export function getPetWindowBounds(
   workArea: Rectangle,
-  restoredPosition?: PetWindowPosition | null,
+  restoredPosition?: PetWindowState | null,
 ): Rectangle {
   if (restoredPosition) {
     return {
-      ...clampPetWindowPosition(restoredPosition, workArea),
+      ...clampPetWindowPosition(restoredPosition, workArea, restoredPosition.region),
       width: PET_WINDOW_WIDTH,
       height: PET_WINDOW_HEIGHT,
     }
@@ -226,7 +282,17 @@ export function petWindowOptions(
     minimizable: false,
     resizable: false,
     show: false,
-    ...(platform === 'darwin' ? {} : { skipTaskbar: true }),
+    // macOS runs a visible window's frame through
+    // -[NSWindow constrainFrameRect:toScreen:], which rewrites any y above the
+    // work area back down to its top edge. The mascot sits at the bottom of a
+    // mostly transparent window, so clamping against it deliberately asks for a
+    // negative y to push that padding off-screen — and AppKit silently refused,
+    // stranding the mascot a padding-height below the menu bar. This is the one
+    // switch that skips that method; clampPetWindowPosition stays the
+    // authoritative bound on every platform and every edge.
+    ...(platform === 'darwin'
+      ? { enableLargerThanScreen: true }
+      : { skipTaskbar: true }),
     transparent: true,
     type: platform === 'darwin' ? 'panel' : undefined,
     webPreferences: {
@@ -264,8 +330,8 @@ export type PetWindowControllerOptions = {
   onCreated?(window: PetWindow): void
   platform?: NodeJS.Platform
   preloadPath: string
-  readPosition?(): PetWindowPosition | null
-  writePosition?(position: PetWindowPosition): void
+  readPosition?(): PetWindowState | null
+  writePosition?(state: PetWindowState): void
 }
 
 export class PetWindowController {
@@ -279,7 +345,7 @@ export class PetWindowController {
   } | null = null
   private dragTimer: ReturnType<typeof setInterval> | null = null
   private visibleDragRegion: Rectangle | null = null
-  private pendingRestoredPosition: PetWindowPosition | null = null
+  private pendingRestoredPosition: PetWindowState | null = null
   private readonly options: PetWindowControllerOptions
 
   constructor(options: PetWindowControllerOptions) {
@@ -291,10 +357,7 @@ export class PetWindowController {
     this.visibleDragRegion = null
     this.pendingRestoredPosition = restoredPosition
     const currentWorkArea = restoredPosition && this.options.getWorkAreaForPoint
-      ? this.options.getWorkAreaForPoint({
-          x: restoredPosition.x + Math.floor(PET_WINDOW_WIDTH / 2),
-          y: restoredPosition.y + Math.floor(PET_WINDOW_HEIGHT / 2),
-        })
+      ? this.options.getWorkAreaForPoint(petWindowAnchor(restoredPosition))
       : this.options.getCurrentWorkArea()
     const window = this.options.createWindow(petWindowOptions(
       getPetWindowBounds(currentWorkArea, restoredPosition),
@@ -404,10 +467,9 @@ export class PetWindowController {
     if (dragRegion) {
       const requestedPosition = this.pendingRestoredPosition ?? window.getBounds()
       this.pendingRestoredPosition = null
-      const anchor = {
-        x: requestedPosition.x + dragRegion.x + Math.floor(dragRegion.width / 2),
-        y: requestedPosition.y + dragRegion.y + Math.floor(dragRegion.height / 2),
-      }
+      // The live region beats whatever was saved: the mascot may have been
+      // resized since, and this is the first measurement of the real one.
+      const anchor = petWindowAnchor({ ...requestedPosition, region: dragRegion })
       const workArea = this.options.getWorkAreaForPoint?.(anchor)
         ?? this.options.getCurrentWorkArea()
       const nextPosition = clampPetWindowPosition(requestedPosition, workArea, dragRegion)
@@ -522,7 +584,12 @@ export class PetWindowController {
     if (!drag) return
 
     this.drag = null
-    this.options.writePosition?.(drag.lastPosition)
+    // The saved position only reconstructs where the mascot was if the box it
+    // was clamped against travels with it.
+    this.options.writePosition?.({
+      ...drag.lastPosition,
+      ...(this.visibleDragRegion ? { region: this.visibleDragRegion } : {}),
+    })
   }
 
   showContextMenu(

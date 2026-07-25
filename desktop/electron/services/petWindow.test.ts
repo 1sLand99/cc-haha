@@ -38,6 +38,18 @@ type FakeWindowOptions = {
   contentSize?: { width: number; height: number }
   /** Drop getContentBounds entirely, to exercise the fallback. */
   withoutContentBounds?: boolean
+  /**
+   * Work area top edge, when the platform constrains the window to it.
+   *
+   * macOS runs a *visible* window's frame through
+   * -[NSWindow constrainFrameRect:toScreen:], which rewrites any y above the
+   * work area back down to that edge — so the negative y the mascot clamp asks
+   * for is silently refused and the mascot strands a padding-height below the
+   * menu bar. A fake window that accepts every y proves nothing about the top
+   * edge, which is why the bug survived a green suite. Left undefined the fake
+   * behaves like Windows and Linux, which impose no such limit.
+   */
+  constrainTopTo?: number
 }
 
 function createFakeWindow(
@@ -51,11 +63,13 @@ function createFakeWindow(
     scaleFactor = 1,
     contentSize,
     withoutContentBounds = false,
+    constrainTopTo,
   }: FakeWindowOptions = {},
 ) {
   const handlers = new Map<string, () => void>()
   let visible = false
   let destroyed = false
+  let escapesConstraint = false
   const toPhysical = (value: number) => Math.ceil(value * scaleFactor)
   const toDip = (value: number) => Math.ceil(value / scaleFactor)
   let physical = {
@@ -70,11 +84,19 @@ function createFakeWindow(
     width: toDip(physical.width),
     height: toDip(physical.height),
   })
+  // enableLargerThanScreen is the one flag that skips constrainFrameRect, so
+  // the constraint has to read it off the constructor options the controller
+  // actually passed — otherwise the fake proves the platform's behaviour
+  // rather than the fix for it.
+  const constrainTop = (y: number) =>
+    constrainTopTo !== undefined && visible && !escapesConstraint
+      ? Math.max(y, constrainTopTo)
+      : y
   const setBounds = vi.fn((next: Partial<typeof physical>) => {
     const merged = { ...readBounds(), ...next }
     physical = {
       x: merged.x,
-      y: merged.y,
+      y: constrainTop(merged.y),
       width: toPhysical(merged.width),
       height: toPhysical(merged.height),
     }
@@ -82,10 +104,16 @@ function createFakeWindow(
 
   return {
     handlers,
+    applyConstructorOptions(options: { enableLargerThanScreen?: boolean }) {
+      escapesConstraint = options.enableLargerThanScreen === true
+    },
     isDestroyed: vi.fn(() => destroyed),
     isVisible: vi.fn(() => visible),
+    // Showing re-runs the constraint, so parking a hidden window above the
+    // work area does not survive the reveal.
     showInactive: vi.fn(() => {
       visible = true
+      physical = { ...physical, y: constrainTop(physical.y) }
     }),
     hide: vi.fn(() => {
       visible = false
@@ -169,6 +197,50 @@ describe('Electron pet window service', () => {
     }
   })
 
+  it('persists the mascot box with the position and tolerates state without one', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'cc-haha-pet-region-'))
+    const env = { CLAUDE_CONFIG_DIR: path.join(root, 'portable') }
+    try {
+      writePetWindowPosition(
+        { x: 100, y: -215, region: { x: 136.4, y: 240.2, width: 112, height: 128 } },
+        env,
+        root,
+      )
+      expect(readPetWindowPosition(env, root)).toEqual({
+        x: 100,
+        y: -215,
+        region: { x: 136, y: 240, width: 112, height: 128 },
+      })
+
+      // State written before the region was persisted still restores.
+      writePetWindowPosition({ x: 12, y: 34 }, env, root)
+      expect(readPetWindowPosition(env, root)).toEqual({ x: 12, y: 34 })
+
+      // An empty box would clamp as if the mascot filled nothing, so it is
+      // dropped rather than trusted.
+      writePetWindowPosition(
+        { x: 12, y: 34, region: { x: 0, y: 0, width: 0, height: 10 } },
+        env,
+        root,
+      )
+      expect(readPetWindowPosition(env, root)).toEqual({ x: 12, y: 34 })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('reopens a saved edge position where the drag actually left it', () => {
+    const workArea = { x: 0, y: 25, width: 800, height: 575 }
+    const region = { x: 136, y: 240, width: 112, height: 128 }
+    const saved = { x: 100, y: workArea.y - region.y, region }
+
+    expect(getPetWindowBounds(workArea, saved).y).toBe(saved.y)
+    // The same position without the box clamps against the whole window and
+    // opens a padding-height lower — the jump the renderer used to correct
+    // once it reported the live region.
+    expect(getPetWindowBounds(workArea, { x: saved.x, y: saved.y }).y).toBe(workArea.y)
+  })
+
   it('creates a transparent frameless sandboxed always-on-top window', () => {
     const macOptions = petWindowOptions(
       { x: 20, y: 30, width: PET_WINDOW_WIDTH, height: PET_WINDOW_HEIGHT },
@@ -182,6 +254,10 @@ describe('Electron pet window service', () => {
       height: PET_WINDOW_HEIGHT,
       alwaysOnTop: true,
       backgroundColor: '#00000000',
+      // Without this macOS refuses every y above the work area, so the mascot
+      // can never be dragged up to the menu bar: the transparent padding above
+      // it has to be allowed off-screen.
+      enableLargerThanScreen: true,
       frame: false,
       fullscreenable: false,
       hasShadow: false,
@@ -206,6 +282,8 @@ describe('Electron pet window service', () => {
     )
     expect(windowsOptions.type).toBeUndefined()
     expect(windowsOptions.skipTaskbar).toBe(true)
+    // Documented macOS-only; Windows and Linux never constrain the frame.
+    expect(windowsOptions).not.toHaveProperty('enableLargerThanScreen')
   })
 
   it('loads the dedicated renderer mode with pet-scoped server auth configured', () => {
@@ -367,8 +445,12 @@ describe('Electron pet window service', () => {
   it.each([
     ['darwin', 'left', { x: -100, y: 220 }, { x: -136, y: 160 }],
     ['darwin', 'right', { x: 1_000, y: 220 }, { x: 552, y: 160 }],
+    ['darwin', 'top', { x: 150, y: -200 }, { x: 100, y: -215 }],
+    ['darwin', 'bottom', { x: 150, y: 900 }, { x: 100, y: 232 }],
     ['win32', 'left', { x: -100, y: 220 }, { x: -136, y: 160 }],
     ['win32', 'right', { x: 1_000, y: 220 }, { x: 552, y: 160 }],
+    ['win32', 'top', { x: 150, y: -200 }, { x: 100, y: -215 }],
+    ['win32', 'bottom', { x: 150, y: 900 }, { x: 100, y: 232 }],
   ] as const)(
     'lets the %s mascot reach the %s display edge through transparent window padding',
     async (platform, _edge, pointerEnd, expectedPosition) => {
@@ -397,6 +479,78 @@ describe('Electron pet window service', () => {
       expect(lastDragBounds(petWindow)).toEqual(draggedTo(expectedPosition))
     },
   )
+
+  // The mascot sits at the bottom of a mostly transparent window, so reaching
+  // the menu bar means the window's own top edge has to go *above* the work
+  // area. macOS refuses that for a visible window unless it opted out, and the
+  // refusal is silent — the controller reads back a position it never got.
+  const menuBarDrag = {
+    workArea: { x: 0, y: 25, width: 800, height: 575 },
+    region: { x: 136, y: 240, width: 112, height: 128 },
+  }
+
+  async function dragToTopEdge(
+    createWindow: (
+      window: ReturnType<typeof createFakeWindow>,
+      options: { enableLargerThanScreen?: boolean },
+    ) => unknown,
+  ) {
+    const petWindow = createFakeWindow(
+      { x: 100, y: 120, width: PET_WINDOW_WIDTH, height: PET_WINDOW_HEIGHT },
+      { constrainTopTo: menuBarDrag.workArea.y },
+    )
+    const writePosition = vi.fn()
+    const controller = new PetWindowController({
+      createWindow: vi.fn((options: { enableLargerThanScreen?: boolean }) =>
+        createWindow(petWindow, options)) as never,
+      getCurrentWorkArea: () => menuBarDrag.workArea,
+      getWorkAreaForPoint: () => menuBarDrag.workArea,
+      load: vi.fn().mockResolvedValue(undefined),
+      platform: 'darwin',
+      preloadPath: '/app/electron-dist/preload.cjs',
+      writePosition,
+    })
+    await controller.show()
+    controller.setInteractiveRegions(petWindow as never, [menuBarDrag.region])
+    controller.dragWindow(petWindow as never, { phase: 'start', x: 150, y: 180 })
+    controller.dragWindow(petWindow as never, { phase: 'end', x: 150, y: -400 })
+    return { petWindow, writePosition }
+  }
+
+  it('drags the darwin mascot up to the menu bar through the frame constraint', async () => {
+    // The opt-out has to come from the options the controller really built.
+    const { petWindow, writePosition } = await dragToTopEdge((window, options) => {
+      window.applyConstructorOptions(options)
+      return window
+    })
+    const { region, workArea } = menuBarDrag
+
+    // The window really sits above the work area, so the mascot's own top edge
+    // lands on it rather than a padding-height below.
+    expect(petWindow.getBounds().y).toBe(workArea.y - region.y)
+    expect(petWindow.getBounds().y + region.y).toBe(workArea.y)
+    // And what lands on disk is a position the window actually reached, next
+    // to the box that makes it mean anything.
+    expect(writePosition).toHaveBeenCalledWith({
+      x: 100,
+      y: workArea.y - region.y,
+      region,
+    })
+  })
+
+  it('strands the mascot below the menu bar when the window keeps the constraint', async () => {
+    // Guards the guard: a fake that accepted every y would pass the test above
+    // whether or not the window opts out, which is exactly how the real bug
+    // survived a green suite.
+    const { petWindow } = await dragToTopEdge((window) => {
+      window.applyConstructorOptions({ enableLargerThanScreen: false })
+      return window
+    })
+    const { region, workArea } = menuBarDrag
+
+    expect(petWindow.getBounds().y).toBe(workArea.y)
+    expect(petWindow.getBounds().y + region.y).toBe(workArea.y + region.y)
+  })
 
   it('clamps dragging against the mascot measured in the real content box', async () => {
     // The renderer measures the mascot against the live viewport, so a content
