@@ -7,7 +7,7 @@ import { clearInstalledPluginsCache } from '../../utils/plugins/installedPlugins
 import { clearPluginCache } from '../../utils/plugins/pluginLoader.js'
 import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
 import { handlePluginsApi } from '../api/plugins.js'
-import { handleSkillsApi } from '../api/skills.js'
+import { handleSkillsApi, listSkillSlashCommands } from '../api/skills.js'
 
 let tmpHome: string
 let originalHome: string | undefined
@@ -592,6 +592,84 @@ describe('Skills API', () => {
       } finally {
         delete process.env.CLAUDE_CODE_DISABLE_AGENT_SKILLS_DIR
       }
+    })
+  })
+
+  /**
+   * The slash command list feeds the desktop composer menu, so it has to agree
+   * with the CLI on which file a name resolves to — otherwise the menu
+   * describes one skill and running it executes another.
+   *
+   * See the matching cases in
+   * src/skills/__tests__/agentSkillsDiscovery.test.ts.
+   */
+  describe('slash command name collisions', () => {
+    async function repoWith(
+      skills: Array<{ root: string; marker: string }>,
+    ): Promise<string> {
+      const repo = path.join(tmpHome, 'workspace')
+      await fs.mkdir(path.join(repo, '.git'), { recursive: true })
+      for (const { root, marker } of skills) {
+        await writeSkill(
+          root.replace('<repo>', repo),
+          'deploy',
+          ['---', `description: ${marker}`, '---', '', '# Deploy'].join('\n'),
+        )
+      }
+      return repo
+    }
+
+    it('prefers a project .claude skill over a user .agents skill', async () => {
+      const repo = await repoWith([
+        { root: path.join(tmpHome, '.agents', 'skills'), marker: 'User agents' },
+        { root: path.join('<repo>', '.claude', 'skills'), marker: 'Project claude' },
+      ])
+
+      const commands = await listSkillSlashCommands(repo)
+      const matches = commands.filter((c) => c.name === 'deploy')
+
+      expect(matches).toHaveLength(1)
+      expect(matches[0]!.description).toBe('Project claude')
+    })
+
+    it('prefers a user .claude skill over a project .agents skill', async () => {
+      const repo = await repoWith([
+        { root: path.join(tmpHome, '.claude', 'skills'), marker: 'User claude' },
+        { root: path.join('<repo>', '.agents', 'skills'), marker: 'Project agents' },
+      ])
+
+      const commands = await listSkillSlashCommands(repo)
+      const matches = commands.filter((c) => c.name === 'deploy')
+
+      expect(matches).toHaveLength(1)
+      expect(matches[0]!.description).toBe('User claude')
+    })
+
+    it('keeps the user copy when both scopes use .claude', async () => {
+      const repo = await repoWith([
+        { root: path.join(tmpHome, '.claude', 'skills'), marker: 'User claude' },
+        { root: path.join('<repo>', '.claude', 'skills'), marker: 'Project claude' },
+      ])
+
+      const commands = await listSkillSlashCommands(repo)
+      const matches = commands.filter((c) => c.name === 'deploy')
+
+      expect(matches).toHaveLength(1)
+      expect(matches[0]!.description).toBe('User claude')
+    })
+
+    it('lists no duplicate names at all', async () => {
+      const repo = await repoWith([
+        { root: path.join(tmpHome, '.claude', 'skills'), marker: 'User claude' },
+        { root: path.join(tmpHome, '.agents', 'skills'), marker: 'User agents' },
+        { root: path.join('<repo>', '.claude', 'skills'), marker: 'Repo claude' },
+        { root: path.join('<repo>', '.agents', 'skills'), marker: 'Repo agents' },
+      ])
+
+      const names = (await listSkillSlashCommands(repo)).map((c) => c.name)
+
+      expect(names.filter((n) => n === 'deploy')).toHaveLength(1)
+      expect(new Set(names).size).toBe(names.length)
     })
   })
 })

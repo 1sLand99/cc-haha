@@ -13,6 +13,7 @@ import { getCwd } from '../../utils/cwd.js'
 import {
   getProjectSkillRoots,
   getUserSkillRoots,
+  outranksClaimedSkill,
   type SkillRoot,
   type SkillRootFlavor,
 } from '../../skills/skillRoots.js'
@@ -429,23 +430,37 @@ export async function listSkillSlashCommands(cwd?: string): Promise<SkillSlashCo
     collectLegacySlashCommands(requestedCwd),
   ])
 
-  const byName = new Map<string, SkillSlashCommand>()
+  // Same precedence the CLI loader applies, so the composer menu and the
+  // command it runs always come from one file. See outranksClaimedSkill.
+  const byName = new Map<
+    string,
+    { command: SkillSlashCommand; flavor: SkillRootFlavor | undefined }
+  >()
 
   for (const skill of skills) {
     if (!skill.userInvocable) continue
+    const claimed = byName.get(skill.name)
+    if (
+      claimed !== undefined &&
+      !outranksClaimedSkill(claimed.flavor, skill.rootFlavor)
+    ) {
+      continue
+    }
     byName.set(skill.name, {
-      name: skill.name,
-      description: skill.description || '',
+      command: { name: skill.name, description: skill.description || '' },
+      flavor: skill.rootFlavor,
     })
   }
 
   for (const command of legacyCommands) {
     if (!byName.has(command.name)) {
-      byName.set(command.name, command)
+      byName.set(command.name, { command, flavor: undefined })
     }
   }
 
-  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
+  return [...byName.values()]
+    .map(claim => claim.command)
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 // ─── Router ──────────────────────────────────────────────────────────────────

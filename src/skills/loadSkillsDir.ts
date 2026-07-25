@@ -58,6 +58,7 @@ import {
   getNestedSkillDirCandidates,
   getProjectSkillRoots,
   getUserSkillRoots,
+  outranksClaimedSkill,
   type SkillRoot,
   type SkillRootFlavor,
 } from './skillRoots.js'
@@ -518,18 +519,6 @@ async function loadSkillsFromSkillsDir(
  * silently dropping one of those would be a worse failure than the one this
  * prevents. Only genuinely unrenderable names are rejected.
  */
-/**
- * Dedup key for "same name, same scope".
- *
- * Joined with NUL because a scopeKey embeds a directory path: with a printable
- * separator a scope ending in that character, paired with a name starting with
- * one, would collide with an unrelated pair. Written as an escape so the
- * separator is not an invisible byte in this file.
- */
-function scopedSkillKey(scopeKey: string, name: string): string {
-  return `${scopeKey}\u0000${name}`
-}
-
 export function isRenderableSkillName(name: string): boolean {
   if (name.length === 0) return false
   for (const char of name) {
@@ -542,34 +531,35 @@ export function isRenderableSkillName(name: string): boolean {
 }
 
 /**
- * Collapses skills that share a name within a single scope, keeping the first.
- * Entries without a scopeKey (legacy /commands/) are always kept.
+ * Collapses skills that share a name, keeping the highest-precedence one.
  *
  * Used on paths that don't run the full realpath dedup; the main loader inlines
  * the same rule so it can interleave with file-identity dedup.
  */
-function dedupeScopedNameCollisions(entries: SkillWithPath[]): SkillWithPath[] {
-  const seen = new Set<string>()
-  const kept: SkillWithPath[] = []
+function dedupeSkillNameCollisions(entries: SkillWithPath[]): SkillWithPath[] {
+  const claimedByName = new Map<
+    string,
+    { entry: SkillWithPath; flavor: SkillRootFlavor | undefined }
+  >()
 
   for (const entry of entries) {
-    if (entry.scopeKey === undefined) {
-      kept.push(entry)
-      continue
-    }
-    const scopedName = scopedSkillKey(entry.scopeKey, entry.skill.name)
-    if (seen.has(scopedName)) {
+    const flavor =
+      entry.scopeKey === undefined ? undefined : (entry.rootFlavor ?? 'claude')
+    const claimed = claimedByName.get(entry.skill.name)
+    if (
+      claimed !== undefined &&
+      !outranksClaimedSkill(claimed.flavor, flavor)
+    ) {
       logForDebugging(
-        `[skills] Shadowed skill '${entry.skill.name}' in ${entry.filePath}: a skill of the same name was already loaded in this scope`,
+        `[skills] Shadowed skill '${entry.skill.name}' in ${entry.filePath}: a skill of the same name was already loaded from a ${claimed.flavor ?? 'legacy commands'} directory`,
         { level: 'warn' },
       )
       continue
     }
-    seen.add(scopedName)
-    kept.push(entry)
+    claimedByName.set(entry.skill.name, { entry, flavor })
   }
 
-  return kept
+  return [...claimedByName.values()].map(claim => claim.entry)
 }
 
 // --- Legacy /commands/ loader ---
@@ -765,9 +755,9 @@ export const getSkillDirCommands = memoize(
           loadSkillsFromSkillsDir(root.path, 'projectSettings', root),
         ),
       )
-      // Across distinct --add-dir paths the user controls uniqueness, but a
-      // single added dir can still carry both conventions — collapse those.
-      return dedupeScopedNameCollisions(additionalSkillsNested.flat()).map(
+      // Both conventions inside one added dir, and the same name across two of
+      // them, collapse the same way they do on the main path.
+      return dedupeSkillNameCollisions(additionalSkillsNested.flat()).map(
         s => s.skill,
       )
     }
@@ -839,10 +829,23 @@ export const getSkillDirCommands = memoize(
       string,
       SettingSource | 'builtin' | 'mcp' | 'plugin' | 'bundled'
     >()
-    // Tracks `${scopeKey}\0${name}` → the flavor that claimed it, so a skill
-    // present in both conventions of one scope is reported once.
-    const seenScopedNames = new Map<string, SkillRootFlavor | undefined>()
-    const deduplicatedSkills: Command[] = []
+    /**
+     * name → the entry currently holding it, and the flavor that claimed it.
+     *
+     * A skill name is a single slash command, so it has to resolve to exactly
+     * one file however many roots spell it. `.claude` outranks `.agents` even
+     * across scopes: this is the Claude Code CLI, so a skill installed for us
+     * stays authoritative over one another client dropped into the shared
+     * `.agents` space. Within one flavor the root order above decides
+     * (managed → user → project, each most-specific-first → --add-dir).
+     *
+     * A `undefined` flavor marks a legacy `/commands/` entry: those only fill a
+     * name nothing else claimed and never displace a skill.
+     */
+    const claimedByName = new Map<
+      string,
+      { skill: Command; flavor: SkillRootFlavor | undefined }
+    >()
 
     for (let i = 0; i < allSkillsWithPaths.length; i++) {
       const entry = allSkillsWithPaths[i]
@@ -860,16 +863,14 @@ export const getSkillDirCommands = memoize(
         }
       }
 
-      // Same name, same scope, different directory convention — the copy-based
-      // sync case, where realpath dedup above can't help because the two files
-      // are genuinely distinct. First wins, and roots are ordered so that is
-      // always `.claude`.
-      if (scopeKey !== undefined) {
-        const scopedName = scopedSkillKey(scopeKey, skill.name)
-        const claimedBy = seenScopedNames.get(scopedName)
-        if (claimedBy !== undefined) {
+      // Two genuinely distinct files claiming one name — the copy-based sync
+      // case, which the realpath dedup above cannot collapse.
+      const flavor = scopeKey === undefined ? undefined : (rootFlavor ?? 'claude')
+      const claimed = claimedByName.get(skill.name)
+      if (claimed !== undefined) {
+        if (!outranksClaimedSkill(claimed.flavor, flavor)) {
           logForDebugging(
-            `[skills] Shadowed skill '${skill.name}' in ${entry.filePath}: a skill of the same name was already loaded from the ${claimedBy} directory in this scope`,
+            `[skills] Shadowed skill '${skill.name}' in ${entry.filePath}: a skill of the same name was already loaded from a ${claimed.flavor ?? 'legacy commands'} directory`,
             { level: 'warn' },
           )
           // Record the loser's file identity too. Roots can overlap — e.g.
@@ -881,14 +882,23 @@ export const getSkillDirCommands = memoize(
           }
           continue
         }
-        seenScopedNames.set(scopedName, rootFlavor ?? 'claude')
+        logForDebugging(
+          `[skills] Replacing skill '${skill.name}' with ${entry.filePath}: a .claude directory outranks the .agents copy loaded earlier`,
+          { level: 'warn' },
+        )
       }
 
       if (fileId !== null && fileId !== undefined) {
         seenFileIds.set(fileId, skill.source)
       }
-      deduplicatedSkills.push(skill)
+      // Map.set keeps the first insertion position, so a replacement inherits
+      // the slot its predecessor held rather than jumping to the end.
+      claimedByName.set(skill.name, { skill, flavor })
     }
+
+    const deduplicatedSkills: Command[] = [...claimedByName.values()].map(
+      claim => claim.skill,
+    )
 
     const duplicatesRemoved =
       allSkillsWithPaths.length - deduplicatedSkills.length

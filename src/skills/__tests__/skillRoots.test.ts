@@ -10,6 +10,7 @@ import {
   getUserAgentSkillsDir,
   getUserSkillRoots,
   isAgentSkillsDirectoryEnabled,
+  outranksClaimedSkill,
 } from '../skillRoots.js'
 
 let tmpHome: string
@@ -229,6 +230,29 @@ describe('skillRoots', () => {
         path.join('/repo/pkg', '.claude', 'skills'),
         path.join('/repo/pkg', '.agents', 'skills'),
       ])
+    })
+  })
+
+  describe('name collision precedence', () => {
+    it('lets .claude take a name .agents is holding', () => {
+      expect(outranksClaimedSkill('agents', 'claude')).toBe(true)
+    })
+
+    it('leaves the incumbent in place for every other pairing', () => {
+      // Same flavor, or the other direction — the caller's root order already
+      // ranked these, so the first one loaded keeps the name.
+      expect(outranksClaimedSkill('claude', 'agents')).toBe(false)
+      expect(outranksClaimedSkill('claude', 'claude')).toBe(false)
+      expect(outranksClaimedSkill('agents', 'agents')).toBe(false)
+    })
+
+    it('never displaces or is displaced by a flavorless root', () => {
+      // Plugin and legacy /commands/ entries have no flavor to rank.
+      expect(outranksClaimedSkill(undefined, 'claude')).toBe(false)
+      expect(outranksClaimedSkill(undefined, 'agents')).toBe(false)
+      expect(outranksClaimedSkill('claude', undefined)).toBe(false)
+      expect(outranksClaimedSkill('agents', undefined)).toBe(false)
+      expect(outranksClaimedSkill(undefined, undefined)).toBe(false)
     })
   })
 })

@@ -10,7 +10,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { getCwdState, setCwdState } from '../../bootstrap/state.js'
+import {
+  getAdditionalDirectoriesForClaudeMd,
+  getCwdState,
+  setAdditionalDirectoriesForClaudeMd,
+  setCwdState,
+} from '../../bootstrap/state.js'
 import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
 import {
   addSkillDirectories,
@@ -176,7 +181,7 @@ describe('.agents/skills discovery', () => {
       expect(commands.filter(c => c.name === 'linked')).toHaveLength(1)
     })
 
-    it('collides within one project level but not across levels', async () => {
+    it('collapses a repeated name across project levels to the most specific one', async () => {
       const repo = await makeRepo()
       const pkg = path.join(repo, 'packages', 'app')
       await fs.mkdir(pkg, { recursive: true })
@@ -188,9 +193,121 @@ describe('.agents/skills discovery', () => {
       const commands = await getSkillDirCommands(pkg)
       const descriptions = commands.filter(c => c.name === 'build').map(c => c.description)
 
-      // The two spellings inside `pkg` collapse to the .claude one; the
-      // repo-root entry is a separate scope and survives, as it always has.
-      expect(descriptions).toEqual(['Package claude', 'Repo claude'])
+      // A name resolves to exactly one skill everywhere it is listed. Roots are
+      // walked most-specific-first, so the package copy wins over the repo root.
+      expect(descriptions).toEqual(['Package claude'])
+    })
+  })
+
+  /**
+   * A skill name is a single slash command, so it must resolve to exactly one
+   * file no matter how many roots hold that name. `.claude` outranks `.agents`
+   * across scopes too: this repository is the Claude Code CLI, and a skill the
+   * user installed for us stays authoritative over one another client dropped
+   * into the shared `.agents` space.
+   */
+  describe('cross-scope name collisions', () => {
+    it('prefers a project .claude skill over a user .agents skill', async () => {
+      const repo = await makeRepo()
+      await writeSkill(agentsSkillsDir(), 'deploy', 'User agents')
+      await writeSkill(path.join(repo, '.claude', 'skills'), 'deploy', 'Project claude')
+
+      clearSkillCaches()
+      const matches = (await getSkillDirCommands(repo)).filter(c => c.name === 'deploy')
+
+      expect(matches).toHaveLength(1)
+      expect(matches[0]!.description).toBe('Project claude')
+    })
+
+    it('prefers a user .claude skill over a project .agents skill', async () => {
+      const repo = await makeRepo()
+      await writeSkill(claudeSkillsDir(), 'deploy', 'User claude')
+      await writeSkill(path.join(repo, '.agents', 'skills'), 'deploy', 'Project agents')
+
+      clearSkillCaches()
+      const matches = (await getSkillDirCommands(repo)).filter(c => c.name === 'deploy')
+
+      expect(matches).toHaveLength(1)
+      expect(matches[0]!.description).toBe('User claude')
+    })
+
+    it('keeps the user copy when both scopes use .claude', async () => {
+      // Same flavor on both sides, so the pre-existing scope order decides and
+      // the user's own skill stays authoritative.
+      //
+      // This scope pair used to yield two entries. Listing one name twice gives
+      // the reader two identical rows and no way to tell them apart, while only
+      // the first was ever executable — so it collapses like every other clash.
+      const repo = await makeRepo()
+      await writeSkill(claudeSkillsDir(), 'deploy', 'User claude')
+      await writeSkill(path.join(repo, '.claude', 'skills'), 'deploy', 'Project claude')
+
+      clearSkillCaches()
+      const matches = (await getSkillDirCommands(repo)).filter(c => c.name === 'deploy')
+
+      expect(matches).toHaveLength(1)
+      expect(matches[0]!.description).toBe('User claude')
+    })
+
+    it('keeps the user copy when both scopes use .agents', async () => {
+      const repo = await makeRepo()
+      await writeSkill(agentsSkillsDir(), 'deploy', 'User agents')
+      await writeSkill(path.join(repo, '.agents', 'skills'), 'deploy', 'Project agents')
+
+      clearSkillCaches()
+      const matches = (await getSkillDirCommands(repo)).filter(c => c.name === 'deploy')
+
+      expect(matches).toHaveLength(1)
+      expect(matches[0]!.description).toBe('User agents')
+    })
+
+    it('collapses a name repeated across --add-dir roots in bare mode', async () => {
+      // --bare loads only --add-dir roots, on a separate branch of the loader.
+      // It has to reach the same verdict: one name, one skill, `.claude` first.
+      const first = path.join(tmpHome, 'added-one')
+      const second = path.join(tmpHome, 'added-two')
+      await writeSkill(path.join(first, '.agents', 'skills'), 'deploy', 'First agents')
+      await writeSkill(path.join(second, '.claude', 'skills'), 'deploy', 'Second claude')
+
+      const originalSimple = process.env.CLAUDE_CODE_SIMPLE
+      const originalDirs = getAdditionalDirectoriesForClaudeMd()
+      process.env.CLAUDE_CODE_SIMPLE = '1'
+      setAdditionalDirectoriesForClaudeMd([first, second])
+      try {
+        clearSkillCaches()
+        const matches = (await getSkillDirCommands(await userScopeCwd())).filter(
+          c => c.name === 'deploy',
+        )
+
+        expect(matches).toHaveLength(1)
+        expect(matches[0]!.description).toBe('Second claude')
+      } finally {
+        if (originalSimple === undefined) delete process.env.CLAUDE_CODE_SIMPLE
+        else process.env.CLAUDE_CODE_SIMPLE = originalSimple
+        setAdditionalDirectoriesForClaudeMd(originalDirs)
+      }
+    })
+
+    it('lists no duplicate names at all', async () => {
+      const repo = await makeRepo()
+      const pkg = path.join(repo, 'packages', 'app')
+      await fs.mkdir(pkg, { recursive: true })
+      for (const [root, marker] of [
+        [claudeSkillsDir(), 'user claude'],
+        [agentsSkillsDir(), 'user agents'],
+        [path.join(repo, '.claude', 'skills'), 'repo claude'],
+        [path.join(repo, '.agents', 'skills'), 'repo agents'],
+        [path.join(pkg, '.claude', 'skills'), 'pkg claude'],
+        [path.join(pkg, '.agents', 'skills'), 'pkg agents'],
+      ] as const) {
+        await writeSkill(root, 'everywhere', marker)
+      }
+
+      clearSkillCaches()
+      const names = (await getSkillDirCommands(pkg)).map(c => c.name)
+
+      expect(names.filter(n => n === 'everywhere')).toHaveLength(1)
+      expect(new Set(names).size).toBe(names.length)
     })
   })
 
@@ -228,19 +345,6 @@ describe('.agents/skills discovery', () => {
 
       expect(names).toContain('user-skill')
       expect(names).toContain('project-skill')
-    })
-
-    it('keeps a user and a project skill that share a name', async () => {
-      // Different scopes — this has always produced two entries and must keep
-      // doing so now that same-scope dedup exists.
-      const repo = await makeRepo()
-      await writeSkill(claudeSkillsDir(), 'shared-name', 'User version')
-      await writeSkill(path.join(repo, '.claude', 'skills'), 'shared-name', 'Project version')
-
-      clearSkillCaches()
-      const commands = await getSkillDirCommands(repo)
-
-      expect(commands.filter(c => c.name === 'shared-name')).toHaveLength(2)
     })
 
     it('skips a skill whose directory name could forge lines in the listing', async () => {

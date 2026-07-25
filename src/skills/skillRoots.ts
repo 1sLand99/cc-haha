@@ -176,6 +176,29 @@ export function getAddDirSkillRoots(dir: string): SkillRoot[] {
 }
 
 /**
+ * Whether a skill may take a name another skill already claimed.
+ *
+ * A name is one slash command, so it resolves to exactly one file however many
+ * roots spell it — and both the CLI loader and the desktop slash command list
+ * settle that with this rule, so the menu never describes one skill while
+ * running another.
+ *
+ * `.claude` outranks `.agents` in every scope, including across them: this is
+ * the Claude Code CLI, so a skill installed for us stays authoritative over one
+ * another client dropped into the shared `.agents` space. Any other pairing
+ * leaves the incumbent in place, which hands the decision to the caller's root
+ * order (managed → user → project, each most-specific-first → --add-dir).
+ * `undefined` marks a root with no flavor — plugin and legacy `/commands/`
+ * entries — and those neither displace nor get displaced on flavor alone.
+ */
+export function outranksClaimedSkill(
+  claimed: SkillRootFlavor | undefined,
+  candidate: SkillRootFlavor | undefined,
+): boolean {
+  return candidate === 'claude' && claimed === 'agents'
+}
+
+/**
  * Both flavors of skills directory nested under a single directory, used by
  * on-demand monorepo discovery. `.claude` first, existence unchecked (the
  * caller stats them and caches hits and misses alike).
