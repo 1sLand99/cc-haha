@@ -1,5 +1,5 @@
 import { useEffect, useState, type PointerEventHandler, type ReactNode } from 'react'
-import { copyTextToClipboard } from '../chat/clipboard'
+import { copyTextToClipboard } from '@/lib/clipboard'
 
 type Props = {
   text: string

@@ -46,7 +46,7 @@ export function MobileBottomSheet({
   if (!open) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-[10000] bg-black/25" onClick={onClose}>
+    <div className="fixed inset-0 z-[var(--z-sheet)] bg-black/25" onClick={onClose}>
       <div
         ref={panelRef}
         id={id}

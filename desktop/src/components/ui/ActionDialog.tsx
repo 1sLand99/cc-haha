@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Button } from './Button'
+import { Button } from '@/components/ui/Button'
 import { Modal } from './Modal'
 
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost'

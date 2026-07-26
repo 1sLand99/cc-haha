@@ -72,7 +72,7 @@ export function Modal({ open, onClose, title, children, width = 560, footer }: M
   if (!open) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-[var(--z-dialog)] flex items-center justify-center">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-[var(--color-overlay-scrim)] transition-opacity duration-200"
