@@ -2,9 +2,13 @@
 @plugin "@tailwindcss/typography";
 
 /* ─── Dark variant binding ────────────────────────────────────────
-   The app has six themes switched via `<html data-theme>`, and deliberately
-   does NOT follow the OS. Without this, Tailwind's default `dark:` compiles
-   to `prefers-color-scheme: dark` and fires on the wrong theme.
+   The app has six themes switched via `<html data-theme>`. Following the OS
+   is resolved in JS (src/theme/systemAppearance.ts) and lands on that same
+   attribute, so `data-theme` stays the single source of truth here. Without
+   this binding, Tailwind's default `dark:` compiles to
+   `prefers-color-scheme: dark` and would fire on the wrong theme — right by
+   accident for someone following the system, plainly wrong for anyone on a
+   fixed palette.
 
    Two of the six sit on a dark ground — `dark` and `ink-blue` — so both are
    listed. Binding only `dark` is how a `dark:` utility would silently render

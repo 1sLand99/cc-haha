@@ -157,6 +157,47 @@ describe('Electron IPC capabilities', () => {
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.petsFocusSession, '../escape')).toBe(false)
   })
 
+  it('pins the reported appearance colors to literal 6-digit hex', () => {
+    // Both values reach BrowserWindow.setBackgroundColor, which also accepts
+    // #AARRGGBB — an 8-digit value would let a compromised renderer make the
+    // window translucent (click-through, overlay spoofing). So the boundary
+    // takes exactly #RRGGBB and nothing else.
+    const valid = {
+      isDark: true,
+      background: '#0E0E0E',
+      lightBackground: '#FFFFFF',
+      followSystem: false,
+    }
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.appearanceSetApplied, valid)).toBe(true)
+
+    for (const invalid of [
+      undefined,
+      'dark',
+      { isDark: true, background: '#0E0E0E', lightBackground: '#FFFFFF' },
+      { isDark: true, background: '#0E0E0E', followSystem: false },
+      { isDark: 'true', background: '#0E0E0E', lightBackground: '#FFFFFF', followSystem: false },
+      { ...valid, background: '#0E0' },
+      { ...valid, background: 'black' },
+      { ...valid, background: 'rgb(0 0 0)' },
+      { ...valid, background: '#800E0E0E' },
+      { ...valid, lightBackground: '#80FFFFFF' },
+      { ...valid, lightBackground: 'white' },
+      { ...valid, extra: 1 },
+    ]) {
+      expect(
+        validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.appearanceSetApplied, invalid),
+        JSON.stringify(invalid),
+      ).toBe(false)
+    }
+  })
+
+  it('keeps the appearance channel away from the pet window', () => {
+    // The pet window is transparent and must not repaint the main window.
+    expect(isElectronIpcChannelAllowedForPetWindow(
+      ELECTRON_IPC_CHANNELS.appearanceSetApplied,
+    )).toBe(false)
+  })
+
   it('gives the pet renderer only runtime bootstrap and companion controls', () => {
     expect(isElectronIpcChannelAllowedForPetWindow(
       ELECTRON_IPC_CHANNELS.runtimeGetServerUrl,

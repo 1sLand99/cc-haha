@@ -191,5 +191,8 @@ export function createElectronHost(bridge: ElectronHostBridge): DesktopHost {
     zoom: {
       set: level => invoke(ELECTRON_IPC_CHANNELS.zoomSet, level),
     },
+    appearance: {
+      setApplied: state => invoke(ELECTRON_IPC_CHANNELS.appearanceSetApplied, state),
+    },
   }
 }

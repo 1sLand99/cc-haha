@@ -118,6 +118,17 @@ describe('desktop persistence migrations', () => {
     expect(window.localStorage.getItem('cc-haha-theme')).toBe('warm-classic')
   })
 
+  test('applies the same rename to the light half of follow-the-system', () => {
+    // The preference holds a theme name too, so a rename that only reached the
+    // applied theme would silently reset which palette daytime returns to.
+    window.localStorage.setItem('cc-haha-light-theme', 'light')
+
+    const report = runDesktopPersistenceMigrations()
+
+    expect(report.migratedKeys).toContain('cc-haha-light-theme')
+    expect(window.localStorage.getItem('cc-haha-light-theme')).toBe('warm-classic')
+  })
+
   test('preserves every palette introduced by the redesign', () => {
     for (const theme of ['white', 'paper', 'warm-classic', 'celadon', 'dark', 'ink-blue']) {
       window.localStorage.setItem('cc-haha-theme', theme)
@@ -127,6 +138,39 @@ describe('desktop persistence migrations', () => {
       expect(report.migratedKeys, `${theme} should survive startup migration`).not.toContain('cc-haha-theme')
       expect(window.localStorage.getItem('cc-haha-theme')).toBe(theme)
     }
+  })
+
+  test('drops a malformed follow-the-system flag rather than reading it as opted in', () => {
+    // Anything but 0/1 has to go: an unset flag is how a fresh install is
+    // recognised, and a junk value would make that inference unpredictable.
+    window.localStorage.setItem('cc-haha-follow-system-theme', 'yes')
+    // A dark palette is not a valid light half, and vice versa.
+    window.localStorage.setItem('cc-haha-light-theme', 'ink-blue')
+    window.localStorage.setItem('cc-haha-dark-theme', 'celadon')
+
+    const report = runDesktopPersistenceMigrations()
+
+    expect(report.migratedKeys).toContain('cc-haha-follow-system-theme')
+    expect(report.migratedKeys).toContain('cc-haha-light-theme')
+    expect(report.migratedKeys).toContain('cc-haha-dark-theme')
+    expect(window.localStorage.getItem('cc-haha-follow-system-theme')).toBeNull()
+    expect(window.localStorage.getItem('cc-haha-light-theme')).toBeNull()
+    expect(window.localStorage.getItem('cc-haha-dark-theme')).toBeNull()
+  })
+
+  test('preserves a valid follow-the-system flag and both ground preferences', () => {
+    window.localStorage.setItem('cc-haha-follow-system-theme', '1')
+    window.localStorage.setItem('cc-haha-light-theme', 'celadon')
+    window.localStorage.setItem('cc-haha-dark-theme', 'ink-blue')
+
+    const report = runDesktopPersistenceMigrations()
+
+    expect(report.migratedKeys).not.toContain('cc-haha-follow-system-theme')
+    expect(report.migratedKeys).not.toContain('cc-haha-light-theme')
+    expect(report.migratedKeys).not.toContain('cc-haha-dark-theme')
+    expect(window.localStorage.getItem('cc-haha-follow-system-theme')).toBe('1')
+    expect(window.localStorage.getItem('cc-haha-light-theme')).toBe('celadon')
+    expect(window.localStorage.getItem('cc-haha-dark-theme')).toBe('ink-blue')
   })
 
   test('preserves every supported locale during startup migration', () => {

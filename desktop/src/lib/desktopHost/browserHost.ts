@@ -309,4 +309,9 @@ export const browserHost: DesktopHost = {
       unsupported('Native app zoom')
     },
   },
+  appearance: {
+    // No native chrome to keep in sync in a browser tab; the CSS theme is the
+    // whole story there, so reporting it is a no-op rather than an error.
+    async setApplied() {},
+  },
 }

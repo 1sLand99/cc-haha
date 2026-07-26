@@ -59,6 +59,7 @@ export const ELECTRON_IPC_CHANNELS = {
   appModeRestart: 'desktop:app-mode:restart',
   adaptersRestartSidecar: 'desktop:adapters:restart-sidecar',
   zoomSet: 'desktop:zoom:set',
+  appearanceSetApplied: 'desktop:appearance:set-applied',
 } as const
 
 export const ELECTRON_EVENT_CHANNELS = {

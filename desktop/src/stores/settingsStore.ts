@@ -64,7 +64,10 @@ type SettingsStore = {
   availableModels: ModelInfo[]
   activeProviderName: string | null
   locale: Locale
-  theme: ThemeMode
+  // No `theme` here on purpose: uiStore owns it. A copy in this store went
+  // stale the moment the OS flipped the appearance without going through
+  // setTheme, and the Settings picker highlighted a theme that was no longer
+  // on screen. Read `useUIStore(s => s.theme)` instead.
   chatSendBehavior: ChatSendBehavior
   outputStyle: string
   outputStyles: OutputStyleOption[]
@@ -185,7 +188,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   availableModels: [],
   activeProviderName: null,
   locale: getStoredLocale(),
-  theme: useUIStore.getState().theme,
   chatSendBehavior: 'enter',
   outputStyle: DEFAULT_OUTPUT_STYLE,
   outputStyles: DEFAULT_OUTPUT_STYLE_OPTIONS,
@@ -234,10 +236,11 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         loadH5AccessSettings(previousH5Access),
         loadTraceCaptureSettings(),
       ])
-      const theme = useUIStore.getState().theme
       const desktopTerminal = normalizeDesktopTerminalSettings(userSettings.desktopTerminal)
       lastPersistedDesktopTerminal = desktopTerminal
-      useUIStore.getState().setTheme(theme)
+      // Nothing to do for the theme here: uiStore already applied it at
+      // startup, and re-applying would re-persist and re-report it on every
+      // provider switch.
       set({
         permissionMode: mode,
         // 服务端响应异常可能缺 models 字段,兜底为空数组防止下游渲染崩溃
@@ -248,7 +251,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         thinkingEnabled: userSettings.alwaysThinkingEnabled !== false,
         autoDreamEnabled: userSettings.autoDreamEnabled === true,
         autoModeOptInAccepted: userSettings.skipAutoPermissionPrompt === true,
-        theme,
         chatSendBehavior: normalizeChatSendBehavior(userSettings.chatSendBehavior),
         outputStyle: normalizeOutputStyle(userSettings.outputStyle),
         skipWebFetchPreflight: userSettings.skipWebFetchPreflight !== false,
@@ -345,8 +347,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     try { localStorage.setItem(LOCALE_STORAGE_KEY, locale) } catch { /* noop */ }
   },
 
+  // Kept as the Settings page's entry point; uiStore owns the state.
   setTheme: async (theme) => {
-    set({ theme })
     useUIStore.getState().setTheme(theme)
   },
 

@@ -1231,14 +1231,16 @@ describe('settingsStore theme persistence', () => {
     }))
 
     const { useSettingsStore } = await import('./settingsStore')
-    const { useUIStore } = await import('./uiStore')
+    const { useUIStore, initializeTheme, teardownTheme } = await import('./uiStore')
+    // The renderer bootstrap applies the theme; fetchAll must not disturb it.
+    initializeTheme()
 
     await useSettingsStore.getState().fetchAll()
 
-    expect(useSettingsStore.getState().theme).toBe('white')
     expect(useUIStore.getState().theme).toBe('white')
     expect(document.documentElement.getAttribute('data-theme')).toBe('white')
     expect(document.documentElement.style.colorScheme).toBe('light')
+    teardownTheme()
   })
 
   it('keeps the desktop theme independent from the Claude user theme', async () => {
@@ -1280,11 +1282,12 @@ describe('settingsStore theme persistence', () => {
     }))
 
     const { useSettingsStore } = await import('./settingsStore')
-    const { useUIStore } = await import('./uiStore')
+    const { useUIStore, initializeTheme, teardownTheme } = await import('./uiStore')
+    // The renderer bootstrap applies the theme; fetchAll must not disturb it.
+    initializeTheme()
 
     await useSettingsStore.getState().fetchAll()
 
-    expect(useSettingsStore.getState().theme).toBe('dark')
     expect(useUIStore.getState().theme).toBe('dark')
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
     expect(document.documentElement.style.colorScheme).toBe('dark')
@@ -1293,6 +1296,7 @@ describe('settingsStore theme persistence', () => {
 
     expect(window.localStorage.getItem('cc-haha-theme')).toBe('warm-classic')
     expect(updateUser).not.toHaveBeenCalled()
+    teardownTheme()
   })
 })
 

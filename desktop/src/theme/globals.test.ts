@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import css from './globals.css?raw'
+import { THEME_MODES } from '../types/settings'
+import { THEME_BACKGROUNDS } from './systemAppearance'
 
 const normalizedCss = css.replace(/\r\n/g, '\n')
 
@@ -362,5 +364,52 @@ describe('terminal palette tokens', () => {
     const inkBlue = getThemeBlock('[data-theme="ink-blue"]')
     expect(inkBlue).toContain('--color-terminal-bg:')
     expect(inkBlue).toContain('--color-terminal-selection:')
+  })
+})
+
+describe('pre-paint background constants', () => {
+  // THEME_BACKGROUNDS feeds the Electron window background and the inline
+  // script in index.html, both of which paint before this stylesheet is
+  // parsed. A drift here is a visible flash on launch.
+
+  /**
+   * Map each palette's `--cc-bg` back to the theme owning it. That is the
+   * source value: `--color-background` is an alias resolving to `var(--cc-bg)`,
+   * so reading the alias would only ever report the literal string.
+   */
+  function declaredGrounds(): Record<string, string> {
+    const found: Record<string, string> = {}
+
+    for (const match of normalizedCss.matchAll(/--cc-bg:\s*([^;]+);/g)) {
+      const before = normalizedCss.slice(0, match.index)
+      const blockStart = before.lastIndexOf('{')
+      // The selector runs from the end of the previous block or comment.
+      const selectorStart = Math.max(
+        before.lastIndexOf('}', blockStart),
+        before.lastIndexOf('*/', blockStart),
+        -1,
+      )
+      // Take the last line so a leftover comment delimiter or a multi-line
+      // selector list does not swallow the part that identifies the theme.
+      const selector = before.slice(selectorStart + 1, blockStart).trim().split('\n').pop()!.trim()
+
+      const theme = /\[data-theme="([\w-]+)"\]/.exec(selector)?.[1]
+      if (theme) found[theme] = match[1]!.trim().toUpperCase()
+    }
+
+    return found
+  }
+
+  it('matches the ground of every palette', () => {
+    const declared = declaredGrounds()
+
+    for (const [theme, background] of Object.entries(THEME_BACKGROUNDS)) {
+      expect(declared[theme], `${theme} has no --cc-bg`).toBeDefined()
+      expect(declared[theme], `${theme} ground drifted from THEME_BACKGROUNDS`).toBe(background.toUpperCase())
+    }
+  })
+
+  it('covers every palette, so a new one cannot ship without a pre-paint color', () => {
+    expect(Object.keys(THEME_BACKGROUNDS).sort()).toEqual([...THEME_MODES].sort())
   })
 })

@@ -150,6 +150,22 @@ const urlWithOptionalBounds: Validator = value =>
 
 const zoomPayload: Validator = value => typeof value === 'number' && Number.isFinite(value)
 
+// The colors reach BrowserWindow.setBackgroundColor, so they are pinned to a
+// literal 6-digit #RRGGBB. This is load-bearing, not tidiness: that API also
+// accepts #AARRGGBB, so an 8-digit value would let a compromised renderer make
+// a window translucent or fully transparent — click-through and overlay
+// spoofing. Do not relax this into "any CSS color".
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
+const appliedAppearance: Validator = value =>
+  isRecord(value)
+  && hasOnlyKeys(value, ['isDark', 'background', 'lightBackground', 'followSystem'])
+  && typeof value.isDark === 'boolean'
+  && typeof value.followSystem === 'boolean'
+  && typeof value.background === 'string'
+  && HEX_COLOR.test(value.background)
+  && typeof value.lightBackground === 'string'
+  && HEX_COLOR.test(value.lightBackground)
+
 const updateCheckOptions: Validator = value => {
   if (value === undefined) return true
   if (!isRecord(value) || !hasOnlyKeys(value, ['proxy'])) return false
@@ -217,6 +233,7 @@ export const ELECTRON_IPC_VALIDATORS = {
   [ELECTRON_IPC_CHANNELS.appModeRestart]: noPayload,
   [ELECTRON_IPC_CHANNELS.adaptersRestartSidecar]: noPayload,
   [ELECTRON_IPC_CHANNELS.zoomSet]: zoomPayload,
+  [ELECTRON_IPC_CHANNELS.appearanceSetApplied]: appliedAppearance,
 } satisfies Record<ElectronIpcChannel, Validator>
 
 const allowedChannels = new Set<ElectronIpcChannel>(

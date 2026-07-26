@@ -47,6 +47,24 @@ export type DialogSaveOptions = {
   filters?: DialogFileFilter[]
 }
 
+/**
+ * What the renderer settled on, reported to the native shell so the window
+ * background and the OS-drawn chrome can match it.
+ */
+export type AppliedAppearance = {
+  isDark: boolean
+  /** Base background of the applied theme, as a CSS hex color. */
+  background: string
+  /**
+   * Base background of the user's light theme, also as a hex color. Carried
+   * separately so a shell that cached this at night knows which light theme to
+   * repaint when it next starts in the morning.
+   */
+  lightBackground: string
+  /** Whether the renderer is tracking the OS setting rather than a fixed pick. */
+  followSystem: boolean
+}
+
 export type NotificationPermissionState = 'granted' | 'denied' | 'default'
 
 export type DesktopNotificationOptions = {
@@ -302,6 +320,9 @@ export type DesktopHost = {
   }
   zoom: {
     set(level: number): Promise<void>
+  }
+  appearance: {
+    setApplied(state: AppliedAppearance): Promise<void>
   }
 }
 

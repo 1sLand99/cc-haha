@@ -430,6 +430,9 @@ describe('TerminalSettings', () => {
 
   it('repaints a running terminal when the app theme changes', async () => {
     terminalMocks.available = true
+    // Pick themes by hand here: while following the system the OS decides the
+    // dark half, so setTheme('dark') would resolve back to the light theme.
+    useUIStore.setState({ followSystemTheme: false })
     useUIStore.getState().setTheme('dark')
 
     render(<TerminalSettings runtimeId="theme-runtime" />)

@@ -53,6 +53,18 @@ describe('desktop host contract', () => {
     await expect(browserHost.pets.onNavigateSession(vi.fn())).resolves.toEqual(expect.any(Function))
   })
 
+  it('accepts the applied appearance instead of rejecting it in a browser tab', async () => {
+    // Reporting the theme is a notification to a native shell, and a browser
+    // tab simply has none — throwing here would surface as a console error on
+    // every theme change in the H5 entry.
+    await expect(browserHost.appearance.setApplied({
+      isDark: true,
+      background: '#0E0E0E',
+      lightBackground: '#FFFFFF',
+      followSystem: true,
+    })).resolves.toBeUndefined()
+  })
+
   it('detects the browser fallback when native host globals are absent', () => {
     expect(createDesktopHost({ electronHost: null })).toBe(browserHost)
   })

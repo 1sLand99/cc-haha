@@ -207,7 +207,6 @@ describe('Settings > General tab', () => {
 
     useSettingsStore.setState({
       locale: 'en',
-      theme: 'warm-classic',
       permissionMode: 'default',
       autoModeOptInAccepted: false,
       thinkingEnabled: true,
@@ -258,7 +257,7 @@ describe('Settings > General tab', () => {
         useSettingsStore.setState({ autoDreamEnabled: enabled })
       }),
       setTheme: vi.fn().mockImplementation(async (theme: ThemeMode) => {
-        useSettingsStore.setState({ theme })
+        useUIStore.setState({ theme })
       }),
       setPermissionMode: vi.fn().mockImplementation(async (permissionMode: PermissionMode) => {
         useSettingsStore.setState({ permissionMode })
@@ -348,7 +347,16 @@ describe('Settings > General tab', () => {
       updateH5AccessSettings: vi.fn(),
     })
 
-    useUIStore.setState({ activeSettingsTab: 'providers', pendingSettingsTab: null, toasts: [] })
+    useUIStore.setState({
+      activeSettingsTab: 'providers',
+      pendingSettingsTab: null,
+      toasts: [],
+      // Fresh installs follow the system, which narrows the theme picker to
+      // its light half. Tests that exercise the full picker opt out here and
+      // the follow-the-system cases turn it back on.
+      followSystemTheme: false,
+      lightTheme: 'white',
+    })
     useUpdateStore.setState({
       status: 'idle',
       availableVersion: null,
@@ -427,13 +435,88 @@ describe('Settings > General tab', () => {
   })
 
   it('marks the pure white appearance theme as selected', () => {
-    useSettingsStore.setState({ theme: 'white' })
+    useUIStore.setState({ theme: 'white' })
     render(<Settings />)
 
     fireEvent.click(screen.getByText('General'))
 
     expect(screen.getByRole('button', { name: 'Pure White' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: 'Warm Classic' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('offers a switch for following the system appearance', () => {
+    render(<Settings />)
+
+    fireEvent.click(screen.getByText('General'))
+
+    const followSwitch = screen.getByRole('switch', { name: 'Follow the system' })
+    expect(followSwitch).not.toBeChecked()
+
+    fireEvent.click(followSwitch)
+
+    expect(useUIStore.getState().followSystemTheme).toBe(true)
+  })
+
+  it('splits the picker into one row per ground while following the system', () => {
+    // The OS picks the ground; what is left to choose is the palette on each
+    // one, so both rows are offered rather than only the light half.
+    useUIStore.setState({ followSystemTheme: true, lightTheme: 'celadon', darkTheme: 'ink-blue', theme: 'ink-blue' })
+    render(<Settings />)
+
+    fireEvent.click(screen.getByText('General'))
+
+    expect(screen.getByText('Use in light mode')).toBeInTheDocument()
+    expect(screen.getByText('Use in dark mode')).toBeInTheDocument()
+    for (const label of ['Pure White', 'Paper', 'Warm Classic', 'Celadon', 'Ink Night', 'Ink Blue']) {
+      expect(screen.getByRole('button', { name: label }), label).toBeInTheDocument()
+    }
+  })
+
+  it('marks each ground preference rather than the applied palette', () => {
+    // Evening: the app is on ink-blue, but the light row is asking which
+    // palette to return to in the morning — that is warm classic, not ink-blue.
+    useUIStore.setState({ followSystemTheme: true, lightTheme: 'warm-classic', darkTheme: 'ink-blue', theme: 'ink-blue' })
+    render(<Settings />)
+
+    fireEvent.click(screen.getByText('General'))
+
+    expect(screen.getByRole('button', { name: 'Warm Classic' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Ink Blue' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Pure White' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: 'Ink Night' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('hides the light-half hint when not following the system', () => {
+    render(<Settings />)
+
+    fireEvent.click(screen.getByText('General'))
+
+    expect(screen.queryByText('Use in light mode')).not.toBeInTheDocument()
+  })
+
+  it('highlights the theme on screen after the OS flipped it and the switch is released', () => {
+    // Going through the real transition, not a hand-set state: the OS turned
+    // dark during the session, then the user releases the switch to freeze it.
+    // The picker must point at the palette that is actually rendered.
+    useUIStore.setState({
+      followSystemTheme: true,
+      lightTheme: 'white',
+      darkTheme: 'ink-blue',
+      theme: 'white',
+    })
+    render(<Settings />)
+    fireEvent.click(screen.getByText('General'))
+
+    act(() => {
+      // Stand in for the OS flip the media-query listener would deliver.
+      useUIStore.setState({ theme: 'ink-blue' })
+    })
+    act(() => {
+      useUIStore.getState().setFollowSystemTheme(false)
+    })
+
+    expect(screen.getByRole('button', { name: 'Ink Blue' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Pure White' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('keeps UI zoom below system notifications because it is a secondary setting', () => {

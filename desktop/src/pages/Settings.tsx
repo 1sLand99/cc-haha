@@ -35,7 +35,9 @@ import {
   SettingsSection,
 } from '@/components/settings/SettingsSection'
 import { Dropdown } from '@/components/ui/Dropdown'
+import { Switch } from '@/components/ui/Switch'
 import { PermissionModeSelector } from '../components/controls/PermissionModeSelector'
+import { isDarkThemeMode, isLightThemeMode } from '../types/settings'
 import type { ThemeMode, UpdateProxyMode, NetworkProxyMode, WebSearchMode, AppMode, ChatSendBehavior, OutputStyleSource } from '../types/settings'
 import type { Locale } from '../i18n'
 import type { SavedProvider, UpdateProviderInput, ProviderTestResult, ModelMapping, Model1mSupport, ApiFormat, ProviderAuthStrategy } from '../types/provider'
@@ -2080,7 +2082,6 @@ export function GeneralSettings() {
     setAutoDreamEnabled,
     locale,
     setLocale,
-    theme,
     setTheme,
     chatSendBehavior,
     setChatSendBehavior,
@@ -2110,6 +2111,15 @@ export function GeneralSettings() {
     uiZoom,
     setUiZoom,
   } = useSettingsStore()
+  // Read the theme from the store that owns it. settingsStore keeps a copy for
+  // its own consumers, but that copy is only refreshed on an explicit setTheme
+  // — an OS flip updates uiStore alone and would leave this picker highlighting
+  // a theme that is no longer on screen.
+  const theme = useUIStore((s) => s.theme)
+  const followSystemTheme = useUIStore((s) => s.followSystemTheme)
+  const lightTheme = useUIStore((s) => s.lightTheme)
+  const darkTheme = useUIStore((s) => s.darkTheme)
+  const setFollowSystemTheme = useUIStore((s) => s.setFollowSystemTheme)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
   const sessions = useSessionStore((s) => s.sessions)
   const t = useTranslation()
@@ -2249,6 +2259,10 @@ export function GeneralSettings() {
     { value: 'dark', label: t('settings.general.appearance.dark') },
     { value: 'ink-blue', label: t('settings.general.appearance.inkBlue') },
   ]
+  // Split by ground, in the order THEMES already lists them, so the two rows
+  // shown while following the system stay consistent with the flat picker.
+  const LIGHT_THEMES = THEMES.filter(({ value }) => isLightThemeMode(value))
+  const DARK_THEMES = THEMES.filter(({ value }) => isDarkThemeMode(value))
 
   const WEB_SEARCH_MODES: Array<{ value: WebSearchMode; label: string }> = [
     { value: 'auto', label: t('settings.general.webSearch.mode.auto') },
@@ -2633,17 +2647,64 @@ export function GeneralSettings() {
         title={t('settings.general.appearanceTitle')}
         description={t('settings.general.appearanceDescription')}
       >
-        <div className="flex flex-wrap gap-2">
-          {THEMES.map(({ value, label }) => (
-            <SettingsPill
-              key={value}
-              selected={theme === value}
-              onClick={() => void setTheme(value)}
-            >
-              {label}
-            </SettingsPill>
-          ))}
+        <div className="mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3">
+          <Switch
+            checked={followSystemTheme}
+            onChange={setFollowSystemTheme}
+            label={t('settings.general.appearance.followSystem')}
+            description={t('settings.general.appearance.followSystemHint')}
+          />
         </div>
+        {followSystemTheme ? (
+          // The OS decides which ground; what is left to choose is the palette
+          // on each one, so the picker splits into the two grounds.
+          <div className="flex flex-col gap-4">
+            <div>
+              <p className="mb-2 text-[12.5px] text-[var(--color-text-tertiary)]">
+                {t('settings.general.appearance.lightThemeLabel')}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {LIGHT_THEMES.map(({ value, label }) => (
+                  <SettingsPill
+                    key={value}
+                    selected={lightTheme === value}
+                    onClick={() => void setTheme(value)}
+                  >
+                    {label}
+                  </SettingsPill>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="mb-2 text-[12.5px] text-[var(--color-text-tertiary)]">
+                {t('settings.general.appearance.darkThemeLabel')}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {DARK_THEMES.map(({ value, label }) => (
+                  <SettingsPill
+                    key={value}
+                    selected={darkTheme === value}
+                    onClick={() => void setTheme(value)}
+                  >
+                    {label}
+                  </SettingsPill>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {THEMES.map(({ value, label }) => (
+              <SettingsPill
+                key={value}
+                selected={theme === value}
+                onClick={() => void setTheme(value)}
+              >
+                {label}
+              </SettingsPill>
+            ))}
+          </div>
+        )}
       </SettingsSection>
 
       {/* Language selector */}

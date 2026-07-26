@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, screen, session, WebContentsView } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, WebContentsView } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'node:path'
 import { ELECTRON_EVENT_CHANNELS, ELECTRON_INTERNAL_CHANNELS, ELECTRON_IPC_CHANNELS, type ElectronIpcChannel } from './ipc/channels'
@@ -40,6 +40,13 @@ import { installMainWindowNavigationGuards, installPreviewNavigationGuards } fro
 import { installPreviewCleanupOnRendererNavigation } from './services/previewLifecycle'
 import { logNotificationSmokeRendererAck, scheduleNotificationSmoke } from './services/notificationSmoke'
 import { normalizeZoomFactor } from './services/zoom'
+import {
+  applyAppliedAppearance,
+  isAppliedAppearance,
+  readAppearanceState,
+  startupWindowBackground,
+  type AppliedAppearance,
+} from './services/nativeAppearance'
 import { resolveRendererEntry } from './services/rendererEntry'
 import { installRendererLifecycle } from './services/rendererLifecycle'
 import { writeWindowSmokeSnapshot } from './services/windowSmoke'
@@ -116,6 +123,47 @@ function rendererEntry() {
   })
 }
 
+/**
+ * Last appearance the renderer reported, kept in memory so the OS-flip watcher
+ * does not have to re-read the cache file (and race with its own write).
+ * Seeded from disk on first use because the renderer has not reported yet.
+ */
+let lastAppliedAppearance: AppliedAppearance | null = null
+
+function currentAppearance(): AppliedAppearance | null {
+  if (!lastAppliedAppearance) lastAppliedAppearance = readAppearanceState(app)
+  return lastAppliedAppearance
+}
+
+/**
+ * The renderer keeps its theme in localStorage, which the main process cannot
+ * read, so the last applied appearance is replayed from cache to pick the
+ * pre-paint window background. First launch falls back to the OS setting.
+ *
+ * `shouldUseDarkColors` is the true OS setting here because `themeSource` is
+ * never pinned — see services/nativeAppearance.ts.
+ */
+function resolveStartupWindowBackground(): string {
+  return startupWindowBackground(currentAppearance(), nativeTheme.shouldUseDarkColors)
+}
+
+/**
+ * While the user follows the OS, repaint window backgrounds the moment the OS
+ * flips instead of waiting for the renderer to notice and report back — that
+ * round-trip is visible as a flash of the old color when resizing.
+ */
+function installSystemAppearanceWatch() {
+  nativeTheme.on('updated', () => {
+    const current = currentAppearance()
+    if (current && !current.followSystem) return
+    const background = startupWindowBackground(current, nativeTheme.shouldUseDarkColors)
+    for (const window of [mainWindow, ...traceWindows.values()]) {
+      if (!window || window.isDestroyed()) continue
+      window.setBackgroundColor(background)
+    }
+  })
+}
+
 async function loadRendererEntry(
   window: BrowserWindow,
   query?: Record<string, string>,
@@ -147,6 +195,7 @@ async function openTraceWindow(sessionId: string) {
     title: 'Trace',
     autoHideMenuBar: true,
     show: false,
+    backgroundColor: resolveStartupWindowBackground(),
     webPreferences: {
       preload: preloadPath(),
       contextIsolation: true,
@@ -546,6 +595,15 @@ function registerIpcHandlers() {
   })
   registerHandler(ELECTRON_IPC_CHANNELS.adaptersRestartSidecar, () => getServerRuntime().restartAdaptersSidecars())
   registerHandler(ELECTRON_IPC_CHANNELS.zoomSet, (event, payload) => currentWindow(event).webContents.setZoomFactor(normalizeZoomFactor(payload)))
+  registerHandler(ELECTRON_IPC_CHANNELS.appearanceSetApplied, (_event, payload) => {
+    if (!isAppliedAppearance(payload)) return
+    lastAppliedAppearance = payload
+    applyAppliedAppearance(payload, {
+      app,
+      // The pet window is deliberately transparent, so it stays out of this.
+      windows: () => [mainWindow, ...traceWindows.values()].filter((window): window is BrowserWindow => !!window),
+    })
+  })
 }
 
 async function createMainWindow() {
@@ -556,6 +614,9 @@ async function createMainWindow() {
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
     show: false,
+    // Painted before the renderer produces its first frame; without it a
+    // dark-theme user gets a white flash on every launch.
+    backgroundColor: resolveStartupWindowBackground(),
     ...windowChromeOptionsForPlatform(process.platform),
     webPreferences: {
       preload: preloadPath(),
@@ -637,6 +698,7 @@ registerIpcHandlers()
 app.whenReady().then(async () => {
   applyWindowsAppUserModelId(app)
   applyStartupPortableMode(app)
+  installSystemAppearanceWatch()
   screen.on('display-metrics-changed', (_event, _display, changedMetrics) => {
     if (changedMetrics.includes('scaleFactor') || changedMetrics.includes('bounds')) {
       previewService?.refreshBounds()
