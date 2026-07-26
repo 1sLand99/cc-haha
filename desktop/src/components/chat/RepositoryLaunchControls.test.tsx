@@ -27,7 +27,10 @@ vi.mock('../../api/sessions', () => ({
   },
 }))
 
-vi.mock('./DirectoryPicker', () => ({
+// Must match the component's own import specifier, or the mock silently does
+// nothing and the real picker renders. It moved to composite/ in the directory
+// reshuffle and this path was left behind.
+vi.mock('@/components/composite/DirectoryPicker', () => ({
   DirectoryPicker: ({ value }: { value: string }) => (
     <button type="button">Project {value}</button>
   ),
@@ -158,6 +161,47 @@ describe('RepositoryLaunchControls', () => {
     const listbox = await screen.findByRole('listbox', { name: 'Select branch' })
     expect(listbox).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: 'Select branch' })).not.toBeInTheDocument()
+  })
+
+  // The dropdown used to close on its own `mousedown` listener, which does not
+  // fire reliably for touch input — the "tapping outside doesn't close the
+  // menu" shape of bug on the H5 build. `useDismissable` listens on
+  // `pointerdown` instead, so this asserts the pointer event, not the mouse one.
+  it('closes the branch dropdown on an outside pointerdown', async () => {
+    renderControls()
+
+    await openBranchMenu()
+    expect(await screen.findByRole('listbox', { name: 'Select branch' })).toBeInTheDocument()
+
+    fireEvent.pointerDown(document.body)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox', { name: 'Select branch' })).not.toBeInTheDocument()
+    })
+  })
+
+  it('keeps the branch dropdown open when the pointer goes down inside it', async () => {
+    renderControls()
+
+    await openBranchMenu()
+    const listbox = await screen.findByRole('listbox', { name: 'Select branch' })
+
+    fireEvent.pointerDown(listbox)
+
+    expect(screen.getByRole('listbox', { name: 'Select branch' })).toBeInTheDocument()
+  })
+
+  it('closes the branch dropdown on Escape', async () => {
+    renderControls()
+
+    await openBranchMenu()
+    await screen.findByRole('listbox', { name: 'Select branch' })
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox', { name: 'Select branch' })).not.toBeInTheDocument()
+    })
   })
 
   it('keeps keyboard branch selection working from the search field', async () => {

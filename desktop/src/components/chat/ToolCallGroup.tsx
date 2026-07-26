@@ -2,7 +2,10 @@ import { memo, useCallback, useState } from 'react'
 import { BookMarked, ChevronDown, ChevronRight, Settings } from 'lucide-react'
 import { ToolCallBlock } from './ToolCallBlock'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
-import { Modal } from '../shared/Modal'
+import { Badge, StatusDot, type Tone } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { IconButton } from '@/components/ui/IconButton'
+import { Modal } from '@/components/ui/Modal'
 import { useTranslation } from '../../i18n'
 import type { TranslationKey } from '../../i18n'
 import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
@@ -306,14 +309,17 @@ function MemoryToolActivityGroup({
               ) : null}
             </div>
 
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setDetailsExpanded((value) => !value)}
-              className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2 text-[11px] font-medium text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+              className="mt-2 border border-[var(--color-border)]"
+              icon={detailsExpanded
+                ? <ChevronDown size={13} aria-hidden="true" />
+                : <ChevronRight size={13} aria-hidden="true" />}
             >
-              {detailsExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               {t('chat.memoryTechnicalDetails')}
-            </button>
+            </Button>
 
             {detailsExpanded ? (
               <div className="mt-2 space-y-1">
@@ -375,9 +381,9 @@ function AgentToolGroup({
           {toolCalls.length === 1 ? t('toolGroup.agentOne') : t('toolGroup.agentMany', { count: toolCalls.length })}
         </span>
         {isAnyRunning && (
-          <span className="rounded-full bg-[var(--color-warning)]/12 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-warning)]">
+          <Badge tone="warning" className="font-semibold">
             {t('agentStatus.running')}
-          </span>
+          </Badge>
         )}
         {!isAnyRunning && errorPresent && (
           <span className="material-symbols-outlined text-[14px] text-[var(--color-error)]">error</span>
@@ -449,9 +455,7 @@ function ToolCallGroupMulti({ toolCalls, resultMap, childToolCallsByParent, isSt
         {!isRunning && errorPresent && (
           <span className="material-symbols-outlined text-[14px] text-[var(--color-error)]">error</span>
         )}
-        {isRunning && (
-          <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-brand)] animate-pulse-dot" />
-        )}
+        {isRunning && <StatusDot tone="brand" pulse />}
       </button>
 
       {expanded && (
@@ -508,7 +512,7 @@ function AgentCallCard({
     childCount: childToolCalls.length,
     taskStatus: agentTaskNotification?.status,
   })
-  const statusClassName = getAgentStatusClassName(status)
+  const statusTone = getAgentStatusTone(status)
   const statusLabel = getAgentStatusLabel(status, t)
   const taskSummary = agentTaskNotification?.summary?.trim() || ''
   const taskResult = agentTaskNotification?.result?.trim() || ''
@@ -567,43 +571,48 @@ function AgentCallCard({
           )}
         </div>
         {outputSummary && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={(event) => {
               event.stopPropagation()
               setPreviewOpen(true)
             }}
-            className="shrink-0 rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+            className="shrink-0 border border-[var(--color-border)]"
           >
             {t('agentStatus.viewResult')}
-          </button>
+          </Button>
         )}
         {canOpenRun && (
-          <button
-            type="button"
-            aria-label={`Open run ${openRunTitle}`}
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={t('toolGroup.openRunNamed', { title: openRunTitle })}
             onClick={(event) => {
               event.stopPropagation()
               useTabStore.getState().openSubagentTab(sessionId, toolCall.toolUseId, openRunTitle)
             }}
-            className="shrink-0 rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+            className="shrink-0 border border-[var(--color-border)]"
           >
-            Open run
-          </button>
+            {t('toolGroup.openRun')}
+          </Button>
         )}
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusClassName}`}>
+        <Badge tone={statusTone} className="font-semibold">
           {statusLabel}
-        </span>
-        <button
-          type="button"
+        </Badge>
+        <IconButton
+          size="sm"
+          shape="circle"
+          tone="muted"
           onClick={() => setExpanded((value) => !value)}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--color-outline)] transition-colors hover:bg-[var(--color-surface-hover)]"
-          aria-label={expanded ? 'Collapse agent' : 'Expand agent'}
-        >
-          <span className="material-symbols-outlined text-[16px]">
-          {expanded ? 'expand_less' : 'expand_more'}
-          </span>
-        </button>
+          label={t(expanded ? 'toolGroup.collapseAgent' : 'toolGroup.expandAgent')}
+          showTooltip={false}
+          icon={(
+            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+              {expanded ? 'expand_less' : 'expand_more'}
+            </span>
+          )}
+        />
       </div>
 
       {expanded && (
@@ -844,19 +853,18 @@ function getAgentStatusLabel(
   }
 }
 
-function getAgentStatusClassName(status: AgentStatus): string {
+function getAgentStatusTone(status: AgentStatus): Tone {
   switch (status) {
     case 'failed':
-      return 'bg-[var(--color-error)]/10 text-[var(--color-error)]'
-    case 'stopped':
-      return 'bg-[var(--color-surface-container-high)] text-[var(--color-text-secondary)]'
+      return 'danger'
     case 'done':
-      return 'bg-[var(--color-success)]/10 text-[var(--color-success)]'
+      return 'success'
     case 'running':
-      return 'bg-[var(--color-warning)]/10 text-[var(--color-warning)]'
+      return 'warning'
+    case 'stopped':
     case 'starting':
     default:
-      return 'bg-[var(--color-surface-container-high)] text-[var(--color-text-secondary)]'
+      return 'neutral'
   }
 }
 

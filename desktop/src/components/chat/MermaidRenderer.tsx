@@ -1,14 +1,30 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react'
 import DOMPurify from 'dompurify'
 import mermaid from 'mermaid'
-import { Modal } from '../shared/Modal'
-import { CopyButton } from '../shared/CopyButton'
+import { Button } from '@/components/ui/Button'
+import { IconButton } from '@/components/ui/IconButton'
+import { Modal } from '@/components/ui/Modal'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { useUIStore } from '../../stores/uiStore'
+import { useTranslation } from '../../i18n'
 import type { ThemeMode } from '../../types/settings'
 
 type Props = {
   code: string
 }
+
+/**
+ * `CopyButton` is styled by className rather than variants, so the chip it sits
+ * beside — a `Button variant="ghost" size="sm"` with a hairline — is mirrored
+ * here. Without this the two chips in the same row drift apart.
+ */
+const COPY_CHIP_CLASS = [
+  'inline-flex h-6 items-center justify-center gap-1.5 rounded-[var(--radius-md)]',
+  'border border-[var(--color-border)] px-2 text-xs font-medium',
+  'text-[var(--color-text-secondary)] transition-colors',
+  'hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]',
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]',
+].join(' ')
 
 const MIN_PREVIEW_ZOOM = 0.05
 const MAX_PREVIEW_ZOOM = 3
@@ -396,6 +412,7 @@ function parseSvgMetrics(svg: string): SvgMetrics | null {
 }
 
 export function MermaidRenderer({ code }: Props) {
+  const t = useTranslation()
   const theme = useUIStore((state) => state.theme)
   const containerRef = useRef<HTMLDivElement>(null)
   const previewViewportRef = useRef<HTMLDivElement>(null)
@@ -672,17 +689,16 @@ export function MermaidRenderer({ code }: Props) {
             <span className="font-semibold uppercase tracking-[0.14em]">Mermaid</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={handlePreview}
-              className="flex items-center gap-1 rounded-md border border-[var(--color-outline-variant)]/40 bg-[var(--color-surface-container-lowest)] px-2 py-1 text-[11px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-container-high)] hover:text-[var(--color-text-primary)]"
+              className="border border-[var(--color-border)]"
+              icon={<span className="material-symbols-outlined text-[12px]" aria-hidden="true">fullscreen</span>}
             >
-              <span className="material-symbols-outlined text-[12px]">fullscreen</span>
-              Preview
-            </button>
-            <CopyButton
-              text={code}
-              className="rounded-md border border-[var(--color-outline-variant)]/40 bg-[var(--color-surface-container-lowest)] px-2 py-1 text-[11px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-container-high)] hover:text-[var(--color-text-primary)]"
-            />
+              {t('mermaid.preview')}
+            </Button>
+            <CopyButton text={code} className={COPY_CHIP_CLASS} />
           </div>
         </div>
 
@@ -714,42 +730,41 @@ export function MermaidRenderer({ code }: Props) {
             </div>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1 py-1">
-                <button
-                  type="button"
+                <IconButton
+                  icon="remove"
+                  label={t('mermaid.zoomOut')}
+                  showTooltip={false}
+                  size="md"
+                  tone="secondary"
                   onClick={zoomOut}
-                  aria-label="Zoom out"
-                  className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-                >
-                  <span className="material-symbols-outlined text-[16px]">remove</span>
-                </button>
-                <button
-                  type="button"
+                />
+                <Button
+                  variant="ghost"
+                  size="base"
                   onClick={resetZoom}
-                  className="min-w-[68px] rounded-md px-2 py-1 text-[11px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+                  className="min-w-[68px] font-semibold"
                 >
                   {Math.round(previewZoom * 100)}%
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="base"
                   onClick={fitPreview}
-                  aria-label="Fit diagram"
-                  className="rounded-md px-2 py-1 text-[11px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+                  aria-label={t('mermaid.fitDiagram')}
+                  className="font-semibold"
                 >
-                  Fit
-                </button>
-                <button
-                  type="button"
+                  {t('mermaid.fit')}
+                </Button>
+                <IconButton
+                  icon="add"
+                  label={t('mermaid.zoomIn')}
+                  showTooltip={false}
+                  size="md"
+                  tone="secondary"
                   onClick={zoomIn}
-                  aria-label="Zoom in"
-                  className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-                >
-                  <span className="material-symbols-outlined text-[16px]">add</span>
-                </button>
+                />
               </div>
-              <CopyButton
-                text={code}
-                className="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[11px] text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)]"
-              />
+              <CopyButton text={code} className={COPY_CHIP_CLASS} />
             </div>
           </div>
           <div

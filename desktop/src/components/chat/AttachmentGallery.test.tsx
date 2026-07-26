@@ -252,13 +252,24 @@ describe('AttachmentGallery', () => {
 
     expect(view.getByRole('button', { name: 'Open <h1>' })).toBeTruthy()
     const noteChip = view.getByLabelText('Selection note: 这个标题更轻一点')
-    const tooltip = view.getByRole('tooltip')
     expect(noteChip.textContent).toContain('<h1>')
     expect(noteChip.getAttribute('title')).toBe('这个标题更轻一点')
+
+    // The note used to be a sibling span kept in the DOM and revealed by
+    // `group-hover/selection:` classes. It is now the shared `Tooltip`, which
+    // mounts into a portal only while hovered/focused — so the assertions moved
+    // from "present but CSS-hidden" to "appears on pointer enter".
+    expect(view.queryByRole('tooltip')).toBeNull()
+
+    fireEvent.mouseEnter(noteChip)
+
+    const tooltip = view.getByRole('tooltip')
     expect(noteChip).toHaveAttribute('aria-describedby', tooltip.id)
     expect(tooltip).toHaveTextContent('修改内容')
     expect(tooltip).toHaveTextContent('这个标题更轻一点')
-    expect(tooltip.className).toContain('group-hover/selection:visible')
+
+    fireEvent.mouseLeave(noteChip)
+    expect(view.queryByRole('tooltip')).toBeNull()
   })
 
   it('previews a path-only pasted image instead of a file chip', () => {

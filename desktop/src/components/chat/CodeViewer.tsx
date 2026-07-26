@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from 'react'
 import { Highlight, type PrismTheme } from 'prism-react-renderer'
-import { CopyButton } from '../shared/CopyButton'
+import { CopyButton } from '@/components/ui/CopyButton'
+import { useTranslation } from '../../i18n'
 
 type Props = {
   code: string
@@ -282,6 +283,7 @@ function CodeArea({
 }
 
 export function CodeViewer({ code, language, maxLines = 20, showLineNumbers = false, wrapLongLines = false }: Props) {
+  const t = useTranslation()
   const [expanded, setExpanded] = useState(false)
 
   const allLines = code.split('\n')
@@ -321,7 +323,9 @@ export function CodeViewer({ code, language, maxLines = 20, showLineNumbers = fa
           onClick={() => setExpanded((value) => !value)}
           className="w-full border-t border-[var(--color-outline-variant)]/40 bg-[var(--color-surface-container)] py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-container-high)] hover:text-[var(--color-text-primary)]"
         >
-          {expanded ? 'Collapse' : `Show ${allLines.length - maxLines} more lines`}
+          {expanded
+            ? t('codeViewer.collapse')
+            : t('codeViewer.showMoreLines', { count: allLines.length - maxLines })}
         </button>
       )}
     </div>

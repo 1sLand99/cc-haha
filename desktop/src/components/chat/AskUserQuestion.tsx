@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { listPendingPermissions, useChatStore } from '../../stores/chatStore'
 import { useTabStore } from '../../stores/tabStore'
 import { useTranslation } from '../../i18n'
-import { Button } from '../shared/Button'
+import { Button } from '@/components/ui/Button'
 
 type QuestionOption = {
   label: string

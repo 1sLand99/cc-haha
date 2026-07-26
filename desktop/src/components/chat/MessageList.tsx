@@ -33,7 +33,8 @@ import type { AgentTaskNotification, UIMessage } from '../../types/chat'
 import { formatTokenCount } from '../../lib/formatTokenCount'
 import { formatDurationMs, hasRunningBackgroundTasks as hasAnyRunningBackgroundTasks } from '../../lib/backgroundTasks'
 import { isTouchH5Document } from '../../lib/touchH5'
-import { ConfirmDialog } from '../shared/ConfirmDialog'
+import { Button } from '@/components/ui/Button'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { clearWindowSelection, getSelectionPopoverPosition, useSelectionPopoverDismiss } from '../../hooks/useSelectionPopoverDismiss'
 import {
   getHeightsForSession,
@@ -899,14 +900,14 @@ function MemoryEventCard({ message }: { message: MemoryEvent }) {
               <div className="font-medium text-[var(--color-text-primary)]">
                 {t('chat.memorySavedTitle', { count: message.files.length })}
               </div>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => openMemorySettings(message.files[0]?.path)}
-                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-brand)]/50 hover:text-[var(--color-text-primary)]"
+                icon={<Settings size={13} aria-hidden="true" />}
               >
-                <Settings size={13} aria-hidden="true" />
                 {t('chat.memoryOpenSettings')}
-              </button>
+              </Button>
             </div>
             {message.message ? (
               <div className="mt-1 text-[var(--color-text-tertiary)]">{message.message}</div>
@@ -2702,16 +2703,17 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       ) : null}
 
       {showJumpToLatest && (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="md"
           onClick={handleJumpToLatest}
           title={t('chat.jumpToLatest')}
           aria-label={t('chat.jumpToLatest')}
-          className="absolute bottom-4 right-5 z-20 flex h-9 items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] px-3 text-xs font-medium text-[var(--color-text-primary)] shadow-[var(--shadow-dropdown)] transition-colors hover:border-[var(--color-brand)]/50 hover:bg-[var(--color-surface-container-low)]"
+          className="absolute bottom-4 right-5 z-20 rounded-full shadow-[var(--shadow-dropdown)]"
+          icon={<ArrowDown size={15} aria-hidden="true" />}
         >
-          <ArrowDown size={15} aria-hidden="true" />
-          <span>{t('chat.jumpToLatest')}</span>
-        </button>
+          {t('chat.jumpToLatest')}
+        </Button>
       )}
 
       <ConfirmDialog

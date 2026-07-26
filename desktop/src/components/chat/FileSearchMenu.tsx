@@ -3,6 +3,7 @@ import { ApiError } from '../../api/client'
 import { filesystemApi } from '../../api/filesystem'
 import { useTranslation } from '../../i18n'
 import type { TranslationKey } from '../../i18n'
+import { IconButton } from '@/components/ui/IconButton'
 
 type DirEntry = {
   name: string
@@ -248,18 +249,17 @@ export const FileSearchMenu = forwardRef<FileSearchMenuHandle, Props>(({ cwd, fi
           ) : null}
         </button>
         {entry.isDirectory ? (
-          <button
-            type="button"
-            aria-label={t('fileSearch.openFolder')}
-            title={t('fileSearch.openFolder')}
+          <IconButton
+            icon="chevron_right"
+            label={t('fileSearch.openFolder')}
+            size="lg"
+            tone="muted"
+            className="my-1 opacity-70 group-hover:opacity-100"
             onClick={(event) => {
               event.stopPropagation()
               navigateEntry(entry)
             }}
-            className="my-1 flex w-9 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] opacity-70 transition hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/40 group-hover:opacity-100"
-          >
-            <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-          </button>
+          />
         ) : null}
       </div>
     )

@@ -1,4 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useDismissable } from '@/hooks/useDismissable'
+import { Button } from '@/components/ui/Button'
+import { IconButton } from '@/components/ui/IconButton'
 import { useTranslation } from '../../i18n'
 import { useChatStore } from '../../stores/chatStore'
 import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
@@ -19,8 +22,8 @@ import { ModelSelector, type ModelSelectorHandle } from '../controls/ModelSelect
 import type { AttachmentRef } from '../../types/chat'
 import { AttachmentGallery } from './AttachmentGallery'
 import { ComposerDropOverlay } from './ComposerDropOverlay'
-import { ProjectContextChip } from '../shared/ProjectContextChip'
-import { RepositoryLaunchControls } from '../shared/RepositoryLaunchControls'
+import { ProjectContextChip } from '@/components/chat/ProjectContextChip'
+import { RepositoryLaunchControls } from '@/components/chat/RepositoryLaunchControls'
 import { FileSearchMenu, type FileSearchMenuHandle } from './FileSearchMenu'
 import { LocalSlashCommandPanel, type LocalSlashCommandName } from './LocalSlashCommandPanel'
 import { ContextUsageIndicator } from './ContextUsageIndicator'
@@ -405,65 +408,37 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }, [input])
 
-  useEffect(() => {
-    if (!plusMenuOpen) return
-    const handleClick = (event: MouseEvent) => {
-      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
-        setPlusMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [plusMenuOpen])
+  useDismissable({
+    open: plusMenuOpen,
+    refs: [plusMenuRef],
+    onDismiss: () => setPlusMenuOpen(false),
+  })
 
-  useEffect(() => {
-    if (!slashMenuOpen) return
-    const handleClick = (event: MouseEvent) => {
-      if (
-        slashMenuRef.current &&
-        !slashMenuRef.current.contains(event.target as Node) &&
-        textareaRef.current &&
-        !textareaRef.current.contains(event.target as Node)
-      ) {
-        setSlashMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [slashMenuOpen])
+  useDismissable({
+    open: slashMenuOpen,
+    refs: [slashMenuRef, textareaRef],
+    onDismiss: () => setSlashMenuOpen(false),
+  })
 
-  useEffect(() => {
-    if (!localSlashPanel) return
-    const handleClick = (event: MouseEvent) => {
-      if (
-        slashMenuRef.current &&
-        !slashMenuRef.current.contains(event.target as Node) &&
-        textareaRef.current &&
-        !textareaRef.current.contains(event.target as Node)
-      ) {
-        setLocalSlashPanel(null)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [localSlashPanel])
+  useDismissable({
+    open: !!localSlashPanel,
+    refs: [slashMenuRef, textareaRef],
+    onDismiss: () => setLocalSlashPanel(null),
+  })
 
-  useEffect(() => {
-    if (!fileSearchOpen) return
-    const handleClick = (event: MouseEvent) => {
+  useDismissable({
+    open: fileSearchOpen,
+    refs: [textareaRef],
+    onDismiss: () => setFileSearchOpen(false),
+    // This menu is looked up by id rather than held in a ref. Returning true
+    // when it is absent preserves the original behavior: with no menu in the
+    // DOM, an outside press was ignored.
+    isExempt: (target) => {
       const menu = document.getElementById('file-search-menu')
-      if (
-        menu &&
-        !menu.contains(event.target as Node) &&
-        textareaRef.current &&
-        !textareaRef.current.contains(event.target as Node)
-      ) {
-        setFileSearchOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [fileSearchOpen])
+      if (!menu) return true
+      return target instanceof Node && menu.contains(target)
+    },
+  })
 
   const allSlashCommands = useMemo(
     () => appendAgentSlashCommands(
@@ -1150,55 +1125,55 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                           className="min-w-0 flex-1 rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-border-focus)]"
                           autoFocus
                         />
-                        <button
-                          type="button"
+                        <Button
+                          variant="tonal"
+                          size="sm"
                           onClick={saveQueuedMessageEdit}
                           disabled={!editingQueuedMessageText.trim()}
-                          className="shrink-0 rounded-[6px] px-2 py-1 font-semibold text-[var(--color-brand)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40"
+                          className="shrink-0 font-semibold"
                         >
                           {t('common.save')}
-                        </button>
-                        <button
-                          type="button"
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={cancelQueuedMessageEdit}
-                          className="shrink-0 rounded-[6px] px-2 py-1 font-medium text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)]"
+                          className="shrink-0"
                         >
                           {t('common.cancel')}
-                        </button>
+                        </Button>
                       </>
                     ) : (
                       <>
                         <span className="min-w-0 flex-1 truncate font-medium" title={message.displayContent}>
                           {message.displayContent}
                         </span>
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => sendQueuedUserMessage(activeTabId, message.id)}
                           aria-label={t('chat.pendingMessageGuideNow')}
                           title={t('chat.pendingMessageGuideNow')}
-                          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[6px] px-2 font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+                          className="shrink-0 font-semibold"
+                          icon={<span className="material-symbols-outlined text-[15px]" aria-hidden="true">subdirectory_arrow_right</span>}
                         >
-                          <span className="material-symbols-outlined text-[15px]" aria-hidden="true">subdirectory_arrow_right</span>
-                          <span>{t('chat.pendingMessageGuide')}</span>
-                        </button>
-                        <button
-                          type="button"
+                          {t('chat.pendingMessageGuide')}
+                        </Button>
+                        <IconButton
+                          icon="edit"
+                          label={t('chat.pendingMessageEdit')}
+                          size="sm"
+                          tone="muted"
                           onClick={() => startEditingQueuedMessage(message.id, message.displayContent)}
-                          aria-label={t('chat.pendingMessageEdit')}
-                          title={t('chat.pendingMessageEdit')}
-                          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-                        >
-                          <span className="material-symbols-outlined text-[15px]" aria-hidden="true">edit</span>
-                        </button>
-                        <button
-                          type="button"
+                        />
+                        <IconButton
+                          icon="delete"
+                          label={t('chat.pendingMessageDelete')}
+                          size="sm"
+                          tone="muted"
+                          hoverTone="danger"
                           onClick={() => removeQueuedUserMessage(activeTabId, message.id)}
-                          aria-label={t('chat.pendingMessageDelete')}
-                          title={t('chat.pendingMessageDelete')}
-                          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-error)]"
-                        >
-                          <span className="material-symbols-outlined text-[15px]" aria-hidden="true">delete</span>
-                        </button>
+                        />
                       </>
                     )}
                   </div>
@@ -1263,9 +1238,17 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
               {!isMemberSession && (
                 <>
                   <div ref={plusMenuRef} className="relative">
+                    {/*
+                      Not `IconButton`: the mobile composer pins 44px touch
+                      targets (`h-11 w-11`), and the component's largest size is
+                      40px. Shrinking it would regress the very thing the
+                      "larger icon-only mobile action buttons" test guards.
+                    */}
                     <button
+                      type="button"
                       onClick={() => setPlusMenuOpen((value) => !value)}
-                      aria-label="Open composer tools"
+                      aria-label={t('chat.composerTools')}
+                      aria-expanded={plusMenuOpen}
                       className={`text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] ${isMobileComposer ? 'inline-flex h-11 w-11 items-center justify-center rounded-xl' : 'rounded-[var(--radius-md)] p-1.5'}`}
                     >
                       <span className="material-symbols-outlined text-[18px]">add</span>
@@ -1341,10 +1324,14 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                     : 'bg-[image:var(--gradient-btn-primary)] text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)]'
                 }`}
               >
+                {/* Icon trails the label, matching the same control on
+                    EmptySession. The two rendered mirror images of each other
+                    until this was spotted in a walkthrough — the arrow led here
+                    and trailed there, on what is the same button to the user. */}
+                {!iconOnlyAction && (!isMemberSession && isActive ? t('common.stop') : isMemberSession ? t('common.send') : t('common.run'))}
                 <span className="material-symbols-outlined text-[14px]">
                   {!isMemberSession && isActive ? 'stop' : 'arrow_forward'}
                 </span>
-                {!iconOnlyAction && (!isMemberSession && isActive ? t('common.stop') : isMemberSession ? t('common.send') : t('common.run'))}
               </button>
             </div>
           </div>

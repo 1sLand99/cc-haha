@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { sessionsApi, type SessionContextSnapshot } from '../../api/sessions'
 import { useTranslation } from '../../i18n'
 import type { ChatState } from '../../types/chat'
-import { MobileBottomSheet } from '../shared/MobileBottomSheet'
+import { MobileBottomSheet } from '@/components/ui/MobileBottomSheet'
 
 type Props = {
   sessionId?: string

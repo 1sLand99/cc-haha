@@ -1,3 +1,6 @@
+import { StatusDot } from '@/components/ui/Badge'
+import { IconButton } from '@/components/ui/IconButton'
+import { Progress } from '@/components/ui/Progress'
 import { useCLITaskStore } from '../../stores/cliTaskStore'
 import { useTranslation } from '../../i18n'
 import type { CLITask } from '../../types/cliTask'
@@ -62,18 +65,16 @@ export function SessionTaskBar() {
               {t('tasks.title')}
             </span>
 
-            {/* Progress bar */}
-            <div className="flex-1 h-1.5 rounded-full bg-[var(--color-border)] overflow-hidden max-w-[200px]">
-              <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{
-                  width: `${progressPercent}%`,
-                  backgroundColor: completedCount === totalCount
-                    ? 'var(--color-success)'
-                    : 'var(--color-brand)',
-                }}
-              />
-            </div>
+            <Progress
+              label={t('tasks.title')}
+              value={progressPercent}
+              size="sm"
+              // Green when everything is done, not at 100% — `auto` keys off the
+              // percentage, and these two agree only because this bar counts
+              // completed items and nothing else.
+              tone={completedCount === totalCount ? 'success' : 'brand'}
+              className="max-w-[200px] flex-1"
+            />
 
             <span className="text-[10px] text-[var(--color-text-tertiary)] tabular-nums">
               {completedCount}/{totalCount}
@@ -88,14 +89,14 @@ export function SessionTaskBar() {
           </button>
 
           {allCompleted && (
-            <button
-              type="button"
-              aria-label={t('tasks.dismissCompleted')}
+            <IconButton
+              size="sm"
+              tone="muted"
+              label={t('tasks.dismissCompleted')}
+              showTooltip={false}
               onClick={() => { void resetCompletedTasks() }}
-              className="flex shrink-0 items-center justify-center rounded-[var(--radius-md)] p-1.5 text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-container-low)] hover:text-[var(--color-text-primary)] transition-colors"
-            >
-              <span className="material-symbols-outlined text-[16px]">close</span>
-            </button>
+              icon={<span className="material-symbols-outlined text-[16px]" aria-hidden="true">close</span>}
+            />
           )}
         </div>
 
@@ -140,7 +141,7 @@ function TaskItem({ task }: { task: CLITask }) {
 
         {task.status === 'in_progress' && task.activeForm && (
           <div className="flex items-center gap-1 mt-0.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-warning)] animate-pulse" />
+            <StatusDot tone="warning" pulse />
             <span className="text-[10px] text-[var(--color-warning)]">
               {task.activeForm}
             </span>

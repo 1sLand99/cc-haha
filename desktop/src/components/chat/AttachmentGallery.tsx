@@ -8,7 +8,9 @@ import { isAbsoluteLocalPath } from '../../lib/handlePreviewLink'
 import { buildOpenWithItems, describeFileType, type OpenWithItem } from '../../lib/openWithItems'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { useUIStore } from '../../stores/uiStore'
-import { OpenWithMenu } from '../common/OpenWithMenu'
+import { OpenWithMenu } from '@/components/composite/OpenWithMenu'
+import { IconButton } from '@/components/ui/IconButton'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { ImageGalleryModal } from './ImageGalleryModal'
 
 export type AttachmentPreview = {
@@ -145,17 +147,14 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
             const src = imageSrc
             const selectionNote = attachment.note?.trim()
             const hasSelectionNote = !isComposer && !!selectionNote
-            const tooltipId = hasSelectionNote
-              ? `selection-note-${(attachment.id || `${attachment.name}-${index}`).replace(/[^a-zA-Z0-9_-]/g, '-')}`
-              : undefined
             return (
               <div
                 key={attachment.id || `${attachment.name}-${index}`}
-                className={isComposer ? 'group relative' : 'group/selection relative flex max-w-full flex-col items-end gap-1.5'}
+                className={isComposer ? 'group relative' : 'relative flex max-w-full flex-col items-end gap-1.5'}
               >
                 <button
                   type="button"
-                  aria-label={`Open ${attachment.name}`}
+                  aria-label={t('attachments.open', { name: attachment.name })}
                   onClick={() => setActiveImageIndex(images.findIndex((image) => image.src === src))}
                   className={
                     isComposer
@@ -175,10 +174,25 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                   />
                 </button>
                 {hasSelectionNote && (
-                  <>
+                  // `delay={0}` reproduces the CSS-transition tooltip this
+                  // replaced, which appeared the moment the pointer landed.
+                  <Tooltip
+                    placement="top-end"
+                    delay={0}
+                    className="max-w-[min(340px,calc(100vw-3rem))] text-[13px]"
+                    content={
+                      <>
+                        <span className="block text-[11px] font-medium uppercase tracking-wide opacity-70">
+                          修改内容
+                        </span>
+                        <span className="mt-1 block whitespace-pre-wrap break-words">
+                          {selectionNote}
+                        </span>
+                      </>
+                    }
+                  >
                     <span
-                      aria-describedby={tooltipId}
-                      aria-label={`Selection note: ${selectionNote}`}
+                      aria-label={t('attachments.selectionNote', { note: selectionNote })}
                       title={selectionNote}
                       tabIndex={0}
                       className={[
@@ -194,25 +208,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                       </span>
                       <span className="min-w-0 truncate">{attachment.name}</span>
                     </span>
-                    <span
-                      id={tooltipId}
-                      role="tooltip"
-                      className={[
-                        'pointer-events-none invisible absolute bottom-9 right-0 z-30 w-max max-w-[min(340px,calc(100vw-3rem))]',
-                        'translate-y-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-high)] px-3 py-2',
-                        'text-left text-[13px] leading-5 text-[var(--color-text-primary)] opacity-0 shadow-[var(--shadow-dropdown)]',
-                        'transition-all duration-150 group-hover/selection:visible group-hover/selection:translate-y-0 group-hover/selection:opacity-100',
-                        'group-focus-within/selection:visible group-focus-within/selection:translate-y-0 group-focus-within/selection:opacity-100',
-                      ].join(' ')}
-                    >
-                      <span className="block text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-tertiary)]">
-                        修改内容
-                      </span>
-                      <span className="mt-1 block whitespace-pre-wrap break-words">
-                        {selectionNote}
-                      </span>
-                    </span>
-                  </>
+                  </Tooltip>
                 )}
                 {onRemove && attachment.id && (
                   <button
@@ -266,14 +262,13 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                   )}
                 </span>
                 {onRemove && attachment.id && (
-                  <button
-                    type="button"
+                  <IconButton
+                    icon={<X aria-hidden="true" size={14} />}
+                    label={t('attachments.remove', { name: attachment.name })}
+                    size="2xs"
+                    tone="muted"
                     onClick={() => onRemove(attachment.id!)}
-                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-                    aria-label={t('attachments.remove', { name: attachment.name })}
-                  >
-                    <X aria-hidden="true" size={14} />
-                  </button>
+                  />
                 )}
               </div>
             )
@@ -364,14 +359,15 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
             >
               {fileVisual}
               {onRemove && attachment.id && (
-                <button
-                  type="button"
+                <IconButton
+                  icon={<span className="material-symbols-outlined text-[17px]" aria-hidden="true">close</span>}
+                  label={t('attachments.remove', { name: attachment.name })}
+                  size="2xs"
+                  tone="muted"
+                  shape="circle"
+                  className={hasQuotePreview ? 'mt-0.5' : 'ml-0.5'}
                   onClick={() => onRemove(attachment.id!)}
-                  className={`${hasQuotePreview ? 'mt-0.5' : 'ml-0.5'} flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)]`}
-                  aria-label={t('attachments.remove', { name: attachment.name })}
-                >
-                  <span className="material-symbols-outlined text-[17px]">close</span>
-                </button>
+                />
               )}
             </div>
           )

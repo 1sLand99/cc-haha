@@ -15,10 +15,11 @@ import {
   type RepositoryContextResult,
 } from '../../api/sessions'
 import { useTranslation } from '../../i18n'
-import { DirectoryPicker } from './DirectoryPicker'
+import { DirectoryPicker } from '@/components/composite/DirectoryPicker'
+import { useDismissable } from '@/hooks/useDismissable'
 import { useMobileViewport } from '../../hooks/useMobileViewport'
 import { isDesktopRuntime } from '../../lib/desktopRuntime'
-import { MobileBottomSheet } from './MobileBottomSheet'
+import { MobileBottomSheet } from '@/components/ui/MobileBottomSheet'
 
 type Props = {
   workDir: string
@@ -158,29 +159,16 @@ export function RepositoryLaunchControls({
     onBranchChange(fallbackBranch || null)
   }, [branch, context, onBranchChange])
 
-  useEffect(() => {
-    if (!branchMenuOpen && !worktreeMenuOpen) return
-    const handleClick = (event: MouseEvent) => {
-      const target = event.target as Node
-      if (rootRef.current?.contains(target)) return
-      if (menuRef.current?.contains(target)) return
-      if (worktreeMenuRef.current?.contains(target)) return
-      setBranchMenuOpen(false)
-      setWorktreeMenuOpen(false)
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      setBranchMenuOpen(false)
-      setWorktreeMenuOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleClick)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [branchMenuOpen, worktreeMenuOpen])
+  const closeMenus = useCallback(() => {
+    setBranchMenuOpen(false)
+    setWorktreeMenuOpen(false)
+  }, [])
+
+  useDismissable({
+    open: branchMenuOpen || worktreeMenuOpen,
+    refs: [rootRef, menuRef, worktreeMenuRef],
+    onDismiss: closeMenus,
+  })
 
   useEffect(() => {
     if (!branchMenuOpen) return
@@ -303,7 +291,7 @@ export function RepositoryLaunchControls({
         left: 12,
         right: 12,
         bottom: 'calc(env(safe-area-inset-bottom) + 84px)',
-        zIndex: 9999,
+        zIndex: 'var(--z-dropdown)',
       }
     : {
         position: 'fixed' as const,
@@ -311,7 +299,7 @@ export function RepositoryLaunchControls({
         ...(menuPos?.direction === 'down'
           ? { top: menuPos.top }
           : { bottom: window.innerHeight - (menuPos?.top ?? 0) }),
-        zIndex: 9999,
+        zIndex: 'var(--z-dropdown)',
       }
   const worktreeMenuClassName = isMobileBrowser
     ? 'overflow-hidden rounded-t-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[0_-18px_48px_rgba(54,35,28,0.2)]'
@@ -322,7 +310,7 @@ export function RepositoryLaunchControls({
         left: 12,
         right: 12,
         bottom: 'calc(env(safe-area-inset-bottom) + 84px)',
-        zIndex: 9999,
+        zIndex: 'var(--z-dropdown)',
       }
     : {
         position: 'fixed' as const,
@@ -330,7 +318,7 @@ export function RepositoryLaunchControls({
         ...(worktreeMenuPos?.direction === 'down'
           ? { top: worktreeMenuPos.top }
           : { bottom: window.innerHeight - (worktreeMenuPos?.top ?? 0) }),
-        zIndex: 9999,
+        zIndex: 'var(--z-dropdown)',
       }
 
   return (

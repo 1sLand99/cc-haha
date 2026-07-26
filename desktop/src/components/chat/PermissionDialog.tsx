@@ -3,7 +3,8 @@ import { getPendingPermission, useChatStore } from '../../stores/chatStore'
 import { useTabStore } from '../../stores/tabStore'
 import { useTranslation } from '../../i18n'
 import type { TranslationKey } from '../../i18n'
-import { Button } from '../shared/Button'
+import { Badge, StatusDot } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import { DiffViewer } from './DiffViewer'
 import {
   PlanPreviewCard,
@@ -183,10 +184,13 @@ export function PermissionDialog({ sessionId, requestId, toolName, input, descri
               {title}
             </span>
             {isPending && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[var(--color-warning)]/15 text-[var(--color-warning)]">
-                <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full bg-[var(--color-warning)] animate-pulse-dot" />
+              <Badge
+                tone="warning"
+                icon={<StatusDot tone="warning" pulse />}
+                className="font-bold uppercase tracking-wider"
+              >
                 {t('permission.awaitingApproval')}
-              </span>
+              </Badge>
             )}
             {!isPending && (
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[var(--color-surface-container-high)] text-[var(--color-text-tertiary)]">
@@ -231,15 +235,19 @@ export function PermissionDialog({ sessionId, requestId, toolName, input, descri
         )}
 
         {allowRawToggle && (
-          <button
+          <Button
+            variant="link"
+            size="xs"
             onClick={() => setShowRaw(!showRaw)}
-            className="mt-2 flex cursor-pointer items-center gap-1 text-[11px] text-[var(--color-text-accent)] hover:underline"
+            className="mt-2"
+            icon={(
+              <span aria-hidden="true" className="material-symbols-outlined text-[14px]">
+                {showRaw ? 'expand_less' : 'expand_more'}
+              </span>
+            )}
           >
-            <span aria-hidden="true" className="material-symbols-outlined text-[14px]">
-              {showRaw ? 'expand_less' : 'expand_more'}
-            </span>
             {showRaw ? t('permission.hideDetails') : t('permission.showFullInput')}
-          </button>
+          </Button>
         )}
 
         {allowRawToggle && showRaw && (
@@ -332,14 +340,17 @@ function ExitPlanModePermissionDialog({
               {t('permission.planReadyTitle')}
             </span>
             {isPending ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-brand)]/15 px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--color-brand)]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-brand)] animate-pulse-dot" />
+              <Badge
+                tone="brand"
+                icon={<StatusDot tone="brand" pulse />}
+                className="font-bold uppercase"
+              >
                 {t('permission.awaitingApproval')}
-              </span>
+              </Badge>
             ) : (
-              <span className="inline-flex items-center rounded-full bg-[var(--color-surface-container-high)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--color-text-tertiary)]">
+              <Badge className="font-bold uppercase">
                 {t('permission.responded')}
-              </span>
+              </Badge>
             )}
           </div>
           {description ? (

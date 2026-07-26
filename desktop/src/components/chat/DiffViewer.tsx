@@ -1,6 +1,6 @@
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued'
 import { Highlight, type PrismTheme } from 'prism-react-renderer'
-import { CopyButton } from '../shared/CopyButton'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { useUIStore } from '../../stores/uiStore'
 
 type Props = {

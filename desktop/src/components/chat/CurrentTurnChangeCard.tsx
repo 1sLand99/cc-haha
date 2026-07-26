@@ -3,7 +3,8 @@ import type { MouseEvent as ReactMouseEvent } from 'react'
 import { ChevronDown, ChevronRight, ChevronUp } from 'lucide-react'
 import type { SessionTurnCheckpoint } from '../../api/sessions'
 import { useTranslation, type TranslationKey } from '../../i18n'
-import { OpenWithMenu } from '../common/OpenWithMenu'
+import { Button } from '@/components/ui/Button'
+import { OpenWithMenu } from '@/components/composite/OpenWithMenu'
 import { buildOpenWithItems, describeFileType, isPreviewableChangedFile, type OpenWithItem } from '../../lib/openWithItems'
 import { openWithContextForWorkspaceFile } from '../../lib/openWithContextForHref'
 import { isAbsoluteLocalPath, localFileUrl } from '../../lib/handlePreviewLink'
@@ -149,16 +150,17 @@ export function CurrentTurnChangeCard({
           </div>
         </div>
 
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="base"
+          loading={isUndoing}
           onClick={onUndo}
-          disabled={isUndoing}
           aria-label={undoAria}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-brand)]/40 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35 disabled:cursor-not-allowed disabled:opacity-50"
+          className="shrink-0"
+          icon={<span className="material-symbols-outlined text-[15px]" aria-hidden="true">undo</span>}
         >
-          <span className="material-symbols-outlined text-[15px]">undo</span>
           {isUndoing ? t('chat.turnChangesUndoing') : undoLabel}
-        </button>
+        </Button>
       </div>
 
       <div className="divide-y divide-[var(--color-border)]">
@@ -185,15 +187,17 @@ export function CurrentTurnChangeCard({
                 <ChevronRight size={17} strokeWidth={1.9} aria-hidden="true" className="shrink-0 text-[var(--color-text-tertiary)]" />
               </button>
               {previewable && (
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="base"
                   aria-label={t('openWith.title')}
                   onClick={(event) => handleOpenWith(event, fileEntry)}
-                  className="mr-2 inline-flex h-8 shrink-0 items-center gap-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35"
+                  className="mr-2 shrink-0"
+                  icon={<ChevronDown size={14} strokeWidth={1.9} aria-hidden="true" />}
+                  iconPosition="end"
                 >
                   {t('openWith.title')}
-                  <ChevronDown size={14} strokeWidth={1.9} />
-                </button>
+                </Button>
               )}
             </div>
           )
