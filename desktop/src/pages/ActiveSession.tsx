@@ -624,47 +624,49 @@ export function ActiveSession() {
                   data-testid="session-header"
                   className={
                     showRightPanel
-                      ? 'flex w-full items-center border-b border-[var(--color-border)] px-4 py-2'
-                      : 'w-full border-b border-[var(--color-border)] px-9 py-2'
+                      ? 'flex w-full items-center border-b border-[var(--color-border)] px-4 py-2.5'
+                      : 'w-full border-b border-[var(--color-border)] px-9 py-3'
                   }
                 >
                   <div className={showRightPanel ? 'min-w-0 flex-1' : 'mx-auto w-full max-w-[900px] min-w-0'}>
                     <div className="flex min-w-0 items-center gap-3">
                       <h1
-                        className="min-w-0 flex-1 truncate text-[15px] font-bold leading-tight tracking-[-0.2px] text-[var(--color-text-primary)]"
+                        className={`min-w-0 flex-1 truncate font-bold leading-tight tracking-[-0.2px] text-[var(--color-text-primary)] ${
+                          showRightPanel ? 'text-[15px]' : 'text-[17px]'
+                        }`}
                         style={{ fontFamily: 'var(--font-headline)' }}
                         title={headerTitle}
                       >
                         {headerTitle}
                       </h1>
-                      <div className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11px] text-[var(--color-text-tertiary)]">
-                        {[
-                          isActive && (
-                            <span key="active" className="flex shrink-0 items-center gap-1.5 text-[var(--color-text-secondary)]">
-                              <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-success)] animate-pulse-dot" />
-                              {t('session.active')}
-                            </span>
-                          ),
-                          totalTokens > 0 && (
-                            <span key="tokens" className="shrink-0" title={t('common.tokens', { count: totalTokens.toLocaleString() })}>
-                              {t('common.tokens', { count: formatTokenCount(totalTokens) })}
-                            </span>
-                          ),
-                          lastUpdated && (
-                            <span key="updated" className="truncate">{t('session.lastUpdated', { time: lastUpdated })}</span>
-                          ),
-                          !showRightPanel && visibleMessageCount > 0 && (
-                            <span key="messages" className="shrink-0">{t('session.messages', { count: visibleMessageCount })}</span>
-                          ),
-                        ]
-                          .filter((part): part is ReactElement => Boolean(part))
-                          .map((part, index) => (
-                            <Fragment key={part.key}>
-                              {index > 0 && <span aria-hidden="true" className="shrink-0">·</span>}
-                              {part}
-                            </Fragment>
-                          ))}
-                      </div>
+                    </div>
+                    <div className="mt-1 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[11px] text-[var(--color-text-tertiary)]">
+                      {[
+                        isActive && (
+                          <span key="active" className="flex shrink-0 items-center gap-1.5 text-[var(--color-text-secondary)]">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-success)] animate-pulse-dot" />
+                            {t('session.active')}
+                          </span>
+                        ),
+                        totalTokens > 0 && (
+                          <span key="tokens" className="shrink-0" title={t('common.tokens', { count: totalTokens.toLocaleString() })}>
+                            {t('common.tokens', { count: formatTokenCount(totalTokens) })}
+                          </span>
+                        ),
+                        lastUpdated && (
+                          <span key="updated" className="truncate">{t('session.lastUpdated', { time: lastUpdated })}</span>
+                        ),
+                        !showRightPanel && visibleMessageCount > 0 && (
+                          <span key="messages" className="shrink-0">{t('session.messages', { count: visibleMessageCount })}</span>
+                        ),
+                      ]
+                        .filter((part): part is ReactElement => Boolean(part))
+                        .map((part, index) => (
+                          <Fragment key={part.key}>
+                            {index > 0 && <span aria-hidden="true" className="shrink-0">·</span>}
+                            {part}
+                          </Fragment>
+                        ))}
                     </div>
                     {session && getSessionWorkspaceState(session) !== 'available' && (
                       <div className={`mt-2 inline-flex max-w-full items-center gap-2 rounded-[var(--radius-md)] border px-3 py-1.5 text-[11px] ${

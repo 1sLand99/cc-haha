@@ -1949,7 +1949,7 @@ describe('ActiveSession task polling', () => {
 
 describe('ActiveSession header', () => {
   // 回归锚点：标题曾经是 text-[22px] 且不截断，长标题会折成两行再加一行元数据，
-  // 连同 pt-6/pb-4 把聊天区顶掉约 90px。标题必须单行截断，元数据与它同一行。
+  // 连同 pt-6/pb-4 把聊天区顶掉约 120px。标题必须单行截断，元数据留在它下面那行。
   const longTitle = 'Create a todo_cccc-ccccbb directory, write a throwaway todo app with react + vite + tailwindcss, then start it'
 
   function mountSessionWithLongTitle(sessionId: string) {
@@ -2013,7 +2013,7 @@ describe('ActiveSession header', () => {
     expect(heading.className).not.toMatch(/text-\[22px\]/)
   })
 
-  it('puts the session metadata on the title row instead of a second line', () => {
+  it('gives the metadata its own line under the title', () => {
     const sessionId = 'header-meta-session'
     mountSessionWithLongTitle(sessionId)
 
@@ -2022,10 +2022,13 @@ describe('ActiveSession header', () => {
     const header = screen.getByTestId('session-header')
     const heading = within(header).getByRole('heading', { level: 1 })
     const titleRow = heading.parentElement as HTMLElement
+    const meta = titleRow.nextElementSibling as HTMLElement
 
-    expect(within(titleRow).getByText('2 messages')).toBeInTheDocument()
-    expect(within(titleRow).getByText('15k tokens')).toBeInTheDocument()
-    expect(header).toHaveClass('py-2')
+    // 元数据挤在标题右侧时会离标题很远，读起来像飘在角落的另一块内容。
+    expect(within(titleRow).queryByText('2 messages')).not.toBeInTheDocument()
+    expect(within(meta).getByText('2 messages')).toBeInTheDocument()
+    expect(within(meta).getByText('15k tokens')).toBeInTheDocument()
+    expect(header).toHaveClass('py-3')
   })
 
   it('keeps the separators between metadata items, never in front of them', () => {
@@ -2035,7 +2038,7 @@ describe('ActiveSession header', () => {
     render(<ActiveSession />)
 
     const heading = within(screen.getByTestId('session-header')).getByRole('heading', { level: 1 })
-    const meta = (heading.parentElement as HTMLElement).lastElementChild as HTMLElement
+    const meta = (heading.parentElement as HTMLElement).nextElementSibling as HTMLElement
 
     // 空闲会话只有三项元数据（tokens / 更新时间 / 消息数），之间两个「·」，开头不该有。
     // 分隔符是纯装饰，读屏时不该被念出来。
