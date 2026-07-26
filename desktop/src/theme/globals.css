@@ -1155,9 +1155,14 @@
   --color-inspector-capacity: var(--cc-t3);
 
   /* Overlays */
+  /* `--color-overlay-scrim` dims for non-modal layers (the mobile sidebar
+     drawer); `--color-modal-scrim` is the heavier one true modals sit on. */
   --color-overlay-scrim: rgba(var(--cc-scrim-rgb), 0.42);
-  --color-modal-scrim: rgba(var(--cc-scrim-rgb), 0.35);
-  --color-surface-glass: rgba(var(--cc-bg-rgb), 0.84);
+  --color-modal-scrim: rgba(var(--cc-scrim-rgb), 0.5);
+  /* Dialogs are opaque: see `.dialog-panel`. Light themes put the paper at the
+     top of the ramp, so the lifted surface is the background value itself. */
+  --color-surface-dialog: var(--cc-bg);
+  --color-surface-glass: rgba(var(--cc-bg-rgb), 0.92);
   --color-surface-glass-border: rgba(var(--cc-bd2-rgb), 0.4);
 
   /* Shadows: card / composer / floating overlay */
@@ -1289,8 +1294,11 @@
   --color-diff-syntax-punctuation: #9B908C;
 
   --color-selection-fg: var(--cc-t1);
-  --color-surface-glass: rgba(var(--cc-bg-rgb), 0.86);
-  --color-modal-scrim: rgba(var(--cc-scrim-rgb), 0.62);
+  /* Ink themes run the background at the bottom of the ramp, so a lifted
+     surface has to climb it — `--cc-s1`, not the light themes' `--cc-bg`. */
+  --color-surface-dialog: var(--cc-s1);
+  --color-surface-glass: rgba(var(--cc-bg-rgb), 0.93);
+  --color-modal-scrim: rgba(var(--cc-scrim-rgb), 0.66);
   --color-overlay-scrim: rgba(var(--cc-scrim-rgb), 0.56);
   --shadow-button-primary: 0 2px 10px rgba(0, 0, 0, 0.4);
   --color-activity-tooltip-border: rgba(var(--cc-bg-rgb), 0.28);
@@ -1381,8 +1389,31 @@ button, input, textarea, select, a, [role="button"] {
   box-shadow: var(--shadow-overlay);
 }
 
+/* The fill above is translucent on the assumption that the blur will scramble
+   whatever shows through. Where `backdrop-filter` is unavailable that
+   assumption fails silently — no fallback fires, the blur is simply skipped,
+   and page text stays legible straight through every dropdown and popover.
+   Going opaque costs the glass look only on engines that never rendered it. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-panel {
+    background: rgb(var(--cc-bg-rgb));
+  }
+}
+
 .glass-panel:focus-within {
   box-shadow: var(--shadow-focus-ring), var(--shadow-dropdown);
+}
+
+/* Modals are read-and-fill surfaces, not glances: an 860px provider form that
+   scrolls needs the page behind it gone, not softened. `.glass-panel` couples
+   its fill to `backdrop-filter`, and a dialog this large cannot take the bet
+   that the blur is live — when it is not, the page reads through the form.
+   No `:focus-within` ring: a dialog holds focus essentially always, so the
+   glass variant's ring would burn permanently rather than signal anything. */
+.dialog-panel {
+  background: var(--color-surface-dialog);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-overlay);
 }
 
 /* The composer sits closer to the page than a floating overlay does, so it

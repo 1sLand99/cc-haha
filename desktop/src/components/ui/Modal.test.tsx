@@ -1,3 +1,4 @@
+import '@testing-library/jest-dom'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -18,6 +19,33 @@ describe('Modal', () => {
 
     expect(container.contains(dialog)).toBe(false)
     expect(document.body.contains(dialog)).toBe(true)
+  })
+
+  it('carries an opaque panel rather than the blur-dependent glass fill', () => {
+    // `.glass-panel` only hides what is behind it when `backdrop-filter` runs.
+    // Where it does not, the blur is skipped without error and the page reads
+    // through the panel — which is how the provider list stayed legible behind
+    // the provider form. Dialogs are too large and too long-lived to bet on it.
+    render(
+      <Modal open onClose={vi.fn()} title="Provider">
+        <span>Provider form</span>
+      </Modal>,
+    )
+
+    const dialog = screen.getByRole('dialog', { name: 'Provider' })
+    expect(dialog).toHaveClass('dialog-panel')
+    expect(dialog).not.toHaveClass('glass-panel')
+  })
+
+  it('sits on the modal scrim, not the lighter non-modal one', () => {
+    render(
+      <Modal open onClose={vi.fn()} title="Provider">
+        <span>Provider form</span>
+      </Modal>,
+    )
+
+    const backdrop = screen.getByRole('dialog', { name: 'Provider' }).previousElementSibling
+    expect(backdrop).toHaveClass('bg-[var(--color-modal-scrim)]')
   })
 
   it('closes when the backdrop is clicked', () => {

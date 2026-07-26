@@ -114,6 +114,7 @@ describe('desktop theme tokens', () => {
     '--color-brand-hover',
     '--color-border-focus',
     '--color-surface-selected',
+    '--color-surface-dialog',
     '--color-switch-checked-bg',
     '--color-switch-thumb',
     '--color-btn-primary-bg',
@@ -259,6 +260,85 @@ describe('desktop theme tokens', () => {
     const onPrimaryContainer = normalizedCss.match(/--color-on-primary-container:/g)?.length ?? 0
     expect(onPrimary).toBeGreaterThan(0)
     expect(onPrimaryContainer).toBe(onPrimary)
+  })
+})
+
+/**
+ * `.glass-panel` states a translucent fill and a blur in one rule, and reads as
+ * frosted only when both land. The blur is the fragile half: where
+ * `backdrop-filter` does not run there is no failure for CSS to report — the
+ * declaration is simply skipped, the fill stays translucent on its own, and
+ * page text reads straight through the panel. That is what put a legible
+ * provider list behind the 860px provider form.
+ *
+ * These pin the two defenses. Dialogs opted out of the coupling entirely;
+ * the small floating layers kept it but no longer depend on it for legibility.
+ */
+describe('overlay opacity contract', () => {
+  /** Every value assigned to `token` across the stylesheet, in source order. */
+  function declarationsOf(token: string) {
+    const pattern = new RegExp(`${token}:\\s*([^;]+);`, 'g')
+    const values = [...normalizedCss.matchAll(pattern)].map((match) => match[1]!.trim())
+    expect(values.length, `${token} should be declared`).toBeGreaterThan(0)
+    return values
+  }
+
+  function alphaOf(declaration: string) {
+    const match = declaration.match(/,\s*([0-9.]+)\s*\)\s*$/)
+    expect(match, `expected a trailing alpha in "${declaration}"`).not.toBeNull()
+    return Number(match![1])
+  }
+
+  it('gives dialogs a fill with no alpha channel at all, in every theme', () => {
+    // Not "mostly opaque" — an rgba() here would put the regression back one
+    // decimal at a time.
+    for (const value of declarationsOf('--color-surface-dialog')) {
+      expect(value, `dialog fill should be opaque, got "${value}"`).not.toMatch(/rgba|hsla/)
+      expect(value).not.toMatch(/,\s*[0-9.]+\s*\)\s*$/)
+    }
+  })
+
+  it('lifts the dialog fill off the ground on both light and ink themes', () => {
+    // Light palettes top out at `--cc-bg`; ink palettes bottom out there, so a
+    // shared value would sink dark dialogs into the page behind them.
+    const values = declarationsOf('--color-surface-dialog')
+    expect(values).toContain('var(--cc-bg)')
+    expect(values).toContain('var(--cc-s1)')
+  })
+
+  it('keeps the glass fill dense enough to stand without the blur', () => {
+    // At 0.84 the page was readable through unblurred glass. These floating
+    // layers are small enough that the frosted look survives the extra density.
+    for (const value of declarationsOf('--color-surface-glass')) {
+      expect(alphaOf(value), `glass fill "${value}" is too sheer`).toBeGreaterThanOrEqual(0.9)
+    }
+  })
+
+  it('drops glass to a fully opaque fill where backdrop-filter is unavailable', () => {
+    const fallback = normalizedCss.match(
+      /@supports not \(\(backdrop-filter[^)]*\)[^{]*\{\s*\.glass-panel\s*\{([^}]*)\}/,
+    )
+    expect(fallback, 'expected an @supports fallback for .glass-panel').not.toBeNull()
+    expect(fallback![1]).toMatch(/background:\s*rgb\(var\(--cc-bg-rgb\)\)/)
+  })
+
+  it('keeps the dialog panel off backdrop-filter entirely', () => {
+    const rule = normalizedCss.match(/\n\.dialog-panel \{([^}]*)\}/)
+    expect(rule, 'expected a .dialog-panel rule').not.toBeNull()
+    expect(rule![1]).not.toMatch(/backdrop-filter/)
+    expect(rule![1]).toMatch(/background:\s*var\(--color-surface-dialog\)/)
+  })
+
+  it('dims harder behind a modal than behind a non-modal drawer', () => {
+    // Now that the panel is opaque the scrim is the only thing separating the
+    // dialog from the page, so it carries more weight than the sidebar's.
+    const modal = declarationsOf('--color-modal-scrim').map(alphaOf)
+    const overlay = declarationsOf('--color-overlay-scrim').map(alphaOf)
+    expect(modal).toHaveLength(overlay.length)
+    modal.forEach((alpha, index) => {
+      expect(alpha, 'modal scrim should be at least as heavy as the overlay scrim')
+        .toBeGreaterThanOrEqual(overlay[index]!)
+    })
   })
 })
 
