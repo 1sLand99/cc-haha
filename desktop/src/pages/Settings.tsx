@@ -21,11 +21,14 @@ import { Copy, Eye, EyeOff, GripVertical, PowerOff, QrCode, RotateCw } from 'luc
 import { useSettingsStore, UI_ZOOM_DEFAULT, UI_ZOOM_MIN, UI_ZOOM_MAX, UI_ZOOM_STEP } from '../stores/settingsStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useTranslation, type TranslationKey } from '../i18n'
-import { Modal } from '../components/shared/Modal'
-import { ConfirmDialog } from '../components/shared/ConfirmDialog'
-import { Input } from '../components/shared/Input'
-import { Button } from '../components/shared/Button'
-import { Dropdown } from '../components/shared/Dropdown'
+import { Modal } from '@/components/ui/Modal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
+import { IconButton } from '@/components/ui/IconButton'
+import { Badge } from '@/components/ui/Badge'
+import { Spinner } from '@/components/ui/Spinner'
+import { Dropdown } from '@/components/ui/Dropdown'
 import { PermissionModeSelector } from '../components/controls/PermissionModeSelector'
 import type { ThemeMode, UpdateProxyMode, NetworkProxyMode, WebSearchMode, AppMode, ChatSendBehavior, OutputStyleSource } from '../types/settings'
 import type { Locale } from '../i18n'
@@ -80,7 +83,7 @@ import {
   restoreSettingsJsonSecrets,
   stripProviderSettingsJsonEnv,
 } from '../lib/providerSettingsJson'
-import { copyTextToClipboard } from '../components/chat/clipboard'
+import { copyTextToClipboard } from '@/lib/clipboard'
 
 const NETWORK_TIMEOUT_MIN_SECONDS = 30
 const NETWORK_TIMEOUT_MAX_SECONDS = 1800
@@ -607,7 +610,7 @@ function ProviderSettings() {
 
       {isLoading && providers.length === 0 ? (
         <div className="flex justify-center py-8">
-          <div className="animate-spin w-5 h-5 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
+          <Spinner size={20} tone="brand" label={t('common.loading')} />
         </div>
       ) : null}
 
@@ -1657,13 +1660,10 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
               width="100%"
               className="block w-full"
               trigger={
-                <button
-                  type="button"
-                  className="flex h-10 w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-left text-sm text-[var(--color-text-primary)] outline-none transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-container-low)] focus-visible:border-[var(--color-border-focus)] focus-visible:shadow-[var(--shadow-focus-ring)]"
-                >
-                  <span className="min-w-0 flex-1 truncate">{selectedApiFormatLabel}</span>
+                <Button variant="secondary" size="md" block className="h-10 gap-3">
+                  <span className="min-w-0 flex-1 truncate text-left">{selectedApiFormatLabel}</span>
                   <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">expand_more</span>
-                </button>
+                </Button>
               }
             />
             {apiFormat !== 'anthropic' && (
@@ -1689,13 +1689,10 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
               width="100%"
               className="block w-full"
               trigger={
-                <button
-                  type="button"
-                  className="flex min-h-10 w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-left text-sm text-[var(--color-text-primary)] outline-none transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-container-low)] focus-visible:border-[var(--color-border-focus)] focus-visible:shadow-[var(--shadow-focus-ring)]"
-                >
-                  <span className="min-w-0 flex-1 truncate">{selectedAuthStrategyLabel}</span>
+                <Button variant="secondary" size="md" block className="h-auto min-h-10 gap-3 py-2">
+                  <span className="min-w-0 flex-1 truncate text-left">{selectedAuthStrategyLabel}</span>
                   <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">expand_more</span>
-                </button>
+                </Button>
               }
             />
           </div>
@@ -1760,16 +1757,15 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
               placeholder="sk-..."
               className="h-10 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 pr-10 text-sm text-[var(--color-text-primary)] outline-none transition-colors duration-150 placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-border-focus)] focus:shadow-[var(--shadow-focus-ring)]"
             />
-            <button
-              type="button"
+            <IconButton
+              icon={showApiKey ? 'visibility_off' : 'visibility'}
+              label={t(showApiKey ? 'settings.providers.hideApiKey' : 'settings.providers.showApiKey')}
+              showTooltip={false}
+              size="sm"
+              tone="muted"
               onClick={() => setShowApiKey((visible) => !visible)}
-              aria-label={showApiKey ? 'Hide API Key' : 'Show API Key'}
-              className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus:outline-none focus:shadow-[var(--shadow-focus-ring)]"
-            >
-              <span className="material-symbols-outlined text-[16px]">
-                {showApiKey ? 'visibility_off' : 'visibility'}
-              </span>
-            </button>
+              className="absolute right-1.5 top-1/2 -translate-y-1/2"
+            />
           </div>
         </div>
 
@@ -2549,8 +2545,9 @@ export function GeneralSettings() {
           <span className="min-w-[48px] rounded-md bg-[var(--color-surface-container-low)] px-2 py-1 text-center text-sm font-medium text-[var(--color-text-secondary)]">
             {uiZoomPercent}%
           </span>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="base"
             aria-label={t('settings.general.uiZoomReset')}
             title={t('settings.general.uiZoomReset')}
             onClick={() => {
@@ -2558,11 +2555,10 @@ export function GeneralSettings() {
               setUiZoomDraft(UI_ZOOM_DEFAULT)
               setUiZoom(UI_ZOOM_DEFAULT)
             }}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+            icon={<RotateCw className="h-3.5 w-3.5" aria-hidden="true" />}
           >
-            <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
             100%
-          </button>
+          </Button>
         </div>
       </div>
       <div
@@ -2665,14 +2661,16 @@ export function GeneralSettings() {
         maxHeight={320}
         className="mb-8 block w-full"
         trigger={
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="md"
+            block
+            className="h-10 gap-3"
             aria-label={t('settings.general.responseLangTitle')}
-            className="flex h-10 w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-left text-sm text-[var(--color-text-primary)] outline-none transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-container-low)] focus-visible:border-[var(--color-border-focus)] focus-visible:shadow-[var(--shadow-focus-ring)]"
           >
-            <span className="min-w-0 flex-1 truncate">{selectedResponseLanguageLabel}</span>
+            <span className="min-w-0 flex-1 truncate text-left">{selectedResponseLanguageLabel}</span>
             <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">expand_more</span>
-          </button>
+          </Button>
         }
       />
 
@@ -2688,14 +2686,16 @@ export function GeneralSettings() {
           maxHeight={360}
           className="block w-full"
           trigger={
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="md"
+              block
+              className="h-auto min-h-10 gap-3 py-2"
               aria-label={t('settings.general.outputStyleSelectLabel')}
               disabled={outputStylesLoading}
-              className="flex min-h-10 w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-left text-sm text-[var(--color-text-primary)] outline-none transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-container-low)] focus-visible:border-[var(--color-border-focus)] focus-visible:shadow-[var(--shadow-focus-ring)] disabled:cursor-not-allowed disabled:opacity-60"
+              icon={<span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">format_paint</span>}
             >
-              <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">format_paint</span>
-              <span className="min-w-0 flex-1">
+              <span className="min-w-0 flex-1 text-left">
                 <span className="block truncate font-medium">
                   {outputStylesLoading
                     ? t('settings.general.outputStyleLoading')
@@ -2708,7 +2708,7 @@ export function GeneralSettings() {
                 )}
               </span>
               <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">expand_more</span>
-            </button>
+            </Button>
           }
         />
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-tertiary)]">
@@ -3581,15 +3581,9 @@ function H5AccessSettings() {
                 </span>
               </span>
             </label>
-            <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                h5Access.enabled
-                  ? 'bg-[var(--color-success)]/10 text-[var(--color-success)]'
-                  : 'bg-[var(--color-surface)] text-[var(--color-text-tertiary)] border border-[var(--color-border)]'
-              }`}
-            >
+            <Badge tone={h5Access.enabled ? 'success' : 'neutral'} size="sm" bordered={!h5Access.enabled}>
               {h5Access.enabled ? t('settings.general.h5AccessStatusEnabled') : t('settings.general.h5AccessDisabledValue')}
-            </span>
+            </Badge>
           </div>
 
           {h5AccessDiagnostics?.storedHostStaleness === 'unreachable' && h5AccessDiagnostics.storedPublicBaseUrl ? (
@@ -3742,6 +3736,10 @@ function H5AccessSettings() {
                     />
                   ) : (
                     <div className="flex flex-col items-center gap-3 px-4 text-center">
+                      {/* Stock neutrals on purpose: the QR box is a hardcoded
+                          `bg-white` (scanners need the contrast), so this text
+                          must stay dark in all three themes. Theme tokens would
+                          go light-on-white under `data-theme="dark"`. */}
                       <QrCode className="h-12 w-12 text-neutral-400" aria-hidden="true" />
                       <p className="text-xs leading-5 text-neutral-500">
                         {t('settings.general.h5AccessQrEmptyHint')}
@@ -4072,12 +4070,9 @@ function AboutSettings() {
         <div className="mt-1 flex items-center gap-2 text-xs text-[var(--color-text-tertiary)]">
           <span>{t('settings.about.version')} {version}</span>
           <span className="text-[var(--color-border)]">·</span>
-          <button
-            onClick={() => openUrl(GITHUB_RELEASES)}
-            className="rounded-[var(--radius-sm)] text-[var(--color-text-accent)] transition-colors hover:text-[var(--color-brand)] focus:outline-none focus:shadow-[var(--shadow-focus-ring)]"
-          >
+          <Button variant="link" size="xs" onClick={() => openUrl(GITHUB_RELEASES)}>
             {t('settings.about.changelog')}
-          </button>
+          </Button>
         </div>
       )}
 

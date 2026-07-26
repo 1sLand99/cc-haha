@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
-import { createPortal } from 'react-dom'
 import { activityStatsApi, type ActivityStatsResponse, type DailyActivity } from '../api/activityStats'
 import {
   desktopUiPreferencesApi,
   getProfileAvatarUrl,
   type DesktopProfilePreferences,
 } from '../api/desktopUiPreferences'
+import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 import { type Locale, useTranslation } from '../i18n'
 import { useSettingsStore } from '../stores/settingsStore'
 import { publicAssetPath } from '../lib/publicAsset'
@@ -638,6 +639,13 @@ export function ActivitySettings() {
     { mode: 'cumulative', label: t('settings.activity.mode.cumulative'), help: t('settings.activity.modeHelp.cumulative') },
   ]
 
+  const cancelProfileEdit = () => {
+    setIsEditingProfile(false)
+    setDraftDisplayName(profile.displayName)
+    setDraftSubtitle(profile.subtitle)
+    setProfileError(null)
+  }
+
   const saveProfile = async () => {
     setIsSavingProfile(true)
     setProfileError(null)
@@ -789,114 +797,79 @@ export function ActivitySettings() {
         )}
       </section>
 
-      {isEditingProfile && createPortal(
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-[var(--color-overlay-scrim)] px-4 py-8" role="dialog" aria-modal="true" aria-labelledby="activity-profile-dialog-title">
-          <div className="w-full max-w-[420px] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] p-5 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 id="activity-profile-dialog-title" className="text-base font-semibold text-[var(--color-text-primary)]">{t('settings.activity.editProfile')}</h2>
-                <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">{t('settings.activity.displayNameHelper')}</p>
-              </div>
-              <button
-                type="button"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-                onClick={() => {
-                  setIsEditingProfile(false)
-                  setDraftDisplayName(profile.displayName)
-                  setDraftSubtitle(profile.subtitle)
-                  setProfileError(null)
-                }}
-                aria-label={t('settings.activity.cancelEdit')}
+      <Modal
+        open={isEditingProfile}
+        onClose={cancelProfileEdit}
+        title={t('settings.activity.editProfile')}
+        width={420}
+        footer={
+          <>
+            <Button variant="ghost" size="base" onClick={cancelProfileEdit}>
+              {t('settings.activity.cancelEdit')}
+            </Button>
+            <Button variant="primary" size="base" onClick={saveProfile} disabled={isSavingProfile}>
+              {t('settings.activity.saveProfile')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.activity.displayNameHelper')}</p>
+
+        <div className="mt-5 grid gap-4">
+          <div className="grid gap-2">
+            <label htmlFor="activity-profile-display-name" className="text-xs font-medium text-[var(--color-text-secondary)]">
+              {t('settings.activity.displayName')}
+            </label>
+            <input
+              id="activity-profile-display-name"
+              value={draftDisplayName}
+              onChange={(event) => setDraftDisplayName(event.target.value)}
+              className="h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-border-focus)]"
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <label htmlFor="activity-profile-subtitle" className="text-xs font-medium text-[var(--color-text-secondary)]">
+              {t('settings.activity.subtitle')}
+            </label>
+            <input
+              id="activity-profile-subtitle"
+              value={draftSubtitle}
+              onChange={(event) => setDraftSubtitle(event.target.value)}
+              className="h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-border-focus)]"
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <div className="text-xs font-medium text-[var(--color-text-secondary)]">{t('settings.activity.avatar')}</div>
+            <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.activity.avatarHelper')}</p>
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={handleAvatarChange}
+              />
+              <Button
+                variant="secondary"
+                size="base"
+                onClick={() => avatarInputRef.current?.click()}
+                icon={<span className="material-symbols-outlined text-[15px]" aria-hidden="true">upload</span>}
               >
-                <span className="material-symbols-outlined text-[17px]" aria-hidden="true">close</span>
-              </button>
-            </div>
-
-            <div className="mt-5 grid gap-4">
-              <div className="grid gap-2">
-                <label htmlFor="activity-profile-display-name" className="text-xs font-medium text-[var(--color-text-secondary)]">
-                  {t('settings.activity.displayName')}
-                </label>
-                <input
-                  id="activity-profile-display-name"
-                  value={draftDisplayName}
-                  onChange={(event) => setDraftDisplayName(event.target.value)}
-                  className="h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-border-focus)]"
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <label htmlFor="activity-profile-subtitle" className="text-xs font-medium text-[var(--color-text-secondary)]">
-                  {t('settings.activity.subtitle')}
-                </label>
-                <input
-                  id="activity-profile-subtitle"
-                  value={draftSubtitle}
-                  onChange={(event) => setDraftSubtitle(event.target.value)}
-                  className="h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-border-focus)]"
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <div className="text-xs font-medium text-[var(--color-text-secondary)]">{t('settings.activity.avatar')}</div>
-                <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.activity.avatarHelper')}</p>
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    ref={avatarInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    className="hidden"
-                    onChange={handleAvatarChange}
-                  />
-                  <button
-                    type="button"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-[background-color,transform] hover:bg-[var(--color-surface-hover)] active:translate-y-[1px]"
-                    onClick={() => avatarInputRef.current?.click()}
-                  >
-                    <span className="material-symbols-outlined text-[15px]" aria-hidden="true">upload</span>
-                    {t('settings.activity.changeAvatar')}
-                  </button>
-                  {profile.avatarFile && (
-                    <button
-                      type="button"
-                      className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-[var(--color-text-tertiary)] transition-[background-color,transform] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:translate-y-[1px]"
-                      onClick={removeAvatar}
-                    >
-                      {t('settings.activity.removeAvatar')}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {profileError && <div className="mt-4 rounded-md border border-[var(--color-error)]/30 bg-[var(--color-error)]/10 px-3 py-2 text-xs text-[var(--color-error)]">{profileError}</div>}
-
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                className="h-8 rounded-md px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-[background-color,transform] hover:bg-[var(--color-surface-hover)] active:translate-y-[1px]"
-                onClick={() => {
-                  setIsEditingProfile(false)
-                  setDraftDisplayName(profile.displayName)
-                  setDraftSubtitle(profile.subtitle)
-                  setProfileError(null)
-                }}
-              >
-                {t('settings.activity.cancelEdit')}
-              </button>
-              <button
-                type="button"
-                className="h-8 rounded-md bg-[var(--color-text-primary)] px-3 text-xs font-medium text-[var(--color-surface)] transition-[opacity,transform] active:translate-y-[1px] disabled:opacity-50"
-                onClick={saveProfile}
-                disabled={isSavingProfile}
-              >
-                {t('settings.activity.saveProfile')}
-              </button>
+                {t('settings.activity.changeAvatar')}
+              </Button>
+              {profile.avatarFile && (
+                <Button variant="ghost" size="base" onClick={removeAvatar}>
+                  {t('settings.activity.removeAvatar')}
+                </Button>
+              )}
             </div>
           </div>
-        </div>,
-        document.body,
-      )}
+        </div>
+
+        {profileError && <div className="mt-4 rounded-md border border-[var(--color-error)]/30 bg-[var(--color-error)]/10 px-3 py-2 text-xs text-[var(--color-error)]">{profileError}</div>}
+      </Modal>
 
       <div className="mt-10">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

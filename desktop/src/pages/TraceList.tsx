@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import type { KeyboardEvent } from 'react'
 import { ExternalLink, RefreshCw, Search, Trash2, Workflow } from 'lucide-react'
 import { tracesApi } from '../api/traces'
 import { SETTINGS_TAB_ID, useTabStore } from '../stores/tabStore'
 import { useUIStore } from '../stores/uiStore'
 import { useTranslation } from '../i18n'
-import { Button } from '../components/shared/Button'
-import { ConfirmDialog } from '../components/shared/ConfirmDialog'
+import { Button } from '@/components/ui/Button'
+import { IconButton } from '@/components/ui/IconButton'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { getDesktopHost } from '../lib/desktopHost'
 import type { TraceSessionList, TraceSessionListItem } from '../types/trace'
 
@@ -249,11 +251,13 @@ function TraceRows({
   if (traces.length === 0) {
     return (
       <div className="flex flex-1 items-start justify-center px-6 py-10">
-        <div className="w-full max-w-md rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6 py-12 text-center">
-          <Workflow className="mx-auto h-8 w-8 text-[var(--color-text-tertiary)]" strokeWidth={2} aria-hidden="true" />
-          <h2 className="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">{t('trace.list.emptyTitle')}</h2>
-          <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">{t('trace.list.emptyBody')}</p>
-        </div>
+        <EmptyState
+          className="w-full max-w-md"
+          headingLevel={2}
+          icon={<Workflow className="h-5 w-5" strokeWidth={2} />}
+          title={t('trace.list.emptyTitle')}
+          description={t('trace.list.emptyBody')}
+        />
       </div>
     )
   }
@@ -364,68 +368,40 @@ function TraceRow({
         </div>
       </button>
       <div className="flex w-[92px] shrink-0 items-center justify-end gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-        <RowAction
+        <IconButton
+          size="sm"
+          tone="secondary"
           label={t('trace.open')}
+          icon={<Workflow className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />}
           onClick={(event) => {
             event.stopPropagation()
             open()
           }}
-        >
-          <Workflow className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-        </RowAction>
-        <RowAction
+        />
+        <IconButton
+          size="sm"
+          tone="secondary"
           label={t('trace.openWindow')}
+          icon={<ExternalLink className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />}
           onClick={(event) => {
             event.stopPropagation()
             onOpenWindow(trace.sessionId)
           }}
-        >
-          <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-        </RowAction>
-        <RowAction
+        />
+        <IconButton
+          size="sm"
+          tone="secondary"
+          hoverTone="danger"
           label={t('trace.delete')}
-          tone="danger"
+          icon={<Trash2 className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />}
           disabled={isDeleting}
           onClick={(event) => {
             event.stopPropagation()
             onDelete(trace)
           }}
-        >
-          <Trash2 className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-        </RowAction>
+        />
       </div>
     </div>
-  )
-}
-
-function RowAction({
-  label,
-  onClick,
-  children,
-  tone = 'default',
-  disabled = false,
-}: {
-  label: string
-  onClick: (event: MouseEvent<HTMLButtonElement>) => void
-  children: ReactNode
-  tone?: 'default' | 'danger'
-  disabled?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      title={label}
-      className={`flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-container-high)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 ${
-        tone === 'danger'
-          ? 'hover:text-[var(--color-error)]'
-          : 'hover:text-[var(--color-text-primary)]'
-      }`}
-    >
-      {children}
-    </button>
   )
 }
 

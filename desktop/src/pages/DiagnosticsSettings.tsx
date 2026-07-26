@@ -6,13 +6,13 @@ import {
   type LocalIndexState,
   type LocalIndexStatus,
 } from '../api/diagnostics'
-import { Button } from '../components/shared/Button'
-import { copyTextToClipboard } from '../components/chat/clipboard'
+import { Button } from '@/components/ui/Button'
+import { copyTextToClipboard } from '@/lib/clipboard'
 import { useTranslation } from '../i18n'
 import { formatBytes } from '../lib/formatBytes'
 import { useUIStore } from '../stores/uiStore'
 import { DoctorPanel } from '../components/doctor/DoctorPanel'
-import { ConfirmDialog } from '../components/shared/ConfirmDialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 export function DiagnosticsSettings() {
   const t = useTranslation()
@@ -522,25 +522,27 @@ function EventRow({
           )}
         </div>
         <div className="text-xs text-[var(--color-text-secondary)] mt-1 break-words">{event.summary}</div>
-        <button
-          type="button"
-          className="mt-1 inline-flex max-w-full items-center gap-1 text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]"
+        <Button
+          variant="ghost"
+          size="xs"
+          className="mt-1 max-w-full"
           aria-label={`${copyEventIdLabel}: ${event.id}`}
           onClick={async () => {
             const copied = await copyTextToClipboard(event.id)
             addToast({ type: copied ? 'success' : 'error', message: copied ? eventIdCopiedLabel : eventIdCopyFailedLabel })
           }}
+          icon={<span className="material-symbols-outlined text-[13px]" aria-hidden="true">content_copy</span>}
+          iconPosition="end"
         >
           <span>{eventIdLabel}:</span>
           <span className="font-mono truncate">{event.id}</span>
-          <span className="material-symbols-outlined text-[13px]" aria-hidden="true">content_copy</span>
-        </button>
+        </Button>
         {detailsText && (
           <details className="mt-2">
             <summary className="cursor-pointer text-xs text-[var(--color-text-tertiary)] select-none">
               {detailsLabel}
             </summary>
-            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-[var(--color-border)] bg-[var(--color-surface-container)] p-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
               {detailsText}
             </pre>
           </details>

@@ -7,6 +7,7 @@ import {
 } from '../api/subagents'
 import { buildRenderModel, MessageBlock } from '../components/chat/MessageList'
 import { ToolCallGroup } from '../components/chat/ToolCallGroup'
+import { IconButton } from '@/components/ui/IconButton'
 import { useTranslation } from '../i18n'
 import { mapHistoryMessagesToUiMessages, useChatStore } from '../stores/chatStore'
 import type { AgentTaskNotification, UIMessage } from '../types/chat'
@@ -83,15 +84,17 @@ export function SubagentRunPage({
             {sourceSessionId} / {toolUseId}
           </p>
         </div>
-        <button
-          type="button"
-          aria-label={t('subagentRun.refresh')}
+        {/* The icon spins in place while loading rather than using IconButton's
+            `loading` prop, which would swap RefreshCw for the generic Spinner. */}
+        <IconButton
+          icon={<RefreshCw size={15} strokeWidth={2.2} aria-hidden="true" className={loading ? 'animate-spin' : undefined} />}
+          label={t('subagentRun.refresh')}
+          showTooltip={false}
+          size="md"
+          tone="muted"
           onClick={() => void load()}
           disabled={loading}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <RefreshCw size={15} strokeWidth={2.2} aria-hidden="true" className={loading ? 'animate-spin' : undefined} />
-        </button>
+        />
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto px-5 py-4">

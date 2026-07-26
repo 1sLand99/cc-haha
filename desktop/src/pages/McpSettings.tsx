@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '../components/shared/Button'
-import { DirectoryPicker } from '../components/shared/DirectoryPicker'
-import { Input } from '../components/shared/Input'
-import { ConfirmDialog } from '../components/shared/ConfirmDialog'
+import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
+import { Switch } from '@/components/ui/Switch'
+import { LoadingState } from '@/components/ui/LoadingState'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { IconButton } from '@/components/ui/IconButton'
+import { mcpStatusTone } from '@/lib/mcpStatus'
+import { DirectoryPicker } from '@/components/composite/DirectoryPicker'
+import { Input } from '@/components/ui/Input'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '../i18n'
 import { useUIStore } from '../stores/uiStore'
 import { useMcpStore } from '../stores/mcpStore'
@@ -67,14 +74,6 @@ const MCP_GROUP_ORDER: McpGroupKey[] = [
 ]
 
 const WRITABLE_SCOPES: McpWritableScope[] = ['local', 'project', 'user']
-
-const STATUS_TONE: Record<McpServerRecord['status'], string> = {
-  connected: 'bg-[var(--color-inspector-success-bg)] text-[var(--color-inspector-success)] border-[var(--color-border)]',
-  checking: 'bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)] border-[var(--color-border)]',
-  'needs-auth': 'bg-[var(--color-surface-container-low)] text-[var(--color-warning)] border-[var(--color-border)]',
-  failed: 'bg-[var(--color-inspector-danger-bg)] text-[var(--color-inspector-danger)] border-[var(--color-border)]',
-  disabled: 'bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)] border-[var(--color-border)]',
-}
 
 const SENSITIVE_MCP_FIELD = /(?:api[_-]?key|auth[_-]?token|authorization|bearer|token|secret|password|credential)/i
 const SENSITIVE_CLI_FLAG = /^--(?:api-key|api_key|auth-token|auth_token|authorization|bearer|token|secret|password|credential)$/i
@@ -305,9 +304,9 @@ function scopeLabel(server: McpServerRecord, t: ReturnType<typeof useTranslation
 
 function StatusBadge({ server }: { server: McpServerRecord }) {
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${STATUS_TONE[server.status]}`}>
+    <Badge tone={mcpStatusTone(server.status)} size="md" bordered className="font-semibold">
       {server.statusLabel}
-    </span>
+    </Badge>
   )
 }
 
@@ -317,35 +316,6 @@ function getServerIdentityKey(server: Pick<McpServerRecord, 'name' | 'scope' | '
   }
 
   return `${server.scope}:${server.name}`
-}
-
-function ToggleSwitch({
-  checked,
-  disabled,
-  onChange,
-}: {
-  checked: boolean
-  disabled?: boolean
-  onChange: () => void
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={onChange}
-      className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${
-        checked ? 'bg-[var(--color-switch-checked-bg)]' : 'bg-[var(--color-border)]'
-      } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
-    >
-      <span
-        className={`inline-block h-6 w-6 transform rounded-full bg-[var(--color-switch-thumb)] shadow-sm transition-transform ${
-          checked ? 'translate-x-7' : 'translate-x-1'
-        }`}
-      />
-    </button>
-  )
 }
 
 function ArraySection({
@@ -389,24 +359,27 @@ function ArraySection({
               onChange={(event) => onChange(row.id, 'value', event.target.value)}
               placeholder={valuePlaceholder}
             />
-            <button
-              type="button"
+            <IconButton
+              icon="delete"
+              label={addLabel}
+              showTooltip={false}
+              size="md"
+              tone="muted"
+              className="mt-1 h-10"
               onClick={() => onRemove(row.id)}
-              className="mt-1 flex h-10 w-8 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-              aria-label={addLabel}
-            >
-              <span className="material-symbols-outlined text-[18px]">delete</span>
-            </button>
+            />
           </div>
         ))}
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="lg"
+          block
+          className="h-12"
           onClick={onAdd}
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-[var(--radius-lg)] bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+          icon={<span className="material-symbols-outlined text-[18px]">add</span>}
         >
-          <span className="material-symbols-outlined text-[18px]">add</span>
           {addLabel}
-        </button>
+        </Button>
       </div>
     </section>
   )
@@ -420,19 +393,6 @@ function StatCard({ label, value, icon }: { label: string; value: number; icon: 
         <span className="text-xs uppercase tracking-[0.18em] font-semibold">{label}</span>
       </div>
       <div className="text-3xl font-semibold text-[var(--color-text-primary)]">{value}</div>
-    </div>
-  )
-}
-
-function LoadingState({ label }: { label: string }) {
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] text-center"
-    >
-      <div className="h-7 w-7 animate-spin rounded-full border-2 border-[var(--color-brand)] border-t-transparent" />
-      <div className="text-sm font-medium text-[var(--color-text-secondary)]">{label}</div>
     </div>
   )
 }
@@ -479,16 +439,23 @@ function ServerRow({
         )}
       </div>
 
-      <button
-        type="button"
+      <IconButton
+        icon="settings"
+        label={t('settings.mcp.openServer', { name: server.name })}
+        showTooltip={false}
+        size="xl"
+        shape="circle"
+        tone="secondary"
         onClick={onOpen}
-        className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-        aria-label={`Open ${server.name}`}
-      >
-        <span className="material-symbols-outlined text-[20px]">settings</span>
-      </button>
+      />
 
-      <ToggleSwitch checked={server.enabled} disabled={isBusy || !server.canToggle} onChange={onToggle} />
+      <Switch
+        label={server.name}
+        labelHidden
+        checked={server.enabled}
+        disabled={isBusy || !server.canToggle}
+        onChange={onToggle}
+      />
     </div>
   )
 }
@@ -803,17 +770,18 @@ export function McpSettings() {
     return (
       <>
         <div className="max-w-5xl min-w-0">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="md"
+            className="mb-5"
             onClick={() => {
               setView({ type: 'list' })
               selectServer(null)
             }}
-            className="mb-5 inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+            icon={<span className="material-symbols-outlined text-[18px]">arrow_back</span>}
           >
-            <span className="material-symbols-outlined text-[18px]">arrow_back</span>
             {t('settings.mcp.form.back')}
-          </button>
+          </Button>
 
           <div className="flex items-start justify-between gap-4 mb-8">
             <div>
@@ -878,17 +846,18 @@ export function McpSettings() {
     return (
       <>
         <div className="max-w-5xl min-w-0">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="md"
+            className="mb-5"
             onClick={() => {
               setView({ type: 'list' })
               selectServer(null)
             }}
-            className="mb-5 inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+            icon={<span className="material-symbols-outlined text-[18px]">arrow_back</span>}
           >
-            <span className="material-symbols-outlined text-[18px]">arrow_back</span>
             {t('settings.mcp.form.back')}
-          </button>
+          </Button>
 
           <div className="flex items-start justify-between gap-4 mb-8">
             <div>
@@ -1137,7 +1106,7 @@ export function McpSettings() {
       </div>
 
       {showListLoading ? (
-        <LoadingState label={t('common.loading')} />
+        <LoadingState label={t('common.loading')} variant="dashed" size="lg" />
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-3 mb-8">
@@ -1147,23 +1116,19 @@ export function McpSettings() {
           </div>
 
           {error ? (
-            <div className="text-center py-16 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
-              <span className="material-symbols-outlined text-[40px] text-[var(--color-error)] mb-3 block">error</span>
-              <p className="text-sm text-[var(--color-error)] mb-3">{error}</p>
-              <button
-                type="button"
-                onClick={() => void fetchServers(projectPathsForFetchRef.current, currentWorkDir)}
-                className="text-sm text-[var(--color-text-accent)] hover:underline"
-              >
-                {t('common.retry')}
-              </button>
-            </div>
+            <ErrorState
+              size="lg"
+              title={error}
+              retryLabel={t('common.retry')}
+              onRetry={() => void fetchServers(projectPathsForFetchRef.current, currentWorkDir)}
+            />
           ) : servers.length === 0 ? (
-            <div className="text-center py-16 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
-              <span className="material-symbols-outlined text-[40px] text-[var(--color-text-tertiary)] mb-3 block">dns</span>
-              <p className="text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.mcp.empty')}</p>
-              <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.mcp.emptyHint')}</p>
-            </div>
+            <EmptyState
+              size="md"
+              icon={<span className="material-symbols-outlined text-[20px]" aria-hidden="true">dns</span>}
+              title={t('settings.mcp.empty')}
+              description={t('settings.mcp.emptyHint')}
+            />
           ) : (
             <div className="flex flex-col gap-6">
               {MCP_GROUP_ORDER.map((group) => {

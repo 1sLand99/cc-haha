@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -16,7 +16,10 @@ import type { TraceSession as TraceSessionData } from '../types/trace'
 import { getDesktopHost } from '../lib/desktopHost'
 import { buildTraceWindowUrl } from '../lib/traceLaunch'
 import { formatClockTime, formatDurationMs, formatTokenCount } from '../lib/trace/formatters'
-import { CopyButton } from '../components/shared/CopyButton'
+import { Button } from '@/components/ui/Button'
+import { CopyButton } from '@/components/ui/CopyButton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { IconButton } from '@/components/ui/IconButton'
 import { TraceSplitLayout } from '../components/trace/TraceSplitLayout'
 import { TraceTree } from '../components/trace/TraceTree'
 import { TraceDetail } from '../components/trace/TraceDetail'
@@ -229,14 +232,15 @@ export function TraceSession({
               {t('trace.loadFailed')}
             </div>
             <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{state.message}</p>
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="base"
+              className="mt-4"
               onClick={refresh}
-              className="mt-4 inline-flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-text-primary)] transition-transform active:scale-[0.98]"
+              icon={<RefreshCw size={14} strokeWidth={2} />}
             >
-              <RefreshCw size={14} strokeWidth={2} />
               {t('common.retry')}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -376,15 +380,28 @@ function TraceHeader({
             copiedLabel={t('common.copied')}
             displayLabel={<Copy size={14} strokeWidth={2} />}
             displayCopiedLabel={<CheckCircle2 size={14} strokeWidth={2} />}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-border)] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-focus)] hover:text-[var(--color-text-primary)] active:scale-[0.98]"
+            // Mirrors IconButton size="sm" tone="secondary" bordered, so this
+            // sits flush with the two IconButtons beside it. CopyButton owns its
+            // own copied/reset state, so it cannot be swapped for IconButton.
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-border)] text-[var(--color-text-secondary)] transition-colors duration-150 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
           />
-          <IconAction label={t('trace.refresh')} onClick={onRefresh}>
-            <RefreshCw size={14} strokeWidth={2} className={refreshing ? 'animate-spin' : ''} />
-          </IconAction>
+          <IconButton
+            size="sm"
+            tone="secondary"
+            bordered
+            label={t('trace.refresh')}
+            onClick={onRefresh}
+            icon={<RefreshCw size={14} strokeWidth={2} className={refreshing ? 'animate-spin' : ''} />}
+          />
           {!standalone ? (
-            <IconAction label={t('trace.openWindow')} onClick={onOpenWindow}>
-              <ExternalLink size={14} strokeWidth={2} />
-            </IconAction>
+            <IconButton
+              size="sm"
+              tone="secondary"
+              bordered
+              label={t('trace.openWindow')}
+              onClick={onOpenWindow}
+              icon={<ExternalLink size={14} strokeWidth={2} />}
+            />
           ) : null}
         </div>
       </div>
@@ -428,25 +445,27 @@ function DiagnosisBanner({
         {diagnosisReasonLabel(diagnosis.reason, t)}
       </span>
       {focusSpan ? (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="xs"
+          className="shrink-0"
           onClick={() => onSelect(focusSpan.id)}
-          className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-focus)] hover:text-[var(--color-text-primary)] active:scale-[0.98]"
         >
           {t('trace.focus')}
-        </button>
+        </Button>
       ) : null}
       <div className="ml-auto flex min-w-0 items-center justify-end gap-1.5 overflow-hidden">
         {evidenceSpans.map((span) => (
-          <button
+          <Button
             key={span.id}
-            type="button"
+            variant="secondary"
+            size="xs"
+            className="max-w-[200px]"
             onClick={() => onSelect(span.id)}
-            className="inline-flex max-w-[200px] items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-focus)] hover:text-[var(--color-text-primary)] active:scale-[0.98]"
+            icon={<TypeIcon span={span} size={13} />}
           >
-            <TypeIcon span={span} size={13} />
             <span className="truncate">{spanDisplayTitle(span, t)}</span>
-          </button>
+          </Button>
         ))}
       </div>
     </section>
@@ -464,20 +483,6 @@ function diagnosisReasonLabel(reason: TraceViewModel['diagnosis']['reason'], t: 
     case 'empty': return t('trace.diagnosis.empty')
     default: return t('trace.diagnosis.healthy')
   }
-}
-
-function IconAction({ label, onClick, children }: { label: string; onClick?: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-border)] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-focus)] hover:text-[var(--color-text-primary)] active:scale-[0.98]"
-    >
-      {children}
-    </button>
-  )
 }
 
 function TraceSkeleton() {
@@ -508,11 +513,13 @@ function TraceEmpty() {
   const t = useTranslation()
   return (
     <div className="flex flex-1 items-center justify-center border-t border-[var(--color-border)] p-8">
-      <div className="max-w-sm rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-6 py-8 text-center">
-        <RadioTower size={22} strokeWidth={2} className="mx-auto text-[var(--color-text-tertiary)]" />
-        <h2 className="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">{t('trace.emptyTitle')}</h2>
-        <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">{t('trace.emptyBody')}</p>
-      </div>
+      <EmptyState
+        className="max-w-sm"
+        headingLevel={2}
+        icon={<RadioTower size={20} strokeWidth={2} />}
+        title={t('trace.emptyTitle')}
+        description={t('trace.emptyBody')}
+      />
     </div>
   )
 }

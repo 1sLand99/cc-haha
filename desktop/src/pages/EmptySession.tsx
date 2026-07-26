@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDismissable } from '@/hooks/useDismissable'
+import { Button } from '@/components/ui/Button'
+import { IconButton } from '@/components/ui/IconButton'
 import { ApiError } from '../api/client'
 import { agentsApi } from '../api/agents'
 import { skillsApi } from '../api/skills'
@@ -11,7 +14,7 @@ import { useSessionRuntimeStore, DRAFT_RUNTIME_SELECTION_KEY } from '../stores/s
 import { useSettingsStore } from '../stores/settingsStore'
 import { useUIStore } from '../stores/uiStore'
 import { SETTINGS_TAB_ID, useTabStore } from '../stores/tabStore'
-import { RepositoryLaunchControls } from '../components/shared/RepositoryLaunchControls'
+import { RepositoryLaunchControls } from '@/components/chat/RepositoryLaunchControls'
 import { PermissionModeSelector } from '../components/controls/PermissionModeSelector'
 import { ModelSelector, type ModelSelectorHandle } from '../components/controls/ModelSelector'
 import { AttachmentGallery } from '../components/chat/AttachmentGallery'
@@ -137,65 +140,36 @@ export function EmptySession() {
     textareaRef.current?.focus()
   }, [])
 
-  useEffect(() => {
-    if (!plusMenuOpen) return
-    const handleClick = (event: MouseEvent) => {
-      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
-        setPlusMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [plusMenuOpen])
+  useDismissable({
+    open: plusMenuOpen,
+    refs: [plusMenuRef],
+    onDismiss: () => setPlusMenuOpen(false),
+  })
 
-  useEffect(() => {
-    if (!slashMenuOpen) return
-    const handleClick = (event: MouseEvent) => {
-      if (
-        slashMenuRef.current &&
-        !slashMenuRef.current.contains(event.target as Node) &&
-        textareaRef.current &&
-        !textareaRef.current.contains(event.target as Node)
-      ) {
-        setSlashMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [slashMenuOpen])
+  useDismissable({
+    open: slashMenuOpen,
+    refs: [slashMenuRef, textareaRef],
+    onDismiss: () => setSlashMenuOpen(false),
+  })
 
-  useEffect(() => {
-    if (!localSlashPanel) return
-    const handleClick = (event: MouseEvent) => {
-      if (
-        slashMenuRef.current &&
-        !slashMenuRef.current.contains(event.target as Node) &&
-        textareaRef.current &&
-        !textareaRef.current.contains(event.target as Node)
-      ) {
-        setLocalSlashPanel(null)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [localSlashPanel])
+  useDismissable({
+    open: !!localSlashPanel,
+    refs: [slashMenuRef, textareaRef],
+    onDismiss: () => setLocalSlashPanel(null),
+  })
 
-  useEffect(() => {
-    if (!fileSearchOpen) return
-    const handleClick = (event: MouseEvent) => {
+  useDismissable({
+    open: fileSearchOpen,
+    refs: [textareaRef],
+    onDismiss: () => setFileSearchOpen(false),
+    // See ChatInput: this menu is found by id, and its absence used to mean
+    // "ignore the press".
+    isExempt: (target) => {
       const menu = document.getElementById('file-search-menu')
-      if (
-        menu &&
-        !menu.contains(event.target as Node) &&
-        textareaRef.current &&
-        !textareaRef.current.contains(event.target as Node)
-      ) {
-        setFileSearchOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [fileSearchOpen])
+      if (!menu) return true
+      return target instanceof Node && menu.contains(target)
+    },
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -744,15 +718,16 @@ export function EmptySession() {
               }`}>
                 <div className="flex shrink-0 items-center gap-2">
                   <div ref={plusMenuRef} className="relative">
-                    <button
+                    <IconButton
+                      icon="add"
+                      label={t('chat.composerTools')}
+                      showTooltip={false}
+                      tone="secondary"
+                      size={isMobileComposer ? 'xl' : 'md'}
+                      className={isMobileComposer ? 'h-11 w-11' : undefined}
+                      aria-expanded={plusMenuOpen}
                       onClick={() => setPlusMenuOpen((prev) => !prev)}
-                      aria-label="Open composer tools"
-                      className={`text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] ${
-                        isMobileComposer ? 'inline-flex h-11 w-11 items-center justify-center rounded-xl' : 'rounded-lg p-1.5'
-                      }`}
-                    >
-                      <span className="material-symbols-outlined text-[18px]">add</span>
-                    </button>
+                    />
 
                     {plusMenuOpen && (
                       <div className={`absolute bottom-full left-0 mb-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 shadow-[var(--shadow-dropdown)] ${
@@ -794,18 +769,19 @@ export function EmptySession() {
                     compact={isMobileComposer}
                   />
                   <ModelSelector ref={modelSelectorRef} runtimeKey={DRAFT_RUNTIME_SELECTION_KEY} disabled={isSubmitting} compact={isMobileComposer} />
-                  <button
+                  <Button
+                    variant="primary"
+                    size="base"
                     onClick={handleSubmit}
                     disabled={!canSubmit}
                     aria-label={t('common.run')}
                     title={isMobileComposer ? t('common.run') : undefined}
-                    className={`flex shrink-0 items-center justify-center gap-1 rounded-lg bg-[image:var(--gradient-btn-primary)] text-xs font-semibold text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)] transition-all hover:brightness-105 disabled:opacity-30 ${
-                      isMobileComposer ? 'h-11 w-11 rounded-xl px-0 py-0' : 'w-[112px] px-3 py-1.5'
-                    }`}
+                    className={`shrink-0 ${isMobileComposer ? 'h-11 w-11' : 'w-[112px]'}`}
+                    icon={<span className="material-symbols-outlined text-[14px]">arrow_forward</span>}
+                    iconPosition="end"
                   >
                     {!isMobileComposer && t('common.run')}
-                    <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>

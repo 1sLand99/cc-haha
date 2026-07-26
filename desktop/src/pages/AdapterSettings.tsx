@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAdapterStore } from '../stores/adapterStore'
 import { useTranslation } from '../i18n'
-import { Input } from '../components/shared/Input'
-import { Button } from '../components/shared/Button'
-import { DirectoryPicker } from '../components/shared/DirectoryPicker'
-import { ConfirmDialog } from '../components/shared/ConfirmDialog'
+import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
+import { LoadingState } from '@/components/ui/LoadingState'
+import { DirectoryPicker } from '@/components/composite/DirectoryPicker'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import QRCode from 'qrcode'
 
 type ImTab = 'telegram' | 'feishu' | 'wechat' | 'dingtalk' | 'whatsapp'
@@ -488,9 +489,8 @@ export function AdapterSettings() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12 text-[var(--color-text-tertiary)]">
-        <span className="material-symbols-outlined animate-spin text-[20px] mr-2">progress_activity</span>
-        Loading...
+      <div className="flex items-center justify-center py-12">
+        <LoadingState label={t('common.loading')} variant="inline" size="md" />
       </div>
     )
   }
@@ -505,7 +505,7 @@ export function AdapterSettings() {
             href={IM_CONFIG_DOCS_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 font-medium text-[var(--color-brand)] transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)]"
+            className="inline-flex items-center gap-1 font-medium text-[var(--color-brand)] transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-background)]"
           >
             {t('settings.adapters.configurationDocs')}
             <span className="material-symbols-outlined text-[14px]" aria-hidden="true">open_in_new</span>
@@ -569,12 +569,13 @@ export function AdapterSettings() {
                         {new Date(user.pairedAt).toLocaleDateString()}
                       </span>
                     </div>
-                    <button
+                    <Button
+                      variant="danger-outline"
+                      size="sm"
                       onClick={() => handleUnbind(user.platform, user.userId)}
-                      className="text-xs text-[var(--color-error)] hover:underline cursor-pointer"
                     >
                       {t('settings.adapters.unbind')}
-                    </button>
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -602,7 +603,7 @@ export function AdapterSettings() {
 
       {/* IM Adapter Tabs */}
       <section className="rounded-xl border border-[var(--color-border)] overflow-hidden">
-        <div role="tablist" aria-label="IM adapter" className="flex items-stretch border-b border-[var(--color-border)] bg-[var(--color-surface-hover)]">
+        <div role="tablist" aria-label={t('settings.adapters.imTabs')} className="flex items-stretch border-b border-[var(--color-border)] bg-[var(--color-surface-hover)]">
           <ImTabButton
             label={t('settings.adapters.telegram')}
             active={activeIm === 'telegram'}

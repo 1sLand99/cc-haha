@@ -22,6 +22,8 @@ import {
   useTerminalPanelStore,
 } from '../stores/terminalPanelStore'
 import { useTranslation } from '../i18n'
+import { Button } from '@/components/ui/Button'
+import { LoadingState } from '@/components/ui/LoadingState'
 import { MessageList } from '../components/chat/MessageList'
 import { ChatInput } from '../components/chat/ChatInput'
 import { ComputerUsePermissionModal } from '../components/chat/ComputerUsePermissionModal'
@@ -539,7 +541,10 @@ export function ActiveSession() {
                     {t('teams.memberSessionHint')}
                   </p>
                 </div>
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
                   onClick={() => {
                     if (activeTeam?.leadSessionId) {
                       useTabStore.getState().openTab(
@@ -550,11 +555,10 @@ export function ActiveSession() {
                     }
                   }}
                   disabled={!activeTeam?.leadSessionId}
-                  className="flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-50 disabled:hover:text-[var(--color-text-secondary)]"
+                  icon={<span className="material-symbols-outlined text-[14px]">arrow_back</span>}
                 >
-                  <span className="material-symbols-outlined text-[14px]">arrow_back</span>
                   {t('teams.backToLeader')}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -653,7 +657,7 @@ export function ActiveSession() {
                     {session && getSessionWorkspaceState(session) !== 'available' && (
                       <div className={`mt-2 inline-flex max-w-full items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px] ${
                         getSessionWorkspaceState(session) === 'worktree_removed'
-                          ? 'border-[var(--color-border)] bg-[var(--color-surface-secondary)] text-[var(--color-text-secondary)]'
+                          ? 'border-[var(--color-border)] bg-[var(--color-surface-container)] text-[var(--color-text-secondary)]'
                           : 'border-[var(--color-error)]/20 bg-[var(--color-error)]/8 text-[var(--color-error)]'
                       }`}>
                         <span className="material-symbols-outlined text-[14px]">
@@ -676,9 +680,8 @@ export function ActiveSession() {
               )}
 
               {isHistoryLoading ? (
-                <div role="status" className="flex flex-1 items-center justify-center p-8 text-sm text-[var(--color-text-secondary)]">
-                  <span className="material-symbols-outlined mr-2 animate-spin text-[18px]">progress_activity</span>
-                  {t('common.loading')}
+                <div className="flex flex-1 items-center justify-center p-8">
+                  <LoadingState label={t('common.loading')} variant="inline" size="md" />
                 </div>
               ) : historyError ? (
                 <div role="alert" className="flex flex-1 items-center justify-center p-8 text-sm text-[var(--color-error)]">

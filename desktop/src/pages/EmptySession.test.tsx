@@ -98,7 +98,7 @@ vi.mock('@tauri-apps/api/webview', () => ({
   }),
 }))
 
-vi.mock('../components/shared/DirectoryPicker', () => ({
+vi.mock('@/components/composite/DirectoryPicker', () => ({
   DirectoryPicker: ({ value, onChange }: { value: string; onChange: (path: string) => void }) => (
     <button type="button" aria-label="Pick project" data-value={value} onClick={() => onChange('/workspace/project')}>
       Pick project

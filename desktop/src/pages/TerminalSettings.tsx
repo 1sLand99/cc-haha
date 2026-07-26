@@ -3,9 +3,14 @@ import { Info } from 'lucide-react'
 import { useTranslation, type TranslationKey } from '../i18n'
 import { terminalApi } from '../api/terminal'
 import { useSettingsStore } from '../stores/settingsStore'
-import { Dropdown } from '../components/shared/Dropdown'
-import { Input } from '../components/shared/Input'
-import { Button } from '../components/shared/Button'
+import { useUIStore } from '../stores/uiStore'
+import { readTerminalPalette } from '../lib/terminalTheme'
+import { Dropdown } from '@/components/ui/Dropdown'
+import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
+import { IconButton } from '@/components/ui/IconButton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Badge, StatusDot, type Tone } from '@/components/ui/Badge'
 import type { DesktopTerminalStartupShell } from '../types/settings'
 import { getDesktopHost } from '../lib/desktopHost'
 import {
@@ -72,6 +77,7 @@ export function TerminalSettings({
   preserveOnUnmount = false,
 }: TerminalSettingsProps = {}) {
   const t = useTranslation()
+  const theme = useUIStore((state) => state.theme)
   const desktopTerminal = useSettingsStore((state) => state.desktopTerminal)
   const setDesktopTerminal = useSettingsStore((state) => state.setDesktopTerminal)
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -226,28 +232,7 @@ export function TerminalSettings({
           fontSize: 12,
           lineHeight: 1.25,
           scrollback: 4000,
-          theme: {
-            background: '#121212',
-            foreground: '#d7d2d0',
-            cursor: '#ffb59f',
-            selectionBackground: '#5f4a40',
-            black: '#1f1f1f',
-            red: '#ff6d67',
-            green: '#7ef18a',
-            yellow: '#f8c55f',
-            blue: '#77a8ff',
-            magenta: '#d699ff',
-            cyan: '#61d6d6',
-            white: '#d7d2d0',
-            brightBlack: '#8f8683',
-            brightRed: '#ff8a85',
-            brightGreen: '#9ff7a7',
-            brightYellow: '#ffdd7a',
-            brightBlue: '#a6c5ff',
-            brightMagenta: '#e3b8ff',
-            brightCyan: '#8ceeee',
-            brightWhite: '#ffffff',
-          },
+          theme: readTerminalPalette(),
         })
         fit = new FitAddonModule.FitAddon()
         const activeTerminal = terminal
@@ -376,6 +361,15 @@ export function TerminalSettings({
     }
   }, [active, resizeSession])
 
+  // Repaint an already-running terminal when the app theme changes. The
+  // runtime outlives this component, so a terminal started under one theme
+  // would otherwise keep that palette for the rest of the session.
+  useEffect(() => {
+    const terminal = runtime.terminal
+    if (!terminal) return
+    terminal.options.theme = readTerminalPalette()
+  }, [runtime, theme])
+
   const clearTerminal = () => {
     runtime.terminal?.clear()
   }
@@ -472,52 +466,52 @@ export function TerminalSettings({
 
         <div className="flex shrink-0 items-center gap-1.5">
           {onOpenInTab && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="base"
               onClick={onOpenInTab}
-              className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+              icon={<span className="material-symbols-outlined text-[16px]">open_in_new</span>}
             >
-              <span className="material-symbols-outlined text-[16px]">open_in_new</span>
               {t('terminal.openInTab')}
-            </button>
+            </Button>
           )}
           {onNewTerminal && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="base"
               onClick={onNewTerminal}
-              className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+              icon={<span className="material-symbols-outlined text-[16px]">add</span>}
             >
-              <span className="material-symbols-outlined text-[16px]">add</span>
               {t('terminal.newTab')}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="base"
             onClick={clearTerminal}
             disabled={!runtime.terminal}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] disabled:cursor-not-allowed disabled:opacity-50"
+            icon={<span className="material-symbols-outlined text-[16px]">mop</span>}
           >
-            <span className="material-symbols-outlined text-[16px]">mop</span>
             {t('settings.terminal.clear')}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="primary"
+            size="base"
             onClick={() => void startTerminal()}
             disabled={status === 'starting'}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-text-primary)] px-2.5 text-xs font-medium text-[var(--color-surface)] transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] disabled:cursor-not-allowed disabled:opacity-50"
+            icon={<span className="material-symbols-outlined text-[16px]">restart_alt</span>}
           >
-            <span className="material-symbols-outlined text-[16px]">restart_alt</span>
             {t('settings.terminal.restart')}
-          </button>
+          </Button>
           {onClose && (
-            <button
-              type="button"
+            <IconButton
+              icon="close"
+              label={t('terminal.closePanel')}
+              showTooltip={false}
+              size="md"
+              tone="muted"
               onClick={onClose}
-              aria-label={t('terminal.closePanel')}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-            >
-              <span className="material-symbols-outlined text-[17px]">close</span>
-            </button>
+            />
           )}
         </div>
       </div>
@@ -555,13 +549,15 @@ export function TerminalSettings({
                   }}
                   width="100%"
                   trigger={
-                    <button
-                      type="button"
-                      className="flex h-10 w-full items-center justify-between rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text-primary)]"
-                    >
-                      <span>{shellItems.find((item) => item.value === startupShell)?.label ?? startupShell}</span>
+                    // `flex-1` on the label, not `justify-between`: Button pins
+                    // `justify-center`, and a className override of it would win
+                    // or lose on stylesheet order rather than on class order.
+                    <Button variant="secondary" size="lg" block>
+                      <span className="flex-1 truncate text-left font-normal text-[var(--color-text-primary)]">
+                        {shellItems.find((item) => item.value === startupShell)?.label ?? startupShell}
+                      </span>
                       <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)]">expand_more</span>
-                    </button>
+                    </Button>
                   }
                 />
               </div>
@@ -606,19 +602,13 @@ export function TerminalSettings({
       )}
 
       {status === 'unavailable' ? (
-        <div className="flex flex-1 items-center justify-center rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-8 text-center">
-          <div>
-            <span className="material-symbols-outlined mb-3 block text-[32px] text-[var(--color-text-tertiary)]">
-              desktop_windows
-            </span>
-            <p className="text-sm font-medium text-[var(--color-text-primary)]">
-              {t('settings.terminal.unavailableTitle')}
-            </p>
-            <p className="mt-1 text-sm text-[var(--color-text-tertiary)]">
-              {t('settings.terminal.unavailableBody')}
-            </p>
-          </div>
-        </div>
+        <EmptyState
+          className="flex-1"
+          size="md"
+          icon={<span className="material-symbols-outlined text-[20px]" aria-hidden="true">desktop_windows</span>}
+          title={t('settings.terminal.unavailableTitle')}
+          description={t('settings.terminal.unavailableBody')}
+        />
       ) : (
         <div
           data-testid="settings-terminal-frame"
@@ -718,19 +708,23 @@ function TerminalHelpHint({ compact = false }: { compact?: boolean }) {
 
   return (
     <span className="group relative inline-flex shrink-0">
-      <button
-        type="button"
-        aria-label={t('settings.terminal.infoLabel')}
+      {/* showTooltip=false: the sibling `role="tooltip"` span below is the tooltip.
+          A native `title` would duplicate it and, per the a11y baseline, tooltips
+          are wired with aria-describedby rather than becoming the accessible name. */}
+      <IconButton
+        icon={<Info className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} aria-hidden="true" strokeWidth={2.2} />}
+        label={t('settings.terminal.infoLabel')}
+        showTooltip={false}
+        size={compact ? 'xs' : 'sm'}
+        shape="circle"
+        tone="muted"
         aria-describedby={tooltipId}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
         onKeyDown={(event) => {
           if (event.key === 'Escape') setOpen(false)
         }}
-        className={`${compact ? 'h-6 w-6' : 'h-7 w-7'} inline-flex items-center justify-center rounded-full text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]`}
-      >
-        <Info className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} aria-hidden="true" strokeWidth={2.2} />
-      </button>
+      />
       <span
         id={tooltipId}
         role="tooltip"
@@ -742,21 +736,25 @@ function TerminalHelpHint({ compact = false }: { compact?: boolean }) {
   )
 }
 
-function StatusPill({ status, label, compact = false }: { status: TerminalStatus; label: string; compact?: boolean }) {
-  const color =
-    status === 'running'
-      ? 'bg-[var(--color-success)]'
-      : status === 'error'
-        ? 'bg-[var(--color-error)]'
-        : status === 'starting'
-          ? 'bg-[var(--color-warning)]'
-          : 'bg-[var(--color-text-tertiary)]'
+const STATUS_TONE: Record<TerminalStatus, Tone> = {
+  running: 'success',
+  error: 'danger',
+  starting: 'warning',
+  idle: 'neutral',
+  exited: 'neutral',
+  unavailable: 'neutral',
+}
 
+function StatusPill({ status, label, compact = false }: { status: TerminalStatus; label: string; compact?: boolean }) {
   return (
-    <span className={`inline-flex ${compact ? 'h-5 px-2 text-[10px]' : 'h-6 px-2.5 text-[11px]'} shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-container-low)] font-medium text-[var(--color-text-secondary)]`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${color}`} />
+    <Badge
+      tone="neutral"
+      bordered
+      size={compact ? 'xs' : 'md'}
+      icon={<StatusDot tone={STATUS_TONE[status]} />}
+    >
       {label}
-    </span>
+    </Badge>
   )
 }
 
@@ -845,29 +843,27 @@ function BashPathSettings({ isTauri }: { isTauri: boolean }) {
           placeholder={t('settings.terminal.bashPathLabel')}
           className="flex-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm font-mono text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-border-focus)]"
         />
-        <button
-          type="button"
+        <IconButton
+          icon="folder_open"
+          label={t('settings.terminal.bashPathBrowse')}
+          showTooltip={false}
+          size="md"
+          tone="secondary"
+          bordered
+          className="w-10"
           onClick={handleBrowse}
-          className="inline-flex h-8 items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)]"
-        >
-          <span className="material-symbols-outlined text-[16px]">folder_open</span>
-        </button>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="inline-flex h-8 items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-text-primary)] px-3 text-xs font-medium text-[var(--color-surface)] transition-colors hover:opacity-90 disabled:opacity-50"
-        >
+        />
+        <Button variant="primary" size="base" onClick={handleSave} disabled={saving}>
           {saved ? t('settings.terminal.bashPathSaved') : t('settings.terminal.bashPathSave')}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="secondary"
+          size="base"
           onClick={handleReset}
           disabled={saving || bashPath === null}
-          className="inline-flex h-8 items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
         >
           {t('settings.terminal.bashPathReset')}
-        </button>
+        </Button>
       </div>
       {invalid && (
         <p className="mt-1.5 text-xs text-[var(--color-error)]">

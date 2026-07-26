@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { BookOpenText, ChevronDown, ChevronRight, Database, FileText, Folder, FolderGit2, PencilLine, RefreshCw, RotateCcw, Save, Search, X } from 'lucide-react'
-import { Button } from '../components/shared/Button'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { IconButton } from '@/components/ui/IconButton'
 import { MarkdownRenderer } from '../components/markdown/MarkdownRenderer'
 import { useTranslation } from '../i18n'
 import { formatBytes } from '../lib/formatBytes'
@@ -273,9 +275,9 @@ export function MemorySettings() {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
               {projects.length === 0 && !isLoadingProjects ? (
-                <EmptyState icon={<FolderGit2 size={18} />} text={t('settings.memory.emptyProjects')} />
+                <EmptyState icon={<FolderGit2 size={18} />} description={t('settings.memory.emptyProjects')} variant="plain" size="sm" />
               ) : filteredProjects.length === 0 ? (
-                <EmptyState icon={<Search size={18} />} text={t('settings.memory.noProjectMatches')} />
+                <EmptyState icon={<Search size={18} />} description={t('settings.memory.noProjectMatches')} variant="plain" size="sm" />
               ) : (
                 <div className="py-1">
                   {filteredProjects.map((project) => {
@@ -406,7 +408,7 @@ export function MemorySettings() {
             )
           ) : (
             <div className="flex min-h-0 flex-1 items-center justify-center p-8">
-              <EmptyState icon={<FileText size={20} />} text={isLoadingFile ? t('common.loading') : t('settings.memory.selectFile')} />
+              <EmptyState icon={<FileText size={20} />} description={isLoadingFile ? t('common.loading') : t('settings.memory.selectFile')} variant="plain" size="sm" />
             </div>
           )}
         </section>
@@ -426,10 +428,11 @@ function Breadcrumb({
   fallbackProject: string
   fallbackFile: string
 }) {
+  const t = useTranslation()
   const projectLabel = project ? projectDisplayName(project.label) : fallbackProject
   const parts = filePath ? [projectLabel, ...filePath.split('/').filter(Boolean)] : [projectLabel, fallbackFile]
   return (
-    <nav aria-label="Memory file path" className="flex min-w-0 items-center gap-1 text-sm text-[var(--color-text-tertiary)]">
+    <nav aria-label={t('settings.memory.filePath')} className="flex min-w-0 items-center gap-1 text-sm text-[var(--color-text-tertiary)]">
       {parts.map((part, index) => {
         const isLast = index === parts.length - 1
         return (
@@ -473,14 +476,15 @@ function SearchField({
         className="h-10 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] pl-9 pr-9 text-sm text-[var(--color-text-primary)] outline-none transition-colors duration-150 placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-border-focus)] focus:shadow-[var(--shadow-focus-ring)]"
       />
       {value ? (
-        <button
-          type="button"
-          aria-label={clearLabel}
+        <IconButton
+          icon={<X size={14} aria-hidden="true" />}
+          label={clearLabel}
+          showTooltip={false}
+          size="sm"
+          tone="muted"
           onClick={() => onChange('')}
-          className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-        >
-          <X size={14} aria-hidden="true" />
-        </button>
+          className="absolute right-2 top-1/2 -translate-y-1/2"
+        />
       ) : null}
     </div>
   )
@@ -672,19 +676,6 @@ function Badge({ children }: { children: string }) {
     <span className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)]">
       {children}
     </span>
-  )
-}
-
-function EmptyState({ icon, text }: { icon?: ReactNode; text: string }) {
-  return (
-    <div className="grid place-items-center gap-2 px-3 py-8 text-center text-sm text-[var(--color-text-tertiary)]">
-      {icon ? (
-        <span className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface-container-low)] text-[var(--color-text-tertiary)]">
-          {icon}
-        </span>
-      ) : null}
-      <span>{text}</span>
-    </div>
   )
 }
 

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useTaskStore } from '../stores/taskStore'
 import { useUIStore } from '../stores/uiStore'
 import { useTranslation } from '../i18n'
-import { Button } from '../components/shared/Button'
+import { Button } from '@/components/ui/Button'
+import { Spinner } from '@/components/ui/Spinner'
 import { TaskList } from '../components/tasks/TaskList'
 import { TaskEmptyState } from '../components/tasks/TaskEmptyState'
 import { NewTaskModal } from '../components/tasks/NewTaskModal'
@@ -45,7 +46,7 @@ export function ScheduledTasks() {
         {/* Content */}
         {!initialized && isLoading ? (
           <div className="flex items-center justify-center py-16">
-            <div className="animate-spin w-6 h-6 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
+            <Spinner size={24} tone="brand" label={t('common.loading')} />
           </div>
         ) : tasks.length === 0 ? (
           <TaskEmptyState onCreateTask={() => openModal('new-task')} />

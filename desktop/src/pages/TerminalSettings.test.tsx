@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useUIStore } from '../stores/uiStore'
 import { destroyTerminalRuntime } from '../lib/terminalRuntime'
 import { browserHost } from '../lib/desktopHost/browserHost'
 
@@ -11,6 +12,9 @@ const terminalMocks = vi.hoisted(() => {
     cols: 80,
     rows: 24,
     element: null as HTMLElement | null,
+    // Real xterm terminals always expose `options`; the theme bridge assigns
+    // `options.theme` when the app theme changes.
+    options: {} as { theme?: Record<string, string> },
     loadAddon: vi.fn(),
     open: vi.fn(),
     dispose: vi.fn(),
@@ -376,6 +380,28 @@ describe('TerminalSettings', () => {
     expect(terminalMocks.spawn).toHaveBeenCalledTimes(1)
 
     destroyTerminalRuntime('shared-runtime')
+  })
+
+  it('repaints a running terminal when the app theme changes', async () => {
+    terminalMocks.available = true
+    useUIStore.getState().setTheme('dark')
+
+    render(<TerminalSettings runtimeId="theme-runtime" />)
+    await waitFor(() => expect(terminalMocks.spawn).toHaveBeenCalledTimes(1))
+
+    const darkTheme = terminalMocks.terminalInstance.options.theme
+    expect(darkTheme).toBeDefined()
+
+    // The runtime outlives the component, so a terminal opened under one theme
+    // used to keep that palette for the rest of the session.
+    act(() => { useUIStore.getState().setTheme('white') })
+
+    await waitFor(() => {
+      expect(terminalMocks.terminalInstance.options.theme).not.toBe(darkTheme)
+    })
+    expect(terminalMocks.terminalInstance.options.theme).toHaveProperty('background')
+
+    destroyTerminalRuntime('theme-runtime')
   })
 
   it('shows Windows-only startup shell controls in settings mode', () => {
