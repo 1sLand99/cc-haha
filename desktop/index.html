@@ -16,6 +16,12 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Claude Code Haha</title>
+    <!--
+      The Electron window draws its own chrome, but this same document is what
+      the H5 remote client loads in a phone browser, where a missing favicon
+      means a blank tab and a screenshot for "add to home screen".
+    -->
+    <link rel="icon" href="/app-icon.png" type="image/png" />
     <!-- Fonts are self-hosted in /fonts/ and declared via @font-face in globals.css -->
     <script>
       if (new URLSearchParams(window.location.search).get('petWindow') === '1') {
