@@ -4,8 +4,14 @@ import {
   desktopUiPreferencesApi,
   type DesktopPetPreferences,
 } from '../../api/desktopUiPreferences'
-import { Button } from '../../components/shared/Button'
-import { Modal } from '../../components/shared/Modal'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { LoadingState } from '@/components/ui/LoadingState'
+import { Switch } from '@/components/ui/Switch'
+import { Modal } from '@/components/ui/Modal'
 import { useTranslation, type TranslationKey } from '../../i18n'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { BUILTIN_PETS } from './builtinPets'
@@ -277,17 +283,17 @@ export function PetSettings() {
       </header>
 
       {loading ? (
-        <div role="status" className="rounded-xl border border-[var(--color-border)] p-5 text-sm text-[var(--color-text-secondary)]">
-          {t('settings.pets.loading')}
-        </div>
+        <LoadingState label={t('settings.pets.loading')} variant="dashed" size="md" />
       ) : loadError || !preferences ? (
-        <div role="alert" className="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-error)]/30 bg-[var(--color-error)]/5 p-4">
-          <span className="text-sm text-[var(--color-error)]">{t('settings.pets.loadError')}</span>
-          <Button variant="secondary" size="sm" onClick={() => void load()}>{t('settings.pets.retry')}</Button>
-        </div>
+        <ErrorState
+          title={t('settings.pets.loadError')}
+          onRetry={() => void load()}
+          retryLabel={t('settings.pets.retry')}
+          size="md"
+        />
       ) : (
         <>
-          <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+          <Card as="section" radius="lg" padding="lg">
             <ToggleRow
               label={t('settings.pets.enableTitle')}
               description={t('settings.pets.enableDescription')}
@@ -295,7 +301,7 @@ export function PetSettings() {
               disabled={!desktopAvailable}
               onChange={(checked) => void updatePreferences({ enabled: checked }, true)}
             />
-          </section>
+          </Card>
 
           <PetCatalog
             title={t('settings.pets.builtInTitle')}
@@ -343,9 +349,7 @@ export function PetSettings() {
                 onSelect={(id) => void updatePreferences({ selectedPetId: id }, preferences.enabled && desktopAvailable)}
               />
             ) : (
-              <div className="rounded-xl border border-dashed border-[var(--color-border)] p-5 text-sm text-[var(--color-text-secondary)]">
-                {t('settings.pets.customEmpty')}
-              </div>
+              <EmptyState description={t('settings.pets.customEmpty')} variant="dashed" size="md" />
             )}
             {invalidPetCount > 0 && (
               <p role="status" className="text-xs text-[var(--color-warning)]">
@@ -354,7 +358,7 @@ export function PetSettings() {
             )}
           </section>
 
-          <section className="space-y-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+          <Card as="section" radius="lg" padding="lg" className="space-y-4">
             <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('settings.pets.appearanceTitle')}</h2>
             <label className="block">
               <span className="flex items-center justify-between gap-3 text-sm font-medium text-[var(--color-text-primary)]">
@@ -390,9 +394,9 @@ export function PetSettings() {
                 onChange={(checked) => void updatePreferences({ showTaskPanel: checked })}
               />
             </div>
-          </section>
+          </Card>
 
-          <section className="flex items-center justify-between gap-5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+          <Card as="section" radius="lg" padding="lg" className="flex items-center justify-between gap-5">
             <div className="min-w-0">
               <h2 className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.pets.folderTitle')}</h2>
               <p className="mt-1 break-all font-mono text-xs text-[var(--color-text-secondary)]">
@@ -408,7 +412,7 @@ export function PetSettings() {
             >
               {t('settings.pets.openFolder')}
             </Button>
-          </section>
+          </Card>
         </>
       )}
 
@@ -469,18 +473,18 @@ export function PetSettings() {
           </div>
         ) : (
           <div className="space-y-4">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]/40"
+            <Button
+              variant="link"
+              size="sm"
+              icon={<ArrowLeft size={15} aria-hidden="true" />}
               disabled={createBusy}
               onClick={() => {
                 setCreateMethod(null)
                 setCreateError(null)
               }}
             >
-              <ArrowLeft size={15} aria-hidden="true" />
               {t('settings.pets.createBack')}
-            </button>
+            </Button>
             <div className="rounded-lg bg-[var(--color-surface-hover)] px-3.5 py-3">
               <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
                 {createMethod === 'image'
@@ -557,17 +561,13 @@ function CreationMethodCard({
       disabled={disabled}
       onClick={onClick}
     >
-      <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-[var(--color-brand)]/10 text-[var(--color-brand)]">
+      <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-brand-soft)] text-[var(--color-brand)]">
         {icon}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</span>
-          {badge && (
-            <span className="rounded-full bg-[var(--color-brand)]/10 px-2 py-0.5 text-[11px] font-medium text-[var(--color-brand)]">
-              {badge}
-            </span>
-          )}
+          {badge && <Badge tone="brand" size="sm">{badge}</Badge>}
         </span>
         <span className="mt-1 block text-xs leading-5 text-[var(--color-text-secondary)]">{description}</span>
         <span className="mt-1 block text-[11px] leading-4 text-[var(--color-text-tertiary)]">{detail}</span>
@@ -656,23 +656,12 @@ function ToggleRow({
   onChange: (checked: boolean) => void
 }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-6">
-      <span>
-        <span className="block text-sm font-medium text-[var(--color-text-primary)]">{label}</span>
-        <span className="mt-0.5 block text-xs text-[var(--color-text-secondary)]">{description}</span>
-      </span>
-      <span className="relative inline-flex h-6 w-11 flex-none items-center">
-        <input
-          className="peer sr-only"
-          type="checkbox"
-          checked={checked}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.checked)}
-          aria-label={label}
-        />
-        <span className="absolute inset-0 rounded-full bg-[var(--color-border)] transition-colors peer-checked:bg-[var(--color-switch-checked-bg)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-border-focus)]/40" />
-        <span className="relative ml-1 h-4 w-4 rounded-full bg-[var(--color-switch-thumb)] shadow-sm transition-transform peer-checked:translate-x-5" />
-      </span>
-    </label>
+    <Switch
+      label={label}
+      description={description}
+      checked={checked}
+      disabled={disabled}
+      onChange={onChange}
+    />
   )
 }

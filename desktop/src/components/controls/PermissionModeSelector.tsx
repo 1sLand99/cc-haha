@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback, useId } from 'react'
 import DOMPurify from 'dompurify'
+import { useDismissable } from '@/hooks/useDismissable'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useSessionStore } from '../../stores/sessionStore'
@@ -9,8 +10,8 @@ import { useTranslation } from '../../i18n'
 import type { PermissionMode } from '../../types/settings'
 import { useMobileViewport } from '../../hooks/useMobileViewport'
 import { isDesktopRuntime } from '../../lib/desktopRuntime'
-import { MobileBottomSheet } from '../shared/MobileBottomSheet'
-import { ActionDialog } from '../shared/ActionDialog'
+import { MobileBottomSheet } from '@/components/ui/MobileBottomSheet'
+import { ActionDialog } from '@/components/ui/ActionDialog'
 import { AutoModeOptInDialog } from './AutoModeOptInDialog'
 
 const MODE_ICONS: Record<PermissionMode, string> = {
@@ -126,7 +127,10 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
   const menuPlacementClass = menuPlacement === 'bottom'
     ? 'top-full mt-2'
     : 'bottom-full mb-2'
-  const menuId = 'permission-mode-menu'
+  // Generated, not hard-coded: the previous literal id was rendered by both the
+  // sheet branch and the desktop branch, so `aria-controls` pointed at whichever
+  // duplicate the browser resolved first.
+  const menuId = useId()
 
   useEffect(() => {
     if (isTurnActive) {
@@ -149,31 +153,20 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
     }
   }, [activeTabId, autoDialog, confirmDialog, open])
 
-  useEffect(() => {
-    if (!open) return
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (
-        ref.current &&
-        !ref.current.contains(target) &&
-        !menuRef.current?.contains(target)
-      ) {
-        setOpen(false)
-      }
-    }
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    document.addEventListener('keydown', handleEsc)
-    return () => {
-      document.removeEventListener('mousedown', handleClick)
-      document.removeEventListener('keydown', handleEsc)
-    }
-  }, [open])
+  const closeMenu = useCallback(() => setOpen(false), [])
 
-  const permissionOptions = (
-    <div id={menuId} ref={menuRef} role="menu">
+  // `ref` wraps the trigger and the desktop popup; `menuRef` covers the sheet,
+  // which portals out of it. `stopEscapePropagation` keeps one Escape from
+  // closing both this menu and a dialog it was opened inside.
+  useDismissable({
+    open,
+    refs: [ref, menuRef],
+    onDismiss: closeMenu,
+    stopEscapePropagation: true,
+  })
+
+  const permissionItems = (
+    <>
       {PERMISSION_ITEMS.map((item) => (
         <button
           key={item.value}
@@ -228,15 +221,6 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
           )}
         </button>
       ))}
-    </div>
-  )
-
-  const menuContent = (
-    <>
-      <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--color-outline)]">
-        {t('permMode.executionPermissions')}
-      </div>
-      {permissionOptions}
     </>
   )
 
@@ -285,11 +269,16 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
             ariaLabel={t('permMode.executionPermissions')}
             contentClassName="py-2"
           >
-            {permissionOptions}
+            <div id={menuId} ref={menuRef} role="menu">
+              {permissionItems}
+            </div>
           </MobileBottomSheet>
         ) : (
           <div id={menuId} ref={menuRef} role="menu" className={`absolute left-0 ${menuPlacementClass} w-[320px] rounded-xl bg-[var(--color-surface-container-lowest)] border border-[var(--color-border)] shadow-[var(--shadow-dropdown)] z-50 py-2`}>
-            {menuContent}
+            <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--color-outline)]">
+              {t('permMode.executionPermissions')}
+            </div>
+            {permissionItems}
           </div>
         )
       )}

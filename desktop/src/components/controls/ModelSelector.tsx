@@ -13,6 +13,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import type { SavedProvider } from '../../types/provider'
 import type { RuntimeSelection } from '../../types/runtime'
 import type { ModelInfo, ReasoningEffortLevel } from '../../types/settings'
+import { useDismissable } from '@/hooks/useDismissable'
 import { useMobileViewport } from '../../hooks/useMobileViewport'
 import { isDesktopRuntime } from '../../lib/desktopRuntime'
 import { resolveDefaultRuntimeSelection } from '../../lib/runtimeSelection'
@@ -23,7 +24,7 @@ import {
   GROK_OFFICIAL_MODELS,
   GROK_OFFICIAL_PROVIDER_ID,
 } from '../../constants/grokOfficialProvider'
-import { MobileBottomSheet } from '../shared/MobileBottomSheet'
+import { MobileBottomSheet } from '@/components/ui/MobileBottomSheet'
 import { ReasoningEffortPopover } from './ReasoningEffortPopover'
 
 type ProviderChoice = {
@@ -265,28 +266,17 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
     open: openSelector,
   }), [openSelector])
 
-  useEffect(() => {
-    if (!open) return
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (
-        ref.current &&
-        !ref.current.contains(target) &&
-        !dropdownRef.current?.contains(target)
-      ) {
-        setOpen(false)
-      }
-    }
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    document.addEventListener('keydown', handleEsc)
-    return () => {
-      document.removeEventListener('mousedown', handleClick)
-      document.removeEventListener('keydown', handleEsc)
-    }
-  }, [open])
+  const closeSelector = useCallback(() => setOpen(false), [])
+
+  // `ref` is the trigger row; `dropdownRef` is the portalled panel (or the
+  // mobile sheet). `stopEscapePropagation` keeps one Escape from closing both
+  // this dropdown and a dialog it was opened inside.
+  useDismissable({
+    open,
+    refs: [ref, dropdownRef],
+    onDismiss: closeSelector,
+    stopEscapePropagation: true,
+  })
 
   const updateDropdownPosition = useCallback(() => {
     const anchor = ref.current

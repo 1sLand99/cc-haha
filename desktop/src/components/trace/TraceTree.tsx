@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { ChevronDown, ChevronRight, Search } from 'lucide-react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
+
+import { EmptyState } from '@/components/ui/EmptyState'
+import { IconButton } from '@/components/ui/IconButton'
+import { SearchField } from '@/components/ui/SearchField'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { useTranslation } from '../../i18n'
 import { previewTraceValue, type TraceSpan, type TraceViewModel } from '../../lib/traceViewModel'
 import { formatDurationMs } from '../../lib/trace/formatters'
 import { StatusGlyph, TypeIcon, spanDisplayTitle, turnDisplayTitle } from './TraceBadges'
 
 export type TraceTreeFilter = 'all' | 'llm' | 'tool' | 'error'
+
+const TRACE_TREE_FILTERS: readonly TraceTreeFilter[] = ['all', 'llm', 'tool', 'error']
 
 type TreeRow = {
   span: TraceSpan
@@ -81,31 +88,25 @@ export function TraceTree({
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface-container-lowest)]" data-testid="trace-tree">
       <div className="shrink-0 border-b border-[var(--color-border)] px-3 py-2.5">
-        <label className="flex h-7 items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text-tertiary)]">
-          <Search size={13} strokeWidth={2} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t('trace.searchSpans')}
-            className="min-w-0 flex-1 bg-transparent text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-          />
-        </label>
-        <div className="mt-2 flex flex-wrap gap-1">
-          {(['all', 'llm', 'tool', 'error'] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setFilter(value)}
-              className={`rounded-[var(--radius-sm)] px-2 py-0.5 text-[10px] font-semibold transition-colors ${
-                filter === value
-                  ? 'bg-[var(--color-primary-container)] text-[var(--color-on-primary-container)]'
-                  : 'border border-[var(--color-border)] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]'
-              }`}
-            >
-              {filterLabel(value, t)}
-            </button>
-          ))}
-        </div>
+        <SearchField
+          value={query}
+          onChange={setQuery}
+          label={t('trace.searchSpans')}
+          // Without this the clear button falls back to the field's own name,
+          // so both carry the same accessible label.
+          clearLabel={t('common.clearSearch')}
+          placeholder={t('trace.searchSpans')}
+          size="sm"
+        />
+        <SegmentedControl<TraceTreeFilter>
+          items={TRACE_TREE_FILTERS.map((value) => ({ value, label: filterLabel(value, t) }))}
+          value={filter}
+          onChange={setFilter}
+          label={t('trace.filter.aria')}
+          size="sm"
+          layout="fill"
+          className="mt-2 w-full"
+        />
       </div>
       <div
         ref={scrollRef}
@@ -127,9 +128,7 @@ export function TraceTree({
             />
           ))
         ) : (
-          <div className="px-4 py-8 text-center text-xs text-[var(--color-text-tertiary)]">
-            {t('trace.noMatchingSpans')}
-          </div>
+          <EmptyState description={t('trace.noMatchingSpans')} variant="plain" size="md" />
         )}
       </div>
     </div>
@@ -163,17 +162,16 @@ function TurnGroup({
           selected ? 'shadow-[inset_2px_0_0_var(--color-brand)]' : ''
         }`}
       >
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={t('trace.tree.toggleTurn')}
-          aria-expanded={!collapsed}
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)]"
-        >
-          {collapsed
+        <IconButton
+          icon={collapsed
             ? <ChevronRight size={13} strokeWidth={2} />
             : <ChevronDown size={13} strokeWidth={2} />}
-        </button>
+          label={t('trace.tree.toggleTurn')}
+          size="2xs"
+          tone="muted"
+          aria-expanded={!collapsed}
+          onClick={onToggle}
+        />
         <button
           type="button"
           onClick={() => onSelect(group.turnId)}

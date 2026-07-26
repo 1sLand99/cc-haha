@@ -11,6 +11,7 @@ import {
   Sparkles,
   Wrench,
 } from 'lucide-react'
+import { Badge, StatusDot } from '@/components/ui/Badge'
 import { useTranslation } from '../../i18n'
 import type { TraceSpan, TraceSpanStatus } from '../../lib/traceViewModel'
 
@@ -67,21 +68,13 @@ export function StatusGlyph({ status }: { status: TraceSpanStatus }) {
 
 export function StatusPill({ status }: { status: TraceSpanStatus }) {
   const t = useTranslation()
-  const className = status === 'error'
-    ? 'bg-[var(--color-error)]/10 text-[var(--color-error)]'
-    : status === 'pending'
-      ? 'bg-[var(--color-warning)]/10 text-[var(--color-warning)]'
-      : 'bg-[var(--color-success)]/10 text-[var(--color-success)]'
+  const tone = status === 'error' ? 'danger' : status === 'pending' ? 'warning' : 'success'
   const label = status === 'error'
     ? t('trace.status.error')
     : status === 'pending'
       ? t('trace.status.pending')
       : t('trace.status.ok')
-  return (
-    <span className={`inline-flex shrink-0 items-center rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] font-semibold ${className}`}>
-      {label}
-    </span>
-  )
+  return <Badge tone={tone} size="xs" pill={false}>{label}</Badge>
 }
 
 export function MetaChip({
@@ -111,10 +104,16 @@ export function MetaChip({
 export function LiveBadge() {
   const t = useTranslation()
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-success)]/25 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-success)]">
-      <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-success)] animate-pulse-dot" />
+    <Badge
+      tone="success"
+      variant="outline"
+      size="xs"
+      pill={false}
+      icon={<StatusDot tone="success" pulse />}
+      className="uppercase tracking-[0.08em]"
+    >
       {t('trace.live')}
-    </span>
+    </Badge>
   )
 }
 

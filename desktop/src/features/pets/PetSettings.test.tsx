@@ -145,7 +145,7 @@ describe('PetSettings', () => {
   it('persists enabling the pet and opens the floating pet window', async () => {
     render(<PetSettings />)
 
-    const toggle = await screen.findByRole('checkbox', { name: 'Show desktop pet' })
+    const toggle = await screen.findByRole('switch', { name: 'Show desktop pet' })
     fireEvent.click(toggle)
 
     await waitFor(() => {
@@ -160,9 +160,9 @@ describe('PetSettings', () => {
   it('keeps the task panel disabled by default and persists enabling it', async () => {
     render(<PetSettings />)
 
-    const panelToggle = await screen.findByRole('checkbox', { name: 'Show active task panel' })
+    const panelToggle = await screen.findByRole('switch', { name: 'Show active task panel' })
     expect(panelToggle).not.toBeChecked()
-    expect(screen.queryByRole('checkbox', { name: 'Start collapsed' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('switch', { name: 'Start collapsed' })).not.toBeInTheDocument()
 
     fireEvent.click(panelToggle)
 
@@ -175,7 +175,7 @@ describe('PetSettings', () => {
     updatePetPreferencesMock.mockRejectedValueOnce(new Error('disk full'))
     render(<PetSettings />)
 
-    const toggle = await screen.findByRole('checkbox', { name: 'Show desktop pet' })
+    const toggle = await screen.findByRole('switch', { name: 'Show desktop pet' })
     fireEvent.click(toggle)
 
     expect(toggle).toBeChecked()
@@ -188,7 +188,7 @@ describe('PetSettings', () => {
     showPetMock.mockRejectedValueOnce(new Error('window unavailable'))
     render(<PetSettings />)
 
-    const toggle = await screen.findByRole('checkbox', { name: 'Show desktop pet' })
+    const toggle = await screen.findByRole('switch', { name: 'Show desktop pet' })
     fireEvent.click(toggle)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Pet preferences could not be saved.')
@@ -204,7 +204,7 @@ describe('PetSettings', () => {
       .mockResolvedValueOnce(preferencesResponse({ ...defaultPetPreferences, enabled: false }))
     render(<PetSettings />)
 
-    const toggle = await screen.findByRole('checkbox', { name: 'Show desktop pet' })
+    const toggle = await screen.findByRole('switch', { name: 'Show desktop pet' })
     expect(toggle).toBeChecked()
 
     window.dispatchEvent(new Event('focus'))
@@ -223,7 +223,7 @@ describe('PetSettings', () => {
       .mockResolvedValueOnce(preferencesResponse({ ...defaultPetPreferences, enabled: false }))
     render(<PetSettings />)
 
-    const toggle = await screen.findByRole('checkbox', { name: 'Show desktop pet' })
+    const toggle = await screen.findByRole('switch', { name: 'Show desktop pet' })
     expect(toggle).toBeChecked()
 
     notifyVisibilityChanged?.()
@@ -246,8 +246,8 @@ describe('PetSettings', () => {
     })
 
     fireEvent.change(screen.getByRole('slider', { name: 'Pet size' }), { target: { value: '176' } })
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Play animations' }))
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Show active task panel' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Play animations' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Show active task panel' }))
 
     await waitFor(() => {
       expect(updatePetPreferencesMock).toHaveBeenCalledWith({ size: 176 })
@@ -265,12 +265,15 @@ describe('PetSettings', () => {
     expect(slider).toHaveClass('accent-[var(--color-brand)]')
     expect(slider).not.toHaveClass('accent-[var(--color-accent)]')
 
-    const motionToggle = screen.getByRole('checkbox', { name: 'Play animations' })
+    const motionToggle = screen.getByRole('switch', { name: 'Play animations' })
     const track = motionToggle.nextElementSibling
     const thumb = track?.nextElementSibling
+    // The focus ring is the opaque token, not `/40`: the alpha modifier
+    // compiles to a color function Safari 15 WebViews drop, and at 40% this
+    // ring was barely visible anyway.
     expect(track).toHaveClass(
       'peer-checked:bg-[var(--color-switch-checked-bg)]',
-      'peer-focus-visible:ring-[var(--color-border-focus)]/40',
+      'peer-focus-visible:ring-[var(--color-border-focus)]',
     )
     expect(thumb).toHaveClass('bg-[var(--color-switch-thumb)]')
 

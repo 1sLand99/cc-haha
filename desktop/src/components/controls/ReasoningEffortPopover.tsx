@@ -1,6 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
+import { useDismissable } from '@/hooks/useDismissable'
+import { useTranslation } from '../../i18n'
 import type { ReasoningEffortLevel } from '../../types/settings'
 
 type Props = {
@@ -32,8 +34,12 @@ export function ReasoningEffortPopover({
   labels,
   onChange,
   onClose,
-  ariaLabel = '推理强度',
+  ariaLabel,
 }: Props) {
+  const t = useTranslation()
+  // The default used to be a hardcoded Chinese literal, so a caller that left
+  // `ariaLabel` off announced the slider in Chinese under every locale.
+  const label = ariaLabel ?? t('model.effort')
   const popoverRef = useRef<HTMLDivElement>(null)
   const sliderRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef(false)
@@ -74,17 +80,17 @@ export function ReasoningEffortPopover({
     }
   }, [anchorRef, open])
 
-  useEffect(() => {
-    if (!open) return
-    const handleOutsidePointer = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (!popoverRef.current?.contains(target) && !anchorRef.current?.contains(target)) {
-        onClose()
-      }
-    }
-    document.addEventListener('pointerdown', handleOutsidePointer)
-    return () => document.removeEventListener('pointerdown', handleOutsidePointer)
-  }, [anchorRef, onClose, open])
+  // Escape is deliberately left to the slider's own key handler below, which
+  // also returns focus to the anchor; letting the hook handle it too would fire
+  // `onClose` twice for one key press.
+  useDismissable({
+    open,
+    refs: [popoverRef],
+    triggerRef: anchorRef,
+    onDismiss: onClose,
+    capture: false,
+    closeOnEscape: false,
+  })
 
   if (!open || !position || options.length === 0) return null
 
@@ -124,7 +130,7 @@ export function ReasoningEffortPopover({
           data-testid="reasoning-effort-context-label"
           className="text-[10px] font-medium tracking-wide text-[var(--color-text-tertiary)]"
         >
-          {ariaLabel}
+          {label}
         </div>
       </div>
 
@@ -132,7 +138,7 @@ export function ReasoningEffortPopover({
         ref={sliderRef}
         role="slider"
         tabIndex={0}
-        aria-label={ariaLabel}
+        aria-label={label}
         aria-valuemin={0}
         aria-valuemax={maxIndex}
         aria-valuenow={selectedIndex}

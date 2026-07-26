@@ -154,7 +154,12 @@ describe('PermissionModeSelector', () => {
     fireEvent.click(trigger)
 
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
-    expect(trigger).toHaveAttribute('aria-controls', 'permission-mode-menu')
+    // The id is generated per instance rather than hard-coded, so assert the
+    // relationship: `aria-controls` must resolve to the one menu on the page.
+    // The literal it replaced was rendered twice, leaving this pointer ambiguous.
+    const menu = screen.getByRole('menu')
+    expect(menu.id).not.toBe('')
+    expect(trigger).toHaveAttribute('aria-controls', menu.id)
     expect(screen.getByRole('dialog', { name: 'Execution Permissions' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /Auto accept edits/ })).toBeInTheDocument()

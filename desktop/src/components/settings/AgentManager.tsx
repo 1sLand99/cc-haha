@@ -16,7 +16,6 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  Search,
   Shield,
   Terminal,
   Trash2,
@@ -36,12 +35,17 @@ import { useSessionStore } from '../../stores/sessionStore'
 import { getSessionBrowsablePath } from '../../lib/sessionWorkspace'
 import { useUIStore } from '../../stores/uiStore'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
-import { Button } from '../shared/Button'
-import { ConfirmDialog } from '../shared/ConfirmDialog'
-import { DirectoryPicker } from '../shared/DirectoryPicker'
-import { Dropdown } from '../shared/Dropdown'
-import { Input } from '../shared/Input'
-import { Modal } from '../shared/Modal'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { LoadingState } from '@/components/ui/LoadingState'
+import { DirectoryPicker } from '@/components/composite/DirectoryPicker'
+import { Dropdown } from '@/components/ui/Dropdown'
+import { Input } from '@/components/ui/Input'
+import { Modal } from '@/components/ui/Modal'
+import { SearchField } from '@/components/ui/SearchField'
 
 const AGENT_COLORS: Record<string, string> = {
   red: '#ef4444',
@@ -198,27 +202,21 @@ export function AgentManager() {
           </div>
 
           {isLoading && allAgents.length === 0 ? (
-            <div className="flex justify-center py-12" role="status" aria-label={t('common.loading')}>
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-brand)] border-t-transparent" />
-            </div>
+            <LoadingState label={t('common.loading')} labelHidden size="md" />
           ) : error ? (
-            <div className="rounded-2xl border border-[var(--color-error)]/30 bg-[var(--color-error)]/5 px-5 py-10 text-center">
-              <p className="mb-3 text-sm text-[var(--color-error)]">{t('settings.agents.loadError')}</p>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<RefreshCw size={14} />}
-                onClick={() => void fetchAgents(agentContextPath)}
-              >
-                {t('common.retry')}
-              </Button>
-            </div>
+            <ErrorState
+              title={t('settings.agents.loadError')}
+              onRetry={() => void fetchAgents(agentContextPath)}
+              retryLabel={t('common.retry')}
+              size="lg"
+            />
           ) : allAgents.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-12 text-center">
-              <Bot className="mx-auto mb-3 text-[var(--color-text-tertiary)]" size={40} />
-              <p className="mb-1 text-sm text-[var(--color-text-secondary)]">{t('settings.agents.empty')}</p>
-              <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.agents.emptyHint')}</p>
-            </div>
+            <EmptyState
+              icon={<Bot size={20} />}
+              title={t('settings.agents.empty')}
+              description={t('settings.agents.emptyHint')}
+              size="md"
+            />
           ) : (
             <div className="flex min-w-0 flex-col gap-6">
               <section className="overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
@@ -737,11 +735,7 @@ function AgentFormModal({
           />
         </Field>
 
-        {submitError && (
-          <div role="alert" className="rounded-lg border border-[var(--color-error)]/30 bg-[var(--color-error)]/5 px-3 py-2 text-sm text-[var(--color-error)]">
-            {submitError}
-          </div>
-        )}
+        {submitError && <ErrorState title={submitError} size="sm" />}
       </div>
     </Modal>
   )
@@ -796,24 +790,24 @@ function ToolPicker({
             {t('settings.agents.form.builtInToolsHint')}
           </p>
         </div>
-        <span className="rounded-full bg-[var(--color-primary-fixed)] px-2.5 py-1 text-xs font-medium text-[var(--color-brand)]">
+        <Badge tone="brand" size="md">
           {t('settings.agents.form.toolsSelectedCount', { count: selectedTools.length })}
-        </span>
+        </Badge>
       </div>
 
       {availableTools.length > 0 ? (
         <>
-          <label className="relative mb-3 block">
-            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]" />
-            <input
-              type="search"
-              aria-label={t('settings.agents.form.toolsSearch')}
-              value={query}
-              placeholder={t('settings.agents.form.toolsSearchPlaceholder')}
-              onChange={(event) => setQuery(event.target.value)}
-              className="h-9 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] pl-9 pr-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-border-focus)] focus:ring-2 focus:ring-[var(--color-brand)]/15"
-            />
-          </label>
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            label={t('settings.agents.form.toolsSearch')}
+            // Without this the clear button falls back to the field's own name,
+            // so both carry the same accessible label.
+            clearLabel={t('common.clearSearch')}
+            placeholder={t('settings.agents.form.toolsSearchPlaceholder')}
+            size="md"
+            containerClassName="mb-3"
+          />
           <div className="max-h-64 space-y-3 overflow-y-auto pr-1">
             {groupedTools.map(({ category, tools }) => (
               <section key={category} aria-label={t(`settings.agents.form.toolCategory.${category}`)}>
@@ -841,7 +835,7 @@ function ToolPicker({
                         <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
                           selected
                             ? 'border-[var(--color-brand)] bg-[var(--color-brand)] text-white'
-                            : 'border-[var(--color-border-strong)] bg-[var(--color-surface)]'
+                            : 'border-[var(--color-outline)] bg-[var(--color-surface)]'
                         }`}>
                           {selected && <Check size={12} strokeWidth={3} />}
                         </span>
@@ -863,9 +857,7 @@ function ToolPicker({
           </div>
         </>
       ) : (
-        <p className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-4 text-center text-xs text-[var(--color-text-tertiary)]">
-          {t('settings.agents.form.toolsUnavailable')}
-        </p>
+        <EmptyState description={t('settings.agents.form.toolsUnavailable')} variant="dashed" size="sm" />
       )}
 
       <div className="mt-3 border-t border-[var(--color-border)] pt-3">
@@ -1056,11 +1048,20 @@ function Field({ label, error, required, children }: { label: string; error?: st
   )
 }
 
+/**
+ * The agent metadata chip.
+ *
+ * `bordered` is what makes this expressible as a `Badge`: these pills carry
+ * both a fill and a hairline border, and they sit on three different
+ * backgrounds (`--color-surface` cards, `--color-surface-container-low`
+ * headers, and the bare page). A plain `outline` badge would collapse into the
+ * card on the first of those.
+ */
 function MetaPill({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-tertiary)]">
+    <Badge tone="neutral" size="md" bordered className="uppercase tracking-[0.12em]">
       {children}
-    </span>
+    </Badge>
   )
 }
 

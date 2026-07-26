@@ -3,7 +3,8 @@ import { Wrench } from 'lucide-react'
 import { useTranslation } from '../../../i18n'
 import type { NormalizedBlock, NormalizedMessage } from '../../../lib/trace/types'
 import { MarkdownRenderer } from '../../markdown/MarkdownRenderer'
-import { CopyButton } from '../../shared/CopyButton'
+import { Badge } from '@/components/ui/Badge'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { CodeViewer } from '../../chat/CodeViewer'
 
 const LONG_TEXT_CHARS = 2000
@@ -153,10 +154,10 @@ function TextResult({ text }: { text: string }) {
 
 function ImageChip({ mediaType }: { mediaType?: string }) {
   return (
-    <span className="inline-flex w-fit items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-tertiary)]">
+    <Badge tone="neutral" variant="outline" size="xs" pill={false} mono className="w-fit">
       [image]
       {mediaType ? <span>{mediaType}</span> : null}
-    </span>
+    </Badge>
   )
 }
 

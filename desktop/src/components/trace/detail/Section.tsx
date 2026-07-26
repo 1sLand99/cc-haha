@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ChevronRight } from 'lucide-react'
 
+import { Badge } from '@/components/ui/Badge'
+
 const sectionOpenState = new Map<string, boolean>()
 const TraceSectionScopeContext = createContext('default')
 
@@ -73,9 +75,9 @@ export function Section({
             {title}
           </span>
           {badge !== undefined ? (
-            <span className="shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-surface-container)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-tertiary)]">
+            <Badge tone="neutral" size="xs" pill={false} mono>
               {badge}
-            </span>
+            </Badge>
           ) : null}
         </button>
         {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}

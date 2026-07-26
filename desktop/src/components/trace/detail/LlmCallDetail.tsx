@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
 import { useTranslation } from '../../../i18n'
 import type { TraceBodySnapshot, TraceCallRecord } from '../../../types/trace'
 import type { TraceSpan } from '../../../lib/traceViewModel'
@@ -9,7 +8,10 @@ import { parseTraceRequestBody, parseTraceResponseBody } from '../../../lib/trac
 import type { NormalizedMessage } from '../../../lib/trace/types'
 import { formatBytes } from '../../../lib/formatBytes'
 import { CodeViewer } from '../../chat/CodeViewer'
-import { CopyButton } from '../../shared/CopyButton'
+import { Badge } from '@/components/ui/Badge'
+import { CopyButton } from '@/components/ui/CopyButton'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Spinner } from '@/components/ui/Spinner'
 import { MetaChip } from '../TraceBadges'
 import { Section } from './Section'
 import { MessageBlocks } from './MessageBlocks'
@@ -179,12 +181,9 @@ function ResponseContent({
         <div className="flex min-w-0 items-center gap-2">
           <div className="text-xs font-semibold text-[var(--color-error)]">{call.error.name}</div>
           {aborted ? (
-            <span
-              className="inline-flex shrink-0 items-center rounded-[var(--radius-sm)] bg-[var(--color-error)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-error)]"
-              data-testid="trace-call-aborted-badge"
-            >
+            <Badge tone="danger" size="xs" pill={false} data-testid="trace-call-aborted-badge">
               {t('trace.status.aborted')}
-            </span>
+            </Badge>
           ) : null}
         </div>
         <div className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)]">{call.error.message}</div>
@@ -209,16 +208,18 @@ function ResponseContent({
   if (pending) {
     return (
       <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-tertiary)]">
-        <Loader2 size={13} strokeWidth={2} className="animate-spin" />
+        <Spinner size={13} />
         {t('trace.detail.streaming')}
       </div>
     )
   }
   if (!parsedMessage) {
     return (
-      <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-tertiary)]">
-        {call.response ? t('trace.detail.legacyTruncated') : t('trace.noResponse')}
-      </div>
+      <EmptyState
+        description={call.response ? t('trace.detail.legacyTruncated') : t('trace.noResponse')}
+        variant="dashed"
+        size="sm"
+      />
     )
   }
   return (
@@ -346,9 +347,7 @@ function RawBody({ title, body, maxLines }: { title: string; body: TraceBodySnap
       {code ? (
         <CodeViewer code={code} language={body.contentType === 'json' ? 'json' : 'text'} maxLines={maxLines} showLineNumbers={body.contentType === 'json'} />
       ) : (
-        <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-3 py-2 text-[11px] text-[var(--color-text-tertiary)]">
-          {t('trace.noData')}
-        </div>
+        <EmptyState description={t('trace.noData')} variant="dashed" size="sm" />
       )}
     </div>
   )

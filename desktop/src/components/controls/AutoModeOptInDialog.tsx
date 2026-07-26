@@ -1,5 +1,5 @@
 import { useTranslation } from '../../i18n'
-import { ActionDialog } from '../shared/ActionDialog'
+import { ActionDialog } from '@/components/ui/ActionDialog'
 
 type Props = {
   open: boolean

@@ -1,5 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronRight, Circle, FileText, LoaderCircle, Square, Terminal, Users, X } from 'lucide-react'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { IconButton } from '@/components/ui/IconButton'
+import { useDismissable } from '@/hooks/useDismissable'
 import { AgentMascot } from './AgentMascot'
 import { getVisibleActivitySections, type ActivityRow, type ActivitySectionId, type SessionActivityModel } from './sessionActivityModel'
 import { useTranslation } from '../../i18n'
@@ -177,6 +181,10 @@ function TaskStatusMarker({ status, t }: { status: ActivityRow['status']; t: Tra
         aria-label={t('session.activity.task.inProgress')}
         className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-[var(--color-brand)] bg-[var(--color-surface)] text-[var(--color-brand)]"
       >
+        {/* Not `Spinner`: this panel's markers stop under reduced motion, while
+            `Spinner` deliberately slows instead. `SessionActivityPanel.test.tsx`
+            asserts both the `motion-reduce:animate-none` and the absence of a
+            bare `.animate-spin` inside a row. */}
         <LoaderCircle size={13} strokeWidth={2.4} aria-hidden="true" className="motion-safe:animate-spin motion-reduce:animate-none" />
       </span>
     )
@@ -274,20 +282,18 @@ function BackgroundTaskStopButton({
     : t('session.activity.stopBackgroundTask', { name: row.label })
 
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      disabled={stopping}
-      onClick={() => onStop(row.taskId!)}
-      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] transition-[background-color,color,transform] duration-150 ease-out hover:bg-[var(--color-error)]/10 hover:text-[var(--color-error)] active:translate-y-px disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-    >
-      {stopping ? (
+    <IconButton
+      icon={stopping ? (
         <LoaderCircle size={14} strokeWidth={2.2} className="motion-safe:animate-spin motion-reduce:animate-none" aria-hidden="true" />
       ) : (
         <Square size={12} strokeWidth={2.4} aria-hidden="true" />
       )}
-    </button>
+      label={label}
+      size="md"
+      tone="muted"
+      disabled={stopping}
+      onClick={() => onStop(row.taskId!)}
+    />
   )
 }
 
@@ -526,31 +532,19 @@ export function SessionActivityPanel({
   const finishedBackgroundTaskKeys = useMemo(() => getFinishedBackgroundTaskKeys(model), [model])
   const visibleSections = useMemo(() => getVisibleActivitySections(model), [model])
 
-  useEffect(() => {
-    if (!open) return
+  // Docked in the rail the panel is part of the layout, so nothing outside it
+  // dismisses it; Escape still does, in both placements.
+  const isDismissExempt = useCallback(
+    (target: EventTarget | null) => placement === 'rail' || isActivityTriggerTarget(target),
+    [placement],
+  )
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose, open])
-
-  useEffect(() => {
-    if (!open || placement === 'rail') return
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (isActivityTriggerTarget(event.target)) return
-      if (panelRef.current?.contains(event.target as Node)) return
-      onClose()
-    }
-
-    document.addEventListener('pointerdown', handlePointerDown)
-    return () => document.removeEventListener('pointerdown', handlePointerDown)
-  }, [onClose, open, placement])
+  useDismissable({
+    open,
+    refs: [panelRef],
+    onDismiss: onClose,
+    isExempt: isDismissExempt,
+  })
 
   useEffect(() => {
     if (!open) {
@@ -582,14 +576,13 @@ export function SessionActivityPanel({
     >
       <div className="flex items-center justify-between px-4 pb-1.5 pt-3.5">
         <h2 className="text-[12px] font-semibold text-[var(--color-text-secondary)]">{t('session.activity.title')}</h2>
-        <button
-          type="button"
-          aria-label={t('session.activity.close')}
+        <IconButton
+          icon={<X size={14} strokeWidth={2.2} aria-hidden="true" />}
+          label={t('session.activity.close')}
+          size="sm"
+          tone="muted"
           onClick={onClose}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] transition-[background-color,color,transform] duration-150 ease-out hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-        >
-          <X size={14} strokeWidth={2.2} aria-hidden="true" />
-        </button>
+        />
       </div>
 
       <div
@@ -611,19 +604,17 @@ export function SessionActivityPanel({
                     {sectionTitle}
                   </h3>
                   {section.rows.length > 0 ? (
-                    <span className="rounded-full bg-[var(--color-surface-container)] px-1.5 py-0.5 text-[9px] leading-none text-[var(--color-text-tertiary)]">
-                      {section.rows.length}
-                    </span>
+                    <Badge tone="neutral" size="xs">{section.rows.length}</Badge>
                   ) : null}
                 </div>
                 {section.id === 'backgroundTasks' && finishedBackgroundTaskKeys.length > 0 && onClearFinishedBackgroundTasks ? (
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={() => onClearFinishedBackgroundTasks(finishedBackgroundTaskKeys)}
-                    className="rounded px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
                   >
                     {t('session.activity.clearFinished')}
-                  </button>
+                  </Button>
                 ) : null}
               </div>
               <div className={getSectionRowsClassName(section.id, section.rows.length)}>
