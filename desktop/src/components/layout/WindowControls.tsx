@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getDesktopHost } from '../../lib/desktopHost'
 import type { DesktopHost } from '../../lib/desktopHost'
+import { useTranslation } from '../../i18n'
 
 const isWindows = typeof navigator !== 'undefined' && /Win/.test(navigator.platform)
 
@@ -8,6 +9,7 @@ const isWindows = typeof navigator !== 'undefined' && /Win/.test(navigator.platf
 export const showWindowControls = isWindows && getDesktopHost().capabilities.windowControls
 
 export function WindowControls() {
+  const t = useTranslation()
   const [maximized, setMaximized] = useState(false)
   const [win, setWin] = useState<DesktopHost['window'] | null>(null)
 
@@ -52,7 +54,7 @@ export function WindowControls() {
       {/* Minimize */}
       <button
         onClick={() => runWindowAction(() => win.minimize())}
-        aria-label="Minimize window"
+        aria-label={t('windowControls.minimize')}
         className="w-[46px] h-full flex items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
       >
         <svg width="10" height="1" viewBox="0 0 10 1">
@@ -63,7 +65,7 @@ export function WindowControls() {
       {/* Maximize / Restore */}
       <button
         onClick={() => runWindowAction(() => win.toggleMaximize())}
-        aria-label={maximized ? 'Restore window' : 'Maximize window'}
+        aria-label={t(maximized ? 'windowControls.restore' : 'windowControls.maximize')}
         className="w-[46px] h-full flex items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
       >
         {maximized ? (
@@ -81,7 +83,7 @@ export function WindowControls() {
       {/* Close */}
       <button
         onClick={() => runWindowAction(() => win.close())}
-        aria-label="Close window"
+        aria-label={t('windowControls.close')}
         className="w-[46px] h-full flex items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-window-close-hover)] hover:text-white transition-colors"
       >
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2">

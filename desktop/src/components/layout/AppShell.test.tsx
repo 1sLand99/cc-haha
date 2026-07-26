@@ -119,11 +119,11 @@ vi.mock('../../pages/TraceSession', () => ({
   ),
 }))
 
-vi.mock('../shared/Toast', () => ({
+vi.mock('@/components/layout/Toast', () => ({
   ToastContainer: () => null,
 }))
 
-vi.mock('../shared/UpdateChecker', () => ({
+vi.mock('@/components/layout/UpdateChecker', () => ({
   UpdateChecker: () => <div>updates loaded</div>,
 }))
 

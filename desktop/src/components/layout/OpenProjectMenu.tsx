@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
-import { TargetIcon } from '../common/TargetIcon'
+import { useDismissable } from '@/hooks/useDismissable'
+import { TargetIcon } from '@/components/composite/TargetIcon'
 
 type Props = {
   path: string | null | undefined
@@ -27,26 +28,14 @@ export function OpenProjectMenu({ path }: Props) {
     void ensureTargets()
   }, [ensureTargets, path])
 
-  useEffect(() => {
-    if (!open) return
+  const handleDismiss = useCallback(() => setOpen(false), [])
 
-    const handleDocumentMouseDown = (event: MouseEvent) => {
-      const target = event.target as Node
-      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return
-      setOpen(false)
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-
-    document.addEventListener('mousedown', handleDocumentMouseDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleDocumentMouseDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [open])
+  useDismissable({
+    open,
+    refs: [menuRef],
+    triggerRef: buttonRef,
+    onDismiss: handleDismiss,
+  })
 
   const primaryTarget = useMemo(
     () => targets.find((target) => target.id === primaryTargetId) ?? targets[0] ?? null,

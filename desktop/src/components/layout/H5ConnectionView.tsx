@@ -1,8 +1,8 @@
 import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { saveAndVerifyH5Connection } from '../../lib/desktopRuntime'
-import { Button } from '../shared/Button'
-import { Input } from '../shared/Input'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 type H5ConnectionViewProps = {
   initialServerUrl?: string | null

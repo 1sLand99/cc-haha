@@ -20,7 +20,10 @@ import {
 import { useChatStore } from '../../stores/chatStore'
 import { useWorkspaceChatContextStore } from '../../stores/workspaceChatContextStore'
 import { useUIStore } from '../../stores/uiStore'
-import { copyTextToClipboard } from '../chat/clipboard'
+import { Button } from '@/components/ui/Button'
+import { IconButton } from '@/components/ui/IconButton'
+import { useDismissable } from '@/hooks/useDismissable'
+import { copyTextToClipboard } from '@/lib/clipboard'
 import { clearWindowSelection, getSelectionPopoverPosition, useSelectionPopoverDismiss } from '../../hooks/useSelectionPopoverDismiss'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 import {
@@ -408,27 +411,6 @@ function PanelMessage({
   )
 }
 
-function ToolbarIconButton({
-  Icon,
-  label,
-  onClick,
-}: {
-  Icon: LucideIcon
-  label: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={onClick}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-info)]/30"
-    >
-      <Icon size={16} strokeWidth={1.9} aria-hidden="true" />
-    </button>
-  )
-}
-
 function WorkspaceFilterInput({
   value,
   onChange,
@@ -476,17 +458,17 @@ function WorkspaceFilterInput({
           <RefreshCw size={13} aria-hidden="true" className="shrink-0 animate-spin" />
         )}
         {value.length > 0 && (
-          <button
-            type="button"
-            aria-label={t('workspace.clearFilter')}
+          <IconButton
+            icon={<X size={13} strokeWidth={2} aria-hidden="true" />}
+            label={t('workspace.clearFilter')}
             onClick={() => {
               onChange('')
               inputRef.current?.focus()
             }}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-          >
-            <X size={13} strokeWidth={2} aria-hidden="true" />
-          </button>
+            size="sm"
+            tone="muted"
+            showTooltip={false}
+          />
         )}
       </div>
       {summary && (
@@ -647,16 +629,16 @@ function CodeSurface({
             className="block w-full resize-none bg-transparent px-3 py-3 text-[13px] leading-6 text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
           />
           <div className="flex justify-end gap-2 px-3 pb-3">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setCommentRange(null)
                 setCommentDraft('')
               }}
-              className="rounded-[7px] px-2.5 py-1 text-[12px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
             >
               {t('common.cancel')}
-            </button>
+            </Button>
             <button
               type="button"
               onClick={submitLineComment}
@@ -825,13 +807,14 @@ function CodeSurface({
                 ? t('workspace.previewAllLines', { total: lines.length })
                 : t('workspace.previewLineLimit', { count: visibleLines.length, total: lines.length })}
             </span>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setShowAllLines((current) => !current)}
-              className="ml-auto rounded-[6px] px-2 py-1 text-[12px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+              className="ml-auto"
             >
               {showAllLines ? t('workspace.collapsePreview') : t('workspace.showAllLoadedLines')}
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -1212,6 +1195,8 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
   const [isNavigatorOpen, setIsNavigatorOpen] = useState(forceVisible)
   const [previewTabContextMenu, setPreviewTabContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
   const [fileContextMenu, setFileContextMenu] = useState<FileContextMenuState | null>(null)
+  const previewTabContextMenuRef = useRef<HTMLDivElement>(null)
+  const fileContextMenuRef = useRef<HTMLDivElement>(null)
   const width = useWorkspacePanelStore((state) => state.width)
   const isOpen = useWorkspacePanelStore((state) => state.isPanelOpen(sessionId))
   const activeView = useWorkspacePanelStore((state) => state.getActiveView(sessionId))
@@ -1364,15 +1349,19 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
     }
   }, [filterQuery, navigatorView, normalizedFilterQuery, sessionId, shouldRender, t, workspaceSearchRevision])
 
-  useEffect(() => {
-    if (!previewTabContextMenu && !fileContextMenu) return
-    const close = () => {
-      setPreviewTabContextMenu(null)
-      setFileContextMenu(null)
-    }
-    document.addEventListener('click', close)
-    return () => document.removeEventListener('click', close)
-  }, [fileContextMenu, previewTabContextMenu])
+  const closeContextMenus = useCallback(() => {
+    setPreviewTabContextMenu(null)
+    setFileContextMenu(null)
+  }, [])
+
+  // Both menus already stopped propagation on their own container, so treating
+  // them as "inside" reproduces the previous behavior (a copy-path click leaves
+  // the menu open) without a hand-rolled document listener.
+  useDismissable({
+    open: previewTabContextMenu !== null || fileContextMenu !== null,
+    refs: [previewTabContextMenuRef, fileContextMenuRef],
+    onDismiss: closeContextMenus,
+  })
 
   useEffect(() => {
     if (!hasPreviewTabs && isNavigatorOpen) {
@@ -1604,13 +1593,14 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
               <CircleAlert size={15} aria-hidden="true" className="mt-0.5 shrink-0" />
               <span className="min-w-0 flex-1 leading-5">{workspaceSearchError}</span>
             </div>
-            <button
-              type="button"
+            <Button
+              variant="danger-outline"
+              size="sm"
               onClick={() => setWorkspaceSearchRevision((revision) => revision + 1)}
-              className="mt-2 rounded-[6px] border border-[var(--color-error)]/30 px-2 py-1 font-medium hover:bg-[var(--color-error)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-error)]/25"
+              className="mt-2"
             >
               {t('common.retry')}
-            </button>
+            </Button>
           </div>
         )
       }
@@ -1633,13 +1623,14 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
             <div role="alert" className="mx-3 mb-2 flex items-center gap-2 rounded-[7px] bg-[var(--color-error)]/6 px-2.5 py-2 text-[11px] text-[var(--color-error)]">
               <CircleAlert size={14} aria-hidden="true" className="shrink-0" />
               <span className="min-w-0 flex-1 truncate">{workspaceSearchError}</span>
-              <button
-                type="button"
+              <Button
+                variant="danger-outline"
+                size="xs"
                 onClick={() => setWorkspaceSearchRevision((revision) => revision + 1)}
-                className="shrink-0 rounded-[5px] px-1.5 py-1 font-medium hover:bg-[var(--color-error)]/10"
+                className="shrink-0"
               >
                 {t('common.retry')}
-              </button>
+              </Button>
             </div>
           )}
           {displayedWorkspaceSearch.entries.map((entry) => (
@@ -1743,34 +1734,58 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
             </span>
           )}
           <div className="ml-auto flex shrink-0 items-center gap-0.5">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="base"
               aria-label={t('workspace.addToChat')}
               onClick={() => addWorkspacePathToChat(activePreviewTab.path)}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[7px] px-2 text-[11px] font-medium text-[var(--color-text-secondary)] transition-[color,background-color,transform] duration-200 ease-out hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.98]"
+              icon={<MessageCircle size={14} strokeWidth={1.8} aria-hidden="true" />}
+              className="shrink-0"
             >
-              <MessageCircle size={14} strokeWidth={1.8} aria-hidden="true" />
               <span className="hidden min-[960px]:inline">{t('workspace.addToChat')}</span>
-            </button>
-            <ToolbarIconButton Icon={RefreshCw} label={t('workspace.refresh')} onClick={handleRefresh} />
-            <ToolbarIconButton
-              Icon={isNavigatorVisible ? PanelRightClose : PanelRightOpen}
+            </Button>
+            <IconButton
+              icon={<RefreshCw size={16} strokeWidth={1.9} aria-hidden="true" />}
+              label={t('workspace.refresh')}
+              onClick={handleRefresh}
+              size="md"
+              tone="muted"
+              showTooltip={false}
+            />
+            <IconButton
+              icon={isNavigatorVisible
+                ? <PanelRightClose size={16} strokeWidth={1.9} aria-hidden="true" />
+                : <PanelRightOpen size={16} strokeWidth={1.9} aria-hidden="true" />}
               label={isNavigatorVisible ? t('workspace.hideNavigator') : t('workspace.showNavigator')}
               onClick={() => setIsNavigatorOpen((open) => {
                 const nextOpen = !open
                 if (nextOpen) window.requestAnimationFrame(() => filterInputRef.current?.focus())
                 return nextOpen
               })}
+              size="md"
+              tone="muted"
+              pressed={isNavigatorVisible}
+              showTooltip={false}
             />
             {previewTabs.length === 1 && (
-              <ToolbarIconButton
-                Icon={X}
+              <IconButton
+                icon={<X size={16} strokeWidth={1.9} aria-hidden="true" />}
                 label={`${t('workspace.closeTab')} ${activePreviewTab.title} ${getPreviewKindLabel(t, activePreviewTab.kind)}`}
                 onClick={() => closePreview(sessionId, activePreviewTab.id)}
+                size="md"
+                tone="muted"
+                showTooltip={false}
               />
             )}
             {!embedded && (
-              <ToolbarIconButton Icon={X} label={t('workspace.closePanel')} onClick={() => closePanel(sessionId)} />
+              <IconButton
+                icon={<X size={16} strokeWidth={1.9} aria-hidden="true" />}
+                label={t('workspace.closePanel')}
+                onClick={() => closePanel(sessionId)}
+                size="md"
+                tone="muted"
+                showTooltip={false}
+              />
             )}
             {activePreviewLoading && state === 'ok' && (
               <RefreshCw
@@ -1789,15 +1804,16 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
           >
             <CircleAlert size={15} className="shrink-0" aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate">{refreshErrorMessage}</span>
-            <button
-              type="button"
+            <Button
+              variant="danger-outline"
+              size="sm"
               onClick={() => {
                 void openPreview(sessionId, activePreviewTab.path, activePreviewTab.kind)
               }}
-              className="shrink-0 rounded-[6px] border border-[var(--color-error)]/30 px-2 py-1 font-medium hover:bg-[var(--color-error)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-error)]/25"
+              className="shrink-0"
             >
               {t('common.retry')}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -1881,16 +1897,18 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
                     )}
                     <span className="min-w-0 flex-1 truncate">{tab.title}</span>
                   </button>
-                  <button
-                    type="button"
-                    aria-label={`${t('workspace.closeTab')} ${tab.title} ${kindLabel}`}
-                    onClick={() => {
-                      closePreview(sessionId, tab.id)
-                    }}
-                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] text-[var(--color-text-tertiary)] opacity-0 transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] group-hover:opacity-100 focus-visible:opacity-100"
-                  >
-                    <span className="material-symbols-outlined text-[13px] leading-none">close</span>
-                  </button>
+                  <span className="shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+                    <IconButton
+                      icon="close"
+                      label={`${t('workspace.closeTab')} ${tab.title} ${kindLabel}`}
+                      onClick={() => {
+                        closePreview(sessionId, tab.id)
+                      }}
+                      size="2xs"
+                      tone="muted"
+                      showTooltip={false}
+                    />
+                  </span>
                 </div>
               )
             })
@@ -1900,6 +1918,7 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
 
       {previewTabContextMenu && (
         <div
+          ref={previewTabContextMenuRef}
           role="menu"
           className="fixed z-50 min-w-[156px] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 text-[12px] shadow-[var(--shadow-dropdown)]"
           style={{ left: previewTabContextMenu.x, top: previewTabContextMenu.y }}
@@ -2026,9 +2045,23 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
               </div>
               {!hasPreviewTabs && (
                 <div className="ml-auto flex shrink-0 items-center gap-0.5">
-                  <ToolbarIconButton Icon={RefreshCw} label={t('workspace.refresh')} onClick={handleRefresh} />
+                  <IconButton
+                    icon={<RefreshCw size={16} strokeWidth={1.9} aria-hidden="true" />}
+                    label={t('workspace.refresh')}
+                    onClick={handleRefresh}
+                    size="md"
+                    tone="muted"
+                    showTooltip={false}
+                  />
                   {!embedded && (
-                    <ToolbarIconButton Icon={X} label={t('workspace.closePanel')} onClick={() => closePanel(sessionId)} />
+                    <IconButton
+                      icon={<X size={16} strokeWidth={1.9} aria-hidden="true" />}
+                      label={t('workspace.closePanel')}
+                      onClick={() => closePanel(sessionId)}
+                      size="md"
+                      tone="muted"
+                      showTooltip={false}
+                    />
                   )}
                 </div>
               )}
@@ -2053,6 +2086,7 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
 
       {fileContextMenu && (
         <div
+          ref={fileContextMenuRef}
           role="menu"
           className="fixed z-50 min-w-[156px] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 text-[12px] shadow-[var(--shadow-dropdown)]"
           style={{ left: fileContextMenu.x, top: fileContextMenu.y }}

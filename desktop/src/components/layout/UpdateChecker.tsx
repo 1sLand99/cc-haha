@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { Button } from '@/components/ui/Button'
 import { useTranslation } from '../../i18n'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 import { isDesktopRuntime } from '../../lib/desktopRuntime'
@@ -28,7 +29,7 @@ export function UpdateChecker() {
   const statusText = t('update.readyBody', { version: availableVersion })
 
   return (
-    <div className="fixed bottom-4 left-1/2 z-[120] w-[min(360px,calc(100vw-2rem))] -translate-x-1/2">
+    <div className="fixed bottom-4 left-1/2 z-[var(--z-toast)] w-[min(360px,calc(100vw-2rem))] -translate-x-1/2">
       <div className="bg-[var(--color-surface-container-low)] border border-[var(--color-border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-dropdown)] p-3">
         <p className="text-sm font-medium text-[var(--color-text-primary)]">
           {t('update.readyTitle')}
@@ -54,18 +55,12 @@ export function UpdateChecker() {
 
         {status === 'downloaded' && (
           <div className="mt-3 flex gap-2">
-            <button
-              onClick={() => void installUpdate()}
-              className="px-3 py-1 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--color-text-accent)] text-white hover:opacity-90 transition-opacity"
-            >
+            <Button variant="primary" size="base" onClick={() => void installUpdate()}>
               {t('update.installAndRestart')}
-            </button>
-            <button
-              onClick={dismissPrompt}
-              className="px-3 py-1 text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors"
-            >
+            </Button>
+            <Button variant="ghost" size="base" onClick={dismissPrompt}>
               {t('update.later')}
-            </button>
+            </Button>
           </div>
         )}
       </div>

@@ -1,9 +1,9 @@
 import { Copy, RefreshCw } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from '../../i18n'
-import { Button } from '../shared/Button'
+import { Button } from '@/components/ui/Button'
 import { DoctorPanel } from '../doctor/DoctorPanel'
-import { copyTextToClipboard } from '../chat/clipboard'
+import { copyTextToClipboard } from '@/lib/clipboard'
 
 const LOG_MARKER = '\n\nRecent server logs:\n'
 

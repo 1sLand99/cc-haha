@@ -1,3 +1,4 @@
+import { IconButton } from '@/components/ui/IconButton'
 import { useUIStore, type Toast as ToastType } from '../../stores/uiStore'
 import { useTranslation } from '../../i18n'
 
@@ -22,18 +23,18 @@ function ToastItem({ toast }: { toast: ToastType }) {
         bg-[var(--color-surface)] rounded-[var(--radius-md)] shadow-[var(--shadow-dropdown)]
         px-4 py-3 text-sm text-[var(--color-text-primary)]
         ${typeStyles[toast.type]}
-        animate-in slide-in-from-right fade-in duration-200
+        animate-overlay-in-right
       `}
     >
       <div className="flex items-center justify-between gap-2">
         <span>{toast.message}</span>
-        <button
+        <IconButton
+          icon="close"
+          label={t('common.dismissNotification')}
           onClick={() => removeToast(toast.id)}
-          aria-label={t('common.dismissNotification')}
-          className="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] text-lg leading-none"
-        >
-          ×
-        </button>
+          size="xs"
+          tone="muted"
+        />
       </div>
     </div>
   )
@@ -45,7 +46,7 @@ export function ToastContainer() {
   if (toasts.length === 0) return null
 
   return (
-    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
+    <div className="fixed bottom-4 right-4 z-[var(--z-toast)] flex flex-col gap-2 max-w-sm">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} />
       ))}

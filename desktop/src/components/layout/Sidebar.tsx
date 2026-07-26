@@ -1,9 +1,13 @@
-import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { Check, ChevronDown, Clock, Folder, FolderOpen, FolderPlus, GitBranch, LoaderCircle, MoreHorizontal, Pin, PinOff, RefreshCw, RotateCcw, SquarePen, X } from 'lucide-react'
+import { forwardRef, useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { Check, ChevronDown, Clock, Folder, FolderOpen, FolderPlus, GitBranch, MoreHorizontal, Pin, PinOff, RefreshCw, RotateCcw, SquarePen, X } from 'lucide-react'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useTranslation, type TranslationKey } from '../../i18n'
-import { ConfirmDialog } from '../shared/ConfirmDialog'
+import { Button } from '@/components/ui/Button'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { IconButton } from '@/components/ui/IconButton'
+import { Spinner } from '@/components/ui/Spinner'
+import { useDismissable } from '@/hooks/useDismissable'
 import { GlobalSearchModal } from '../search/GlobalSearchModal'
 import { FindInPageModal } from '../search/FindInPageModal'
 import type { SessionListItem } from '../../types/session'
@@ -100,6 +104,11 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
   const [draggingProjectKey, setDraggingProjectKey] = useState<string | null>(null)
   const [projectDropTarget, setProjectDropTarget] = useState<{ key: string; position: 'before' | 'after' } | null>(null)
   const suppressProjectClickRef = useRef<string | null>(null)
+  const sessionContextMenuRef = useRef<HTMLDivElement>(null)
+  const projectContextMenuRef = useRef<HTMLDivElement>(null)
+  const projectHeaderMenuRef = useRef<HTMLDivElement>(null)
+  const projectHeaderSubmenuRef = useRef<HTMLDivElement>(null)
+  const projectHeaderActionsRef = useRef<HTMLDivElement>(null)
   const sidebarPreferenceRevisionRef = useRef(0)
   const sessionScrollAreaRef = useRef<HTMLDivElement>(null)
   const pendingSessionScrollAnchorRef = useRef<SessionScrollAnchor | null>(null)
@@ -145,17 +154,23 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sidebarOpen])
 
-  useEffect(() => {
-    if (!contextMenu && !projectContextMenu && !projectHeaderMenu && !projectHeaderSubmenu) return
-    const close = () => {
-      setContextMenu(null)
-      setProjectContextMenu(null)
-      setProjectHeaderMenu(null)
-      setProjectHeaderSubmenu(null)
-    }
-    document.addEventListener('click', close)
-    return () => document.removeEventListener('click', close)
-  }, [contextMenu, projectContextMenu, projectHeaderMenu, projectHeaderSubmenu])
+  const closeAllSidebarMenus = useCallback(() => {
+    setContextMenu(null)
+    setProjectContextMenu(null)
+    setProjectHeaderMenu(null)
+    setProjectHeaderSubmenu(null)
+  }, [])
+
+  // Each menu already stops propagation on its own container, so listing them
+  // as "inside" reproduces the previous behavior. `triggerRef` covers the two
+  // project-header buttons: without it their own click would reopen the menu
+  // this hook just closed.
+  useDismissable({
+    open: contextMenu !== null || projectContextMenu !== null || projectHeaderMenu !== null || projectHeaderSubmenu !== null,
+    refs: [sessionContextMenuRef, projectContextMenuRef, projectHeaderMenuRef, projectHeaderSubmenuRef],
+    triggerRef: projectHeaderActionsRef,
+    onDismiss: closeAllSidebarMenus,
+  })
 
   // Title filtering moved into the global search modal (Cmd+K); the list shows all sessions.
   const filteredSessions = sessions
@@ -780,30 +795,27 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                 <span className="min-w-0 flex-1 truncate pl-2">{t('search.global.trigger')}</span>
                 <kbd className="pointer-events-none shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1 font-mono text-[10px] leading-tight text-[var(--color-text-tertiary)]">⌘K</kbd>
               </button>
-              <button
-                type="button"
+              <IconButton
+                icon={<RefreshCw className={`h-4 w-4 ${showRefreshLoading ? 'animate-spin' : ''}`} strokeWidth={1.9} aria-hidden="true" />}
+                label={t('sidebar.refreshSessions')}
                 onClick={() => void refreshSessionsNow()}
-                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] border border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)] disabled:cursor-default disabled:opacity-65 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-                aria-label={t('sidebar.refreshSessions')}
-                title={t('sidebar.refreshSessions')}
-              >
-                <RefreshCw className={`h-4 w-4 ${showRefreshLoading ? 'animate-spin' : ''}`} strokeWidth={1.9} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
+                size="lg"
+                tone="secondary"
+                surface="sidebar"
+                className="border border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)]"
+              />
+              <IconButton
+                icon={isBatchMode ? 'close' : 'delete_sweep'}
+                label={isBatchMode ? t('sidebar.batchExit') : t('sidebar.batchManage')}
                 onClick={isBatchMode ? handleExitBatchMode : enterBatchMode}
-                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${
-                  isBatchMode
-                    ? 'border-[var(--color-brand)] bg-[var(--color-sidebar-item-active)] text-[var(--color-brand)]'
-                    : 'border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)]'
-                }`}
-                aria-label={isBatchMode ? t('sidebar.batchExit') : t('sidebar.batchManage')}
-                title={isBatchMode ? t('sidebar.batchExit') : t('sidebar.batchManage')}
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  {isBatchMode ? 'close' : 'delete_sweep'}
-                </span>
-              </button>
+                size="lg"
+                tone={isBatchMode ? 'brand' : 'secondary'}
+                surface="sidebar"
+                aria-pressed={isBatchMode}
+                className={isBatchMode
+                  ? 'border border-[var(--color-brand)] bg-[var(--color-sidebar-item-active)]'
+                  : 'border border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)]'}
+              />
             </div>
           </div>
 
@@ -817,19 +829,18 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                   <span className="min-w-0 text-xs font-medium text-[var(--color-text-primary)]">
                     {t('sidebar.batchSelectedCount', { count: selectedCount })}
                   </span>
-                  <button
-                    type="button"
+                  <IconButton
+                    icon={<span className="material-symbols-outlined text-[17px]" aria-hidden="true">close</span>}
+                    label={t('sidebar.batchExit')}
                     onClick={handleExitBatchMode}
-                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-                    aria-label={t('sidebar.batchExit')}
-                    title={t('sidebar.batchExit')}
-                  >
-                    <span className="material-symbols-outlined text-[17px]">close</span>
-                  </button>
+                    size="sm"
+                    tone="muted"
+                  />
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="base"
                     onClick={() => {
                       if (filteredSessionIds.every((id) => selectedSessionIds.has(id))) {
                         deselectSessions(filteredSessionIds)
@@ -838,20 +849,19 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                       }
                     }}
                     disabled={filteredSessionIds.length === 0}
-                    className="rounded-md border border-[var(--color-border)] px-2 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
                   >
                     {filteredSessionIds.length > 0 && filteredSessionIds.every((id) => selectedSessionIds.has(id))
                       ? t('sidebar.batchDeselectAll')
                       : t('sidebar.batchSelectAll')}
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="base"
                     onClick={() => requestBatchDelete([...selectedSessionIds])}
                     disabled={selectedCount === 0}
-                    className="rounded-md bg-[var(--color-error)] px-2 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                   >
                     {t('sidebar.batchDeleteSelected', { count: selectedCount })}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -888,12 +898,14 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                 <div className="mx-1 mt-2 rounded-[var(--radius-md)] border border-[var(--color-error)]/20 bg-[var(--color-error)]/5 px-3 py-2">
                   <div className="text-xs font-medium text-[var(--color-error)]">{t('sidebar.sessionListFailed')}</div>
                   <div className="mt-1 text-[11px] text-[var(--color-text-secondary)] break-words">{error}</div>
-                  <button
+                  <Button
+                    variant="link"
+                    size="xs"
                     onClick={() => fetchSessions()}
-                    className="mt-2 text-[11px] font-medium text-[var(--color-brand)] hover:underline"
+                    className="mt-2"
                   >
                     {t('common.retry')}
-                  </button>
+                  </Button>
                 </div>
               )}
               {showInitialLoading ? (
@@ -912,6 +924,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                   createLabel={t('sidebar.newProject')}
                   onOpenMenu={(event) => openProjectHeaderMenu(event, 'main')}
                   onOpenCreate={(event) => openProjectHeaderMenu(event, 'create')}
+                  actionsRef={projectHeaderActionsRef}
                 />
               )}
               {visibleProjectGroups.map((project) => {
@@ -990,7 +1003,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                             onClick={() => toggleGroupSelection(groupIds)}
                             className={`rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${
                               groupSelectedCount > 0
-                                ? 'text-[var(--color-brand)] hover:bg-[var(--color-brand)]/10'
+                                ? 'text-[var(--color-brand)] hover:bg-[var(--color-brand-soft)]'
                                 : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-secondary)]'
                             }`}
                             aria-label={t('sidebar.batchSelectGroup', { group: project.title })}
@@ -1002,31 +1015,29 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                         )}
                         {!isBatchMode && (
                           <div className="pointer-events-none flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/project:pointer-events-auto group-hover/project:opacity-100 group-focus-within/project:pointer-events-auto group-focus-within/project:opacity-100">
-                            <button
-                              type="button"
+                            <IconButton
+                              icon={<MoreHorizontal className="h-[17px] w-[17px]" strokeWidth={2} aria-hidden="true" />}
+                              label={t('sidebar.projectActions', { project: project.title })}
                               onClick={(event) => {
                                 event.stopPropagation()
                                 setContextMenu(null)
                                 setProjectContextMenu({ key: project.key, x: event.clientX, y: event.clientY })
                               }}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-                              aria-label={t('sidebar.projectActions', { project: project.title })}
-                              title={t('sidebar.projectActions', { project: project.title })}
-                            >
-                              <MoreHorizontal className="h-[17px] w-[17px]" strokeWidth={2} aria-hidden="true" />
-                            </button>
-                            <button
-                              type="button"
+                              size="sm"
+                              tone="muted"
+                              surface="sidebar"
+                            />
+                            <IconButton
+                              icon={<SquarePen className="h-[16px] w-[16px]" strokeWidth={2} aria-hidden="true" />}
+                              label={t('sidebar.newSessionInProject', { project: project.title })}
                               onClick={(event) => {
                                 event.stopPropagation()
                                 void createSessionForWorkDir(project.workDir)
                               }}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-                              aria-label={t('sidebar.newSessionInProject', { project: project.title })}
-                              title={t('sidebar.newSessionInProject', { project: project.title })}
-                            >
-                              <SquarePen className="h-[16px] w-[16px]" strokeWidth={2} aria-hidden="true" />
-                            </button>
+                              size="sm"
+                              tone="muted"
+                              surface="sidebar"
+                            />
                           </div>
                         )}
                       </div>
@@ -1170,6 +1181,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
 
       {contextMenu && (
         <div
+          ref={sessionContextMenuRef}
           className="fixed z-50 min-w-[140px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1"
           style={{ left: contextMenu.x, top: contextMenu.y, boxShadow: 'var(--shadow-dropdown)' }}
         >
@@ -1198,6 +1210,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
         const hidden = hiddenProjectKeys.has(project.key)
         return (
           <div
+            ref={projectContextMenuRef}
             role="menu"
             className="fixed z-50 min-w-[230px] overflow-hidden rounded-[18px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[var(--shadow-dropdown)]"
             style={positionProjectMenu(projectContextMenu.x, projectContextMenu.y)}
@@ -1228,6 +1241,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
 
       {projectHeaderMenu && (
         <ProjectHeaderMenu
+          ref={projectHeaderMenuRef}
           type={projectHeaderMenu.type}
           x={projectHeaderMenu.x}
           y={projectHeaderMenu.y}
@@ -1246,6 +1260,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
 
       {projectHeaderSubmenu && (
         <ProjectHeaderMenu
+          ref={projectHeaderSubmenuRef}
           type={projectHeaderSubmenu.type}
           x={projectHeaderSubmenu.x}
           y={projectHeaderSubmenu.y}
@@ -1399,12 +1414,15 @@ function ProjectHeaderActions({
   createLabel,
   onOpenMenu,
   onOpenCreate,
+  actionsRef,
 }: {
   title: string
   menuLabel: string
   createLabel: string
   onOpenMenu: (event: React.MouseEvent) => void
   onOpenCreate: (event: React.MouseEvent) => void
+  /** Handed to `useDismissable` as the trigger, so opening does not self-close. */
+  actionsRef: React.RefObject<HTMLDivElement>
 }) {
   return (
     <div
@@ -1414,45 +1432,37 @@ function ProjectHeaderActions({
       <div className="text-[12px] font-semibold tracking-normal text-[var(--color-text-primary)]">
         {title}
       </div>
-      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover/sidebar-projects:opacity-100 focus-within:opacity-100">
-        <button
-          type="button"
+      <div
+        ref={actionsRef}
+        className="flex items-center gap-1 opacity-0 transition-opacity group-hover/sidebar-projects:opacity-100 focus-within:opacity-100"
+      >
+        <IconButton
+          icon={<MoreHorizontal className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" />}
+          label={menuLabel}
           onClick={onOpenMenu}
-          className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-          aria-label={menuLabel}
-          title={menuLabel}
-        >
-          <MoreHorizontal className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
+          size="md"
+          tone="muted"
+          surface="sidebar"
+        />
+        <IconButton
+          icon={<FolderPlus className="h-[18px] w-[18px]" strokeWidth={1.9} aria-hidden="true" />}
+          label={createLabel}
           onClick={onOpenCreate}
-          className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-          aria-label={createLabel}
-          title={createLabel}
-        >
-          <FolderPlus className="h-[18px] w-[18px]" strokeWidth={1.9} aria-hidden="true" />
-        </button>
+          size="md"
+          tone="muted"
+          surface="sidebar"
+        />
       </div>
     </div>
   )
 }
 
-function ProjectHeaderMenu({
-  type,
-  x,
-  y,
-  organization,
-  sortBy,
-  onOpenSubmenu,
-  onSetOrganization,
-  onSetSortBy,
-  onCreateBlank,
-  onUseExistingFolder,
-  onRestoreHiddenProjects,
-  hiddenProjectCount,
-  t,
-}: {
+/**
+ * `forwardRef` because `useDismissable` needs the rendered menu element to tell
+ * an inside click from an outside one. Without it the hook only ever sees
+ * "outside" and the menu closes the moment any item is pressed.
+ */
+const ProjectHeaderMenu = forwardRef<HTMLDivElement, {
   type: SidebarHeaderMenuType
   x: number
   y: number
@@ -1466,14 +1476,28 @@ function ProjectHeaderMenu({
   onRestoreHiddenProjects: () => void
   hiddenProjectCount: number
   t: ReturnType<typeof useTranslation>
-}) {
+}>(function ProjectHeaderMenu({
+  type,
+  x,
+  y,
+  organization,
+  sortBy,
+  onOpenSubmenu,
+  onSetOrganization,
+  onSetSortBy,
+  onCreateBlank,
+  onUseExistingFolder,
+  onRestoreHiddenProjects,
+  hiddenProjectCount,
+  t,
+}, ref) {
   const width = type === 'sort' ? 230 : type === 'create' ? 250 : 270
   const style: React.CSSProperties = { left: x, top: y, width, boxShadow: 'var(--shadow-dropdown)' }
   const className = 'fixed z-50 overflow-hidden rounded-[18px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[var(--shadow-dropdown)]'
 
   if (type === 'create') {
     return (
-      <div role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
+      <div ref={ref} role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
         <HeaderMenuItem icon={<SquarePen size={18} aria-hidden="true" />} onClick={onCreateBlank}>
           {t('sidebar.newBlankProject')}
         </HeaderMenuItem>
@@ -1486,7 +1510,7 @@ function ProjectHeaderMenu({
 
   if (type === 'organize') {
     return (
-      <div role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
+      <div ref={ref} role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
         <HeaderMenuItem icon={<Folder size={18} aria-hidden="true" />} checked={organization === 'project'} onClick={() => onSetOrganization('project')}>
           {t('sidebar.organizeByProject')}
         </HeaderMenuItem>
@@ -1502,7 +1526,7 @@ function ProjectHeaderMenu({
 
   if (type === 'sort') {
     return (
-      <div role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
+      <div ref={ref} role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
         <HeaderMenuItem icon={<Clock size={18} aria-hidden="true" />} checked={sortBy === 'createdAt'} onClick={() => onSetSortBy('createdAt')}>
           {t('sidebar.sortByCreatedAt')}
         </HeaderMenuItem>
@@ -1514,7 +1538,7 @@ function ProjectHeaderMenu({
   }
 
   return (
-    <div role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
+    <div ref={ref} role="menu" className={className} style={style} onClick={(event) => event.stopPropagation()}>
       <HeaderMenuItem
         icon={<Folder size={18} aria-hidden="true" />}
         trailing
@@ -1541,7 +1565,7 @@ function ProjectHeaderMenu({
       )}
     </div>
   )
-}
+})
 
 function HeaderMenuItem({
   icon,
@@ -1967,7 +1991,8 @@ function SessionRowMeta({
           aria-label={t('sidebar.sessionRunning')}
           title={t('sidebar.sessionRunning')}
         >
-          <LoaderCircle className="h-3.5 w-3.5 animate-spin" strokeWidth={2.2} aria-hidden="true" />
+          {/* The wrapper already carries the name, so the spinner stays silent. */}
+          <Spinner size={14} />
         </span>
       )}
       {isWorktree && (
