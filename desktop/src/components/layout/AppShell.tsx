@@ -9,6 +9,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore, type SettingsTab } from '../../stores/uiStore'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { useElectronWindowDragRegions } from '../../hooks/useElectronWindowDragRegions'
+import { useSidebarResize } from '../../hooks/useSidebarResize'
 import {
   H5ConnectionRequiredError,
   initializeDesktopServerUrl,
@@ -57,7 +58,9 @@ export function AppShell() {
     ? sessions.find((session) => session.id === activeTabId) ?? null
     : null
   const wasMobileShellRef = useRef(false)
+  const sidebarWidth = useUIStore((s) => s.sidebarWidth)
   const effectiveSidebarOpen = isMobileShell ? mobileSidebarOpen : sidebarOpen
+  const sidebarResize = useSidebarResize(!isMobileShell)
   const activeTab = tabs.find((tab) => tab.sessionId === activeTabId)
   const isActiveChatTab = isChatTab(activeTab)
   const mobileSessionTitle = activeSession?.title || activeTab?.title || t('session.untitled')
@@ -292,6 +295,7 @@ export function AppShell() {
       ) : null}
       <div
         id="sidebar-shell"
+        ref={sidebarResize.shellRef}
         data-testid="sidebar-shell"
         data-state={effectiveSidebarOpen ? 'open' : 'closed'}
         data-mobile={isMobileShell ? 'true' : 'false'}
@@ -300,6 +304,18 @@ export function AppShell() {
       >
         {!isMobileShell || effectiveSidebarOpen ? (
           <Sidebar isMobile={isMobileShell} onRequestClose={() => setEffectiveSidebarOpen(false)} />
+        ) : null}
+        {!isMobileShell ? (
+          <div
+            data-testid="sidebar-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t('sidebar.resize')}
+            aria-valuenow={effectiveSidebarOpen ? sidebarWidth : 0}
+            tabIndex={0}
+            className="sidebar-resize-handle"
+            {...sidebarResize.handleProps}
+          />
         ) : null}
       </div>
       <main

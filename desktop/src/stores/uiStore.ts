@@ -25,6 +25,23 @@ import {
 } from '../theme/systemAppearance'
 
 const ACTIVE_SETTINGS_TAB_STORAGE_KEY = 'cc-haha-active-settings-tab'
+const SIDEBAR_WIDTH_STORAGE_KEY = 'cc-haha-sidebar-width'
+
+export const SIDEBAR_MIN_WIDTH = 240
+export const SIDEBAR_MAX_WIDTH = 480
+export const SIDEBAR_DEFAULT_WIDTH = 300
+
+export function clampSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)))
+}
+
+function getStoredSidebarWidth(): number {
+  try {
+    const stored = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY))
+    if (Number.isFinite(stored) && stored > 0) return clampSidebarWidth(stored)
+  } catch { /* localStorage unavailable */ }
+  return SIDEBAR_DEFAULT_WIDTH
+}
 
 const SETTINGS_TABS = [
   'providers',
@@ -234,6 +251,8 @@ type UIStore = {
   /** Which ink palette the dark half of "follow the system" resolves to. */
   darkTheme: DarkThemeMode
   sidebarOpen: boolean
+  /** Expanded-state sidebar width in px, user-resizable within the clamp range. */
+  sidebarWidth: number
   activeView: ActiveView
   activeSettingsTab: SettingsTab
   pendingSettingsTab: SettingsTab | null
@@ -246,6 +265,7 @@ type UIStore = {
   toggleTheme: () => void
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
+  setSidebarWidth: (width: number) => void
   setActiveView: (view: ActiveView) => void
   setActiveSettingsTab: (tab: SettingsTab) => void
   setPendingSettingsTab: (tab: SettingsTab | null) => void
@@ -264,6 +284,7 @@ export const useUIStore = create<UIStore>((set) => ({
   lightTheme: readStoredLightTheme(),
   darkTheme: readStoredDarkTheme(),
   sidebarOpen: true,
+  sidebarWidth: getStoredSidebarWidth(),
   activeView: 'code',
   activeSettingsTab: getStoredSettingsTab(),
   pendingSettingsTab: null,
@@ -329,6 +350,11 @@ export const useUIStore = create<UIStore>((set) => ({
 
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  setSidebarWidth: (width) => {
+    const clamped = clampSidebarWidth(width)
+    persist(SIDEBAR_WIDTH_STORAGE_KEY, String(clamped))
+    set({ sidebarWidth: clamped })
+  },
   setActiveView: (view) => set({ activeView: view }),
   setActiveSettingsTab: (tab) => {
     try { localStorage.setItem(ACTIVE_SETTINGS_TAB_STORAGE_KEY, tab) } catch { /* noop */ }

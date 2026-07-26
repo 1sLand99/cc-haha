@@ -1436,6 +1436,7 @@ button, input, textarea, select, a, [role="button"] {
 }
 
 .sidebar-shell {
+  position: relative;
   width: var(--sidebar-width);
   flex-shrink: 0;
   overflow: hidden;
@@ -1445,6 +1446,58 @@ button, input, textarea, select, a, [role="button"] {
 
 .sidebar-shell[data-state="closed"] {
   width: var(--sidebar-rail-width);
+}
+
+/* While the pointer is driving the width, the animation must be off or every
+   frame chases the previous one and the edge lags behind the cursor. */
+.sidebar-shell--resizing,
+.sidebar-shell--resizing .sidebar-panel {
+  transition: none;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 8px;
+  z-index: 10;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 140ms ease;
+  touch-action: none;
+}
+
+.sidebar-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 2px;
+  background: transparent;
+  transition: background-color 140ms ease;
+}
+
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle:focus-visible::after,
+.sidebar-shell--resizing .sidebar-resize-handle::after {
+  background: var(--color-brand);
+}
+
+.sidebar-resize-handle:focus-visible {
+  outline: none;
+}
+
+/* Keep the resize cursor and kill text selection for the whole drag, no matter
+   what the pointer ends up over once capture takes it outside the handle. */
+body.sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.sidebar-resizing * {
+  cursor: col-resize !important;
 }
 
 .app-shell--mobile .sidebar-shell {

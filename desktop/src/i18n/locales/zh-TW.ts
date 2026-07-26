@@ -125,6 +125,7 @@ export const zh: Record<TranslationKey, string> = {
   'sidebar.timeGroup.older': '更早',
   'sidebar.collapse': '摺疊側邊欄',
   'sidebar.expand': '展開側邊欄',
+  'sidebar.resize': '拖曳調整側邊欄寬度',
 
   // ─── Title Bar ──────────────────────────────────────
   'titlebar.code': '程式碼',

@@ -123,6 +123,7 @@ export const en = {
   'sidebar.timeGroup.older': 'Older',
   'sidebar.collapse': 'Collapse sidebar',
   'sidebar.expand': 'Expand sidebar',
+  'sidebar.resize': 'Resize sidebar',
 
   // ─── Title Bar ──────────────────────────────────────
   'titlebar.code': 'Code',

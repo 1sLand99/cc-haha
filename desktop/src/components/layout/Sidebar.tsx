@@ -680,8 +680,13 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
         className={`px-3 pb-2 ${isDesktopRuntime && !isWindows ? 'pt-[44px]' : 'pt-3'}`}
       >
         <div className={`flex ${expanded ? 'items-center justify-between gap-3' : 'flex-col items-center gap-2'}`}>
+          {/* The mark only stands in for the wordmark on the rail. Expanded,
+              the name says it better and the icon beside it is just clutter;
+              collapsed, the copy is width-clamped to zero and the header would
+              otherwise be empty. `sm` is the cleanest cut of the mark — two C's
+              and the seal bar, no cursor or sparkles to turn to mush at 24px. */}
           <div className={`flex min-w-0 items-center ${expanded ? 'gap-2.5' : 'justify-center'}`}>
-            <BrandSeal size={expanded ? 'md' : 'lg'} />
+            {!expanded ? <BrandSeal size="sm" /> : null}
             <span
               className={`sidebar-copy ${expanded ? 'sidebar-copy--visible' : 'sidebar-copy--hidden'} text-base font-bold tracking-tight text-[var(--color-text-primary)]`}
               style={{ fontFamily: 'var(--font-headline)' }}

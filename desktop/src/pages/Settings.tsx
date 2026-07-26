@@ -226,7 +226,10 @@ export function Settings() {
     <div className="flex-1 flex flex-col overflow-hidden bg-[var(--color-surface)]">
       <div className="flex-1 flex overflow-hidden">
         {/* Tab navigation */}
-        <div className="w-[260px] flex-shrink-0 flex flex-col overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-4">
+        {/* Narrow enough that the rail is not a gutter of dead space, wide
+            enough that the longest label in any locale — the Japanese
+            "コンピューター操作" — still clears the truncation on TabButton. */}
+        <div className="w-[220px] flex-shrink-0 flex flex-col overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-4">
           <div className="flex-1 flex flex-col gap-0.5">
             <TabButton icon="dns" label={t('settings.tab.providers')} active={activeTab === 'providers'} onClick={() => setActiveTab('providers')} />
             <TabButton icon="tune" label={t('settings.tab.general')} active={activeTab === 'general'} onClick={() => setActiveTab('general')} />
