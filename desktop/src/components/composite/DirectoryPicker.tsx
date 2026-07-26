@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { useDismissable } from '@/hooks/useDismissable'
 import { sessionsApi, type RecentProject } from '../../api/sessions'
 import { filesystemApi } from '../../api/filesystem'
 import { useTranslation } from '../../i18n'
@@ -10,7 +11,10 @@ import {
   invalidateRecentProjectsCache,
   setCachedRecentProjects,
 } from '../../lib/recentProjectsCache'
-import { MobileBottomSheet } from './MobileBottomSheet'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { LoadingState } from '@/components/ui/LoadingState'
+import { MobileBottomSheet } from '@/components/ui/MobileBottomSheet'
 
 type Props = {
   value: string
@@ -70,18 +74,18 @@ export function DirectoryPicker({ value, onChange, variant = 'chip', isGitProjec
     })
   }, [])
 
-  // Close on outside click (checks both trigger and portal dropdown)
-  useEffect(() => {
-    if (!isOpen) return
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (ref.current?.contains(target)) return
-      if (dropdownRef.current?.contains(target)) return
-      setIsOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [isOpen])
+  const close = useCallback(() => setIsOpen(false), [])
+
+  // `ref` wraps the trigger, `dropdownRef` the portalled menu — both count as
+  // inside. `stopEscapePropagation` because this picker is used inside modals
+  // (AgentManager, McpSettings); without it one Escape would close the dialog
+  // along with the menu.
+  useDismissable({
+    open: isOpen,
+    refs: [ref, dropdownRef],
+    onDismiss: close,
+    stopEscapePropagation: true,
+  })
 
   // Recalculate position on scroll/resize while open
   useEffect(() => {
@@ -175,7 +179,7 @@ export function DirectoryPicker({ value, onChange, variant = 'chip', isGitProjec
     ...(dropdownPos?.direction === 'down'
       ? { top: dropdownPos.top }
       : { bottom: window.innerHeight - (dropdownPos?.top ?? 0) }),
-    zIndex: 9999,
+    zIndex: 'var(--z-dropdown)',
   }
   const dropdownTitle = mode === 'recent' ? t('dirPicker.recent') : t('dirPicker.chooseProjectFolder')
   const dropdownContent = mode === 'recent' ? (
@@ -187,9 +191,9 @@ export function DirectoryPicker({ value, onChange, variant = 'chip', isGitProjec
       )}
       <div className={`${isMobileBrowser ? '' : 'max-h-[300px]'} overflow-y-auto`}>
         {loading ? (
-          <div className="px-4 py-6 text-center text-xs text-[var(--color-text-tertiary)]">{t('common.loading')}</div>
+          <LoadingState label={t('common.loading')} variant="block" size="sm" />
         ) : projects.length === 0 ? (
-          <div className="px-4 py-6 text-center text-xs text-[var(--color-text-tertiary)]">{t('dirPicker.noRecent')}</div>
+          <EmptyState description={t('dirPicker.noRecent')} variant="plain" size="sm" />
         ) : (
           projects.map((project) => {
             const isSelected = project.realPath === value
@@ -242,9 +246,9 @@ export function DirectoryPicker({ value, onChange, variant = 'chip', isGitProjec
   ) : (
     <>
       <div className="flex flex-wrap items-center gap-1 border-b border-[var(--color-border)] px-3 py-2">
-        <button onClick={() => setMode('recent')} className="mr-2 text-xs text-[var(--color-text-accent)] hover:underline">
+        <Button variant="link" size="xs" className="mr-2" onClick={() => setMode('recent')}>
           {'← ' + t('dirPicker.recent')}
-        </button>
+        </Button>
         <button onClick={() => loadBrowseDir('/')} className="text-[10px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]">/</button>
         {browsePath.split('/').filter(Boolean).map((seg, i, arr) => (
           <span key={i} className="flex items-center gap-1">
@@ -259,7 +263,7 @@ export function DirectoryPicker({ value, onChange, variant = 'chip', isGitProjec
 
       <div className={`${isMobileBrowser ? '' : 'max-h-[240px]'} overflow-y-auto`}>
         {loading ? (
-          <div className="px-3 py-4 text-center text-xs text-[var(--color-text-tertiary)]">{t('common.loading')}</div>
+          <LoadingState label={t('common.loading')} variant="block" size="sm" />
         ) : (
           <>
             {browseParent && browseParent !== browsePath && (
@@ -269,7 +273,7 @@ export function DirectoryPicker({ value, onChange, variant = 'chip', isGitProjec
               </button>
             )}
             {browseEntries.length === 0 ? (
-              <div className="px-3 py-4 text-center text-xs text-[var(--color-text-tertiary)]">{t('dirPicker.noSubdirs')}</div>
+              <EmptyState description={t('dirPicker.noSubdirs')} variant="plain" size="sm" />
             ) : browseEntries.map((entry) => (
               <div
                 key={entry.path}
@@ -283,9 +287,9 @@ export function DirectoryPicker({ value, onChange, variant = 'chip', isGitProjec
                   <span className="material-symbols-outlined text-[16px] text-[var(--color-text-tertiary)]">folder</span>
                   <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-primary)]">{entry.name}</span>
                 </button>
-                <button type="button" onClick={() => handleSelect(entry.path)} className="rounded px-2 py-0.5 text-[10px] font-semibold text-[var(--color-brand)] transition-colors hover:bg-[var(--color-primary-fixed)]">
+                <Button variant="link" size="xs" onClick={() => handleSelect(entry.path)}>
                   {t('common.select')}
-                </button>
+                </Button>
               </div>
             ))}
           </>
@@ -294,9 +298,9 @@ export function DirectoryPicker({ value, onChange, variant = 'chip', isGitProjec
 
       <div className="flex items-center justify-between border-t border-[var(--color-border)] px-3 py-2">
         <span className="truncate font-[var(--font-mono)] text-[10px] text-[var(--color-text-tertiary)]">{browsePath}</span>
-        <button onClick={() => handleSelect(browsePath)} className="rounded-lg bg-[var(--color-brand)] px-3 py-1.5 text-xs font-semibold text-[var(--color-on-primary)] hover:opacity-90">
+        <Button size="base" onClick={() => handleSelect(browsePath)}>
           {t('dirPicker.useThisFolder')}
-        </button>
+        </Button>
       </div>
     </>
   )

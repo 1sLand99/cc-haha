@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { Globe, ExternalLink, FileText } from 'lucide-react'
+import { useDismissable } from '@/hooks/useDismissable'
 import { TargetIcon } from './TargetIcon'
 import type { OpenWithItem } from '../../lib/openWithItems'
 
@@ -50,36 +51,33 @@ export function OpenWithMenu({ items, anchor, onClose, triggerEl }: Props) {
     setPos({ top, left })
   }, [anchor])
 
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node | null
-      if (!target) return
-      // Ignore clicks inside the menu itself, AND clicks inside the trigger
-      // element that opened it — the trigger's own onClick handler will toggle.
-      if (ref.current?.contains(target)) return
-      if (triggerEl && triggerEl.contains(target)) return
-      onClose()
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    const onViewportMove = () => onClose()
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    window.addEventListener('scroll', onViewportMove, true)
-    window.addEventListener('resize', onViewportMove)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-      window.removeEventListener('scroll', onViewportMove, true)
-      window.removeEventListener('resize', onViewportMove)
-    }
-  }, [onClose, triggerEl])
+  // The hook takes a ref; this component is handed the raw trigger element by
+  // its callers. Only the dismiss handler reads it, and it does so at event
+  // time, so mirroring it into a ref here is safe.
+  const triggerRef = useRef<HTMLElement | null>(null)
+  triggerRef.current = triggerEl ?? null
+
+  const dismiss = useCallback(() => onClose(), [onClose])
+
+  useDismissable({
+    open: true,
+    refs: [ref],
+    triggerRef,
+    onDismiss: dismiss,
+    // Kept on `mousedown` rather than the hook's `pointerdown` default: the
+    // callers in `chat/` document this contract, so switching input events is
+    // a separate change that has to land with them.
+    event: 'mousedown',
+    capture: false,
+    closeOnViewportChange: true,
+  })
 
   return createPortal(
     <div
       ref={ref}
       role="menu"
       className="fixed min-w-[220px] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-dropdown)]"
-      style={{ top: pos.top, left: pos.left, zIndex: 1000 }}
+      style={{ top: pos.top, left: pos.left, zIndex: 'var(--z-dropdown)' }}
     >
       {items.map((item) => (
         <button
