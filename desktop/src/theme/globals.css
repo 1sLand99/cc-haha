@@ -1,6 +1,13 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* ─── Dark variant binding ────────────────────────────────────────
+   The app has three themes (white / light / dark) switched via
+   `<html data-theme>`, and deliberately does NOT follow the OS.
+   Without this, Tailwind's default `dark:` compiles to
+   `prefers-color-scheme: dark` and fires on the wrong theme. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 /* ─── Self-hosted fonts (no Google CDN dependency) ────────────── */
 
 /* Inter – variable weight 400-600, latin */
@@ -363,6 +370,64 @@
   }
 }
 
+/* ─── Terminal ANSI palette ───────────────────────────────────────
+   The embedded terminal stays dark under all three themes (that is what
+   the per-theme `--color-terminal-*` values encode — light/white/dark
+   differ only in hue, not in lightness), so the 16 ANSI slots are shared.
+   Split them into the theme blocks if a theme ever needs its own ramp.
+   Consumed by `lib/terminalTheme.ts`, which is the only place allowed to
+   turn these into an xterm ITheme object. */
+:root {
+  --color-terminal-ansi-black: #1F1F1F;
+  --color-terminal-ansi-red: #FF6D67;
+  --color-terminal-ansi-green: #7EF18A;
+  --color-terminal-ansi-yellow: #F8C55F;
+  --color-terminal-ansi-blue: #77A8FF;
+  --color-terminal-ansi-magenta: #D699FF;
+  --color-terminal-ansi-cyan: #61D6D6;
+  --color-terminal-ansi-white: #D7D2D0;
+  --color-terminal-ansi-bright-black: #8F8683;
+  --color-terminal-ansi-bright-red: #FF8A85;
+  --color-terminal-ansi-bright-green: #9FF7A7;
+  --color-terminal-ansi-bright-yellow: #FFDD7A;
+  --color-terminal-ansi-bright-blue: #A6C5FF;
+  --color-terminal-ansi-bright-magenta: #E3B8FF;
+  --color-terminal-ansi-bright-cyan: #8CEEEE;
+  --color-terminal-ansi-bright-white: #FFFFFF;
+}
+
+/* ─── Layering scale ──────────────────────────────────────────────
+   One ordered stack for every overlay. Theme-independent, so it lives
+   outside the theme blocks.
+
+   Two orderings here are deliberate and load-bearing:
+
+   1. dropdown/popover sit ABOVE dialog. A modal dialog blocks the page
+      behind it, so any open dropdown necessarily belongs to the topmost
+      dialog. Putting dropdowns below dialogs makes DirectoryPicker
+      unusable inside AgentManager's modal — which is exactly why it used
+      to hardcode `zIndex: 9999`.
+   2. toast sits above sheet. Otherwise a confirmation shown while a
+      mobile bottom sheet is open is invisible to the user.
+
+   Tailwind v4 has no z-index theme namespace, so reference these as
+   `z-[var(--z-dialog)]` (or `zIndex: 'var(--z-dialog)'` inline).
+   Never introduce a raw z-index outside this scale. */
+:root {
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 20;
+  --z-nav: 30;
+  --z-scrim: 40;
+  --z-drawer: 50;
+  --z-dialog: 60;
+  --z-sheet: 65;
+  --z-dropdown: 70;
+  --z-popover: 75;
+  --z-tooltip: 80;
+  --z-toast: 90;
+}
+
 /* ─── Tailwind Theme Override (matches prototype design system) ─── */
 @theme {
   --color-primary: #8F482F;
@@ -371,6 +436,7 @@
   --color-primary-fixed-dim: #FFB59D;
 
   --color-on-primary: #FFFFFF;
+  --color-on-primary-container: #FFFFFF;
   --color-on-surface: #1B1C1A;
   --color-on-surface-variant: #54433E;
 
@@ -395,6 +461,7 @@
   --color-tertiary-container: #677B4E;
 
   --color-error: #BA1A1A;
+  --color-on-error: #FFFFFF;
   --color-error-container: #FFDAD6;
   --color-on-error-container: #410002;
 
@@ -404,10 +471,13 @@
 
   --color-success: #087E4F;
   --color-success-container: #E8F5E2;
+  --color-on-success-container: #0A5C3A;
   --color-info: #2D628F;
   --color-info-container: #E4F1FF;
+  --color-on-info-container: #1B4C73;
   --color-warning: #CA8A04;
   --color-warning-container: #FFF3D6;
+  --color-on-warning-container: #7A4E00;
 
   --font-headline: 'Manrope', sans-serif;
   --font-body: 'Inter', sans-serif;
@@ -458,9 +528,12 @@
   --color-activity-tooltip-text: #F2F1ED;
   --color-activity-tooltip-muted: #FFB59D;
   --color-success-container: #E8F5E2;
+  --color-on-success-container: #0A5C3A;
   --color-info: #2D628F;
   --color-info-container: #E4F1FF;
+  --color-on-info-container: #1B4C73;
   --color-warning-container: #FFF3D6;
+  --color-on-warning-container: #7A4E00;
   --color-inspector-surface: #FBFAF6;
   --color-inspector-panel: #F4F2ED;
   --color-inspector-chip: #EBE7DF;
@@ -508,6 +581,13 @@
   /* Brand & accents */
   --color-brand: var(--color-primary);
   --color-brand-hover: var(--color-primary-container);
+  /* Soft fills for tonal controls. Opaque on purpose: the `/10` alpha
+     modifier compiles to a color function Safari 15 WebViews cannot parse
+     (see the guard in vite-config.test.ts). */
+  --color-brand-soft: #EFE7E1;
+  --color-brand-soft-hover: #E7DAD3;
+  --color-error-soft: #FBEBE9;
+  --color-error-soft-hover: #F6DCD9;
   --color-text-accent: var(--color-secondary);
 
   /* Shadows */
@@ -578,6 +658,8 @@
   --color-terminal-bg: #1E1E1E;
   --color-terminal-border: #1A1A1A;
   --color-terminal-fg: #D4D4D4;
+  --color-terminal-cursor: #FFB59F;
+  --color-terminal-selection: #4A4A4A;
   --color-terminal-muted: #999999;
   --color-terminal-accent: #28C840;
   --color-terminal-danger: #FF5F57;
@@ -616,6 +698,7 @@
   --color-primary-fixed-dim: #FFB59D;
 
   --color-on-primary: #FFFFFF;
+  --color-on-primary-container: #FFFFFF;
   --color-on-surface: #111827;
   --color-on-surface-variant: #4B5563;
 
@@ -639,6 +722,7 @@
   --color-tertiary-container: #E2F1D1;
 
   --color-error: #B42318;
+  --color-on-error: #FFFFFF;
   --color-error-container: #FEE4E2;
   --color-on-error-container: #7A271A;
 
@@ -648,10 +732,13 @@
 
   --color-success: #087E4F;
   --color-success-container: #DCFAE6;
+  --color-on-success-container: #0A5C3A;
   --color-info: #0F5C8F;
   --color-info-container: #D9ECFF;
+  --color-on-info-container: #1B4C73;
   --color-warning: #B54708;
   --color-warning-container: #FEF0C7;
+  --color-on-warning-container: #7A4E00;
 
   --color-surface-sidebar: #F1F4F7;
   --color-surface-hover: #F2F5F8;
@@ -723,6 +810,10 @@
   --color-surface-info: #F6F8FA;
   --color-brand: var(--color-primary);
   --color-brand-hover: var(--color-primary-container);
+  --color-brand-soft: #F4EDEA;
+  --color-brand-soft-hover: #EDE0D9;
+  --color-error-soft: #FDF0EF;
+  --color-error-soft-hover: #FAE1DF;
   --color-text-accent: var(--color-secondary);
 
   --shadow-dropdown: 0 8px 24px rgba(15, 23, 42, 0.06), 0 24px 60px rgba(15, 23, 42, 0.08);
@@ -787,6 +878,8 @@
   --color-terminal-bg: #111827;
   --color-terminal-border: #0F172A;
   --color-terminal-fg: #E5E7EB;
+  --color-terminal-cursor: #FFB59F;
+  --color-terminal-selection: #3A4553;
   --color-terminal-muted: #9CA3AF;
   --color-terminal-accent: #32D583;
   --color-terminal-danger: #F97066;
@@ -817,6 +910,7 @@
   --color-primary-fixed-dim: #FFB59F;
 
   --color-on-primary: #2C120B;
+  --color-on-primary-container: #2C120B;
   --color-on-surface: #E5E2E1;
   --color-on-surface-variant: #B7AAA5;
 
@@ -840,6 +934,7 @@
   --color-tertiary-container: #003D44;
 
   --color-error: #FFB4AB;
+  --color-on-error: #5F1412;
   --color-error-container: #93000A;
   --color-on-error-container: #FFDAD6;
 
@@ -849,10 +944,13 @@
 
   --color-success: #7EDB8B;
   --color-success-container: rgba(126, 219, 139, 0.16);
+  --color-on-success-container: #7EDB8B;
   --color-info: #74E0F7;
   --color-info-container: rgba(116, 224, 247, 0.16);
+  --color-on-info-container: #74E0F7;
   --color-warning: #F7C46C;
   --color-warning-container: rgba(247, 196, 108, 0.16);
+  --color-on-warning-container: #F7C46C;
 
   --color-surface-sidebar: #171615;
   --color-surface-hover: var(--color-surface-container-highest);
@@ -926,6 +1024,10 @@
   --color-surface-info: rgba(32, 31, 31, 0.88);
   --color-brand: var(--color-primary);
   --color-brand-hover: var(--color-primary-container);
+  --color-brand-soft: #332420;
+  --color-brand-soft-hover: #42302A;
+  --color-error-soft: #3A1F1D;
+  --color-error-soft-hover: #4A2725;
   --color-text-accent: var(--color-tertiary);
 
   --shadow-dropdown: 0 16px 40px rgba(0, 0, 0, 0.42);
@@ -989,6 +1091,8 @@
   --color-terminal-bg: #121212;
   --color-terminal-border: #1A1919;
   --color-terminal-fg: #D7D2D0;
+  --color-terminal-cursor: #FFB59F;
+  --color-terminal-selection: #5F4A40;
   --color-terminal-muted: #8F8683;
   --color-terminal-accent: #7EF18A;
   --color-terminal-danger: #FF6D67;
@@ -1069,11 +1173,6 @@ button, input, textarea, select, a, [role="button"] {
   -webkit-app-region: no-drag;
 }
 
-/* Custom shadow from prototype */
-.custom-shadow {
-  box-shadow: var(--shadow-dropdown);
-}
-
 .glass-panel {
   background: var(--color-surface-glass);
   border: 1px solid var(--color-surface-glass-border);
@@ -1116,19 +1215,6 @@ button, input, textarea, select, a, [role="button"] {
 
 .app-shell-backdrop {
   background: var(--color-overlay-scrim);
-}
-
-.skill-market-detail-scrim {
-  background: var(--color-modal-scrim);
-  backdrop-filter: blur(1.5px);
-  -webkit-backdrop-filter: blur(1.5px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .skill-market-detail-scrim {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
 }
 
 .sidebar-shell {
@@ -1289,13 +1375,6 @@ button, input, textarea, select, a, [role="button"] {
   max-height: 1200px;
   opacity: 1;
   transform: translateX(0);
-}
-
-.sidebar-section--hidden {
-  max-height: 0;
-  opacity: 0;
-  transform: translateX(-12px);
-  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1462,10 +1541,6 @@ button, input, textarea, select, a, [role="button"] {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
-@keyframes activity-reveal {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
 @keyframes composer-drop-fade {
   from { opacity: 0; transform: scale(0.985); }
   to { opacity: 1; transform: scale(1); }
@@ -1478,9 +1553,48 @@ button, input, textarea, select, a, [role="button"] {
 .animate-spin { animation: spin 1s linear infinite; }
 .animate-pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
 
-/* Progress bar */
-@keyframes progress-fill {
-  from { width: 0%; }
+@media (prefers-reduced-motion: reduce) {
+  /* Slow the spinner rather than stopping it. A frozen spinner reads as a
+     hung UI, which is a worse outcome than the motion it avoids — the
+     rotation is the whole signal the component carries. */
+  .animate-spin { animation-duration: 2.4s; }
+  .animate-shimmer,
+  .animate-pulse-dot { animation-duration: 3s; }
+}
+
+/* Overlay entrances.
+   These replace the `animate-in slide-in-from-*` classes that came from
+   `tailwindcss-animate`; that dependency was removed with the shadcn
+   rollback, so those classes silently did nothing. Keep them here so the
+   set stays greppable and paired with its keyframes. */
+@keyframes overlay-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes overlay-in-from-top {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes overlay-in-from-bottom {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes overlay-in-from-right {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-overlay-in { animation: overlay-fade-in 150ms ease-out; }
+.animate-overlay-in-top { animation: overlay-in-from-top 150ms ease-out; }
+.animate-overlay-in-bottom { animation: overlay-in-from-bottom 150ms ease-out; }
+.animate-overlay-in-right { animation: overlay-in-from-right 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-overlay-in,
+  .animate-overlay-in-top,
+  .animate-overlay-in-bottom,
+  .animate-overlay-in-right {
+    animation: overlay-fade-in 1ms linear;
+  }
 }
 
 /* Indeterminate (browser-style) loading bar: a segment that slides across the track */
@@ -2043,7 +2157,6 @@ html[data-theme='dark'] .pet-panel-toggle:hover {
   color: white;
 }
 
-.pet-empty-state,
 .pet-error-card {
   display: flex;
   align-items: center;
@@ -2051,11 +2164,6 @@ html[data-theme='dark'] .pet-panel-toggle:hover {
   gap: 7px;
   color: rgba(70, 65, 79, 0.68);
   font-size: 12px;
-}
-
-.pet-empty-state {
-  min-height: 52px;
-  padding: 8px 10px;
 }
 
 .pet-error-card {
@@ -2069,10 +2177,6 @@ html[data-theme='dark'] .pet-panel-toggle:hover {
   background: rgba(255, 244, 246, 0.9);
   color: #a83f54;
   pointer-events: auto;
-}
-
-.pet-status-pulse {
-  animation: pet-status-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes pet-motion-idle {

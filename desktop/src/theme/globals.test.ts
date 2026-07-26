@@ -32,8 +32,9 @@ function getCssBetween(startMarker: string, endMarker: string) {
   return normalizedCss.slice(start, end)
 }
 
+const themes = [':root,\n[data-theme="light"]', '[data-theme="white"]', '[data-theme="dark"]'] as const
+
 describe('desktop theme tokens', () => {
-  const themes = [':root,\n[data-theme="light"]', '[data-theme="white"]', '[data-theme="dark"]'] as const
   const requiredTokens = [
     '--color-activity-heat-0',
     '--color-activity-heat-1',
@@ -116,7 +117,7 @@ describe('desktop theme tokens', () => {
   })
 
   it('avoids color-mix in the startup-critical UI zoom shell chrome for Safari 15 WebView support', () => {
-    const zoomShellCss = getCssBetween('.settings-zoom-kbd {', '/* ─── Tailwind Theme Override')
+    const zoomShellCss = getCssBetween('.settings-zoom-kbd {', '/* ─── Terminal ANSI palette')
 
     expect(zoomShellCss).not.toContain('color-mix(')
   })
@@ -163,5 +164,123 @@ describe('desktop theme tokens', () => {
 
     expect(mascotCss).toContain('z-index: 10;')
     expect(cardCss).toContain('z-index: 15;')
+  })
+
+  it('binds the dark variant to the app theme attribute, not the operating system', () => {
+    // The app ships three themes toggled via `<html data-theme>`. Tailwind's
+    // stock `dark:` compiles to `prefers-color-scheme`, which fires on the OS
+    // setting and is wrong for every one of them.
+    expect(normalizedCss).toContain('@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));')
+    expect(normalizedCss).not.toMatch(/@media[^{]*\(\s*prefers-color-scheme/)
+  })
+
+  it('defines on-primary-container everywhere on-primary is defined', () => {
+    // The light values live in the `@theme` block as the defaults; the white
+    // and dark blocks override them. A container color that only exists for
+    // some themes is how `--color-on-primary-container` went missing entirely.
+    const onPrimary = normalizedCss.match(/--color-on-primary:/g)?.length ?? 0
+    const onPrimaryContainer = normalizedCss.match(/--color-on-primary-container:/g)?.length ?? 0
+    expect(onPrimary).toBeGreaterThan(0)
+    expect(onPrimaryContainer).toBe(onPrimary)
+  })
+})
+
+describe('layering scale', () => {
+  const scale = (() => {
+    const start = normalizedCss.indexOf('/* ─── Layering scale')
+    expect(start).toBeGreaterThanOrEqual(0)
+    const blockStart = normalizedCss.indexOf('{', start)
+    const blockEnd = normalizedCss.indexOf('}', blockStart)
+    const body = normalizedCss.slice(blockStart + 1, blockEnd)
+    const values = new Map<string, number>()
+    for (const match of body.matchAll(/(--z-[a-z]+):\s*(\d+);/g)) {
+      values.set(match[1]!, Number(match[2]))
+    }
+    return values
+  })()
+
+  it('defines every layer used by the overlay components', () => {
+    for (const token of ['--z-drawer', '--z-dialog', '--z-sheet', '--z-dropdown', '--z-popover', '--z-tooltip', '--z-toast']) {
+      expect(scale.get(token), `${token} missing from the layering scale`).toBeTypeOf('number')
+    }
+  })
+
+  it('keeps toasts above bottom sheets', () => {
+    // Regression: the toast container sat at z-100 while MobileBottomSheet used
+    // z-10000, so any confirmation raised from inside a sheet was invisible.
+    expect(scale.get('--z-toast')!).toBeGreaterThan(scale.get('--z-sheet')!)
+  })
+
+  it('keeps dropdowns and popovers above dialogs', () => {
+    // A modal dialog blocks the page behind it, so an open dropdown always
+    // belongs to the topmost dialog. Inverting this is what forced
+    // DirectoryPicker to hardcode `zIndex: 9999` to stay usable in a modal.
+    expect(scale.get('--z-dropdown')!).toBeGreaterThan(scale.get('--z-dialog')!)
+    expect(scale.get('--z-popover')!).toBeGreaterThan(scale.get('--z-dialog')!)
+    expect(scale.get('--z-tooltip')!).toBeGreaterThan(scale.get('--z-dropdown')!)
+  })
+
+  it('orders the scale strictly from base to toast', () => {
+    const ordered = [
+      '--z-base', '--z-raised', '--z-sticky', '--z-nav', '--z-scrim',
+      '--z-drawer', '--z-dialog', '--z-sheet', '--z-dropdown', '--z-popover',
+      '--z-tooltip', '--z-toast',
+    ]
+    const values = ordered.map((token) => scale.get(token)!)
+    expect(values).toEqual([...values].sort((a, b) => a - b))
+  })
+})
+
+describe('animation classes', () => {
+  const keyframeNames = new Set(
+    [...normalizedCss.matchAll(/@keyframes\s+([\w-]+)/g)].map((match) => match[1]),
+  )
+
+  it('pairs every animation reference with a defined keyframe', () => {
+    // Regression: `.pet-status-pulse` referenced a `pet-status-pulse` keyframe
+    // that never existed, so the class was silently inert.
+    const missing: string[] = []
+    for (const match of normalizedCss.matchAll(/animation(?:-name)?:\s*([^;]+);/g)) {
+      for (const part of match[1]!.split(',')) {
+        const name = part.trim().split(/\s+/)[0]
+        if (!name || name === 'none' || /^\d/.test(name)) continue
+        if (!keyframeNames.has(name)) missing.push(name)
+      }
+    }
+    expect(missing).toEqual([])
+  })
+
+  it('defines the overlay entrance animations that replaced tailwindcss-animate', () => {
+    // `animate-in slide-in-from-*` came from `tailwindcss-animate`, removed in
+    // the shadcn rollback. Toast and Dropdown kept the classes and lost their
+    // entrance animation entirely.
+    for (const name of ['overlay-fade-in', 'overlay-in-from-top', 'overlay-in-from-bottom', 'overlay-in-from-right']) {
+      expect(keyframeNames.has(name), `@keyframes ${name} missing`).toBe(true)
+    }
+    for (const cls of ['.animate-overlay-in', '.animate-overlay-in-top', '.animate-overlay-in-bottom', '.animate-overlay-in-right']) {
+      expect(normalizedCss).toContain(`${cls} {`)
+    }
+  })
+})
+
+describe('terminal palette tokens', () => {
+  const ansiSlots = [
+    'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
+    'bright-black', 'bright-red', 'bright-green', 'bright-yellow',
+    'bright-blue', 'bright-magenta', 'bright-cyan', 'bright-white',
+  ]
+
+  it('defines all 16 ANSI slots that lib/terminalTheme.ts reads', () => {
+    for (const slot of ansiSlots) {
+      expect(normalizedCss).toContain(`--color-terminal-ansi-${slot}:`)
+    }
+  })
+
+  it('gives every theme its own cursor and selection color', () => {
+    for (const theme of themes) {
+      const block = getThemeBlock(theme)
+      expect(block).toContain('--color-terminal-cursor:')
+      expect(block).toContain('--color-terminal-selection:')
+    }
   })
 })
