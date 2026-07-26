@@ -1510,6 +1510,9 @@ export const en = {
   'repoLaunch.worktreeCurrent': 'Current worktree',
   'repoLaunch.worktreeIsolated': 'Isolated worktree',
   'repoLaunch.selectWorktree': 'Select worktree mode',
+  'repoLaunch.launchLocation': 'Location',
+  'repoLaunch.branch': 'Branch',
+  'repoLaunch.worktreeBadge': 'Isolated',
   'repoLaunch.missingWorkdir': 'Working directory is missing.',
   'repoLaunch.dirtyWarning': 'Uncommitted changes detected. Direct switching may be blocked; use isolated worktree to continue without touching this folder.',
   'repoLaunch.checkedOutWarning': 'Selected branch is already checked out in another worktree. Direct launch may be blocked by Git; use "Isolated worktree" to avoid changing directories.',
@@ -2005,6 +2008,7 @@ export const en = {
 
   // ─── Directory Picker ──────────────────────────────────────
   'dirPicker.selectProject': 'Select a project...',
+  'dirPicker.directory': 'Directory',
   'dirPicker.recent': 'Recent',
   'dirPicker.noRecent': 'No recent projects',
   'dirPicker.chooseFolder': 'Choose a different folder',

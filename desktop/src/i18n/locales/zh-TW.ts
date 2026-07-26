@@ -1512,6 +1512,9 @@ export const zh: Record<TranslationKey, string> = {
   'repoLaunch.worktreeCurrent': '當前工作樹',
   'repoLaunch.worktreeIsolated': '獨立工作樹',
   'repoLaunch.selectWorktree': '選擇工作樹模式',
+  'repoLaunch.launchLocation': '執行位置',
+  'repoLaunch.branch': '分支',
+  'repoLaunch.worktreeBadge': '獨立',
   'repoLaunch.missingWorkdir': '工作目錄不存在。',
   'repoLaunch.dirtyWarning': '檢測到未提交變更，直接切換可能會被阻止；使用獨立工作樹可以繼續，且不會改動當前目錄。',
   'repoLaunch.checkedOutWarning': '選中的分支已在其他工作樹中檢出。直接啟動可能會被 Git 阻止；使用“獨立工作樹”可以避免切換當前目錄。',
@@ -2007,6 +2010,7 @@ export const zh: Record<TranslationKey, string> = {
 
   // ─── Directory Picker ──────────────────────────────────────
   'dirPicker.selectProject': '選擇專案...',
+  'dirPicker.directory': '目錄',
   'dirPicker.recent': '最近',
   'dirPicker.noRecent': '暫無最近專案',
   'dirPicker.chooseFolder': '選擇其他資料夾',

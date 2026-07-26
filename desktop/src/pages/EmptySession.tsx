@@ -712,8 +712,8 @@ export function EmptySession() {
               <div className={`border-t border-[var(--color-border-separator)] pt-3 ${
                 isMobileComposer ? 'flex flex-wrap items-center gap-2' : 'flex items-center justify-between'
               }`}>
-                <div className="flex shrink-0 items-center gap-2">
-                  <div ref={plusMenuRef} className="relative">
+                <div className="flex min-w-0 shrink items-center gap-2">
+                  <div ref={plusMenuRef} className="relative shrink-0">
                     <IconButton
                       icon="add"
                       label={t('chat.composerTools')}
@@ -753,9 +753,23 @@ export function EmptySession() {
                     value={draftPermissionMode}
                     onChange={setDraftPermissionMode}
                   />
+
+                  {!isMobileComposer && (
+                    <RepositoryLaunchControls
+                      workDir={workDir}
+                      onWorkDirChange={handleWorkDirChange}
+                      branch={selectedBranch}
+                      onBranchChange={setSelectedBranch}
+                      useWorktree={useWorktree}
+                      onUseWorktreeChange={setUseWorktree}
+                      onLaunchReadyChange={setRepositoryLaunchReady}
+                      disabled={isSubmitting}
+                      placement="toolbar"
+                    />
+                  )}
                 </div>
 
-                <div className={`${isMobileComposer ? 'flex min-w-0 flex-1 items-center justify-end gap-2' : 'flex items-center gap-3'}`}>
+                <div className={`${isMobileComposer ? 'flex min-w-0 flex-1 items-center justify-end gap-2' : 'flex shrink-0 items-center gap-3'}`}>
                   <ContextUsageIndicator
                     chatState="idle"
                     messageCount={0}
@@ -782,19 +796,6 @@ export function EmptySession() {
               </div>
             </div>
 
-            {!isMobileComposer && (
-              <RepositoryLaunchControls
-                workDir={workDir}
-                onWorkDirChange={handleWorkDirChange}
-                branch={selectedBranch}
-                onBranchChange={setSelectedBranch}
-                useWorktree={useWorktree}
-                onUseWorktreeChange={setUseWorktree}
-                onLaunchReadyChange={setRepositoryLaunchReady}
-                disabled={isSubmitting}
-                placement="composer"
-              />
-            )}
           </div>
 
           {isMobileComposer && (

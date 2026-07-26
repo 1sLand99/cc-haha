@@ -201,7 +201,12 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const useCompactControls = compact || isMobileComposer
   const iconOnlyAction = compact || isMobileComposer
   const activeLaunchWorkDir = showLaunchControls ? (launchWorkDir || resolvedWorkDir || '') : (resolvedWorkDir || '')
-  const embedLaunchControlsInHero = isHeroComposer && !useCompactControls && showLaunchControls
+  // The run location lives in the toolbar on the wide desktop composer, and it
+  // stays there for the whole session: editable while the session is still a
+  // draft, read-only once the first message lands. It used to jump from inside
+  // the panel to a chip below it at that moment.
+  const showLocationInToolbar = isHeroComposer && !useCompactControls && !isMemberSession
+  const embedLaunchControlsInHero = showLocationInToolbar && showLaunchControls
   const pendingSlashUiAction = !isMemberSession && input.trim().startsWith('/')
     ? resolveSlashUiAction(input.trim().slice(1))
     : null
@@ -966,7 +971,11 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
           // composer corner. Both match EmptySession's shell so the same
           // control does not render two different panels.
           className={isHeroComposer
-            ? `glass-panel glass-panel--composer relative flex flex-col gap-3 overflow-visible ${embedLaunchControlsInHero ? 'rounded-[var(--radius-2xl)]' : 'rounded-t-[var(--radius-2xl)] rounded-b-none'} p-4 transition-colors ${isDragActive ? 'composer-drop-target-active' : ''}`
+            // Always fully rounded now: the launch controls used to be a bar
+            // welded to the panel's bottom edge, which is what squared it off.
+            // They are a single pill today — in the toolbar, or on their own
+            // line below — so nothing butts against the panel any more.
+            ? `glass-panel glass-panel--composer relative flex flex-col gap-3 overflow-visible rounded-[var(--radius-2xl)] p-4 transition-colors ${isDragActive ? 'composer-drop-target-active' : ''}`
             : compact
               ? `glass-panel glass-panel--composer relative overflow-visible rounded-[var(--radius-2xl)] p-3 transition-colors ${isDragActive ? 'composer-drop-target-active' : ''}`
               : `glass-panel glass-panel--composer relative overflow-visible rounded-[var(--radius-2xl)] transition-colors ${isMobileComposer ? 'p-3' : 'p-4'} ${isDragActive ? 'composer-drop-target-active' : ''}`}
@@ -1291,13 +1300,40 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                   </div>
 
                   <PermissionModeSelector compact={useCompactControls} />
+
+                  {showLocationInToolbar && (
+                    embedLaunchControlsInHero ? (
+                      <RepositoryLaunchControls
+                        workDir={activeLaunchWorkDir}
+                        onWorkDirChange={handleLaunchWorkDirChange}
+                        branch={launchBranch}
+                        onBranchChange={setLaunchBranch}
+                        useWorktree={launchUseWorktree}
+                        onUseWorktreeChange={setLaunchUseWorktree}
+                        onLaunchReadyChange={setLaunchReady}
+                        disabled={isActive || launchTransitioning}
+                        placement="toolbar"
+                      />
+                    ) : (
+                      <ProjectContextChip
+                        workDir={resolvedWorkDir}
+                        repoName={gitInfo?.repoName || null}
+                        branch={gitInfo?.branch || null}
+                        sourceWorkDir={gitInfo?.worktree?.sourceWorkDir || null}
+                        isWorktree={!!gitInfo?.worktree?.enabled}
+                        worktreeSlug={gitInfo?.worktree?.slug || null}
+                        worktreePath={gitInfo?.worktree?.path || gitInfo?.worktree?.plannedPath || null}
+                        variant="toolbar"
+                      />
+                    )
+                  )}
                 </>
               )}
             </div>
 
             <div
               data-testid="chat-input-toolbar-trailing"
-              className={`flex min-w-0 items-center ${isMobileComposer ? 'flex-1 justify-end gap-1' : 'gap-2'}`}
+              className={`flex min-w-0 items-center ${isMobileComposer ? 'flex-1 justify-end gap-1' : 'shrink-0 gap-2'}`}
             >
               {!isMemberSession && activeTabId && (
                 <ContextUsageIndicator
@@ -1353,26 +1389,11 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
             </div>
           </div>
 
-          {embedLaunchControlsInHero && (
-            <div className="-mx-4 -mb-4 mt-3">
-              <RepositoryLaunchControls
-                workDir={activeLaunchWorkDir}
-                onWorkDirChange={handleLaunchWorkDirChange}
-                branch={launchBranch}
-                onBranchChange={setLaunchBranch}
-                useWorktree={launchUseWorktree}
-                onUseWorktreeChange={setLaunchUseWorktree}
-                onLaunchReadyChange={setLaunchReady}
-                disabled={isActive || launchTransitioning}
-                placement="composer"
-              />
-            </div>
-          )}
         </div>
 
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileSelect} />
 
-        {!isMemberSession && !embedLaunchControlsInHero && (
+        {!isMemberSession && !showLocationInToolbar && (
           <div className={useCompactControls ? 'mt-2 flex min-w-0 px-1' : 'mt-3 px-1'}>
             {messageCount > 0 ? (
               <ProjectContextChip

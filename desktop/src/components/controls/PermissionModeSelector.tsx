@@ -262,7 +262,10 @@ export function PermissionModeSelector({ workDir: workDirProp, compact = false, 
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         title={isTurnActive ? t('permMode.disabledDuringTurn') : (compact ? MODE_LABELS[currentMode] : undefined)}
-        className={`flex items-center font-medium text-[var(--color-text-primary)] transition-[background-color,color,border-color] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] ${
+        // `shrink-0` / `whitespace-nowrap`: it shares the composer toolbar with
+        // the run-location pill, whose branch name can be arbitrarily long.
+        // Without these the label wrapped to two lines and grew the whole row.
+        className={`flex shrink-0 items-center whitespace-nowrap font-medium text-[var(--color-text-primary)] transition-[background-color,color,border-color] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] ${
           isTurnActive ? 'opacity-50 cursor-not-allowed' : 'hover:border-[var(--color-outline)] hover:bg-[var(--color-surface-hover)]'
         } ${compactButtonClass}`}
       >

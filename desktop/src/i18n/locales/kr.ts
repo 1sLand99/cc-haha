@@ -1512,6 +1512,9 @@ export const kr: Record<TranslationKey, string> = {
   'repoLaunch.worktreeCurrent': '현재 worktree',
   'repoLaunch.worktreeIsolated': '독립 worktree',
   'repoLaunch.selectWorktree': 'worktree 모드 선택',
+  'repoLaunch.launchLocation': '실행 위치',
+  'repoLaunch.branch': '브랜치',
+  'repoLaunch.worktreeBadge': '독립',
   'repoLaunch.missingWorkdir': '작업 디렉터리가 없습니다.',
   'repoLaunch.dirtyWarning': '커밋되지 않은 변경 사항이 감지되었습니다. 직접 전환이 차단될 수 있습니다. 이 폴더를 건드리지 않고 계속하려면 독립 worktree를 사용하세요.',
   'repoLaunch.checkedOutWarning': '선택한 브랜치는 다른 worktree에서 이미 체크아웃되어 있습니다. Git에 의해 직접 시작이 차단될 수 있습니다. 디렉터리 변경을 피하려면 "독립 worktree"를 사용하세요.',
@@ -2007,6 +2010,7 @@ export const kr: Record<TranslationKey, string> = {
 
   // ─── Directory Picker ──────────────────────────────────────
   'dirPicker.selectProject': '프로젝트 선택...',
+  'dirPicker.directory': '디렉터리',
   'dirPicker.recent': '최근',
   'dirPicker.noRecent': '최근 프로젝트가 없습니다',
   'dirPicker.chooseFolder': '다른 폴더 선택',

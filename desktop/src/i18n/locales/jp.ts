@@ -1512,6 +1512,9 @@ export const jp: Record<TranslationKey, string> = {
   'repoLaunch.worktreeCurrent': '現在の worktree',
   'repoLaunch.worktreeIsolated': '独立した worktree',
   'repoLaunch.selectWorktree': 'worktree モードを選択',
+  'repoLaunch.launchLocation': '実行場所',
+  'repoLaunch.branch': 'ブランチ',
+  'repoLaunch.worktreeBadge': '分離',
   'repoLaunch.missingWorkdir': '作業ディレクトリが見つかりません。',
   'repoLaunch.dirtyWarning': '未コミットの変更が検出されました。直接切り替えはブロックされる場合があります。このフォルダに触れずに続行するには、独立した worktree を使用してください。',
   'repoLaunch.checkedOutWarning': '選択したブランチは別の worktree で既にチェックアウトされています。直接起動は Git によってブロックされる場合があります。ディレクトリの変更を避けるには「独立した worktree」を使用してください。',
@@ -2007,6 +2010,7 @@ export const jp: Record<TranslationKey, string> = {
 
   // ─── Directory Picker ──────────────────────────────────────
   'dirPicker.selectProject': 'プロジェクトを選択...',
+  'dirPicker.directory': 'ディレクトリ',
   'dirPicker.recent': '最近',
   'dirPicker.noRecent': '最近のプロジェクトはありません',
   'dirPicker.chooseFolder': '別のフォルダを選択',
