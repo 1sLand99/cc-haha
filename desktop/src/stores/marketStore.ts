@@ -54,6 +54,13 @@ type MarketStore = {
   isLoading: boolean
   isLoadingMore: boolean
   error: string | null
+  /**
+   * Kept apart from `error`: the list is scrolled by an observer now, so a
+   * failed page must not blank the catalogue behind a full-region error, and
+   * must not leave the observer re-firing into the same failure forever. The
+   * next page is only retried when the user asks for it.
+   */
+  loadMoreError: string | null
 
   selectedId: string | null
   detail: NormalizedSkillDetail | null
@@ -134,6 +141,7 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
   isLoading: false,
   isLoadingMore: false,
   error: null,
+  loadMoreError: null,
 
   selectedId: null,
   detail: null,
@@ -154,6 +162,7 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
       isLoading: true,
       isLoadingMore: false,
       error: null,
+      loadMoreError: null,
       ...(reset ? { items: [], nextCursor: null } : {}),
     })
     try {
@@ -181,7 +190,7 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
     const { nextCursor, isLoadingMore, isLoading, query, filters } = get()
     if (!nextCursor || isLoadingMore || isLoading) return
     const seq = listRequestSeq
-    set({ isLoadingMore: true })
+    set({ isLoadingMore: true, loadMoreError: null })
     try {
       const result = await marketApi.list({
         q: query.trim() || undefined,
@@ -200,10 +209,11 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
         nextCursor: result.nextCursor,
         sources: result.sources,
         isLoadingMore: false,
+        loadMoreError: null,
       })
     } catch (err) {
       if (seq !== listRequestSeq) return
-      set({ error: err instanceof Error ? err.message : String(err), isLoadingMore: false })
+      set({ loadMoreError: err instanceof Error ? err.message : String(err), isLoadingMore: false })
     }
   },
 

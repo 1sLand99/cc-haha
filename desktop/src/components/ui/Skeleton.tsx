@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 
 import { cx } from '@/lib/cx'
 
@@ -64,6 +64,12 @@ export type SkeletonGroupProps = {
   /** Announced while the placeholder is on screen, e.g. "Loading sessions". */
   label: string
   className?: string
+  /**
+   * For layout a caller cannot express as a class — a grid template built from
+   * the same constants the real grid uses. Inline beats the utility classes
+   * below deterministically, which two competing `gap` classes do not.
+   */
+  style?: CSSProperties
   children: ReactNode
 }
 
@@ -74,9 +80,9 @@ export type SkeletonGroupProps = {
  * the loading semantics — the hand-rolled placeholders had neither `role` nor
  * `aria-busy`, so a screen reader saw an empty region and said nothing.
  */
-export function SkeletonGroup({ label, className, children }: SkeletonGroupProps) {
+export function SkeletonGroup({ label, className, style, children }: SkeletonGroupProps) {
   return (
-    <div role="status" aria-busy="true" aria-live="polite" className={cx('animate-pulse', className)}>
+    <div role="status" aria-busy="true" aria-live="polite" style={style} className={cx('animate-pulse', className)}>
       <span className="sr-only">{label}</span>
       {children}
     </div>
@@ -126,6 +132,8 @@ export type SkeletonCardsProps = {
   minHeight?: string
   withAvatar?: boolean
   className?: string
+  /** Grid overrides — see `SkeletonGroupProps['style']`. */
+  style?: CSSProperties
 }
 
 /** A card-grid placeholder. */
@@ -135,9 +143,10 @@ export function SkeletonCards({
   minHeight = '132px',
   withAvatar = false,
   className,
+  style,
 }: SkeletonCardsProps) {
   return (
-    <SkeletonGroup label={label} className={cx('grid gap-3', className)}>
+    <SkeletonGroup label={label} style={style} className={cx('grid gap-3', className)}>
       {Array.from({ length: count }, (_, card) => (
         <div
           key={card}

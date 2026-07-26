@@ -1,22 +1,32 @@
-import { useEffect } from 'react'
-import { CloudOff, PackageSearch, RefreshCw, Search, Store, X } from 'lucide-react'
+import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowUpRight, CloudOff, PackageSearch, RefreshCw, Search, Sparkles, Store, X } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorState } from '@/components/ui/ErrorState'
 import { IconButton } from '@/components/ui/IconButton'
 import { SkeletonCards } from '@/components/ui/Skeleton'
 import { useMarketStore } from '../../stores/marketStore'
+import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
+import { useUIStore } from '../../stores/uiStore'
 import { FilterBar } from './FilterBar'
 import { MarketDisclaimer } from './MarketDisclaimer'
 import { SkillCard } from './SkillCard'
 import { SourceStatusBar } from './SourceStatusBar'
+import {
+  CATALOG_CARD_MIN_HEIGHT,
+  CATALOG_GAP,
+  CATALOG_GRID_TEMPLATE,
+  useMarketGridFill,
+} from './useMarketGridFill'
 
 /**
- * `minmax(340px, 1fr)` verbatim would overflow a phone viewport — the same
- * bundle serves the touch H5 shell — so the floor is clamped to the column
- * width. On desktop it is the handoff's grid exactly.
+ * Starts the next page while the last row is still on screen, so the skeleton
+ * is a hint that more is coming rather than a wall the reader hits.
  */
-const CATALOG_GRID = 'repeat(auto-fill,minmax(min(100%,340px),1fr))'
+const PREFETCH_MARGIN = '400px'
+
+const CATALOG_GRID_STYLE = { gridTemplateColumns: CATALOG_GRID_TEMPLATE, gap: CATALOG_GAP }
 
 export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string) => void }) {
   const t = useTranslation()
@@ -29,11 +39,22 @@ export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string
     isLoading,
     isLoadingMore,
     error,
+    loadMoreError,
     fetchList,
     loadMore,
     setQuery,
     installingIds,
   } = useMarketStore()
+
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const { measureRef, columns, count: skeletonCount } = useMarketGridFill()
+  /**
+   * Every shell this runs in supports the observer; the manual button stays as
+   * the fallback so a runtime without it (or a test) can still page through
+   * instead of the list simply ending.
+   */
+  const [canAutoLoad] = useState(() => typeof IntersectionObserver === 'function')
 
   useEffect(() => {
     if (items.length === 0 && !isLoading && !error) {
@@ -42,12 +63,41 @@ export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    // A failed page stops the auto-loading: the observer would otherwise walk
+    // straight back into the same failure the moment the skeleton unmounts.
+    if (!canAutoLoad || !nextCursor || isLoading || isLoadingMore || loadMoreError) return
+    const sentinel = sentinelRef.current
+    if (!sentinel) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadMore()
+      },
+      { root: scrollRef.current, rootMargin: PREFETCH_MARGIN },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+    // Re-observing after each page is what keeps a tall window filling: an
+    // observer only reports *changes*, so a sentinel that never left the
+    // viewport would fire once and then stall with half a screen of content.
+  }, [canAutoLoad, nextCursor, isLoading, isLoadingMore, loadMoreError, loadMore])
+
+  const openInstalledSkills = useCallback(() => {
+    useUIStore.getState().setPendingSettingsTab('skills')
+    useTabStore.getState().openTab(SETTINGS_TAB_ID, t('sidebar.settings'), 'settings')
+  }, [t])
+
   const hasActiveFilters =
     filters.source !== 'all' || filters.security !== 'all' || filters.installed !== 'all'
   const hasQuery = query.trim().length > 0
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[var(--color-surface)]">
+    <div
+      ref={scrollRef}
+      data-testid="market-scroll"
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[var(--color-surface)]"
+    >
       <div className="mx-auto flex w-full max-w-[1280px] flex-col px-6 pb-10 pt-7 lg:px-10">
         <header className="flex flex-wrap items-start gap-x-[18px] gap-y-4">
           <span className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-brand)] shadow-[var(--shadow-card)]">
@@ -64,7 +114,31 @@ export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string
               {t('market.subtitle')}
             </p>
           </div>
-          <SourceStatusBar sources={sources} className="pt-2" />
+          {/* The live-source dots and the way out of the catalogue read as one
+              cluster: what the shelves are serving on top, what is already on
+              the reader's machine under it, both flush right so the header
+              keeps a single trailing edge. */}
+          <div className="flex flex-col items-end gap-2.5 pt-2">
+            <SourceStatusBar sources={sources} />
+            <Button
+              variant="secondary"
+              size="md"
+              data-testid="market-installed-entry"
+              title={t('market.installedSkillsHint')}
+              onClick={openInstalledSkills}
+              className="gap-2 pr-3"
+              icon={
+                <Sparkles className="h-4 w-4 text-[var(--color-brand)]" strokeWidth={1.6} aria-hidden="true" />
+              }
+            >
+              {t('market.installedSkills')}
+              <ArrowUpRight
+                className="h-3.5 w-3.5 text-[var(--color-text-tertiary)]"
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+            </Button>
+          </div>
         </header>
 
         <MarketDisclaimer />
@@ -103,7 +177,15 @@ export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string
           </p>
         )}
 
-        {isLoading && <MarketGridSkeleton label={t('market.loading')} />}
+        {isLoading && (
+          <MarketGridSkeleton
+            ref={measureRef}
+            label={t('market.loading')}
+            count={skeletonCount}
+            testId="market-loading"
+            className="mt-5"
+          />
+        )}
 
         {/* Kept as a bespoke region-level state rather than `ErrorState`: that
             component is the compact left-aligned inline notice, and the three
@@ -155,8 +237,9 @@ export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string
         {!isLoading && items.length > 0 && (
           <>
             <div
-              className="grid gap-[18px]"
-              style={{ gridTemplateColumns: CATALOG_GRID }}
+              ref={measureRef}
+              className="grid"
+              style={CATALOG_GRID_STYLE}
               data-testid="market-grid"
             >
               {items.map((skill) => (
@@ -171,17 +254,49 @@ export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string
             </div>
 
             {nextCursor && (
-              <div className="flex justify-center pt-7">
-                <Button
-                  variant="secondary"
-                  size="lg"
-                  data-testid="market-load-more"
-                  loading={isLoadingMore}
-                  onClick={() => void loadMore()}
-                >
-                  {isLoadingMore ? t('market.loadingMore') : t('market.loadMore')}
-                </Button>
-              </div>
+              <>
+                {/* Sits flush against the grid's bottom edge, so the prefetch
+                    margin is measured from the last row rather than from
+                    whatever state is drawn below it. */}
+                <div
+                  ref={sentinelRef}
+                  data-testid="market-load-more-sentinel"
+                  aria-hidden="true"
+                  className="h-px w-full"
+                />
+
+                {isLoadingMore && (
+                  <MarketGridSkeleton
+                    label={t('market.loadingMore')}
+                    count={columns}
+                    testId="market-loading-more"
+                    style={{ marginTop: CATALOG_GAP }}
+                  />
+                )}
+
+                {loadMoreError && !isLoadingMore && (
+                  <ErrorState
+                    title={t('market.loadMoreError')}
+                    detail={loadMoreError}
+                    onRetry={() => void loadMore()}
+                    retryLabel={t('market.retry')}
+                    className="mx-auto mt-7 max-w-md items-center text-center"
+                  />
+                )}
+
+                {!canAutoLoad && !isLoadingMore && !loadMoreError && (
+                  <div className="flex justify-center pt-7">
+                    <Button
+                      variant="secondary"
+                      size="lg"
+                      data-testid="market-load-more"
+                      onClick={() => void loadMore()}
+                    >
+                      {t('market.loadMore')}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
@@ -190,16 +305,26 @@ export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string
   )
 }
 
-function MarketGridSkeleton({ label }: { label: string }) {
-  return (
-    <div data-testid="market-loading" className="mt-5">
-      <SkeletonCards
-        label={label}
-        count={6}
-        minHeight="232px"
-        withAvatar
-        className="[grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr))]"
-      />
-    </div>
-  )
+type MarketGridSkeletonProps = {
+  label: string
+  count: number
+  testId: string
+  className?: string
+  style?: React.CSSProperties
 }
+
+const MarketGridSkeleton = forwardRef<HTMLDivElement, MarketGridSkeletonProps>(
+  function MarketGridSkeleton({ label, count, testId, className, style }, ref) {
+    return (
+      <div ref={ref} data-testid={testId} className={className} style={style}>
+        <SkeletonCards
+          label={label}
+          count={count}
+          minHeight={`${CATALOG_CARD_MIN_HEIGHT}px`}
+          withAvatar
+          style={CATALOG_GRID_STYLE}
+        />
+      </div>
+    )
+  },
+)

@@ -76,6 +76,7 @@ beforeEach(() => {
     isLoading: false,
     isLoadingMore: false,
     error: null,
+    loadMoreError: null,
     selectedId: null,
     detail: null,
     isDetailLoading: false,
@@ -127,6 +128,41 @@ describe('marketStore list', () => {
   it('does not loadMore without a cursor', async () => {
     await useMarketStore.getState().loadMore()
     expect(mockedApi.list).not.toHaveBeenCalled()
+  })
+
+  it('keeps a failed page out of the list-level error and off the catalogue', async () => {
+    useMarketStore.setState({ items: [makeSkill()], nextCursor: 'next' })
+    mockedApi.list.mockRejectedValue(new Error('page boom'))
+
+    await useMarketStore.getState().loadMore()
+
+    const state = useMarketStore.getState()
+    // `error` blanks the catalogue behind a full-region failure panel; a page
+    // that did not arrive must not do that to the pages that did.
+    expect(state.loadMoreError).toBe('page boom')
+    expect(state.error).toBeNull()
+    expect(state.items).toHaveLength(1)
+    expect(state.nextCursor).toBe('next')
+    expect(state.isLoadingMore).toBe(false)
+  })
+
+  it('clears the load-more failure on a successful retry', async () => {
+    useMarketStore.setState({ items: [makeSkill()], nextCursor: 'next', loadMoreError: 'page boom' })
+    mockedApi.list.mockResolvedValue(listResponse([makeSkill({ id: 'skillhub:b', source: 'skillhub' })], null))
+
+    await useMarketStore.getState().loadMore()
+
+    expect(useMarketStore.getState().loadMoreError).toBeNull()
+    expect(useMarketStore.getState().items).toHaveLength(2)
+  })
+
+  it('clears the load-more failure when the list is refetched', async () => {
+    useMarketStore.setState({ items: [makeSkill()], nextCursor: 'next', loadMoreError: 'page boom' })
+    mockedApi.list.mockResolvedValue(listResponse([makeSkill()]))
+
+    await useMarketStore.getState().fetchList({ reset: true })
+
+    expect(useMarketStore.getState().loadMoreError).toBeNull()
   })
 
   it('passes filters to the api', async () => {
