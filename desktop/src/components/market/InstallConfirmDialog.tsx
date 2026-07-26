@@ -1,3 +1,4 @@
+import { ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import type { NormalizedSkill } from '../../types/market'
 import { Button } from '@/components/ui/Button'
@@ -28,6 +29,8 @@ export function InstallConfirmDialog({
   if (!skill) return null
 
   const risky = skill.securityStatus === 'flagged' || skill.securityStatus === 'unknown'
+  const RiskIcon =
+    skill.securityStatus === 'flagged' ? ShieldAlert : risky ? ShieldQuestion : ShieldCheck
 
   return (
     <Modal open={open} onClose={installing ? () => {} : onClose} title={t('market.installConfirm.title')} width={480}>
@@ -36,7 +39,7 @@ export function InstallConfirmDialog({
           {t('market.installConfirm.message', { name: skill.name, source: t(`market.source.${skill.source}`) })}
         </p>
 
-        <div className="flex flex-col gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3.5 py-3 text-xs">
+        <div className="flex flex-col gap-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3.5 py-3 text-xs">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[var(--color-text-tertiary)]">{t('market.filter.source')}</span>
             <span className="font-medium text-[var(--color-text-primary)]">{t(`market.source.${skill.source}`)}</span>
@@ -59,27 +62,19 @@ export function InstallConfirmDialog({
           </div>
         </div>
 
+        {/* Tone pairs, not alpha: `--color-<tone>-container` with its own
+            `--color-on-<tone>-container` foreground. The `/40` modifiers this
+            carried compile to a color function Safari 15 WebViews drop. */}
         <div
-          className={`flex items-start gap-2 rounded-xl px-3.5 py-2.5 text-xs leading-5 ${
+          className={`flex items-start gap-2 rounded-[var(--radius-lg)] px-3.5 py-2.5 text-xs leading-5 ${
             skill.securityStatus === 'flagged'
-              ? 'border border-[var(--color-error)]/40 bg-[var(--color-error-container)]/40 text-[var(--color-text-primary)]'
+              ? 'border border-[var(--color-error)] bg-[var(--color-error-container)] text-[var(--color-on-error-container)]'
               : risky
-                ? 'border border-[var(--color-warning)]/40 bg-[var(--color-warning-container)]/40 text-[var(--color-text-primary)]'
-                : 'border border-[var(--color-success)]/30 bg-[var(--color-success-container)]/40 text-[var(--color-text-primary)]'
+                ? 'border border-[var(--color-warning)] bg-[var(--color-warning-container)] text-[var(--color-on-warning-container)]'
+                : 'border border-[var(--color-success)] bg-[var(--color-success-container)] text-[var(--color-on-success-container)]'
           }`}
         >
-          <span
-            className={`material-symbols-outlined mt-0.5 text-[16px] ${
-              skill.securityStatus === 'flagged'
-                ? 'text-[var(--color-error)]'
-                : risky
-                  ? 'text-[var(--color-warning)]'
-                  : 'text-[var(--color-success)]'
-            }`}
-            aria-hidden
-          >
-            {skill.securityStatus === 'flagged' ? 'gpp_maybe' : risky ? 'shield_question' : 'gpp_good'}
-          </span>
+          <RiskIcon className="mt-0.5 h-4 w-4 flex-shrink-0" strokeWidth={1.6} aria-hidden="true" />
           <span>{t(RISK_KEYS[skill.securityStatus])}</span>
         </div>
 

@@ -278,8 +278,8 @@ export function PetSettings() {
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6 pb-8">
       <header>
-        <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">{t('settings.pets.title')}</h1>
-        <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{t('settings.pets.subtitle')}</p>
+        <h1 className="text-[24px] font-semibold leading-tight text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>{t('settings.pets.title')}</h1>
+        <p className="mt-1.5 text-[13.5px] leading-6 text-[var(--color-text-secondary)]">{t('settings.pets.subtitle')}</p>
       </header>
 
       {loading ? (
@@ -314,7 +314,7 @@ export function PetSettings() {
 
           <section className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('settings.pets.customTitle')}</h2>
+              <h2 className="text-base font-semibold text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>{t('settings.pets.customTitle')}</h2>
               <div className="flex items-center gap-2">
                 <Button
                   variant="secondary"
@@ -359,7 +359,7 @@ export function PetSettings() {
           </section>
 
           <Card as="section" radius="lg" padding="lg" className="space-y-4">
-            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('settings.pets.appearanceTitle')}</h2>
+            <h2 className="text-base font-semibold text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>{t('settings.pets.appearanceTitle')}</h2>
             <label className="block">
               <span className="flex items-center justify-between gap-3 text-sm font-medium text-[var(--color-text-primary)]">
                 <span>{t('settings.pets.size')}</span>
@@ -378,7 +378,7 @@ export function PetSettings() {
                 onChange={(event) => void updatePreferences({ size: Number(event.target.value) })}
               />
             </label>
-            <div className="border-t border-[var(--color-border)]/70 pt-4">
+            <div className="border-t border-[var(--color-border-separator)] pt-4">
               <ToggleRow
                 label={t('settings.pets.motion')}
                 description={t('settings.pets.motionDescription')}
@@ -386,7 +386,7 @@ export function PetSettings() {
                 onChange={(checked) => void updatePreferences({ motionEnabled: checked })}
               />
             </div>
-            <div className="border-t border-[var(--color-border)]/70 pt-4">
+            <div className="border-t border-[var(--color-border-separator)] pt-4">
               <ToggleRow
                 label={t('settings.pets.showTaskPanel')}
                 description={t('settings.pets.showTaskPanelDescription')}
@@ -398,7 +398,7 @@ export function PetSettings() {
 
           <Card as="section" radius="lg" padding="lg" className="flex items-center justify-between gap-5">
             <div className="min-w-0">
-              <h2 className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.pets.folderTitle')}</h2>
+              <h2 className="text-sm font-medium text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>{t('settings.pets.folderTitle')}</h2>
               <p className="mt-1 break-all font-mono text-xs text-[var(--color-text-secondary)]">
                 {t('settings.pets.folderDescription')}
               </p>
@@ -485,8 +485,8 @@ export function PetSettings() {
             >
               {t('settings.pets.createBack')}
             </Button>
-            <div className="rounded-lg bg-[var(--color-surface-hover)] px-3.5 py-3">
-              <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
+            <div className="rounded-[var(--radius-lg)] bg-[var(--color-surface-hover)] px-3.5 py-3">
+              <h3 className="text-sm font-semibold text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>
                 {createMethod === 'image'
                   ? t('settings.pets.createImageTitle')
                   : t('settings.pets.createAtlasTitle')}
@@ -500,7 +500,7 @@ export function PetSettings() {
             <label className="block space-y-1.5 text-sm text-[var(--color-text-primary)]">
               <span className="font-medium">{t('settings.pets.createId')}</span>
               <input
-                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 outline-none focus:border-[var(--color-border-focus)]"
+                className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 outline-none focus:border-[var(--color-border-focus)]"
                 aria-label={t('settings.pets.createId')}
                 value={createForm.slug}
                 maxLength={73}
@@ -512,7 +512,7 @@ export function PetSettings() {
             <label className="block space-y-1.5 text-sm text-[var(--color-text-primary)]">
               <span className="font-medium">{t('settings.pets.createName')}</span>
               <input
-                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 outline-none focus:border-[var(--color-border-focus)]"
+                className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 outline-none focus:border-[var(--color-border-focus)]"
                 aria-label={t('settings.pets.createName')}
                 value={createForm.displayName}
                 maxLength={80}
@@ -522,7 +522,7 @@ export function PetSettings() {
             <label className="block space-y-1.5 text-sm text-[var(--color-text-primary)]">
               <span className="font-medium">{t('settings.pets.createDescription')}</span>
               <textarea
-                className="min-h-24 w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 outline-none focus:border-[var(--color-border-focus)]"
+                className="min-h-24 w-full resize-y rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 outline-none focus:border-[var(--color-border-focus)]"
                 aria-label={t('settings.pets.createDescription')}
                 value={createForm.description}
                 maxLength={500}
@@ -557,7 +557,7 @@ function CreationMethodCard({
   return (
     <button
       type="button"
-      className="group flex w-full items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-left transition-[border-color,background-color,transform] enabled:hover:-translate-y-0.5 enabled:hover:border-[var(--color-brand)]/60 enabled:hover:bg-[var(--color-surface-hover)] enabled:active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-55"
+      className="group flex w-full items-start gap-3 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-left transition-[border-color,background-color,transform] enabled:hover:-translate-y-0.5 enabled:hover:border-[var(--color-primary-fixed-dim)] enabled:hover:bg-[var(--color-surface-hover)] motion-reduce:transition-none motion-reduce:enabled:hover:translate-y-0 enabled:active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-55"
       disabled={disabled}
       onClick={onClick}
     >
@@ -594,22 +594,22 @@ function PetCatalog({
   const t = useTranslation()
   return (
     <section className="space-y-3">
-      {title && <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{title}</h2>}
+      {title && <h2 className="text-base font-semibold text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>{title}</h2>}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {pets.map((pet) => {
           const selected = pet.id === selectedPetId
           return (
             <article
               key={pet.id}
-              className={`flex items-center gap-4 rounded-xl border p-4 transition-colors ${
+              className={`flex items-center gap-4 rounded-[var(--radius-xl)] p-4 transition-[background-color,border-color] duration-150 ease-out ${
                 selected
-                  ? 'border-[var(--color-brand)] bg-[var(--color-surface-selected)]'
-                  : 'border-[var(--color-border)] bg-[var(--color-surface)]'
+                  ? 'border-[1.5px] border-[var(--color-primary-fixed-dim)] bg-[var(--color-surface-hover)]'
+                  : 'border border-[var(--color-border)] bg-[var(--color-surface)]'
               }`}
             >
               <PetPreview pet={pet} />
               <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">{pet.displayName}</h3>
+                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>{pet.displayName}</h3>
                 <p className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)]">
                   {pet.source === 'builtin' ? t(pet.descriptionKey) : pet.description}
                 </p>
@@ -634,7 +634,7 @@ function PetCatalog({
 function PetPreview({ pet }: { pet: PetDescriptor }) {
   return (
     <div
-      className="flex h-16 w-16 flex-none items-center justify-center rounded-2xl"
+      className="flex h-16 w-16 flex-none items-center justify-center rounded-[var(--radius-2xl)]"
       style={{ backgroundColor: pet.source === 'builtin' ? `${pet.accent}18` : undefined }}
     >
       <PetRenderer pet={pet} state="idle" size={54} motionEnabled={false} />

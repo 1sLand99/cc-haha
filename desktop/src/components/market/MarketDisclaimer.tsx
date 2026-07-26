@@ -28,11 +28,13 @@ export function MarketDisclaimer() {
     <div
       role="note"
       data-testid="market-disclaimer"
-      className="flex items-start gap-3 rounded-lg border border-[var(--color-warning)]/20 border-l-2 bg-[var(--color-surface-container-low)] px-3.5 py-2.5"
+      className="mt-6 flex items-start gap-3 rounded-[var(--radius-lg)] border border-[var(--color-primary-fixed-dim)] bg-[var(--color-brand-soft)] px-[18px] py-3.5"
     >
-      <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--color-warning)]" strokeWidth={2} aria-hidden="true" />
-      <p className="min-w-0 flex-1 text-[11px] leading-[18px] text-[var(--color-text-secondary)] sm:text-xs sm:leading-5">
-        <span className="font-semibold text-[var(--color-text-primary)]">{t('market.disclaimer.title')}</span>{' '}
+      <ShieldAlert className="mt-0.5 h-[17px] w-[17px] flex-shrink-0 text-[var(--color-brand)]" strokeWidth={1.5} aria-hidden="true" />
+      {/* Foreground is the darkened pair, never `--color-brand`: terracotta on
+          its own soft fill measures 4.3:1 under the two ink themes. */}
+      <p className="min-w-0 flex-1 text-[13px] leading-[1.7] text-[var(--color-on-brand-soft)] sm:text-sm">
+        <span className="font-semibold">{t('market.disclaimer.title')}</span>{' '}
         {t('market.disclaimer.body')}
       </p>
       <IconButton

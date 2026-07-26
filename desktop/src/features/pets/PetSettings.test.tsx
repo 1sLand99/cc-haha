@@ -277,10 +277,15 @@ describe('PetSettings', () => {
     )
     expect(thumb).toHaveClass('bg-[var(--color-switch-thumb)]')
 
+    // Selection is a 1.5px terracotta outline over the hover ground, matching
+    // the provider list and the worktree cards. The raw `--color-brand` border
+    // it used to carry is the accent at full strength, which read as an error
+    // outline next to the muted card grid.
     const selectedCard = screen.getByRole('button', { name: 'Selected' }).closest('article')
     expect(selectedCard).toHaveClass(
-      'border-[var(--color-brand)]',
-      'bg-[var(--color-surface-selected)]',
+      'border-[1.5px]',
+      'border-[var(--color-primary-fixed-dim)]',
+      'bg-[var(--color-surface-hover)]',
     )
   })
 

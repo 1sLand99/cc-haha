@@ -35,25 +35,26 @@ export function PromptEditor({
 }: Props) {
   const t = useTranslation()
   return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] focus-within:border-[var(--color-border-focus)] transition-colors overflow-visible">
+    <div className="overflow-visible rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] transition-colors focus-within:border-[var(--color-border-focus)]">
       {/* Prompt textarea */}
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         rows={4}
-        className="w-full resize-y bg-transparent px-3 py-2.5 text-sm leading-relaxed text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+        className="w-full resize-y bg-transparent px-4 py-3.5 text-sm leading-[1.8] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
         style={{ minHeight: 120 }}
       />
 
-      {/* Bottom toolbar */}
-      <div className="border-t border-[var(--color-border)]/40 px-3 py-2 flex flex-col gap-2 bg-[var(--color-surface-container-low)] rounded-b-[var(--radius-lg)]">
+      {/* Bottom toolbar. The rule was `--color-border` at `/40`, which Safari 15
+          WebView drops entirely — the toolbar then floated with no seam. */}
+      <div className="flex flex-col gap-2 rounded-b-[var(--radius-xl)] border-t border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-2.5">
         {/* Row 1: Permission + Model selectors */}
         <div className="flex items-center justify-between">
           <Badge
             tone="danger"
             size="md"
-            icon={<span className="material-symbols-outlined text-[14px]">gavel</span>}
+            icon={<span aria-hidden="true" className="material-symbols-outlined text-[14px]">gavel</span>}
           >
             {t('newTask.fullPermissions')}
           </Badge>
@@ -75,7 +76,7 @@ export function PromptEditor({
             which a default badge would push onto one unbreakable line. The
             fill also moves off `bg-[var(--color-error)]/8` — Safari 15 WebView
             drops that color function, so the strip had no background there. */}
-        <Badge tone="danger" wrap pill={false} className="w-full" icon={<span className="material-symbols-outlined text-[12px]">warning</span>}>
+        <Badge tone="danger" size="sm" wrap bordered pill={false} className="w-full" icon={<span aria-hidden="true" className="material-symbols-outlined text-[13px]">warning</span>}>
           {t('promptEditor.bypassWarning')}{folderPath ? ` ${t('promptEditor.within')} ${folderPath}` : ` ${t('promptEditor.selectFolder')}`}.
         </Badge>
       </div>

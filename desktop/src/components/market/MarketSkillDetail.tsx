@@ -79,31 +79,31 @@ export function MarketSkillDetail({
 
   if (isDetailLoading) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[var(--color-surface-container-lowest)]" data-testid="market-detail-loading">
-        <div className="mx-auto w-full max-w-[1320px] px-6 py-6 lg:px-8">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[var(--color-surface)]" data-testid="market-detail-loading">
+        <div className="mx-auto w-full max-w-[1280px] px-6 py-6 lg:px-11">
           <Button
             variant="ghost"
             size="base"
-            icon={<ArrowLeft className="h-4 w-4" strokeWidth={2} aria-hidden="true" />}
+            icon={<ArrowLeft className="h-4 w-4" strokeWidth={1.6} aria-hidden="true" />}
             onClick={backToList}
           >
             {t('market.detail.back')}
           </Button>
-          <SkeletonGroup label={t('market.loading')} className="mt-5">
-            <div className="flex items-start gap-5 border-b border-[var(--color-border)]/70 pb-6">
-              <Skeleton shape="block" width="4rem" height="4rem" radius="lg" tone="strong" className="flex-shrink-0" />
+          <SkeletonGroup label={t('market.loading')} className="mt-[18px]">
+            <div className="flex items-start gap-6 pb-6">
+              <Skeleton shape="block" width="92px" height="92px" radius="lg" tone="strong" className="flex-shrink-0" />
               <div className="min-w-0 flex-1 pt-1">
-                <Skeleton height="0.625rem" className="w-24" />
-                <Skeleton height="1.5rem" tone="strong" className="mt-3 w-64 max-w-full" />
+                <Skeleton height="0.75rem" className="w-32" />
+                <Skeleton height="2rem" tone="strong" className="mt-3 w-64 max-w-full" />
                 <Skeleton height="0.75rem" className="mt-4 w-[min(100%,36rem)]" />
               </div>
             </div>
-            <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-9">
               <div>
-                <Skeleton height="2.5rem" className="w-52" />
-                <div className="mt-5 h-72 rounded-xl border border-[var(--color-border)]/60 bg-[var(--color-surface-container-low)]" />
+                <Skeleton height="2.75rem" className="w-52" />
+                <div className="mt-[22px] h-72 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)]" />
               </div>
-              <div className="order-first h-72 rounded-xl border border-[var(--color-border)]/60 bg-[var(--color-surface-container-low)] lg:order-none" />
+              <div className="order-first h-72 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] lg:order-none" />
             </div>
           </SkeletonGroup>
         </div>
@@ -180,9 +180,9 @@ export function MarketSkillDetail({
       {installError && installError.id === detail.id && (
         <div
           data-testid="market-install-error"
-          className="mt-4 flex items-start gap-2 rounded-lg border border-[var(--color-error)]/25 bg-[var(--color-error-container)]/35 px-3.5 py-2.5 text-sm text-[var(--color-text-primary)]"
+          className="mt-4 flex items-start gap-2 rounded-[var(--radius-lg)] border border-[var(--color-error)] bg-[var(--color-error-container)] px-3.5 py-2.5 text-sm text-[var(--color-on-error-container)]"
         >
-          <CircleAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--color-error)]" strokeWidth={2} aria-hidden="true" />
+          <CircleAlert className="mt-0.5 h-4 w-4 flex-shrink-0" strokeWidth={1.6} aria-hidden="true" />
           <span className="break-words">
             {installError.kind === 'generic'
               ? t('market.installError.generic', { message: installError.message })

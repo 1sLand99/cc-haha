@@ -285,7 +285,7 @@ export function AppShell() {
         <button
           type="button"
           data-testid="sidebar-backdrop"
-          className="app-shell-backdrop fixed inset-0 z-40 border-0 p-0"
+          className="app-shell-backdrop fixed inset-0 z-[var(--z-scrim)] border-0 p-0"
           aria-label={t('sidebar.collapse')}
           onClick={() => setEffectiveSidebarOpen(false)}
         />
@@ -317,7 +317,7 @@ export function AppShell() {
               icon={effectiveSidebarOpen ? 'close' : 'menu'}
               label={effectiveSidebarOpen ? t('sidebar.collapse') : t('sidebar.expand')}
               onClick={toggleEffectiveSidebar}
-              size="xl"
+              size="2xl"
               aria-controls="sidebar-shell"
               aria-expanded={effectiveSidebarOpen}
             />

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { isThemeMode, THEME_MODES, type ThemeMode } from '../types/settings'
+import { isDarkTheme, isThemeMode, THEME_MODES, type ThemeMode } from '../types/settings'
 
 const THEME_STORAGE_KEY = 'cc-haha-theme'
 const ACTIVE_SETTINGS_TAB_STORAGE_KEY = 'cc-haha-active-settings-tab'
@@ -46,7 +46,10 @@ function getStoredSettingsTab(): SettingsTab {
 export function applyTheme(theme: ThemeMode) {
   if (typeof document === 'undefined') return
   document.documentElement.setAttribute('data-theme', theme)
-  document.documentElement.style.colorScheme = theme === 'dark' ? 'dark' : 'light'
+  // Two of the six palettes sit on a dark ground, so this cannot test for the
+  // literal 'dark' key — ink-blue would render native scrollbars and form
+  // controls in their light variant against a near-black page.
+  document.documentElement.style.colorScheme = isDarkTheme(theme) ? 'dark' : 'light'
 }
 
 export function initializeTheme() {

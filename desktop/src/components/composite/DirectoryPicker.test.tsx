@@ -83,7 +83,11 @@ describe('DirectoryPicker', () => {
 
     const trigger = screen.getByRole('button')
     expect(trigger).toHaveTextContent('project')
-    expect(trigger.className).toContain('rounded-[7px]')
+    // The workbar trigger shares the launch row's outlined-pill recipe (see
+    // RepositoryLaunchControls.workbarButtonClassName): the directory, branch
+    // and worktree chips sit on one row and must read as one family.
+    expect(trigger.className).toContain('rounded-[var(--radius-lg)]')
+    expect(trigger.className).toContain('border-[var(--color-border)]')
     expect(trigger.className).not.toContain('rounded-full')
   })
 

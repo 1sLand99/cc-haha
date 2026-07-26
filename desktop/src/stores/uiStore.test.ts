@@ -28,19 +28,30 @@ describe('uiStore theme handling', () => {
     expect(document.documentElement.style.colorScheme).toBe('light')
   })
 
-  it('cycles through pure white, warm classic, and dark themes', async () => {
+  it('cycles through all six palettes and wraps back to pure white', async () => {
     const { useUIStore } = await import('./uiStore')
 
-    useUIStore.getState().toggleTheme()
-    expect(useUIStore.getState().theme).toBe('light')
-    expect(document.documentElement.style.colorScheme).toBe('light')
+    const cycle = ['paper', 'warm-classic', 'celadon', 'dark', 'ink-blue', 'white']
+    for (const expected of cycle) {
+      useUIStore.getState().toggleTheme()
+      expect(useUIStore.getState().theme).toBe(expected)
+    }
+  })
 
-    useUIStore.getState().toggleTheme()
-    expect(useUIStore.getState().theme).toBe('dark')
+  it('reports a dark color scheme for both ink palettes, not just the one named dark', async () => {
+    // `ink-blue` is a dark ground under a name that does not contain "dark".
+    // Testing `theme === 'dark'` leaves native scrollbars and form controls in
+    // their light variant against a near-black page.
+    const { useUIStore } = await import('./uiStore')
+
+    useUIStore.getState().setTheme('ink-blue')
+    expect(document.documentElement.getAttribute('data-theme')).toBe('ink-blue')
     expect(document.documentElement.style.colorScheme).toBe('dark')
 
-    useUIStore.getState().toggleTheme()
-    expect(useUIStore.getState().theme).toBe('white')
+    useUIStore.getState().setTheme('dark')
+    expect(document.documentElement.style.colorScheme).toBe('dark')
+
+    useUIStore.getState().setTheme('celadon')
     expect(document.documentElement.style.colorScheme).toBe('light')
   })
 })

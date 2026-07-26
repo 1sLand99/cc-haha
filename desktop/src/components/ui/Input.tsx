@@ -2,7 +2,8 @@ import { useId, type InputHTMLAttributes, type ReactNode } from 'react'
 
 import { cx } from '@/lib/cx'
 
-export type FieldSize = 'sm' | 'md' | 'lg'
+/** `xl` is the 44px page-level tier the handoff draws for market/list search bars. */
+export type FieldSize = 'sm' | 'md' | 'lg' | 'xl'
 
 export type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> & {
   label?: string
@@ -19,6 +20,7 @@ export const FIELD_SIZE_CLASSES: Record<FieldSize, string> = {
   sm: 'h-7 px-2 text-xs',
   md: 'h-8 px-2.5 text-sm',
   lg: 'h-10 px-3 text-sm',
+  xl: 'h-11 px-3.5 text-sm',
 }
 
 /**

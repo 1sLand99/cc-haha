@@ -8,6 +8,7 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { IconButton } from '@/components/ui/IconButton'
 import { mcpStatusTone } from '@/lib/mcpStatus'
 import { DirectoryPicker } from '@/components/composite/DirectoryPicker'
+import { SettingsPageHeader } from '@/components/settings/SettingsSection'
 import { Input } from '@/components/ui/Input'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '../i18n'
@@ -387,7 +388,7 @@ function ArraySection({
 
 function StatCard({ label, value, icon }: { label: string; value: number; icon: string }) {
   return (
-    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-5 py-4">
+    <div className="rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-5 py-4">
       <div className="flex items-center gap-2 text-[var(--color-text-tertiary)] mb-2">
         <span className="material-symbols-outlined text-[18px]">{icon}</span>
         <span className="text-xs uppercase tracking-[0.18em] font-semibold">{label}</span>
@@ -426,7 +427,7 @@ function ServerRow({
           </span>
           {serverHasProjectContext(server) && (
             <span
-              className="max-w-full truncate rounded-full bg-[var(--color-surface-hover)] px-2 py-1 font-[var(--font-mono)] text-[11px] text-[var(--color-text-tertiary)]"
+              className="max-w-full truncate rounded-full bg-[var(--color-surface-hover)] px-2 py-1 font-mono text-[11px] text-[var(--color-text-tertiary)]"
               title={server.projectPath}
             >
               {server.projectPath}
@@ -785,7 +786,7 @@ export function McpSettings() {
 
           <div className="flex items-start justify-between gap-4 mb-8">
             <div>
-              <h2 className="text-[2.2rem] font-semibold tracking-[-0.03em] text-[var(--color-text-primary)]">{server.name}</h2>
+              <h2 className="text-[32px] font-semibold leading-tight text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>{server.name}</h2>
               <p className="mt-3 text-base text-[var(--color-text-secondary)]">{redactSensitiveText(server.summary)}</p>
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <StatusBadge server={server} />
@@ -861,7 +862,7 @@ export function McpSettings() {
 
           <div className="flex items-start justify-between gap-4 mb-8">
             <div>
-              <h2 className="text-[2.2rem] font-semibold tracking-[-0.03em] text-[var(--color-text-primary)]">
+              <h2 className="text-[32px] font-semibold leading-tight text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>
                 {editing ? t('settings.mcp.form.editTitle', { name: targetServer!.name }) : t('settings.mcp.form.createTitle')}
               </h2>
               <p className="mt-3 text-base text-[var(--color-text-secondary)]">
@@ -887,7 +888,7 @@ export function McpSettings() {
               {editing && targetServer?.canRemove && (
                 <Button
                   variant="ghost"
-                  className="text-[var(--color-error)] hover:text-[var(--color-error)] hover:bg-[var(--color-error)]/8"
+                  className="text-[var(--color-error)] hover:text-[var(--color-error)] hover:bg-[var(--color-error-soft)]"
                   onClick={() => handleDelete(targetServer)}
                   loading={isDeleting}
                 >
@@ -1090,20 +1091,16 @@ export function McpSettings() {
 
   return (
     <div className="max-w-5xl min-w-0">
-      <div className="flex items-start justify-between gap-6 mb-8">
-        <div>
-          <h2 className="text-[2.2rem] font-semibold tracking-[-0.03em] text-[var(--color-text-primary)]">
-            {t('settings.mcp.title')}
-          </h2>
-          <p className="mt-3 text-base text-[var(--color-text-secondary)]">
-            {t('settings.mcp.description')}
-          </p>
-        </div>
-        <Button variant="secondary" size="lg" onClick={beginCreate}>
-          <span className="material-symbols-outlined text-[18px]">add</span>
-          {t('settings.mcp.addServer')}
-        </Button>
-      </div>
+      <SettingsPageHeader
+        title={t('settings.mcp.title')}
+        description={t('settings.mcp.description')}
+        action={(
+          <Button size="base" onClick={beginCreate}>
+            <span className="material-symbols-outlined text-[16px]">add</span>
+            {t('settings.mcp.addServer')}
+          </Button>
+        )}
+      />
 
       {showListLoading ? (
         <LoadingState label={t('common.loading')} variant="dashed" size="lg" />

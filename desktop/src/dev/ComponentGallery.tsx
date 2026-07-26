@@ -21,6 +21,8 @@ import { Spinner } from '@/components/ui/Spinner'
 import { Switch } from '@/components/ui/Switch'
 import { TextArea } from '@/components/ui/TextArea'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { BrandSeal } from '@/components/composite/BrandSeal'
+import { THEME_MODES } from '@/types/settings'
 
 /**
  * A dev-only page rendering every `components/ui` primitive under each theme.
@@ -34,9 +36,10 @@ import { Tooltip } from '@/components/ui/Tooltip'
  * from the app and never enters the production bundle.
  */
 
-const THEMES = ['white', 'light', 'dark'] as const
+/** Sourced from the type rather than restated, so a new palette shows up here. */
+const THEMES = THEME_MODES
 const TONES: Tone[] = ['neutral', 'brand', 'success', 'warning', 'danger', 'info']
-const VARIANTS: ButtonVariant[] = ['primary', 'secondary', 'tonal', 'ghost', 'danger', 'danger-outline', 'link', 'inverse']
+const VARIANTS: ButtonVariant[] = ['primary', 'secondary', 'tonal', 'tonal-outline', 'ghost', 'danger', 'danger-outline', 'link', 'inverse']
 const SIZES: ButtonSize[] = ['xs', 'sm', 'base', 'md', 'lg']
 const ICON_SIZES: IconButtonSize[] = ['2xs', 'xs', 'sm', 'md', 'lg', 'xl', '2xl']
 const ICON_TONES: IconButtonTone[] = ['default', 'secondary', 'muted', 'brand', 'danger']
@@ -237,6 +240,18 @@ export function ComponentGallery() {
           <Card surface="high">high</Card>
           <Card border="dashed">dashed</Card>
           <Card interactive>interactive (hover / focus)</Card>
+          <Card shadow="card">shadow=card</Card>
+          <Card shadow="composer">shadow=composer</Card>
+          <Card interactive lift>lift (hover raises 2px)</Card>
+        </div>
+      </Section>
+
+      <Section title="BrandSeal" note="The 「哈」 seal. The glyph is platform serif — check it against Songti on macOS. The inner rule appears only at xl.">
+        <div className="flex flex-wrap items-end gap-4">
+          <BrandSeal size="sm" />
+          <BrandSeal size="md" />
+          <BrandSeal size="lg" />
+          <BrandSeal size="xl" />
         </div>
       </Section>
 

@@ -7,6 +7,12 @@ export type ButtonVariant =
   | 'primary'
   | 'secondary'
   | 'tonal'
+  /**
+   * Terracotta outline that inverts to a solid terracotta fill on hover — the
+   * handoff's install/secondary-action button (market cards, detail pages).
+   * Distinct from `tonal`, which rests on a soft fill and never inverts.
+   */
+  | 'tonal-outline'
   | 'ghost'
   | 'danger'
   | 'danger-outline'
@@ -38,25 +44,45 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   block?: boolean
 }
 
+/**
+ * Disabled styling lives per-variant rather than in the base classes.
+ *
+ * A single `disabled:opacity-50` cannot express the handoff's disabled primary,
+ * which is an opaque `--s1` block with `--t3` text — half-transparent ink over
+ * the page ground reads as "still loading" rather than "not available". Putting
+ * it here also sidesteps a base-vs-variant class fight the component cannot
+ * resolve without `tailwind-merge` (see components/AGENTS.md §3.6).
+ */
+const DISABLED_FILL =
+  'disabled:bg-[var(--color-surface-hover)] disabled:text-[var(--color-text-tertiary)] disabled:shadow-none disabled:border-transparent'
+const DISABLED_FADE = 'disabled:opacity-50'
+
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
+  // Solid ink that turns terracotta on hover — the handoff's primary action.
+  // It is deliberately not the brand color at rest: on a page where terracotta
+  // marks the accent everywhere, an ink block is what reads as "the button".
   primary:
-    'bg-[image:var(--gradient-btn-primary)] text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)] hover:bg-[image:var(--gradient-btn-primary-hover)] hover:brightness-105 active:translate-y-[1px]',
+    `bg-[var(--color-btn-primary-bg)] text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)] hover:bg-[var(--color-brand)] hover:-translate-y-px active:translate-y-0 active:scale-[0.97] ${DISABLED_FILL}`,
   secondary:
-    'bg-[var(--color-surface)] text-[var(--color-text-primary)] border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)]',
+    `bg-[var(--color-surface)] text-[var(--color-text-primary)] border border-[var(--color-border)] hover:border-[var(--color-outline)] hover:bg-[var(--color-surface-hover)] active:scale-[0.98] ${DISABLED_FILL}`,
   tonal:
-    'bg-[var(--color-brand-soft)] text-[var(--color-brand)] hover:bg-[var(--color-brand-soft-hover)]',
+    // Text is the darkened pair, not `--color-brand`: the raw accent only makes
+    // 4.3:1 on its own soft fill under the two ink palettes.
+    `bg-[var(--color-brand-soft)] text-[var(--color-on-brand-soft)] hover:bg-[var(--color-brand-soft-hover)] active:scale-[0.98] ${DISABLED_FILL}`,
+  'tonal-outline':
+    `bg-transparent text-[var(--color-brand)] border border-[var(--color-primary-fixed-dim)] hover:bg-[var(--color-brand)] hover:border-[var(--color-brand)] hover:text-[var(--color-on-primary)] active:scale-[0.98] ${DISABLED_FADE}`,
   ghost:
-    'bg-transparent text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]',
+    `bg-transparent text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.98] ${DISABLED_FADE}`,
   danger:
     // Foreground from a token, not `white`: dark's --color-error is a light red
     // that white text is unreadable on.
-    'bg-[var(--color-error)] text-[var(--color-on-error)] hover:opacity-90',
+    `bg-[var(--color-error)] text-[var(--color-on-error)] hover:brightness-110 hover:-translate-y-px active:translate-y-0 active:scale-[0.97] ${DISABLED_FILL}`,
   inverse:
-    'bg-[var(--color-inverse-surface)] text-[var(--color-inverse-on-surface)] hover:opacity-90',
+    `bg-[var(--color-inverse-surface)] text-[var(--color-inverse-on-surface)] hover:bg-[var(--color-brand)] hover:-translate-y-px active:translate-y-0 active:scale-[0.97] ${DISABLED_FILL}`,
   'danger-outline':
-    'bg-transparent text-[var(--color-error)] border border-[var(--color-error)] hover:bg-[var(--color-error-soft)]',
+    `bg-transparent text-[var(--color-error)] border border-[var(--color-error)] hover:bg-[var(--color-error-soft)] active:scale-[0.98] ${DISABLED_FADE}`,
   link:
-    'bg-transparent text-[var(--color-brand)] underline-offset-2 hover:underline px-0',
+    `bg-transparent text-[var(--color-brand)] underline-offset-2 hover:underline hover:text-[var(--color-brand-hover)] px-0 ${DISABLED_FADE}`,
 }
 
 /**
@@ -69,20 +95,42 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
  * move any existing button. `xs` is new.
  */
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  xs: 'h-5 px-1.5 text-[11px] gap-1',
-  sm: 'h-6 px-2 text-xs gap-1.5',
-  base: 'h-8 px-3 text-xs gap-1.5',
-  md: 'h-9 px-4 text-sm gap-1.5',
-  lg: 'h-10 px-5 text-sm gap-2',
+  xs: 'h-5 text-[11px] gap-1',
+  sm: 'h-6 text-xs gap-1.5',
+  base: 'h-8 text-xs gap-1.5',
+  md: 'h-9 text-sm gap-1.5',
+  lg: 'h-10 text-sm gap-2',
+}
+
+/**
+ * Horizontal padding, separate from the size class so `link` can drop it.
+ * When it lived inside SIZE_CLASSES, `link` emitted both `px-0` and the size's
+ * `px-4` — and Tailwind resolves that by sorting the generated stylesheet, not
+ * by the order the classes were passed, so the winner was a coin flip.
+ */
+const SIZE_PX: Record<ButtonSize, string> = {
+  xs: 'px-1.5',
+  sm: 'px-2',
+  base: 'px-3',
+  md: 'px-4',
+  lg: 'px-5',
 }
 
 const SPINNER_SIZE: Record<ButtonSize, number> = { xs: 11, sm: 12, base: 14, md: 16, lg: 16 }
 
 const BASE_CLASSES = [
   'inline-flex items-center justify-center rounded-[var(--radius-md)]',
-  'font-medium transition-colors duration-150 cursor-pointer',
+  'font-medium cursor-pointer',
+  // The handoff pins one motion curve on every button: .16s on paint, .14s on
+  // transform. `transition-colors` alone would leave the hover lift snapping.
+  'transition-[background-color,color,border-color,box-shadow,transform,opacity] duration-150 ease-out',
+  // `--color-border-focus` resolves to the terracotta accent in all six
+  // palettes; the 2px offset is the handoff's global focus treatment, and the
+  // offset color has to be a token or it paints white on the ink themes.
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]',
-  'disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none',
+  'focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]',
+  'disabled:cursor-not-allowed disabled:pointer-events-none disabled:translate-y-0',
+  'motion-reduce:transition-none motion-reduce:hover:translate-y-0 motion-reduce:active:scale-100',
 ].join(' ')
 
 /**
@@ -122,7 +170,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={cx(BASE_CLASSES, VARIANT_CLASSES[variant], SIZE_CLASSES[size], block && 'w-full', className)}
+      className={cx(
+        BASE_CLASSES,
+        VARIANT_CLASSES[variant],
+        SIZE_CLASSES[size],
+        variant !== 'link' && SIZE_PX[size],
+        block && 'w-full',
+        className,
+      )}
       {...props}
     >
       {leading}

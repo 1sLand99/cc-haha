@@ -207,7 +207,7 @@ describe('Settings > General tab', () => {
 
     useSettingsStore.setState({
       locale: 'en',
-      theme: 'light',
+      theme: 'warm-classic',
       permissionMode: 'default',
       autoModeOptInAccepted: false,
       thinkingEnabled: true,
@@ -387,19 +387,43 @@ describe('Settings > General tab', () => {
     expect(screen.getByLabelText('Skip WebFetch domain preflight')).toBeInTheDocument()
   })
 
-  it('offers the pure white appearance theme', () => {
+  it('offers all six palettes, paper grounds before ink ones', () => {
     render(<Settings />)
 
     fireEvent.click(screen.getByText('General'))
-    const pureWhite = screen.getByRole('button', { name: 'Pure White' })
-    const warmClassic = screen.getByRole('button', { name: 'Warm Classic' })
-    const dark = screen.getByRole('button', { name: 'Dark' })
+    // The picker order is load-bearing: the four paper grounds come first, then
+    // the two ink ones, so the list reads light-to-dark rather than shuffled.
+    const order = ['Pure White', 'Paper', 'Warm Classic', 'Celadon', 'Ink Night', 'Ink Blue']
+      .map((name) => screen.getByRole('button', { name }))
 
-    expect((pureWhite.compareDocumentPosition(warmClassic) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true)
-    expect((warmClassic.compareDocumentPosition(dark) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true)
+    for (const [index, chip] of order.slice(0, -1).entries()) {
+      const next = order[index + 1]!
+      expect(
+        (chip.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+        `${order[index + 1]} should follow ${order[index]}`,
+      ).toBe(true)
+    }
+
     fireEvent.click(screen.getByRole('button', { name: 'Pure White' }))
-
     expect(useSettingsStore.getState().setTheme).toHaveBeenCalledWith('white')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ink Blue' }))
+    expect(useSettingsStore.getState().setTheme).toHaveBeenCalledWith('ink-blue')
+  })
+
+  it('gives the settings rail the handoff width and a rounded selected item', () => {
+    useUIStore.setState({ activeSettingsTab: 'general', pendingSettingsTab: null })
+    render(<Settings />)
+
+    const activeItem = screen.getByRole('button', { name: 'General' })
+    // Selection is a rounded ground inside the rail, not a full-bleed band:
+    // the rail is padded, so a square highlight would touch the divider.
+    expect(activeItem.className).toContain('rounded-[var(--radius-md)]')
+    expect(activeItem.className).toContain('bg-[var(--color-surface-hover)]')
+    expect(activeItem).toHaveAttribute('aria-current', 'page')
+
+    const rail = activeItem.parentElement?.parentElement
+    expect(rail?.className).toContain('w-[260px]')
   })
 
   it('marks the pure white appearance theme as selected', () => {
@@ -1574,6 +1598,18 @@ describe('Settings > Providers tab', () => {
     providerStoreState.providerOrder = ['provider-1', 'claude-official', 'openai-official', 'grok-official']
     providerStoreState.activeId = null
     providerStoreState.hasLoadedProviders = true
+  })
+
+  it('outlines the default provider in terracotta rather than the focus color', () => {
+    providerStoreState.activeId = 'provider-1'
+    render(<Settings />)
+
+    const card = screen.getByTestId('provider-provider-1')
+    // 1.5px so the default row reads as chosen at a glance without the heavier
+    // ring the focus border gave it, which collided with the real focus ring.
+    expect(card.className).toContain('border-[1.5px]')
+    expect(card.className).toContain('border-[var(--color-primary-fixed-dim)]')
+    expect(card.className).not.toContain('border-[var(--color-border-focus)]')
   })
 
   it('does not query official OAuth status before providers finish loading', () => {

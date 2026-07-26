@@ -82,7 +82,8 @@ export function Modal({ open, onClose, title, children, width = 560, footer }: M
       {/* Modal content */}
       <div
         ref={dialogRef}
-        className="glass-panel relative rounded-[var(--radius-xl)] max-h-[85vh] flex flex-col"
+        // 24px — the top of the handoff's corner scale, reserved for modals.
+        className="glass-panel relative rounded-[var(--radius-3xl)] max-h-[85vh] flex flex-col"
         style={{ width, maxWidth: 'calc(100vw - 48px)' }}
         role="dialog"
         aria-modal="true"
@@ -91,7 +92,14 @@ export function Modal({ open, onClose, title, children, width = 560, footer }: M
       >
         {title && (
           <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-0">
-            <h2 className="text-xl font-bold text-[var(--color-text-primary)]">{title}</h2>
+            <h2
+              // 22px serif — dialog titles are headings, and headings carry the
+              // 「墨」 identity (handoff §7, every modal comp).
+              className="text-[22px] font-bold tracking-tight text-[var(--color-text-primary)]"
+              style={{ fontFamily: 'var(--font-headline)' }}
+            >
+              {title}
+            </h2>
             <button
               type="button"
               onClick={onClose}

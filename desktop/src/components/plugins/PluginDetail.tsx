@@ -198,14 +198,17 @@ export function PluginDetail() {
         </Button>
       </div>
 
-      <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] overflow-hidden">
+      <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] shadow-[var(--shadow-card)] overflow-hidden">
         <div className="grid gap-4 px-5 py-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.9fr)] lg:items-start">
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-tertiary)] mb-2">
               {t('settings.plugins.entryEyebrow')}
             </div>
             <div className="flex flex-wrap items-center gap-2 mb-2">
-              <h3 className="text-[22px] font-semibold leading-tight text-[var(--color-text-primary)] break-all">
+              <h3
+                className="text-[24px] font-semibold leading-tight text-[var(--color-text-primary)] break-all"
+                style={{ fontFamily: 'var(--font-headline)' }}
+              >
                 {selectedPlugin.name}
               </h3>
               <StatusPill enabled={selectedPlugin.enabled} hasErrors={selectedPlugin.hasErrors} />
@@ -254,7 +257,7 @@ export function PluginDetail() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4">
+      <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] px-5 py-4">
         <div className="flex flex-wrap gap-2">
           {canMutate && (
             selectedPlugin.enabled ? (
@@ -348,9 +351,12 @@ export function PluginDetail() {
         />
       )}
 
-      <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+      <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] overflow-hidden">
         <div className="px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
-          <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
+          <h4
+            className="text-[16.5px] font-semibold leading-tight text-[var(--color-text-primary)]"
+            style={{ fontFamily: 'var(--font-headline)' }}
+          >
             {t('settings.plugins.capabilitiesTitle')}
           </h4>
           <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
@@ -465,7 +471,7 @@ export function PluginDetail() {
             {otherCapabilityItems.map(({ key, items }) => (
               <div
                 key={key}
-                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3"
+                className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3"
               >
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <div className="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -529,10 +535,15 @@ function CapabilityPreviewSection({
   hint?: string
 }) {
   return (
-    <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] overflow-hidden">
+    <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] overflow-hidden">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3">
-        <div className="text-sm font-semibold text-[var(--color-text-primary)]">{title}</div>
-        <div className="text-[11px] text-[var(--color-text-tertiary)]">{count}</div>
+        <div
+          className="text-[14.5px] font-semibold text-[var(--color-text-primary)]"
+          style={{ fontFamily: 'var(--font-headline)' }}
+        >
+          {title}
+        </div>
+        <div className="font-mono text-[11px] tabular-nums text-[var(--color-text-tertiary)]">{count}</div>
       </div>
       <div className="p-4">
         {hint && count > 0 && (
@@ -569,7 +580,7 @@ function SkillPreviewCard({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="group rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] disabled:cursor-default disabled:opacity-70 disabled:hover:border-[var(--color-border)] disabled:hover:bg-[var(--color-surface)]"
+      className="group rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] disabled:cursor-default disabled:opacity-70 disabled:hover:border-[var(--color-border)] disabled:hover:bg-[var(--color-surface)]"
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 flex-wrap min-w-0">
@@ -595,7 +606,7 @@ function CommandPreviewCard({
   description: string
 }) {
   return (
-    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+    <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
       <div className="text-sm font-semibold text-[var(--color-text-primary)] break-all">/{name}</div>
       <div className="mt-2 text-xs leading-5 text-[var(--color-text-secondary)] break-words">{description}</div>
     </div>
@@ -618,7 +629,7 @@ function AgentPreviewCard({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="group rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] disabled:cursor-default disabled:opacity-70 disabled:hover:border-[var(--color-border)] disabled:hover:bg-[var(--color-surface)]"
+      className="group rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] disabled:cursor-default disabled:opacity-70 disabled:hover:border-[var(--color-border)] disabled:hover:bg-[var(--color-surface)]"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -651,7 +662,7 @@ function McpPreviewCard({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="group rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] disabled:cursor-default disabled:opacity-70 disabled:hover:border-[var(--color-border)] disabled:hover:bg-[var(--color-surface)]"
+      className="group rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-left transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] disabled:cursor-default disabled:opacity-70 disabled:hover:border-[var(--color-border)] disabled:hover:bg-[var(--color-surface)]"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -679,7 +690,7 @@ function HookPreviewCard({
   actions: string[]
 }) {
   return (
-    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+    <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-sm font-semibold text-[var(--color-text-primary)] break-all">{event}</span>
         {/* `wrap` is what unblocked these two: a hook matcher is a regex and an
@@ -721,7 +732,10 @@ function DetailStat({
         <span className="material-symbols-outlined text-[14px]">{icon}</span>
         <span>{label}</span>
       </div>
-      <div className="mt-2 text-base font-semibold text-[var(--color-text-primary)] break-all">
+      <div
+        className="mt-2 text-[21px] font-semibold leading-none text-[var(--color-text-primary)] break-all"
+        style={{ fontFamily: 'var(--font-headline)' }}
+      >
         {value}
       </div>
     </Card>

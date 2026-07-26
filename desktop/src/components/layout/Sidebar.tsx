@@ -3,8 +3,11 @@ import { Check, ChevronDown, Clock, Folder, FolderOpen, FolderPlus, GitBranch, M
 import { useSessionStore } from '../../stores/sessionStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useTranslation, type TranslationKey } from '../../i18n'
+import { BrandSeal } from '@/components/composite/BrandSeal'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorState } from '@/components/ui/ErrorState'
 import { IconButton } from '@/components/ui/IconButton'
 import { Spinner } from '@/components/ui/Spinner'
 import { useDismissable } from '@/hooks/useDismissable'
@@ -16,7 +19,6 @@ import { useChatStore } from '../../stores/chatStore'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { desktopUiPreferencesApi, type SidebarProjectPreferences } from '../../api/desktopUiPreferences'
 import { getDesktopHost } from '../../lib/desktopHost'
-import { publicAssetPath } from '../../lib/publicAsset'
 import { hasRunningBackgroundTasks } from '../../lib/backgroundTasks'
 import { getSessionWorkspaceState } from '../../lib/sessionWorkspace'
 
@@ -679,12 +681,12 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
       >
         <div className={`flex ${expanded ? 'items-center justify-between gap-3' : 'flex-col items-center gap-2'}`}>
           <div className={`flex min-w-0 items-center ${expanded ? 'gap-2.5' : 'justify-center'}`}>
-            <img src={publicAssetPath('app-icon.png')} alt="" className="h-8 w-8 flex-shrink-0" />
+            <BrandSeal size={expanded ? 'md' : 'lg'} />
             <span
-              className={`sidebar-copy ${expanded ? 'sidebar-copy--visible' : 'sidebar-copy--hidden'} text-[13px] font-semibold tracking-tight text-[var(--color-text-primary)]`}
+              className={`sidebar-copy ${expanded ? 'sidebar-copy--visible' : 'sidebar-copy--hidden'} text-base font-bold tracking-tight text-[var(--color-text-primary)]`}
               style={{ fontFamily: 'var(--font-headline)' }}
             >
-              Claude Code <span className="text-[var(--color-primary-container)]">Haha</span>
+              Claude Code <span className="text-[var(--color-brand)]">Haha</span>
             </span>
           </div>
           <div className={`flex items-center ${expanded ? 'gap-1.5' : 'flex-col gap-2'}`}>
@@ -692,7 +694,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
               href="https://github.com/NanmiCoder/cc-haha"
               target="_blank"
               rel="noopener noreferrer"
-              className={`sidebar-copy ${expanded ? 'sidebar-copy--visible' : 'sidebar-copy--hidden'} inline-flex items-center justify-center rounded-md p-1 text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]`}
+              className={`sidebar-copy ${expanded ? 'sidebar-copy--visible' : 'sidebar-copy--hidden'} inline-flex items-center justify-center rounded-[var(--radius-sm)] p-1 text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]`}
               title="GitHub"
               tabIndex={expanded ? undefined : -1}
               aria-hidden={!expanded}
@@ -703,7 +705,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
               <button
                 type="button"
                 onClick={closeMobileDrawer}
-                className="sidebar-toggle-button flex h-11 w-11 items-center justify-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-sidebar)]"
+                className="sidebar-toggle-button flex h-11 w-11 items-center justify-center rounded-[var(--radius-lg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-sidebar)]"
                 aria-label={t('sidebar.collapse')}
                 title={t('sidebar.collapse')}
               >
@@ -785,7 +787,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
               <button
                 type="button"
                 onClick={() => openModal('globalSearch')}
-                className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-[14px] border border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)] pl-3 pr-2 text-left text-[13px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] focus-visible:border-[var(--color-border-focus)] focus-visible:outline-none"
+                className={`flex min-w-0 flex-1 items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)] pl-3 pr-2 text-left text-[13px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-sidebar-item-hover)] focus-visible:border-[var(--color-border-focus)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-sidebar)] ${isMobile ? 'h-11' : 'h-9'}`}
                 aria-label={t('search.global.trigger')}
                 title={t('search.global.trigger')}
               >
@@ -799,7 +801,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                 icon={<RefreshCw className={`h-4 w-4 ${showRefreshLoading ? 'animate-spin' : ''}`} strokeWidth={1.9} aria-hidden="true" />}
                 label={t('sidebar.refreshSessions')}
                 onClick={() => void refreshSessionsNow()}
-                size="lg"
+                size={isMobile ? '2xl' : 'lg'}
                 tone="secondary"
                 surface="sidebar"
                 className="border border-[var(--color-sidebar-search-border)] bg-[var(--color-sidebar-search-bg)]"
@@ -808,7 +810,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                 icon={isBatchMode ? 'close' : 'delete_sweep'}
                 label={isBatchMode ? t('sidebar.batchExit') : t('sidebar.batchManage')}
                 onClick={isBatchMode ? handleExitBatchMode : enterBatchMode}
-                size="lg"
+                size={isMobile ? '2xl' : 'lg'}
                 tone={isBatchMode ? 'brand' : 'secondary'}
                 surface="sidebar"
                 aria-pressed={isBatchMode}
@@ -895,26 +897,23 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
               className="sidebar-scroll-area min-h-0 flex-1 overflow-y-auto px-3 pb-20"
             >
               {error && (
-                <div className="mx-1 mt-2 rounded-[var(--radius-md)] border border-[var(--color-error)]/20 bg-[var(--color-error)]/5 px-3 py-2">
-                  <div className="text-xs font-medium text-[var(--color-error)]">{t('sidebar.sessionListFailed')}</div>
-                  <div className="mt-1 text-[11px] text-[var(--color-text-secondary)] break-words">{error}</div>
-                  <Button
-                    variant="link"
-                    size="xs"
-                    onClick={() => fetchSessions()}
-                    className="mt-2"
-                  >
-                    {t('common.retry')}
-                  </Button>
-                </div>
+                <ErrorState
+                  className="mx-1 mt-2 break-words"
+                  size="sm"
+                  tone="strong"
+                  title={t('sidebar.sessionListFailed')}
+                  detail={error}
+                  onRetry={() => fetchSessions()}
+                  retryLabel={t('common.retry')}
+                />
               )}
               {showInitialLoading ? (
                 <div className="px-3 py-4 text-center text-xs text-[var(--color-text-tertiary)]">
                   {t('common.loading')}
                 </div>
-              ) : filteredSessions.length === 0 && (
-                <div className="px-3 py-4 text-center text-xs text-[var(--color-text-tertiary)]">
-                  {t('sidebar.noSessions')}
+              ) : !error && filteredSessions.length === 0 && (
+                <div className="px-3 py-2">
+                  <EmptyState variant="inline" title={t('sidebar.noSessions')} />
                 </div>
               )}
               {orderedProjectGroups.length > 0 && (
@@ -925,6 +924,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                   onOpenMenu={(event) => openProjectHeaderMenu(event, 'main')}
                   onOpenCreate={(event) => openProjectHeaderMenu(event, 'create')}
                   actionsRef={projectHeaderActionsRef}
+                  isMobile={isMobile}
                 />
               )}
               {visibleProjectGroups.map((project) => {
@@ -965,7 +965,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                         onDragEnd={clearProjectDragState}
                         onClick={() => toggleProjectCollapsed(project.key)}
                         data-state={projectCollapsed ? 'closed' : 'open'}
-                        className="flex min-w-0 flex-1 cursor-grab items-center gap-2 rounded-xl px-1.5 py-2 text-left transition-[background,color] active:cursor-grabbing hover:bg-[var(--color-sidebar-item-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+                        className={`flex min-w-0 flex-1 cursor-grab items-center gap-2 rounded-[var(--radius-md)] px-1.5 text-left transition-[background,color] active:cursor-grabbing hover:bg-[var(--color-sidebar-item-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${isMobile ? 'min-h-11 py-2.5' : 'py-2'}`}
                         aria-expanded={!projectCollapsed}
                         aria-label={t(projectCollapsed ? 'sidebar.expandProject' : 'sidebar.collapseProject', { project: project.title })}
                         title={project.subtitle || project.title}
@@ -1001,7 +1001,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                           <button
                             type="button"
                             onClick={() => toggleGroupSelection(groupIds)}
-                            className={`rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${
+                            className={`rounded-[var(--radius-sm)] px-1.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${
                               groupSelectedCount > 0
                                 ? 'text-[var(--color-brand)] hover:bg-[var(--color-brand-soft)]'
                                 : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-secondary)]'
@@ -1014,7 +1014,15 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                           </button>
                         )}
                         {!isBatchMode && (
-                          <div className="pointer-events-none flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/project:pointer-events-auto group-hover/project:opacity-100 group-focus-within/project:pointer-events-auto group-focus-within/project:opacity-100">
+                          // Desktop reveals these on row hover. The touch drawer
+                          // has neither hover nor a way to focus through
+                          // `pointer-events: none`, so there they stay put — two
+                          // 44px targets with enough gap not to catch each other.
+                          <div className={`flex items-center transition-opacity duration-150 ${
+                            isMobile
+                              ? 'gap-1.5 opacity-100'
+                              : 'pointer-events-none gap-0.5 opacity-0 group-hover/project:pointer-events-auto group-hover/project:opacity-100 group-focus-within/project:pointer-events-auto group-focus-within/project:opacity-100'
+                          }`}>
                             <IconButton
                               icon={<MoreHorizontal className="h-[17px] w-[17px]" strokeWidth={2} aria-hidden="true" />}
                               label={t('sidebar.projectActions', { project: project.title })}
@@ -1023,7 +1031,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                                 setContextMenu(null)
                                 setProjectContextMenu({ key: project.key, x: event.clientX, y: event.clientY })
                               }}
-                              size="sm"
+                              size={isMobile ? '2xl' : 'sm'}
                               tone="muted"
                               surface="sidebar"
                             />
@@ -1034,7 +1042,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                                 event.stopPropagation()
                                 void createSessionForWorkDir(project.workDir)
                               }}
-                              size="sm"
+                              size={isMobile ? '2xl' : 'sm'}
                               tone="muted"
                               surface="sidebar"
                             />
@@ -1082,11 +1090,14 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                                   }}
                                   onContextMenu={(e) => handleContextMenu(e, session.id)}
                                   className={`
-                                    group/session w-full rounded-lg px-2.5 ${isMobile ? 'py-3' : 'py-1.5'} text-left text-[13px] transition-[background,filter,color] duration-200
+                                    group/session w-full rounded-[var(--radius-md)] px-2.5 ${isMobile ? 'py-3' : 'py-1.5'} text-left text-[13px] transition-[background,filter,color,box-shadow] duration-200
+                                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--color-surface-sidebar)]
                                     ${selectedSessionIds.has(session.id)
-                                      ? 'sidebar-session-row--selected bg-[var(--color-sidebar-item-active)] text-[var(--color-text-primary)]'
+                                      ? 'sidebar-session-row--selected bg-[var(--color-sidebar-item-active)] text-[var(--color-text-primary)] shadow-[var(--shadow-card)]'
                                       : session.id === activeTabId
-                                      ? 'sidebar-session-row--active bg-[var(--color-sidebar-item-active)] text-[var(--color-text-primary)]'
+                                      // The handoff marks the open session as a card lifted off the
+                                      // sidebar ground: page-white fill plus the resting shadow step.
+                                      ? 'sidebar-session-row--active bg-[var(--color-sidebar-item-active)] text-[var(--color-text-primary)] shadow-[var(--shadow-card)]'
                                       : 'sidebar-session-row--idle text-[var(--color-text-secondary)] hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)]'
                                     }
                                   `}
@@ -1099,7 +1110,9 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                                         className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[5px] border transition-colors ${
                                           selectedSessionIds.has(session.id)
                                             ? 'border-[var(--color-brand)] bg-[var(--color-brand)] text-[var(--color-on-primary)]'
-                                            : 'border-[var(--color-border)] bg-[var(--color-surface)]'
+                                            // Hairline `--color-border` only reaches 1.2:1 here; a control
+                                            // boundary needs 3:1 (WCAG 1.4.11).
+                                            : 'border-[var(--color-border-strong)] bg-[var(--color-surface)]'
                                         }`}
                                         aria-hidden="true"
                                       >
@@ -1134,7 +1147,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
                             <button
                               type="button"
                               onClick={() => toggleProjectSessionExpansion(project.key)}
-                              className="inline-flex items-center justify-start py-1 text-[13px] font-semibold text-[var(--color-text-tertiary)] opacity-75 transition-[color,opacity] hover:text-[var(--color-text-secondary)] hover:opacity-100 focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+                              className={`inline-flex items-center justify-start text-[13px] font-semibold text-[var(--color-text-tertiary)] opacity-75 transition-[color,opacity] hover:text-[var(--color-text-secondary)] hover:opacity-100 focus-visible:rounded-[var(--radius-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${isMobile ? 'min-h-11 py-2' : 'py-1'}`}
                               aria-expanded={sessionsExpanded}
                             >
                               {sessionsExpanded
@@ -1182,21 +1195,21 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
       {contextMenu && (
         <div
           ref={sessionContextMenuRef}
-          className="fixed z-50 min-w-[140px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1"
-          style={{ left: contextMenu.x, top: contextMenu.y, boxShadow: 'var(--shadow-dropdown)' }}
+          className="fixed z-[var(--z-dropdown)] min-w-[180px] overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[var(--shadow-dropdown)]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
             onClick={() => {
               const session = sessions.find((s) => s.id === contextMenu.id)
               handleStartRename(contextMenu.id, session?.title || '')
             }}
-            className="w-full px-3 py-1.5 text-left text-xs text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
+            className="w-full px-4 py-2 text-left text-[13px] text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
           >
             {t('common.rename')}
           </button>
           <button
             onClick={() => handleDelete(contextMenu.id)}
-            className="w-full px-3 py-1.5 text-left text-xs text-[var(--color-error)] transition-colors hover:bg-[var(--color-surface-hover)]"
+            className="w-full px-4 py-2 text-left text-[13px] text-[var(--color-error)] transition-colors hover:bg-[var(--color-error-container)]"
           >
             {t('common.delete')}
           </button>
@@ -1212,7 +1225,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
           <div
             ref={projectContextMenuRef}
             role="menu"
-            className="fixed z-50 min-w-[230px] overflow-hidden rounded-[18px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[var(--shadow-dropdown)]"
+            className="fixed z-[var(--z-dropdown)] min-w-[230px] overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[var(--shadow-dropdown)]"
             style={positionProjectMenu(projectContextMenu.x, projectContextMenu.y)}
             onClick={(event) => event.stopPropagation()}
           >
@@ -1415,6 +1428,7 @@ function ProjectHeaderActions({
   onOpenMenu,
   onOpenCreate,
   actionsRef,
+  isMobile = false,
 }: {
   title: string
   menuLabel: string
@@ -1423,6 +1437,7 @@ function ProjectHeaderActions({
   onOpenCreate: (event: React.MouseEvent) => void
   /** Handed to `useDismissable` as the trigger, so opening does not self-close. */
   actionsRef: React.RefObject<HTMLDivElement>
+  isMobile?: boolean
 }) {
   return (
     <div
@@ -1432,15 +1447,22 @@ function ProjectHeaderActions({
       <div className="text-[12px] font-semibold tracking-normal text-[var(--color-text-primary)]">
         {title}
       </div>
+      {/* Hover-revealed on desktop. A touch drawer has no hover, and these kept
+          `pointer-events`, so on the phone they were invisible but still
+          tappable — a blind target. */}
       <div
         ref={actionsRef}
-        className="flex items-center gap-1 opacity-0 transition-opacity group-hover/sidebar-projects:opacity-100 focus-within:opacity-100"
+        className={`flex items-center transition-opacity focus-within:opacity-100 ${
+          isMobile
+            ? 'gap-1.5 opacity-100'
+            : 'gap-1 opacity-0 group-hover/sidebar-projects:opacity-100'
+        }`}
       >
         <IconButton
           icon={<MoreHorizontal className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" />}
           label={menuLabel}
           onClick={onOpenMenu}
-          size="md"
+          size={isMobile ? '2xl' : 'md'}
           tone="muted"
           surface="sidebar"
         />
@@ -1448,7 +1470,7 @@ function ProjectHeaderActions({
           icon={<FolderPlus className="h-[18px] w-[18px]" strokeWidth={1.9} aria-hidden="true" />}
           label={createLabel}
           onClick={onOpenCreate}
-          size="md"
+          size={isMobile ? '2xl' : 'md'}
           tone="muted"
           surface="sidebar"
         />
@@ -1493,7 +1515,7 @@ const ProjectHeaderMenu = forwardRef<HTMLDivElement, {
 }, ref) {
   const width = type === 'sort' ? 230 : type === 'create' ? 250 : 270
   const style: React.CSSProperties = { left: x, top: y, width, boxShadow: 'var(--shadow-dropdown)' }
-  const className = 'fixed z-50 overflow-hidden rounded-[18px] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[var(--shadow-dropdown)]'
+  const className = 'fixed z-[var(--z-dropdown)] overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[var(--shadow-dropdown)]'
 
   if (type === 'create') {
     return (
@@ -1954,7 +1976,7 @@ function ProjectMenuItem({
       onClick={disabled ? undefined : onClick}
       className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:bg-[var(--color-surface-hover)] disabled:cursor-default disabled:opacity-45 ${
         danger
-          ? 'text-[var(--color-error)] enabled:hover:bg-[var(--color-error)]/10'
+          ? 'text-[var(--color-error)] enabled:hover:bg-[var(--color-error-container)]'
           : 'text-[var(--color-text-primary)] enabled:hover:bg-[var(--color-surface-hover)]'
       }`}
     >
@@ -2035,7 +2057,8 @@ function NavItem({
       title={collapsed ? label : undefined}
       className={`
         flex items-center transition-colors duration-200
-        ${collapsed ? 'h-10 w-10 justify-center rounded-[var(--radius-md)] px-0 py-0' : `w-full gap-2.5 rounded-[12px] px-3 ${touchFriendly ? 'py-3' : 'py-2.5'} text-sm`}
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-sidebar)]
+        ${collapsed ? 'h-10 w-10 justify-center rounded-[var(--radius-md)] px-0 py-0' : `w-full gap-2.5 rounded-[var(--radius-md)] px-3 ${touchFriendly ? 'py-3' : 'py-2.5'} text-[14.5px]`}
         ${active
           ? 'bg-[var(--color-sidebar-item-active)] font-medium text-[var(--color-text-primary)]'
           : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-sidebar-item-hover)] hover:text-[var(--color-text-primary)]'

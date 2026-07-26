@@ -6,6 +6,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { Checkbox } from '@/components/ui/Checkbox'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -188,7 +189,7 @@ export function PluginList() {
 
   return (
     <div className="flex flex-col gap-6 min-w-0">
-      <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] overflow-hidden">
+      <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] shadow-[var(--shadow-card)] overflow-hidden">
         <div className="flex flex-col gap-4 px-5 py-5 min-w-0">
           <div className="flex flex-col gap-4 min-w-0 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0 max-w-4xl">
@@ -199,7 +200,10 @@ export function PluginList() {
                 <span className="material-symbols-outlined text-[22px] text-[var(--color-brand)]">
                   extension
                 </span>
-                <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">
+                <h3
+                  className="text-[21px] font-semibold leading-tight text-[var(--color-text-primary)]"
+                  style={{ fontFamily: 'var(--font-headline)' }}
+                >
                   {t('settings.plugins.browserTitle')}
                 </h3>
               </div>
@@ -304,9 +308,12 @@ export function PluginList() {
       </section>
 
       {marketplaces.length > 0 && (
-        <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+        <section className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] overflow-hidden">
           <div className="px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
-            <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
+            <h4
+              className="text-[16.5px] font-semibold leading-tight text-[var(--color-text-primary)]"
+              style={{ fontFamily: 'var(--font-headline)' }}
+            >
               {t('settings.plugins.marketplacesTitle')}
             </h4>
             <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
@@ -317,7 +324,7 @@ export function PluginList() {
             {marketplaces.map((marketplace) => (
               <div
                 key={marketplace.name}
-                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3"
+                className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3"
               >
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -416,47 +423,48 @@ function renderGroup(
   return (
     <section
       key={bucket}
-      className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden"
+      className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] overflow-hidden"
     >
       <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
         <div className="min-w-0">
-          <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
+          <h4
+            className="text-[16.5px] font-semibold leading-tight text-[var(--color-text-primary)]"
+            style={{ fontFamily: 'var(--font-headline)' }}
+          >
             {t(titleKey)}
           </h4>
           <p className="text-xs leading-5 text-[var(--color-text-tertiary)] mt-1">
             {t('settings.plugins.groupHint', { count: String(items.length) })}
           </p>
         </div>
-        <span className="text-xs text-[var(--color-text-tertiary)]">{items.length}</span>
+        <span className="font-mono text-xs tabular-nums text-[var(--color-text-tertiary)]">{items.length}</span>
       </div>
       <div className="flex flex-col p-2">
         {items.map((plugin) => (
           <div
             key={plugin.id}
-            className={`group rounded-xl border px-3 py-3 transition-all hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] ${
+            className={`group rounded-[var(--radius-lg)] border px-3 py-3 transition-[background-color,border-color] duration-150 ease-out hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] ${
               selectedPluginIds.has(plugin.id)
-                ? 'border-[var(--color-brand)]/45 bg-[var(--color-surface-selected)]'
+                ? 'border-[var(--color-primary-fixed-dim)] bg-[var(--color-surface-selected)]'
                 : 'border-transparent'
             }`}
           >
             <div className="flex items-start gap-3">
               {canMutatePlugin(plugin) ? (
-                <label className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-container-high)]">
-                  <input
-                    type="checkbox"
-                    aria-label={t('settings.plugins.selectPlugin', { name: plugin.name })}
-                    checked={selectedPluginIds.has(plugin.id)}
-                    onChange={(event) => onToggleSelection(plugin.id, event.currentTarget.checked)}
-                    className="h-4 w-4 rounded border-[var(--color-border)] accent-[var(--color-brand)]"
-                  />
-                </label>
+                <Checkbox
+                  label={t('settings.plugins.selectPlugin', { name: plugin.name })}
+                  labelHidden
+                  checked={selectedPluginIds.has(plugin.id)}
+                  onChange={(event) => onToggleSelection(plugin.id, event.currentTarget.checked)}
+                  containerClassName="h-6 w-6 shrink-0"
+                />
               ) : (
                 <span className="mt-0.5 h-6 w-6 shrink-0" aria-hidden="true" />
               )}
               <button
                 type="button"
                 onClick={() => void fetchPluginDetail(plugin.id, cwd)}
-                className="flex min-w-0 flex-1 items-start gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]"
+                className="flex min-w-0 flex-1 items-start gap-3 rounded-[var(--radius-lg)] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]"
               >
                 <span className="mt-0.5 material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)]">
                   {plugin.hasErrors ? 'warning' : plugin.enabled ? 'extension' : 'extension_off'}
@@ -528,7 +536,10 @@ function SummaryCard({
           {label}
         </span>
       </div>
-      <div className="mt-1.5 truncate text-lg font-semibold text-[var(--color-text-primary)]">
+      <div
+        className="mt-1.5 truncate text-[21px] font-semibold leading-none text-[var(--color-text-primary)]"
+        style={{ fontFamily: 'var(--font-headline)' }}
+      >
         {value}
       </div>
     </Card>

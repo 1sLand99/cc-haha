@@ -216,7 +216,7 @@ export function BrowserSurface({ sessionId }: { sessionId: string }) {
       data-testid="browser-zoom-controls"
       role="group"
       aria-label={t('browser.zoomControls')}
-      className="inline-flex h-10 shrink-0 items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 shadow-lg"
+      className="inline-flex h-10 shrink-0 items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 shadow-[var(--shadow-overlay)]"
     >
       <IconButton
         icon={<Minus size={14} />}
@@ -227,7 +227,7 @@ export function BrowserSurface({ sessionId }: { sessionId: string }) {
         disabled={!canZoomOut}
         onClick={() => setPreviewZoom(previewZoom - BROWSER_ZOOM_STEP)}
       />
-      <span className="min-w-11 select-none text-center text-xs font-medium tabular-nums text-[var(--color-text-secondary)]">
+      <span className="min-w-11 select-none text-center font-mono text-xs font-medium tabular-nums text-[var(--color-text-secondary)]">
         {zoomPercent}%
       </span>
       <IconButton
@@ -318,7 +318,7 @@ export function BrowserSurface({ sessionId }: { sessionId: string }) {
           </div>
           <div
             data-testid="browser-preview-floating-controls"
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex h-12 items-end justify-end px-3 pb-2"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-[var(--z-raised)] flex h-12 items-end justify-end px-3 pb-2"
           >
             <div className="pointer-events-auto">
               {zoomControls}

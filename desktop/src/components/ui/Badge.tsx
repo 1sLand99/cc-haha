@@ -51,7 +51,9 @@ export type BadgeProps = Omit<HTMLAttributes<HTMLSpanElement>, 'children' | 'tit
  */
 const SOFT_CLASSES: Record<Tone, string> = {
   neutral: 'bg-[var(--color-surface-container)] text-[var(--color-text-secondary)]',
-  brand: 'bg-[var(--color-brand-soft)] text-[var(--color-brand)]',
+  // The darkened pair, not `--color-brand`: the raw accent only reaches
+  // 4.3–4.5:1 on its own soft fill under the two ink palettes.
+  brand: 'bg-[var(--color-brand-soft)] text-[var(--color-on-brand-soft)]',
   success: 'bg-[var(--color-success-container)] text-[var(--color-on-success-container)]',
   warning: 'bg-[var(--color-warning-container)] text-[var(--color-on-warning-container)]',
   danger: 'bg-[var(--color-error-container)] text-[var(--color-on-error-container)]',

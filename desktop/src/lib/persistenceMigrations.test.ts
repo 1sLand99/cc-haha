@@ -106,6 +106,29 @@ describe('desktop persistence migrations', () => {
     expect(window.localStorage.getItem('cc-haha-theme')).toBe('white')
   })
 
+  test('renames the retired light theme to warm-classic instead of resetting it', () => {
+    // `light` was the warm workspace, labelled 经典暖色 in the picker. Falling
+    // through to the enum check would drop it and silently reset those
+    // installs to pure white, which reads as the app forgetting the setting.
+    window.localStorage.setItem('cc-haha-theme', 'light')
+
+    const report = runDesktopPersistenceMigrations()
+
+    expect(report.migratedKeys).toContain('cc-haha-theme')
+    expect(window.localStorage.getItem('cc-haha-theme')).toBe('warm-classic')
+  })
+
+  test('preserves every palette introduced by the redesign', () => {
+    for (const theme of ['white', 'paper', 'warm-classic', 'celadon', 'dark', 'ink-blue']) {
+      window.localStorage.setItem('cc-haha-theme', theme)
+
+      const report = runDesktopPersistenceMigrations()
+
+      expect(report.migratedKeys, `${theme} should survive startup migration`).not.toContain('cc-haha-theme')
+      expect(window.localStorage.getItem('cc-haha-theme')).toBe(theme)
+    }
+  })
+
   test('preserves every supported locale during startup migration', () => {
     for (const locale of ['en', 'zh', 'zh-TW', 'jp', 'kr']) {
       window.localStorage.setItem('cc-haha-locale', locale)

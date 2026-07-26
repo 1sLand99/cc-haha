@@ -158,8 +158,8 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                   onClick={() => setActiveImageIndex(images.findIndex((image) => image.src === src))}
                   className={
                     isComposer
-                      ? 'overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)]'
-                      : 'overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] text-left shadow-sm transition-transform hover:scale-[1.01]'
+                      ? 'overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)]'
+                      : 'overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] text-left shadow-[var(--shadow-card)] transition-transform hover:scale-[1.01] motion-reduce:transition-none'
                   }
                 >
                   <img
@@ -183,7 +183,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                     content={
                       <>
                         <span className="block text-[11px] font-medium uppercase tracking-wide opacity-70">
-                          修改内容
+                          {t('attachments.selectionNoteTitle')}
                         </span>
                         <span className="mt-1 block whitespace-pre-wrap break-words">
                           {selectionNote}
@@ -198,9 +198,9 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                       className={[
                         'inline-flex h-7 max-w-[260px] items-center gap-1.5 rounded-full border',
                         'border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-2.5',
-                        'text-[12px] font-medium leading-none text-[var(--color-text-primary)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]',
-                        'transition-colors hover:border-[var(--color-brand)]/45 hover:bg-[var(--color-surface-container)]',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-2',
+                        'text-[12px] font-medium leading-none text-[var(--color-text-primary)] shadow-[var(--shadow-card)]',
+                        'transition-colors hover:border-[var(--color-primary-fixed-dim)] hover:bg-[var(--color-surface-container)]',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2',
                       ].join(' ')}
                     >
                       <span className="material-symbols-outlined text-[15px] text-[var(--color-text-tertiary)]">
@@ -214,7 +214,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                   <button
                     type="button"
                     onClick={() => onRemove(attachment.id!)}
-                    className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-error)] text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-error)] text-[10px] text-[var(--color-on-error)] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
                     aria-label={t('attachments.remove', { name: attachment.name })}
                   >
                     ×
@@ -243,7 +243,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
               <div
                 key={attachment.id || `${attachment.name}-${index}`}
                 data-testid="diff-comment-card"
-                className="group/diff-comment flex max-w-[min(420px,100%)] min-w-[240px] items-start gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-2.5 py-2 text-left shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
+                className="group/diff-comment flex max-w-[min(420px,100%)] min-w-[240px] items-start gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-2.5 py-2 text-left shadow-[var(--shadow-card)]"
               >
                 <MessageSquare aria-hidden="true" size={15} className="mt-0.5 shrink-0 text-[var(--color-text-tertiary)]" />
                 <span className="min-w-0 flex-1">
@@ -256,7 +256,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                     </span>
                   )}
                   {quotePreview && (
-                    <span className="mt-0.5 block truncate font-[var(--font-mono)] text-[11px] leading-4 text-[var(--color-text-tertiary)]">
+                    <span className="mt-0.5 block truncate font-mono text-[11px] leading-4 text-[var(--color-text-tertiary)]">
                       {quotePreview}
                     </span>
                   )}
@@ -295,7 +295,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
             <>
               <span
                 aria-hidden="true"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] bg-[var(--color-surface)] shadow-[inset_0_0_0_1px_var(--color-border)]"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-surface)] shadow-[inset_0_0_0_1px_var(--color-border)]"
                 style={{ color: fileIconAccent(fileIcon) }}
               >
                 <span className="material-symbols-outlined text-[19px]">{fileIcon}</span>
@@ -308,7 +308,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                   {typeLabel}
                 </span>
                 {hasQuotePreview && (
-                  <span className="mt-0.5 block max-w-[320px] truncate font-[var(--font-mono)] text-[11px] leading-4 text-[var(--color-text-tertiary)]">
+                  <span className="mt-0.5 block max-w-[320px] truncate font-mono text-[11px] leading-4 text-[var(--color-text-tertiary)]">
                     {quotePreview}
                   </span>
                 )}
@@ -321,9 +321,9 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
               key={attachment.id || `${attachment.name}-${index}`}
               data-file-extension={typeInfo.ext || undefined}
               className={[
-                'group/file inline-flex max-w-full min-w-[220px] items-stretch overflow-hidden rounded-[12px] border border-[var(--color-border)]',
-                'bg-[var(--color-surface-container-low)] text-[var(--color-text-secondary)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]',
-                'transition-colors hover:border-[var(--color-brand)]/35 hover:bg-[var(--color-surface-container)]',
+                'group/file inline-flex max-w-full min-w-[220px] items-stretch overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)]',
+                'bg-[var(--color-surface-container-low)] text-[var(--color-text-secondary)] shadow-[var(--shadow-card)]',
+                'transition-colors hover:border-[var(--color-outline)] hover:bg-[var(--color-surface-container)]',
               ].join(' ')}
             >
               <button
@@ -331,7 +331,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                 onClick={() => openLocalAttachment(attachment)}
                 aria-label={t('attachments.open', { name: attachment.name })}
                 title={attachment.path}
-                className="flex min-h-12 min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/40"
+                className="flex min-h-12 min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)]"
               >
                 {fileVisual}
               </button>
@@ -340,7 +340,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                 onClick={(event) => openAttachmentWith(event, attachment)}
                 aria-label={t('openWith.title')}
                 title={t('openWith.title')}
-                className="flex w-9 shrink-0 items-center justify-center border-l border-[var(--color-border)] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/40"
+                className="flex w-9 shrink-0 items-center justify-center border-l border-[var(--color-border)] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)]"
               >
                 <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
               </button>
@@ -353,8 +353,8 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
               data-file-extension={typeInfo.ext || undefined}
               className={[
                 'group/file inline-flex max-w-full min-w-0 items-center gap-2.5 border border-[var(--color-border)]',
-                'rounded-[12px] bg-[var(--color-surface-container-low)] px-2.5 py-1.5 text-[var(--color-text-secondary)]',
-                'shadow-[0_1px_2px_rgba(0,0,0,0.04)]',
+                'rounded-[var(--radius-lg)] bg-[var(--color-surface-container-low)] px-2.5 py-1.5 text-[var(--color-text-secondary)]',
+                'shadow-[var(--shadow-card)]',
               ].join(' ')}
             >
               {fileVisual}

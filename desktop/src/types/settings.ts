@@ -4,11 +4,26 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'auto' | 'plan' | 'bypa
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'max'
 export type ReasoningEffortLevel = EffortLevel | 'xhigh'
-export const THEME_MODES = ['white', 'light', 'dark'] as const
+/**
+ * The six 「纸 · 墨 · 印」 palettes, in the order the appearance picker shows
+ * them: four paper grounds, then two ink ones. Each name matches a
+ * `[data-theme]` block in theme/globals.css.
+ *
+ * `light` was the pre-redesign key for the warm workspace; it migrates to
+ * `warm-classic` (see lib/persistenceMigrations.ts).
+ */
+export const THEME_MODES = ['white', 'paper', 'warm-classic', 'celadon', 'dark', 'ink-blue'] as const
 export type ThemeMode = (typeof THEME_MODES)[number]
+
+/** The two themes on a dark ground. Drives `color-scheme` and Mermaid. */
+export const DARK_THEME_MODES: readonly ThemeMode[] = ['dark', 'ink-blue']
 
 export function isThemeMode(value: unknown): value is ThemeMode {
   return typeof value === 'string' && (THEME_MODES as readonly string[]).includes(value)
+}
+
+export function isDarkTheme(theme: ThemeMode): boolean {
+  return DARK_THEME_MODES.includes(theme)
 }
 
 export type WebSearchMode = 'auto' | 'anthropic' | 'tavily' | 'brave' | 'disabled'

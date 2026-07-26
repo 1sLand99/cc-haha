@@ -87,7 +87,7 @@ export function AssistantOutputTargetCard({ target, sessionId, workDir }: Props)
   }, [openWith, sessionId, t, target.href, workDir])
 
   return (
-    <section className="flex items-start gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border)]/70 bg-[var(--color-surface-container-low)] px-3 py-2.5 shadow-sm">
+    <section className="flex items-start gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-2.5 shadow-[var(--shadow-card)]">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-surface)] text-[var(--color-text-secondary)]">
         {isLocalhost ? (
           <Globe size={17} strokeWidth={2.1} aria-hidden="true" />

@@ -21,10 +21,12 @@ export function SessionActivityButton({
       icon={<ListChecks size={17} strokeWidth={1.9} />}
       label={resolvedLabel}
       size="md"
-      tone={isOpen ? 'default' : 'muted'}
-      // `default` sets no resting background, so this adds one without colliding
-      // with a tone class.
-      className={isOpen ? 'bg-[var(--color-surface-hover)]' : undefined}
+      // The design's active toolbar toggle is a terracotta wash with a
+      // terracotta glyph, which `tone="brand"` + `filled` already are. The
+      // `className` fill this replaces raced the tone's own `bg-[…]`, and which
+      // won came down to stylesheet order.
+      tone={isOpen ? 'brand' : 'muted'}
+      filled={isOpen}
       aria-expanded={isOpen}
       aria-pressed={isOpen}
       onClick={() => toggle(sessionId)}

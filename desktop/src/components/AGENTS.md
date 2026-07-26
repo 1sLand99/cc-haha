@@ -41,6 +41,7 @@
 | 复制按钮 | `CopyButton` | `ui/CopyButton.tsx` |
 | 目录选择 | `DirectoryPicker` | `composite/DirectoryPicker.tsx` |
 | 「用 X 打开」菜单 | `OpenWithMenu` | `composite/OpenWithMenu.tsx` |
+| 品牌印章「哈」 | `BrandSeal` | `composite/BrandSeal.tsx` |
 
 ### 两个 hook
 
@@ -139,7 +140,7 @@ style={{ zIndex: 'var(--z-dialog)' }}
 2. 如果是通用需求（同样的形态在多处出现），**给组件加一个 variant/tone/size**，连同测试一起。
 3. 改不了或拿不准，**保持原样并记下来** —— 一个诚实的"跳过 + 原因"比一个视觉走样的替换有价值得多。
 
-`IconButton` 的 `secondary` tone、`2xs`–`2xl` 六档尺寸、`bordered`、`solid`、`hoverTone="danger"`、`pressed`、`surface="sidebar"`，`Button` 的 `base`(h-8) 与 `inverse` 变体，`Badge` 的 `wrap`/`title`/rest 透传，`SearchField` 的 `clearLabel` —— 全部来自这个流程。多轮独立的替换工作各自撞到同一批缺口，然后一次补齐。
+`IconButton` 的 `secondary` tone、`2xs`–`2xl` 六档尺寸、`bordered`、`solid`、`hoverTone="danger"`、`pressed`、`surface="sidebar"`、`surface="terminal"`（墨色终端标题栏，纸主题下 `--color-text-tertiary` 在其上不可见），`Button` 的 `base`(h-8)、`inverse` 与 `tonal-outline`（陶土描边 hover 反色）变体，`Card` 的 `shadow`/`lift`/`container` 档与 rest 透传，`Badge` 的 `wrap`/`title`/rest 透传，`SearchField` 的 `clearLabel` 与 `xl`(44px) 档 —— 全部来自这个流程。多轮独立的替换工作各自撞到同一批缺口，然后一次补齐。
 
 几个存在理由值得记住：
 

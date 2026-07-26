@@ -1,15 +1,26 @@
-import type { ReactNode } from 'react'
+import type { HTMLAttributes, ReactNode } from 'react'
 
 import { cx } from '@/lib/cx'
 
-export type CardProps = {
-  radius?: 'sm' | 'md' | 'lg' | 'xl'
+export type CardProps = HTMLAttributes<HTMLElement> & {
+  radius?: 'sm' | 'md' | 'lg' | 'xl' | '2xl'
   /** Which surface layer this card sits on. */
-  surface?: 'base' | 'low' | 'lowest' | 'high' | 'none'
+  surface?: 'base' | 'low' | 'lowest' | 'high' | 'container' | 'none'
   border?: 'solid' | 'dashed' | 'none'
   padding?: 'none' | 'sm' | 'md' | 'lg'
+  /**
+   * Elevation, from the handoff's three-step shadow scale.
+   *
+   * `card` is the resting lift for content cards; `composer` is the heavier one
+   * reserved for the input dock and for cards lifting on hover. Kept as a prop
+   * rather than a `className` because two `shadow-[…]` values do not compose —
+   * Tailwind picks a winner by sorting, not by argument order.
+   */
+  shadow?: 'none' | 'card' | 'composer'
   /** Adds hover and focus affordances for cards that are themselves clickable. */
   interactive?: boolean
+  /** Raises the card 2px on hover. Only meaningful with `interactive`. */
+  lift?: boolean
   as?: 'div' | 'section' | 'article' | 'li'
   className?: string
   children: ReactNode
@@ -20,6 +31,13 @@ const RADIUS = {
   md: 'rounded-[var(--radius-md)]',
   lg: 'rounded-[var(--radius-lg)]',
   xl: 'rounded-[var(--radius-xl)]',
+  '2xl': 'rounded-[var(--radius-2xl)]',
+} as const
+
+const SHADOW = {
+  none: '',
+  card: 'shadow-[var(--shadow-card)]',
+  composer: 'shadow-[var(--shadow-composer)]',
 } as const
 
 const SURFACE = {
@@ -27,6 +45,7 @@ const SURFACE = {
   low: 'bg-[var(--color-surface-container-low)]',
   lowest: 'bg-[var(--color-surface-container-lowest)]',
   high: 'bg-[var(--color-surface-container-high)]',
+  container: 'bg-[var(--color-surface-container)]',
   none: '',
 } as const
 
@@ -57,22 +76,37 @@ export function Card({
   surface = 'base',
   border = 'solid',
   padding = 'md',
+  shadow = 'none',
   interactive = false,
+  lift = false,
   as: Element = 'div',
   className,
   children,
+  // Everything else (`data-*`, `style`, aria) passes through, same as Badge and
+  // for the same reason: without it a caller that needs a test id or a scoped
+  // CSS class is forced back to hand-rolled markup.
+  ...rest
 }: CardProps) {
   return (
     <Element
+      {...rest}
       className={cx(
         RADIUS[radius],
         SURFACE[surface],
         BORDER[border],
         PADDING[padding],
+        // A lifting card animates its own shadow on hover, so it must not also
+        // carry a resting one — the two `shadow-[…]` values would not compose.
+        lift ? '' : SHADOW[shadow],
         interactive && [
-          'cursor-pointer transition-colors duration-150',
+          'cursor-pointer transition-[background-color,border-color,box-shadow,transform] duration-150 ease-out',
           'hover:border-[var(--color-brand)] hover:bg-[var(--color-surface-hover)]',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]',
+          'focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]',
+        ].join(' '),
+        lift && [
+          'shadow-[var(--shadow-card)] hover:-translate-y-0.5 hover:shadow-[var(--shadow-composer)]',
+          'motion-reduce:transition-none motion-reduce:hover:translate-y-0',
         ].join(' '),
         className,
       )}

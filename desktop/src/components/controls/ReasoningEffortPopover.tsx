@@ -22,7 +22,7 @@ type PopoverPosition = {
   width: number
 }
 
-const POPOVER_WIDTH = 240
+const POPOVER_WIDTH = 300
 const VIEWPORT_MARGIN = 16
 const POPOVER_GAP = 10
 
@@ -113,22 +113,23 @@ export function ReasoningEffortPopover({
     <div
       ref={popoverRef}
       data-testid="reasoning-effort-popover"
-      className="fixed z-[90] rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] px-3.5 pb-3.5 pt-3 shadow-[0_12px_30px_rgba(15,23,42,0.13)]"
+      className="fixed z-[var(--z-popover)] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] px-[22px] pb-[19px] pt-[19px] shadow-[var(--shadow-overlay)]"
       style={{ bottom: position.bottom, left: position.left, width: position.width }}
     >
       <div
         data-testid="reasoning-effort-header"
-        className="mb-2.5 flex items-baseline justify-between gap-3"
+        className="mb-[15px] flex items-baseline justify-between gap-3"
       >
         <div
           data-testid="reasoning-effort-label"
-          className="text-sm font-semibold text-[var(--color-text-secondary)]"
+          className="text-[19px] font-bold leading-none text-[var(--color-text-primary)]"
+          style={{ fontFamily: 'var(--font-headline)' }}
         >
           {labels[value]}
         </div>
         <div
           data-testid="reasoning-effort-context-label"
-          className="text-[10px] font-medium tracking-wide text-[var(--color-text-tertiary)]"
+          className="text-[12.5px] text-[var(--color-text-tertiary)]"
         >
           {label}
         </div>
@@ -143,7 +144,7 @@ export function ReasoningEffortPopover({
         aria-valuemax={maxIndex}
         aria-valuenow={selectedIndex}
         aria-valuetext={labels[value]}
-        className="group relative flex h-9 touch-none cursor-pointer items-center outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-3 focus-visible:ring-offset-[var(--color-surface-container-lowest)]"
+        className="group relative flex h-[26px] touch-none cursor-pointer items-center outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--color-surface-container-lowest)]"
         onClick={(event) => selectFromClientX(event.clientX)}
         onPointerDown={(event) => {
           draggingRef.current = true
@@ -188,21 +189,25 @@ export function ReasoningEffortPopover({
       >
         <div
           data-testid="reasoning-effort-track"
-          className="absolute inset-x-0 h-6 overflow-hidden rounded-full bg-[var(--color-surface-container-high)] shadow-[inset_0_0_0_1px_var(--color-border)]"
+          className="absolute inset-x-0 h-[14px] overflow-hidden rounded-full bg-[var(--color-surface-hover)]"
         >
           <div
             data-testid="reasoning-effort-fill"
-            className="h-full rounded-full bg-[var(--color-brand)] transition-[width] duration-200 motion-reduce:transition-none"
+            className="h-full rounded-full bg-[var(--color-brand)] transition-[width] duration-[180ms] motion-reduce:transition-none"
             style={{ width: `${fillPercent}%` }}
           />
         </div>
 
-        <div className="absolute inset-x-0 flex items-center justify-between px-[18px]">
+        <div className="absolute inset-x-0 flex items-center justify-between px-[11px]">
           {options.map((option, index) => (
             <span
               key={option}
               data-testid="reasoning-effort-stop"
-              className={`h-1.5 w-1.5 rounded-full ${index <= selectedIndex ? 'bg-white/45' : 'bg-[var(--color-outline)]/55'}`}
+              // Foreground token rather than `white/45`: the `/N` modifier
+              // compiles to a color function Safari 15's WebView drops, and the
+              // unfilled half of the track is a light surface under every
+              // palette, where white dots are invisible.
+              className={`h-[7px] w-[7px] rounded-full ${index <= selectedIndex ? 'bg-[var(--color-on-primary)]' : 'bg-[var(--color-outline)]'}`}
             />
           ))}
         </div>
@@ -210,7 +215,10 @@ export function ReasoningEffortPopover({
         <div
           aria-hidden="true"
           data-testid="reasoning-effort-thumb"
-          className="absolute top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[var(--color-border)] bg-white shadow-[0_2px_7px_rgba(15,23,42,0.13)] transition-[left] duration-200 motion-reduce:transition-none"
+          // The hairline is what makes the knob readable on the ink themes,
+          // where `--color-surface` resolves to the same value as the popover
+          // it sits on and `--shadow-card` has nothing lighter to cast against.
+          className="absolute top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[var(--color-outline)] bg-[var(--color-surface)] shadow-[var(--shadow-card)] transition-[left] duration-[180ms] motion-reduce:transition-none"
           style={{ left: `${fillPercent}%` }}
         />
       </div>

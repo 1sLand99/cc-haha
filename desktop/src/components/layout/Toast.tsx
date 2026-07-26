@@ -2,11 +2,13 @@ import { IconButton } from '@/components/ui/IconButton'
 import { useUIStore, type Toast as ToastType } from '../../stores/uiStore'
 import { useTranslation } from '../../i18n'
 
+// The tone lives in a 3px left rule rather than a tinted body: on the paper
+// themes a filled banner would fight the surrounding surface layering.
 const typeStyles: Record<ToastType['type'], string> = {
-  success: 'border-l-4 border-l-[var(--color-success)]',
-  error: 'border-l-4 border-l-[var(--color-error)]',
-  warning: 'border-l-4 border-l-[var(--color-warning)]',
-  info: 'border-l-4 border-l-[var(--color-text-accent)]',
+  success: 'border-l-[3px] border-l-[var(--color-success)]',
+  error: 'border-l-[3px] border-l-[var(--color-error)]',
+  warning: 'border-l-[3px] border-l-[var(--color-warning)]',
+  info: 'border-l-[3px] border-l-[var(--color-info)]',
 }
 
 function ToastItem({ toast }: { toast: ToastType }) {
@@ -20,14 +22,14 @@ function ToastItem({ toast }: { toast: ToastType }) {
       aria-live={isUrgent ? 'assertive' : 'polite'}
       aria-atomic="true"
       className={`
-        bg-[var(--color-surface)] rounded-[var(--radius-md)] shadow-[var(--shadow-dropdown)]
-        px-4 py-3 text-sm text-[var(--color-text-primary)]
+        rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]
+        px-4 py-3 text-[13.5px] text-[var(--color-text-primary)] shadow-[var(--shadow-overlay)]
         ${typeStyles[toast.type]}
         animate-overlay-in-right
       `}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span>{toast.message}</span>
+      <div className="flex items-center justify-between gap-2.5">
+        <span className="min-w-0 flex-1 leading-[1.5]">{toast.message}</span>
         <IconButton
           icon="close"
           label={t('common.dismissNotification')}

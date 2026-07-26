@@ -45,7 +45,7 @@ export function SessionTaskBar() {
 
   return (
     <div className="shrink-0 px-8">
-      <div className="mx-auto max-w-[860px] rounded-[var(--radius-lg)] border border-[var(--color-outline-variant)]/40 bg-[var(--color-surface-container-lowest)] overflow-hidden mb-2">
+      <div className="mx-auto max-w-[900px] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] overflow-hidden mb-2">
         {/* Header — always visible, clickable to toggle */}
         <div className="flex items-center gap-2 bg-[var(--color-surface-container)] px-2 py-1.5">
           <button
@@ -53,7 +53,7 @@ export function SessionTaskBar() {
             onClick={toggleExpanded}
             className="flex min-w-0 flex-1 items-center gap-3 rounded-[var(--radius-md)] px-2 py-1 hover:bg-[var(--color-surface-container-low)] transition-colors"
           >
-            <div className="flex items-center justify-center w-6 h-6 rounded-[var(--radius-md)] bg-[var(--color-secondary)]/10">
+            <div className="flex items-center justify-center w-6 h-6 rounded-[var(--radius-md)] bg-[var(--color-secondary-container)]">
               <span
                 className="material-symbols-outlined text-[14px] text-[var(--color-secondary)]"
               >
@@ -102,7 +102,7 @@ export function SessionTaskBar() {
 
         {/* Expanded task list */}
         {expanded && (
-          <div className="px-4 pb-2 pt-1 flex flex-col gap-0.5 max-h-[240px] overflow-y-auto border-t border-[var(--color-outline-variant)]/20">
+          <div className="px-4 pb-2 pt-1 flex flex-col gap-0.5 max-h-[240px] overflow-y-auto border-t border-[var(--color-border)]">
             {tasks.map((task) => (
               <TaskItem key={task.id} task={task} />
             ))}

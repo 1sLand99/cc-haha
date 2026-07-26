@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDismissable } from '@/hooks/useDismissable'
+import { BrandSeal } from '@/components/composite/BrandSeal'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { ApiError } from '../api/client'
@@ -24,7 +25,6 @@ import { FileSearchMenu, type FileSearchMenuHandle } from '../components/chat/Fi
 import { LocalSlashCommandPanel, type LocalSlashCommandName } from '../components/chat/LocalSlashCommandPanel'
 import { useMobileViewport } from '../hooks/useMobileViewport'
 import { isDesktopRuntime } from '../lib/desktopRuntime'
-import { publicAssetPath } from '../lib/publicAsset'
 import { resolveActiveProviderRuntimeSelection } from '../lib/runtimeSelection'
 import {
   filesToComposerAttachments,
@@ -546,28 +546,24 @@ export function EmptySession() {
 
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden bg-[var(--color-surface)]">
-      <div className={`flex flex-1 flex-col items-center justify-center ${
+      <div className={`brand-seal-glow flex flex-1 flex-col items-center justify-center ${
         isMobileComposer ? 'px-6 pb-[230px] pt-10' : 'p-8 pb-32'
       }`}>
         <div className={`flex flex-col items-center text-center ${
-          isMobileComposer ? 'max-w-[300px]' : 'max-w-md'
+          isMobileComposer ? 'max-w-[300px] gap-3' : 'max-w-[420px] gap-[13px]'
         }`}>
-          <img
-            src={publicAssetPath('app-icon.png')}
-            alt="Claude Code Haha"
-            className={isMobileComposer ? 'mb-4 h-16 w-16' : 'mb-6 h-24 w-24'}
-          />
+          <BrandSeal size={isMobileComposer ? 'lg' : 'xl'} />
           <h1
-            className={`mb-2 font-extrabold tracking-tight text-[var(--color-text-primary)] ${
-              isMobileComposer ? 'text-2xl' : 'text-3xl'
+            className={`font-bold tracking-tight text-[var(--color-text-primary)] ${
+              isMobileComposer ? 'text-2xl' : 'text-[27px]'
             }`}
             style={{ fontFamily: 'var(--font-headline)' }}
           >
             {t('empty.title')}
           </h1>
           <p
-            className={`mx-auto text-[var(--color-text-secondary)] ${
-              isMobileComposer ? 'max-w-[280px] text-sm leading-6' : 'max-w-xs'
+            className={`mx-auto -mt-1 text-[var(--color-text-secondary)] ${
+              isMobileComposer ? 'max-w-[280px] text-sm leading-6' : 'text-[15px] leading-[1.7]'
             }`}
             style={{ fontFamily: 'var(--font-body)' }}
           >
@@ -578,7 +574,7 @@ export function EmptySession() {
 
       <div
         data-testid="empty-session-composer-shell"
-        className={`absolute left-0 right-0 z-30 flex justify-center ${
+        className={`absolute left-0 right-0 z-[var(--z-nav)] flex justify-center ${
         isMobileComposer
           ? 'bottom-0 px-3 pb-[calc(env(safe-area-inset-bottom)+10px)]'
           : 'bottom-4 px-8'
@@ -588,8 +584,8 @@ export function EmptySession() {
           <div
             ref={panelRef}
             data-testid="empty-session-composer-panel"
-            className={`glass-panel relative flex flex-col gap-3 overflow-visible ${
-              isMobileComposer ? 'rounded-2xl p-3 shadow-[0_-12px_36px_rgba(54,35,28,0.12)]' : 'rounded-xl p-0'
+            className={`glass-panel glass-panel--composer relative flex flex-col gap-3 overflow-visible rounded-[var(--radius-2xl)] ${
+              isMobileComposer ? 'p-3' : 'p-0'
             } ${isDragActive ? 'composer-drop-target-active' : ''}`}
             {...dragHandlers}
           >
@@ -665,7 +661,7 @@ export function EmptySession() {
               {slashMenuOpen && filteredCommands.length > 0 && (
                 <div
                   ref={slashMenuRef}
-                  className="absolute bottom-full left-0 right-0 z-50 mb-2 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-dropdown)]"
+                  className="absolute bottom-full left-0 right-0 z-[var(--z-dropdown)] mb-2 overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-dropdown)]"
                 >
                   <div className="max-h-[260px] overflow-y-auto py-1">
                     {filteredCommands.map((command, index) => (
@@ -730,7 +726,7 @@ export function EmptySession() {
                     />
 
                     {plusMenuOpen && (
-                      <div className={`absolute bottom-full left-0 mb-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 shadow-[var(--shadow-dropdown)] ${
+                      <div className={`absolute bottom-full left-0 mb-2 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 shadow-[var(--shadow-dropdown)] ${
                         isMobileComposer ? 'w-[min(240px,calc(100vw-32px))]' : 'w-[240px]'
                       }`}>
                         <button

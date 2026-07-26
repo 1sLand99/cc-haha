@@ -35,9 +35,25 @@ type Props = {
 
 const BRANCH_MENU_HEIGHT = 360
 const BRANCH_MENU_WIDTH = 390
-const WORKTREE_MENU_HEIGHT = 126
-const WORKTREE_MENU_WIDTH = 226
+const WORKTREE_MENU_HEIGHT = 230
+const WORKTREE_MENU_WIDTH = 400
 const VIEWPORT_GUTTER = 12
+
+/**
+ * Decorative dot for the worktree cards. The cards are `role="option"` and
+ * already carry `aria-selected`, so this is hidden from the accessibility tree
+ * rather than announced a second time.
+ */
+function WorktreeRadio({ selected }: { selected: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-[var(--color-outline)]"
+    >
+      {selected && <span className="h-[9px] w-[9px] rounded-full bg-[var(--color-brand)]" />}
+    </span>
+  )
+}
 
 function stateMessage(context: RepositoryContextResult | null, error: string | null) {
   if (error) return error
@@ -81,6 +97,11 @@ export function RepositoryLaunchControls({
   const searchInputId = useId()
   const listboxId = useId()
   const worktreeListboxId = useId()
+  // The cards show a title and a sentence of description. Pointing the
+  // accessible name at the title span keeps the option announced as
+  // "Isolated worktree" instead of the whole paragraph (components/AGENTS.md §6).
+  const worktreeCurrentLabelId = useId()
+  const worktreeIsolatedLabelId = useId()
 
   const updateMenuPos = useCallback(() => {
     if (!branchButtonRef.current) return
@@ -280,11 +301,16 @@ export function RepositoryLaunchControls({
   }, [isLaunchReady, onLaunchReadyChange])
 
   const worktreeLabel = useWorktree ? t('repoLaunch.worktreeIsolated') : t('repoLaunch.worktreeCurrent')
-  const workbarButtonClassName = 'group inline-flex h-9 min-w-0 items-center gap-1.5 rounded-[7px] border border-transparent px-2.5 text-[13px] font-medium leading-none text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-container-lowest)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]/35 disabled:cursor-not-allowed disabled:opacity-50'
+  // The worktree cards name the branch their changes would land on.
+  const branchLabel = selectedBranch?.name ?? context?.currentBranch ?? t('repoLaunch.noBranch')
+  // Outlined pill, per the handoff's launch row: 1px border at rest that firms
+  // up to `--color-outline` on hover. The focus ring uses the opaque focus
+  // token rather than `--color-brand/35`, whose `/N` modifier Safari 15 drops.
+  const workbarButtonClassName = 'group inline-flex h-9 min-w-0 items-center gap-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 text-[13.5px] font-medium leading-none text-[var(--color-text-primary)] transition-[background-color,color,border-color] duration-150 ease-out hover:border-[var(--color-outline)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] disabled:cursor-not-allowed disabled:opacity-50'
 
   const branchMenuClassName = isMobileBrowser
     ? 'max-h-[72dvh] overflow-hidden rounded-t-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[0_-18px_48px_rgba(54,35,28,0.2)]'
-    : 'w-[390px] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-dropdown)]'
+    : 'w-[390px] overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-overlay)]'
   const branchMenuStyle = isMobileBrowser
     ? {
         position: 'fixed' as const,
@@ -303,7 +329,19 @@ export function RepositoryLaunchControls({
       }
   const worktreeMenuClassName = isMobileBrowser
     ? 'overflow-hidden rounded-t-2xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-2 shadow-[0_-18px_48px_rgba(54,35,28,0.2)]'
-    : 'w-[226px] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 shadow-[var(--shadow-dropdown)]'
+    // Literal, not interpolated from WORKTREE_MENU_WIDTH: Tailwind extracts
+    // class names statically and never emits a rule for a computed one.
+    : 'w-[400px] overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] p-2.5 shadow-[var(--shadow-overlay)]'
+  // The two modes are a single choice, so they read as radio cards rather than
+  // a menu list: 1.5px edge that turns terracotta on the selected one.
+  const worktreeCardClassName = (selected: boolean) => [
+    'flex w-full items-start gap-3 rounded-[var(--radius-lg)] border-[1.5px] px-[15px] py-3 text-left',
+    'transition-[background-color,border-color] duration-150 ease-out',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)]',
+    selected
+      ? 'border-[var(--color-primary-fixed-dim)] bg-[var(--color-brand-soft)]'
+      : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[var(--color-outline)] hover:bg-[var(--color-surface-hover)]',
+  ].join(' ')
   const worktreeMenuStyle = isMobileBrowser
     ? {
         position: 'fixed' as const,
@@ -328,7 +366,7 @@ export function RepositoryLaunchControls({
           ? 'min-h-[52px] flex-wrap rounded-none bg-[var(--color-surface-container-lowest)] px-3 py-2 shadow-none'
           : isComposerPlacement
             ? 'min-h-[44px] flex-nowrap bg-transparent px-4 py-2'
-          : 'min-h-[48px] flex-nowrap rounded-b-xl bg-[var(--color-surface-container-low)] px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]'
+          : 'min-h-[48px] flex-nowrap rounded-b-[var(--radius-xl)] bg-[var(--color-surface-container-low)] px-4 py-2'
       }`}>
         <DirectoryPicker value={workDir} onChange={onWorkDirChange} variant="workbar" isGitProject={isGitReady} />
 
@@ -355,13 +393,13 @@ export function RepositoryLaunchControls({
                 setWorktreeMenuOpen(false)
                 setBranchFilter('')
               }}
-              className={`${workbarButtonClassName} ${isMobileBrowser ? 'max-w-[160px] shrink-0 bg-[var(--color-surface-container)]' : 'max-w-[260px] shrink'}`}
+              className={`${workbarButtonClassName} ${isMobileBrowser ? 'max-w-[160px] shrink-0' : 'max-w-[260px] shrink'}`}
             >
-              <GitBranch size={17} className="shrink-0 text-[var(--color-text-tertiary)] group-hover:text-[var(--color-text-secondary)]" />
-              <span className="min-w-0 flex-1 truncate text-[var(--color-text-primary)]">
+              <GitBranch size={15} className="shrink-0 text-[var(--color-text-secondary)]" />
+              <span className="min-w-0 flex-1 truncate">
                 {selectedBranch?.name || t('repoLaunch.noBranch')}
               </span>
-              <ChevronDown size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
+              <ChevronDown size={13} className="shrink-0 text-[var(--color-text-tertiary)]" />
             </button>
 
             <button
@@ -377,17 +415,17 @@ export function RepositoryLaunchControls({
                 setWorktreeMenuOpen((prev) => !prev)
                 setBranchMenuOpen(false)
               }}
-              className={`${workbarButtonClassName} shrink-0 ${isMobileBrowser ? 'bg-[var(--color-surface-container)]' : ''} ${
+              className={`${workbarButtonClassName} shrink-0 ${
                 useWorktree
-                  ? 'bg-[var(--color-surface-container-lowest)] text-[var(--color-text-primary)]'
+                  ? 'border-[var(--color-primary-fixed-dim)] bg-[var(--color-brand-soft)] font-semibold text-[var(--color-on-brand-soft)] hover:border-[var(--color-primary-fixed-dim)] hover:bg-[var(--color-brand-soft-hover)]'
                   : ''
               }`}
             >
-              <GitFork size={17} className="shrink-0 text-[var(--color-text-tertiary)]" />
+              <GitFork size={15} className={`shrink-0 ${useWorktree ? 'text-[var(--color-on-brand-soft)]' : 'text-[var(--color-text-secondary)]'}`} />
               <span className="min-w-0 truncate">
                 {worktreeLabel}
               </span>
-              <ChevronDown size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
+              <ChevronDown size={13} className={`shrink-0 ${useWorktree ? 'text-[var(--color-on-brand-soft)]' : 'text-[var(--color-text-tertiary)]'}`} />
             </button>
           </>
         )}
@@ -420,7 +458,7 @@ export function RepositoryLaunchControls({
             closeLabel={t('tabs.close')}
             panelRef={menuRef}
             headerExtra={(
-              <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-2">
+              <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-2">
                 <Search size={15} className="shrink-0 text-[var(--color-text-tertiary)]" />
                 <input
                   id={searchInputId}
@@ -453,7 +491,7 @@ export function RepositoryLaunchControls({
                     aria-selected={isSelected}
                     onMouseEnter={() => setSelectedIndex(index)}
                     onClick={() => selectBranch(candidate)}
-                    className={`flex min-h-[56px] w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 ${
+                    className={`flex min-h-[56px] w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)] ${
                       index === selectedIndex || isSelected ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
@@ -486,10 +524,10 @@ export function RepositoryLaunchControls({
             style={branchMenuStyle}
           >
             <div className="border-b border-[var(--color-border)] p-3">
-              <label htmlFor={searchInputId} className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[var(--color-outline)]">
+              <label htmlFor={searchInputId} className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-tertiary)]">
                 {t('repoLaunch.selectBranch')}
               </label>
-              <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-2">
+              <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-2">
                 <Search size={15} className="shrink-0 text-[var(--color-text-tertiary)]" />
                 <input
                   id={searchInputId}
@@ -522,7 +560,7 @@ export function RepositoryLaunchControls({
                     aria-selected={isSelected}
                     onMouseEnter={() => setSelectedIndex(index)}
                     onClick={() => selectBranch(candidate)}
-                    className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 ${
+                    className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)] ${
                       index === selectedIndex || isSelected ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
                     }`}
                   >
@@ -562,41 +600,43 @@ export function RepositoryLaunchControls({
             panelRef={worktreeMenuRef}
             contentClassName="py-2"
           >
-            <div id={worktreeListboxId} role="listbox" aria-label={t('repoLaunch.selectWorktree')}>
+            <div id={worktreeListboxId} role="listbox" aria-label={t('repoLaunch.selectWorktree')} className="flex flex-col gap-2 px-4 py-2">
               <button
                 type="button"
                 role="option"
                 aria-selected={!useWorktree}
+                aria-labelledby={worktreeCurrentLabelId}
                 onClick={() => selectWorktreeMode(false)}
-                className={`flex min-h-[52px] w-full items-center gap-2.5 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 disabled:cursor-not-allowed disabled:opacity-45 ${
-                  !useWorktree ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
-                }`}
+                className={`${worktreeCardClassName(!useWorktree)} min-h-[52px] disabled:cursor-not-allowed disabled:opacity-45`}
               >
-                <GitFork size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
+                <WorktreeRadio selected={!useWorktree} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium text-[var(--color-text-primary)]">
+                  <span id={worktreeCurrentLabelId} className="block text-[14.5px] font-bold text-[var(--color-text-primary)]">
                     {t('repoLaunch.worktreeCurrent')}
                   </span>
+                  <span className="mt-[3px] block text-[12.5px] leading-[1.6] text-[var(--color-text-secondary)]">
+                    {t('repoLaunch.worktreeCurrentDesc', { branch: branchLabel })}
+                  </span>
                 </span>
-                {!useWorktree && <Check size={16} className="shrink-0 text-[var(--color-brand)]" />}
               </button>
 
               <button
                 type="button"
                 role="option"
                 aria-selected={useWorktree}
+                aria-labelledby={worktreeIsolatedLabelId}
                 onClick={() => selectWorktreeMode(true)}
-                className={`flex min-h-[52px] w-full items-center gap-2.5 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 ${
-                  useWorktree ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
-                }`}
+                className={`${worktreeCardClassName(useWorktree)} min-h-[52px]`}
               >
-                <GitFork size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
+                <WorktreeRadio selected={useWorktree} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium text-[var(--color-text-primary)]">
+                  <span id={worktreeIsolatedLabelId} className="block text-[14.5px] font-bold text-[var(--color-text-primary)]">
                     {t('repoLaunch.worktreeIsolated')}
                   </span>
+                  <span className="mt-[3px] block text-[12.5px] leading-[1.6] text-[var(--color-text-secondary)]">
+                    {t('repoLaunch.worktreeIsolatedDesc', { branch: branchLabel })}
+                  </span>
                 </span>
-                {useWorktree && <Check size={16} className="shrink-0 text-[var(--color-brand)]" />}
               </button>
             </div>
           </MobileBottomSheet>
@@ -606,41 +646,43 @@ export function RepositoryLaunchControls({
             className={worktreeMenuClassName}
             style={worktreeMenuStyle}
           >
-          <div id={worktreeListboxId} role="listbox" aria-label={t('repoLaunch.selectWorktree')}>
+          <div id={worktreeListboxId} role="listbox" aria-label={t('repoLaunch.selectWorktree')} className="flex flex-col gap-2">
             <button
               type="button"
               role="option"
               aria-selected={!useWorktree}
+              aria-labelledby={worktreeCurrentLabelId}
               onClick={() => selectWorktreeMode(false)}
-              className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 disabled:cursor-not-allowed disabled:opacity-45 ${
-                !useWorktree ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
-              }`}
+              className={`${worktreeCardClassName(!useWorktree)} disabled:cursor-not-allowed disabled:opacity-45`}
             >
-              <GitFork size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
+              <WorktreeRadio selected={!useWorktree} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium text-[var(--color-text-primary)]">
+                <span id={worktreeCurrentLabelId} className="block text-[14.5px] font-bold text-[var(--color-text-primary)]">
                   {t('repoLaunch.worktreeCurrent')}
                 </span>
+                <span className="mt-[3px] block text-[12.5px] leading-[1.6] text-[var(--color-text-secondary)]">
+                  {t('repoLaunch.worktreeCurrentDesc', { branch: branchLabel })}
+                </span>
               </span>
-              {!useWorktree && <Check size={16} className="shrink-0 text-[var(--color-brand)]" />}
             </button>
 
             <button
               type="button"
               role="option"
               aria-selected={useWorktree}
+              aria-labelledby={worktreeIsolatedLabelId}
               onClick={() => selectWorktreeMode(true)}
-              className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-brand)]/35 ${
-                useWorktree ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'
-              }`}
+              className={worktreeCardClassName(useWorktree)}
             >
-              <GitFork size={16} className="shrink-0 text-[var(--color-text-tertiary)]" />
+              <WorktreeRadio selected={useWorktree} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium text-[var(--color-text-primary)]">
+                <span id={worktreeIsolatedLabelId} className="block text-[14.5px] font-bold text-[var(--color-text-primary)]">
                   {t('repoLaunch.worktreeIsolated')}
                 </span>
+                <span className="mt-[3px] block text-[12.5px] leading-[1.6] text-[var(--color-text-secondary)]">
+                  {t('repoLaunch.worktreeIsolatedDesc', { branch: branchLabel })}
+                </span>
               </span>
-              {useWorktree && <Check size={16} className="shrink-0 text-[var(--color-brand)]" />}
             </button>
           </div>
         </div>,

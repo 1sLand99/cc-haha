@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import '@testing-library/jest-dom'
 
@@ -87,6 +87,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useSessionRuntimeStore } from '../stores/sessionRuntimeStore'
 import { useTabStore } from '../stores/tabStore'
+import { useTaskStore } from '../stores/taskStore'
 
 beforeEach(() => {
   useSettingsStore.setState({ locale: 'en' })
@@ -1245,6 +1246,26 @@ describe('Content-only pages render without errors', () => {
     const { container } = render(<ScheduledTasks />)
     await screen.findByText('Scheduled tasks')
     expect(container.innerHTML).toContain('Scheduled tasks')
+  })
+
+  it('ScheduledTasks reports a failed load instead of showing the empty state', async () => {
+    const fetchTasks = vi.fn().mockResolvedValue(undefined)
+    useTaskStore.setState({ tasks: [], isLoading: false, error: 'tasks unreachable', fetchTasks })
+
+    // `fetchTasks` resolves and flips `initialized` after mount; awaiting the
+    // render keeps that state update inside act().
+    await act(async () => { render(<ScheduledTasks />) })
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('tasks unreachable')
+    // The empty state invites creating a task; a failed load must not.
+    expect(screen.queryByText('No scheduled tasks yet.')).not.toBeInTheDocument()
+
+    fetchTasks.mockClear()
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+    expect(fetchTasks).toHaveBeenCalled()
+
+    act(() => { useTaskStore.setState({ error: null }) })
   })
 })
 

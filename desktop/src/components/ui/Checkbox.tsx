@@ -66,7 +66,7 @@ export function Checkbox({
         aria-labelledby={labelHidden ? undefined : labelId}
         aria-describedby={description ? descriptionId : undefined}
         className={cx(
-          'mt-0.5 shrink-0 rounded-[var(--radius-sm)] border-[var(--color-border)]',
+          'mt-0.5 shrink-0 rounded-[var(--radius-sm)] border-[var(--color-border-strong)]',
           'accent-[var(--color-brand)]',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]',
           disabled && 'cursor-not-allowed',

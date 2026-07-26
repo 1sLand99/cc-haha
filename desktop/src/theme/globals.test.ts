@@ -4,24 +4,34 @@ import css from './globals.css?raw'
 
 const normalizedCss = css.replace(/\r\n/g, '\n')
 
-function getThemeBlock(selector: ':root,\n[data-theme="light"]' | '[data-theme="white"]' | '[data-theme="dark"]') {
-  const start = normalizedCss.indexOf(`${selector} {`)
-  expect(start).toBeGreaterThanOrEqual(0)
-
-  const bodyStart = normalizedCss.indexOf('{', start)
-  let depth = 0
-  for (let index = bodyStart; index < normalizedCss.length; index += 1) {
-    const char = normalizedCss[index]
-    if (char === '{') depth += 1
-    if (char === '}') {
-      depth -= 1
-      if (depth === 0) {
-        return normalizedCss.slice(bodyStart + 1, index)
+/** Concatenates every block written against `selector` (see contrast.test.ts). */
+function getThemeBlock(selector: string) {
+  const bodies: string[] = []
+  let cursor = 0
+  for (;;) {
+    const start = normalizedCss.indexOf(`${selector} {`, cursor)
+    if (start < 0) break
+    const bodyStart = normalizedCss.indexOf('{', start)
+    let depth = 0
+    let closed = false
+    for (let index = bodyStart; index < normalizedCss.length; index += 1) {
+      const char = normalizedCss[index]
+      if (char === '{') depth += 1
+      if (char === '}') {
+        depth -= 1
+        if (depth === 0) {
+          bodies.push(normalizedCss.slice(bodyStart + 1, index))
+          cursor = index
+          closed = true
+          break
+        }
       }
     }
+    if (!closed) throw new Error(`Theme block not closed: ${selector}`)
   }
 
-  throw new Error(`Theme block not closed: ${selector}`)
+  expect(bodies.length, `Missing block: ${selector}`).toBeGreaterThan(0)
+  return bodies.join('\n')
 }
 
 function getCssBetween(startMarker: string, endMarker: string) {
@@ -32,10 +42,49 @@ function getCssBetween(startMarker: string, endMarker: string) {
   return normalizedCss.slice(start, end)
 }
 
-const themes = [':root,\n[data-theme="light"]', '[data-theme="white"]', '[data-theme="dark"]'] as const
+/**
+ * The six 「纸 · 墨 · 印」 palettes. Each block holds only raw `--cc-*` color
+ * values; the shared `:root` semantic layer turns those into the `--color-*`
+ * tokens components consume, so the mapping is written once instead of copied
+ * per theme.
+ */
+const themes = [
+  ':root,\n[data-theme="white"]',
+  '[data-theme="paper"]',
+  '[data-theme="warm-classic"]',
+  '[data-theme="celadon"]',
+  '[data-theme="dark"]',
+  '[data-theme="ink-blue"]',
+] as const
 
 describe('desktop theme tokens', () => {
-  const requiredTokens = [
+  /**
+   * The source variables every palette owes the semantic layer. A palette that
+   * skips one does not fail loudly — the token inherits whatever the previous
+   * `:root` block left behind, so e.g. celadon would quietly render pure-white's
+   * borders. This list is the contract that makes that a red test.
+   */
+  const requiredSourceTokens = [
+    '--cc-bg', '--cc-s0', '--cc-s1', '--cc-s2', '--cc-bd', '--cc-bd2',
+    '--cc-t1', '--cc-t2', '--cc-t3',
+    '--cc-ac', '--cc-ac2', '--cc-ac-soft', '--cc-ac-soft-hover', '--cc-ac-border',
+    '--cc-ac-ink', '--cc-on-ac',
+    '--cc-ok', '--cc-ok-soft', '--cc-ok-ink',
+    '--cc-wn', '--cc-wn-soft', '--cc-wn-ink',
+    '--cc-er', '--cc-er-soft', '--cc-er-soft-hover', '--cc-er-ink',
+    '--cc-info', '--cc-info-soft', '--cc-info-ink',
+    '--cc-teal', '--cc-teal-soft', '--cc-teal-border', '--cc-teal-icon',
+    '--cc-diff-add', '--cc-diff-add-gutter', '--cc-diff-add-word',
+    '--cc-diff-del', '--cc-diff-del-gutter', '--cc-diff-del-word',
+    '--cc-diff-mark', '--cc-diff-mark-gutter', '--cc-code',
+    '--cc-heat-0', '--cc-heat-1', '--cc-heat-2', '--cc-heat-3', '--cc-heat-4',
+    '--cc-shadow-card', '--cc-shadow-composer', '--cc-shadow-overlay',
+    '--cc-bg-rgb', '--cc-s1-rgb', '--cc-t1-rgb', '--cc-t2-rgb',
+    '--cc-bd2-rgb', '--cc-ac-rgb', '--cc-er-rgb', '--cc-scrim-rgb',
+  ]
+
+  /** Consumed by components; defined once in the semantic layer. */
+  const requiredSemanticTokens = [
     '--color-activity-heat-0',
     '--color-activity-heat-1',
     '--color-activity-heat-2',
@@ -65,6 +114,11 @@ describe('desktop theme tokens', () => {
     '--color-surface-selected',
     '--color-switch-checked-bg',
     '--color-switch-thumb',
+    '--color-btn-primary-bg',
+    '--color-btn-primary-fg',
+    '--shadow-card',
+    '--shadow-composer',
+    '--shadow-overlay',
     '--color-text-secondary-a72',
     '--color-text-secondary-a68',
     '--color-text-primary-a88',
@@ -77,32 +131,51 @@ describe('desktop theme tokens', () => {
     '--color-outline-a92',
   ]
 
-  it('defines activity and status tokens for every supported theme', () => {
+  it('defines the full source palette for every supported theme', () => {
     for (const theme of themes) {
       const block = getThemeBlock(theme)
 
-      for (const token of requiredTokens) {
+      for (const token of requiredSourceTokens) {
         expect(block, `${theme} should define ${token}`).toContain(`${token}:`)
       }
     }
+  })
+
+  it('defines every semantic token once, in the shared layer', () => {
+    const root = getThemeBlock(':root')
+
+    for (const token of requiredSemanticTokens) {
+      expect(root, `the semantic layer should define ${token}`).toContain(`${token}:`)
+    }
+  })
+
+  it('gives each theme its own color-scheme so native controls match the ground', () => {
+    // Regression guard for the ink-blue palette: it is a dark ground but is not
+    // the theme literally named `dark`, so anything testing `theme === 'dark'`
+    // renders its scrollbars and form controls in the light variant.
+    for (const theme of themes) {
+      expect(getThemeBlock(theme), `${theme} should declare color-scheme`).toContain('color-scheme:')
+    }
+    expect(getThemeBlock('[data-theme="ink-blue"]')).toContain('color-scheme: dark;')
+  })
+
+  it('binds the dark utility variant to both ink themes', () => {
+    // `dark:` utilities compile against this list. Omitting ink-blue makes
+    // every one of them silently render its light branch on that theme.
+    expect(normalizedCss).toContain('[data-theme="ink-blue"], [data-theme="ink-blue"] *')
   })
 
   it('keeps activity heatmap colors on the app theme accent instead of the old blue ramp', () => {
     expect(css).not.toContain('#DCEEFF')
     expect(css).not.toContain('#B6D9FF')
     expect(css).not.toContain('#2387E8')
-    expect(css).toContain('--color-activity-heat-4: var(--color-primary);')
+    expect(css).toContain('--color-activity-heat-4: var(--cc-heat-4);')
     expect(css).toContain('.activity-heat-cell:hover')
     expect(css).toContain('box-shadow: var(--shadow-activity-cell-hover);')
   })
 
-  it('maps switch activation to each theme brand color', () => {
-    for (const theme of themes) {
-      const block = getThemeBlock(theme)
-
-      expect(block, `${theme} should use its brand color for checked switches`)
-        .toContain('--color-switch-checked-bg: var(--color-brand);')
-    }
+  it('maps switch activation to the theme brand color', () => {
+    expect(getThemeBlock(':root')).toContain('--color-switch-checked-bg: var(--color-brand);')
   })
 
   it('uses container queries for the compact activity summary strip', () => {
@@ -122,10 +195,12 @@ describe('desktop theme tokens', () => {
     expect(zoomShellCss).not.toContain('color-mix(')
   })
 
-  it('keeps the UI zoom slider thumb visible in dark mode', () => {
-    expect(css).toContain('[data-theme="dark"] .settings-zoom-control')
+  it('keeps the UI zoom slider thumb visible on both ink grounds', () => {
+    // The thumb is a light disc on a light track; on a dark ground it needs an
+    // accent border to read at all. Both dark palettes get the override.
+    expect(css).toContain('[data-theme="dark"] .settings-zoom-control,\n[data-theme="ink-blue"] .settings-zoom-control')
     expect(css).toContain('--settings-zoom-thumb-bg: var(--color-surface-bright);')
-    expect(css).toContain('--settings-zoom-thumb-border: rgba(255, 181, 159, 0.78);')
+    expect(css).toContain('--settings-zoom-thumb-border: var(--color-brand);')
     expect(css).toContain('box-shadow: var(--settings-zoom-thumb-shadow);')
   })
 
@@ -167,10 +242,10 @@ describe('desktop theme tokens', () => {
   })
 
   it('binds the dark variant to the app theme attribute, not the operating system', () => {
-    // The app ships three themes toggled via `<html data-theme>`. Tailwind's
+    // The app ships six themes toggled via `<html data-theme>`. Tailwind's
     // stock `dark:` compiles to `prefers-color-scheme`, which fires on the OS
     // setting and is wrong for every one of them.
-    expect(normalizedCss).toContain('@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));')
+    expect(normalizedCss).toContain('@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *')
     expect(normalizedCss).not.toMatch(/@media[^{]*\(\s*prefers-color-scheme/)
   })
 
@@ -276,11 +351,16 @@ describe('terminal palette tokens', () => {
     }
   })
 
-  it('gives every theme its own cursor and selection color', () => {
-    for (const theme of themes) {
-      const block = getThemeBlock(theme)
-      expect(block).toContain('--color-terminal-cursor:')
-      expect(block).toContain('--color-terminal-selection:')
-    }
+  it('defines the terminal ground once and lets ink-blue override it', () => {
+    // The handoff pins one warm-ink terminal panel across the paper themes;
+    // only ink-blue swaps in a cool ground, so it is the one override.
+    const root = getThemeBlock(':root')
+    expect(root).toContain('--color-terminal-cursor:')
+    expect(root).toContain('--color-terminal-selection:')
+    expect(root).toContain('--color-terminal-bg:')
+
+    const inkBlue = getThemeBlock('[data-theme="ink-blue"]')
+    expect(inkBlue).toContain('--color-terminal-bg:')
+    expect(inkBlue).toContain('--color-terminal-selection:')
   })
 })

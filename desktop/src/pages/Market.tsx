@@ -78,7 +78,7 @@ export function Market() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface-container-lowest,var(--color-surface))]">
+    <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface)]">
       {selectedId ? (
         <MarketSkillDetail onRequestInstall={requestInstall} onRequestUninstall={requestUninstall} />
       ) : (

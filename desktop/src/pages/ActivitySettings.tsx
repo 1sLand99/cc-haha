@@ -6,6 +6,7 @@ import {
   type DesktopProfilePreferences,
 } from '../api/desktopUiPreferences'
 import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
 import { Modal } from '@/components/ui/Modal'
 import { type Locale, useTranslation } from '../i18n'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -707,7 +708,7 @@ export function ActivitySettings() {
   return (
     <div className="mx-auto w-full max-w-[1060px] min-w-0 pb-12">
       <section className="relative flex min-h-[176px] flex-col items-center justify-start pt-4 text-center">
-        <div className="relative h-16 w-16 overflow-hidden rounded-full border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[0_10px_28px_-22px_rgba(15,23,42,0.6)]">
+        <div className="relative h-16 w-16 overflow-hidden rounded-full border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-card)]">
           <img
             src={avatarSrc}
             alt={`${profile.displayName} avatar`}
@@ -719,12 +720,12 @@ export function ActivitySettings() {
           />
         </div>
         <div className="group/activity-profile mt-4 flex max-w-full items-center justify-center gap-2">
-          <h1 className="max-w-[min(720px,calc(100%-2.25rem))] truncate text-[28px] font-semibold tracking-tight text-[var(--color-text-primary)] sm:text-[34px]">{profile.displayName}</h1>
+          <h1 className="max-w-[min(720px,calc(100%-2.25rem))] truncate text-[26px] font-semibold text-[var(--color-text-primary)] sm:text-[31px]" style={{ fontFamily: 'var(--font-headline)' }}>{profile.displayName}</h1>
           <button
             type="button"
             aria-label={t('settings.activity.editProfile')}
             title={t('settings.activity.editProfile')}
-            className="mt-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--color-text-tertiary)] opacity-0 transition-[background-color,color,opacity,transform] group-hover/activity-profile:opacity-100 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] focus-visible:opacity-100 active:translate-y-[1px] disabled:pointer-events-none disabled:opacity-0"
+            className="mt-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-tertiary)] opacity-0 transition-[background-color,color,opacity,transform] group-hover/activity-profile:opacity-100 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] focus-visible:opacity-100 active:translate-y-[1px] disabled:pointer-events-none disabled:opacity-0"
             onClick={() => {
               setIsEditingProfile(true)
               setDraftDisplayName(profile.displayName)
@@ -751,46 +752,62 @@ export function ActivitySettings() {
         {profileError && !isEditingProfile && <div className="mt-3 text-xs text-[var(--color-error)]">{profileError}</div>}
       </section>
 
-      <section className="activity-summary-panel mx-auto mt-7 w-full max-w-[900px] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-border)] p-px shadow-[0_12px_34px_-32px_rgba(15,23,42,0.55)]">
+      <section className="activity-summary-panel mx-auto mt-7 w-full min-w-0 max-w-[900px]">
         {isLoading ? (
-          <div className="activity-summary-grid grid gap-px">
+          <div className="activity-summary-grid grid gap-3">
             {Array.from({ length: 5 }).map((_, index) => (
-              <div
+              <Card
                 key={index}
-                className={`activity-summary-metric min-h-[76px] animate-pulse bg-[var(--color-surface)] px-4 py-3 ${
+                radius="xl"
+                surface="lowest"
+                padding="none"
+                shadow="card"
+                className={`activity-summary-metric min-h-[92px] animate-pulse px-4 py-4 ${
                   index === 0 ? 'activity-summary-metric-primary' : ''
                 }`}
               >
-                <div className="mx-auto h-5 w-16 rounded bg-[var(--color-surface-container)]" />
-                <div className="mx-auto mt-2 h-3 w-20 rounded bg-[var(--color-surface-container)]" />
-                <div className="mx-auto mt-2 h-2.5 w-14 rounded bg-[var(--color-surface-container)]" />
-              </div>
+                <div className="mx-auto h-6 w-16 rounded-[var(--radius-sm)] bg-[var(--color-surface-container)]" />
+                <div className="mx-auto mt-2.5 h-3 w-20 rounded-[var(--radius-sm)] bg-[var(--color-surface-container)]" />
+                <div className="mx-auto mt-2 h-2.5 w-14 rounded-[var(--radius-sm)] bg-[var(--color-surface-container)]" />
+              </Card>
             ))}
           </div>
         ) : (
-          <div className="activity-summary-grid grid gap-px">
+          <div className="activity-summary-grid grid gap-3">
             {metrics.map((metric, index) => {
               const isPrimary = index === 0
               return (
-                <div
+                <Card
                   key={metric.label}
-                  className={`activity-summary-metric min-w-0 bg-[var(--color-surface-container-lowest)] px-4 py-3 text-center opacity-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.48)] [animation:activity-reveal_420ms_cubic-bezier(0.16,1,0.3,1)_forwards] ${
+                  radius="xl"
+                  surface="lowest"
+                  padding="none"
+                  lift
+                  // `backwards` holds the entry frame through `animationDelay` so the stagger still
+                  // reads, without a standalone `opacity-0`: that pairing is what made these cards
+                  // invisible once the keyframes they named were dropped from globals.css.
+                  className={`activity-summary-metric min-w-0 px-4 py-4 text-center [animation:screen-pop_420ms_cubic-bezier(0.16,1,0.3,1)_backwards] motion-reduce:animate-none ${
                     isPrimary ? 'activity-summary-metric-primary' : ''
                   }`}
                   style={{ animationDelay: `${index * 45}ms` }}
                 >
-                  <div className="flex min-h-[68px] flex-col items-center justify-center gap-1.5">
-                    <div className={`activity-summary-value max-w-full min-w-0 truncate font-semibold leading-none tracking-tight text-[var(--color-text-primary)] tabular-nums ${
-                      isPrimary ? 'text-[23px]' : 'text-[22px]'
-                    }`}>
+                  <div className="flex min-h-[68px] flex-col items-center justify-center gap-2">
+                    <div
+                      // Two lines rather than one truncated one: durations like "436 小时 26 分钟"
+                      // do not fit a fifth of the row and were rendering as "436 小…".
+                      className={`activity-summary-value max-w-full min-w-0 line-clamp-2 font-semibold leading-[1.15] text-[var(--color-text-primary)] tabular-nums ${
+                        isPrimary ? 'text-[25px]' : 'text-[24px]'
+                      }`}
+                      style={{ fontFamily: 'var(--font-headline)' }}
+                    >
                       {metric.value}
                     </div>
-                    <div className="min-w-0 truncate text-[13px] font-medium leading-tight text-[var(--color-text-secondary)]">
+                    <div className="min-w-0 truncate text-[12px] font-medium leading-tight text-[var(--color-text-tertiary)]">
                       {metric.label}
                     </div>
                     {metric.detail && <div className="max-w-full truncate text-[11px] leading-tight text-[var(--color-text-tertiary)]">{metric.detail}</div>}
                   </div>
-                </div>
+                </Card>
               )
             })}
           </div>
@@ -824,7 +841,7 @@ export function ActivitySettings() {
               id="activity-profile-display-name"
               value={draftDisplayName}
               onChange={(event) => setDraftDisplayName(event.target.value)}
-              className="h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-border-focus)]"
+              className="h-10 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-border-focus)]"
             />
           </div>
 
@@ -836,7 +853,7 @@ export function ActivitySettings() {
               id="activity-profile-subtitle"
               value={draftSubtitle}
               onChange={(event) => setDraftSubtitle(event.target.value)}
-              className="h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-border-focus)]"
+              className="h-10 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-border-focus)]"
             />
           </div>
 
@@ -868,13 +885,13 @@ export function ActivitySettings() {
           </div>
         </div>
 
-        {profileError && <div className="mt-4 rounded-md border border-[var(--color-error)]/30 bg-[var(--color-error)]/10 px-3 py-2 text-xs text-[var(--color-error)]">{profileError}</div>}
+        {profileError && <div className="mt-4 rounded-[var(--radius-md)] border border-[var(--color-error)] bg-[var(--color-error-container)] px-3 py-2 text-xs text-[var(--color-on-error-container)]">{profileError}</div>}
       </Modal>
 
       <div className="mt-10">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">{t('settings.activity.tokenActivity')}</h2>
+            <h2 className="text-xl font-semibold text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>{t('settings.activity.tokenActivity')}</h2>
           </div>
           <div className="inline-flex w-fit items-center gap-7">
             {modeOptions.map((option) => (
@@ -910,13 +927,13 @@ export function ActivitySettings() {
             </div>
           </div>
         ) : error ? (
-          <div className="rounded-md border border-[var(--color-error)]/30 bg-[var(--color-error)]/10 px-4 py-3 text-sm text-[var(--color-error)]">
+          <div className="rounded-[var(--radius-md)] border border-[var(--color-error)] bg-[var(--color-error-container)] px-4 py-3 text-sm text-[var(--color-on-error-container)]">
             {error}
           </div>
         ) : !hasUsage ? (
           <div className="flex min-h-[190px] items-center justify-center">
             <div className="max-w-sm text-center">
-              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] text-[var(--color-text-tertiary)]">
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] text-[var(--color-text-tertiary)]">
                 <span className="material-symbols-outlined text-[20px]" aria-hidden="true">monitoring</span>
               </div>
               <div className="mt-3 text-sm font-medium text-[var(--color-text-primary)]">{t('settings.activity.emptyTitle')}</div>
@@ -999,7 +1016,7 @@ export function ActivitySettings() {
                   <div
                     id={`activity-day-tooltip-${tooltipDay.date}`}
                     role="tooltip"
-                    className="pointer-events-none absolute z-20 min-w-[172px] rounded-md border border-[var(--color-activity-tooltip-border)] bg-[var(--color-activity-tooltip-surface)] px-3 py-2 text-xs shadow-xl"
+                    className="pointer-events-none absolute z-20 min-w-[172px] rounded-[var(--radius-md)] border border-[var(--color-activity-tooltip-border)] bg-[var(--color-activity-tooltip-surface)] px-3 py-2 text-xs shadow-xl"
                     style={tooltipStyle}
                   >
                     <div className="font-medium text-[var(--color-activity-tooltip-text)]">{getHeatmapCellTitle(tooltipDay, locale, t)}</div>
@@ -1032,7 +1049,7 @@ export function ActivitySettings() {
           topPluginItems.length > 0 ? 'lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)]' : 'lg:max-w-[520px]'
         }`}>
           <section className="min-w-0">
-            <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">{t('settings.activity.activityInsights')}</h2>
+            <h2 className="text-lg font-semibold text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>{t('settings.activity.activityInsights')}</h2>
             <dl className="mt-5 grid gap-3">
               {insightMetrics.map((metric) => (
                 <div key={metric.label} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-5">
@@ -1050,11 +1067,11 @@ export function ActivitySettings() {
 
           {topPluginItems.length > 0 && (
             <section className="min-w-0">
-              <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">{t('settings.activity.mostUsedPluginsAndSkills')}</h2>
+              <h2 className="text-lg font-semibold text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>{t('settings.activity.mostUsedPluginsAndSkills')}</h2>
               <div className="mt-5 grid gap-3">
                 {topPluginItems.map((item) => (
                   <div key={item.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] text-[var(--color-text-tertiary)]">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] text-[var(--color-text-tertiary)]">
                       <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
                         {item.kind === 'skill' ? 'extension' : 'hub'}
                       </span>

@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
+import { Trash2 } from 'lucide-react'
 import { useSkillStore } from '../../stores/skillStore'
 import { useTranslation } from '../../i18n'
 import { useUIStore } from '../../stores/uiStore'
@@ -120,7 +121,7 @@ export function SkillDetail() {
       size="lg"
       data-testid="local-skill-uninstall-button"
       loading={uninstalling}
-      icon={<span className="material-symbols-outlined text-[18px]" aria-hidden>delete</span>}
+      icon={<Trash2 className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />}
       onClick={() => setConfirmUninstall(true)}
     >
       {uninstalling ? t('market.uninstall.uninstalling') : t('market.uninstall.action')}

@@ -1344,6 +1344,39 @@ describe('Sidebar', () => {
     expect(addToast).not.toHaveBeenCalled()
   })
 
+  it('announces a session list failure and offers a retry', () => {
+    useSessionStore.setState({ sessions: [], isLoading: false, error: 'upstream exploded' })
+
+    render(<Sidebar />)
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('Session list failed')
+    expect(alert).toHaveTextContent('upstream exploded')
+
+    fetchSessions.mockClear()
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+    expect(fetchSessions).toHaveBeenCalled()
+  })
+
+  it('does not claim there are no sessions while the list is failing', () => {
+    useSessionStore.setState({ sessions: [], isLoading: false, error: 'upstream exploded' })
+
+    render(<Sidebar />)
+
+    // Showing "no sessions" next to the failure reads as "the list is empty",
+    // which is a different fact from "we could not load the list".
+    expect(screen.queryByText('No sessions')).not.toBeInTheDocument()
+  })
+
+  it('says there are no sessions once the list loads empty', () => {
+    useSessionStore.setState({ sessions: [], isLoading: false, error: null })
+
+    render(<Sidebar />)
+
+    expect(screen.getByText('No sessions')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('keeps the initial loading state during an empty first build', () => {
     useSessionStore.setState({
       sessions: [],
@@ -1617,6 +1650,60 @@ describe('Sidebar', () => {
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
       value: originalVisibility,
+    })
+  })
+
+  // The whole drawer is touch-only: it has no hover, and nothing can be focused
+  // through `pointer-events: none`. Every control gated on `group-hover` was
+  // therefore either dead or an invisible tap target, and the 53 tests above
+  // never saw it because they all render the desktop sidebar.
+  describe('touch drawer controls', () => {
+    const renderWithProject = (isMobile: boolean) => {
+      useSessionStore.setState({
+        sessions: [makeSession('alpha-1', 'Alpha newest', '/workspace/alpha', new Date('2026-05-15T10:00:00.000Z').toISOString())],
+      })
+      return render(<Sidebar isMobile={isMobile} />)
+    }
+
+    it('keeps the project row actions hover-gated on desktop', () => {
+      renderWithProject(false)
+
+      const actions = screen.getByRole('button', { name: 'Project actions for alpha' })
+      expect(actions).toHaveClass('h-7', 'w-7')
+      expect(actions.parentElement).toHaveClass('pointer-events-none', 'opacity-0')
+    })
+
+    it('leaves the project row actions tappable at 44px in the drawer', () => {
+      renderWithProject(true)
+
+      const actions = screen.getByRole('button', { name: 'Project actions for alpha' })
+      const create = screen.getByRole('button', { name: 'New session in alpha' })
+      expect(actions).toHaveClass('h-11', 'w-11')
+      expect(create).toHaveClass('h-11', 'w-11')
+      // Both live in one row, so they need a gap wide enough not to catch a
+      // thumb aimed at the other.
+      expect(actions.parentElement).toHaveClass('opacity-100', 'gap-1.5')
+      expect(actions.parentElement).not.toHaveClass('pointer-events-none')
+    })
+
+    it('stops rendering the projects header actions as an invisible tap target', () => {
+      renderWithProject(true)
+
+      // These kept `pointer-events` while sitting at `opacity: 0` — visually
+      // absent on a phone, yet still firing on tap.
+      const menu = screen.getByRole('button', { name: 'Project menu' })
+      expect(menu).toHaveClass('h-11', 'w-11')
+      expect(menu.parentElement).toHaveClass('opacity-100')
+      expect(menu.parentElement).not.toHaveClass('opacity-0')
+    })
+
+    it('raises the search row and overflow toggle to the touch minimum', () => {
+      renderWithProject(true)
+
+      expect(screen.getByRole('button', { name: 'Refresh sessions' })).toHaveClass('h-11', 'w-11')
+      expect(screen.getByRole('button', { name: 'Batch manage' })).toHaveClass('h-11', 'w-11')
+      // Same flex row as the two above; at h-9 it left the row ragged.
+      expect(screen.getAllByRole('button', { name: 'Search chats' })[0]).toHaveClass('h-11')
     })
   })
 })

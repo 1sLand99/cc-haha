@@ -562,7 +562,10 @@ describe('AppShell boot flow', () => {
     expect(header).toHaveTextContent('Analyze recent commits')
     expect(header).toHaveTextContent('session.active')
     expect(header).toHaveTextContent('session.messages')
-    expect(screen.getByTestId('mobile-sidebar-toggle')).toHaveClass('h-10', 'w-10')
+    // 44px — the hamburger is the primary mobile navigation target, and the
+    // platform minimum for primary touch targets is 44, not the 40 it shipped
+    // at (IconButton's own size doc had the two tiers reversed).
+    expect(screen.getByTestId('mobile-sidebar-toggle')).toHaveClass('h-11', 'w-11')
   })
 
   it('keeps browser H5 mobile on chat tabs when settings was restored as active', async () => {

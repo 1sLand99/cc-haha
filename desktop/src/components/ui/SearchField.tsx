@@ -34,9 +34,16 @@ export type SearchFieldProps =
     activeDescendantId?: string
   }
 
-const ICON_PX: Record<FieldSize, number> = { sm: 13, md: 14, lg: 16 }
-const ICON_INSET: Record<FieldSize, string> = { sm: 'left-2', md: 'left-2.5', lg: 'left-3' }
-const TEXT_INSET: Record<FieldSize, string> = { sm: 'pl-7', md: 'pl-8', lg: 'pl-9' }
+const ICON_PX: Record<FieldSize, number> = { sm: 13, md: 14, lg: 16, xl: 16 }
+const ICON_INSET: Record<FieldSize, string> = { sm: 'left-2', md: 'left-2.5', lg: 'left-3', xl: 'left-3.5' }
+const TEXT_INSET: Record<FieldSize, string> = { sm: 'pl-7', md: 'pl-8', lg: 'pl-9', xl: 'pl-10' }
+/** Page-level (`xl`) search bars take the card corner; inline ones the control corner. */
+const RADIUS: Record<FieldSize, string> = {
+  sm: 'rounded-[var(--radius-md)]',
+  md: 'rounded-[var(--radius-md)]',
+  lg: 'rounded-[var(--radius-md)]',
+  xl: 'rounded-[var(--radius-lg)]',
+}
 
 /**
  * The search box.
@@ -109,7 +116,8 @@ export function SearchField({
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
           className={cx(
-            'w-full rounded-[var(--radius-md)] border outline-none',
+            'w-full border outline-none',
+            RADIUS[size],
             'bg-[var(--color-surface)] text-[var(--color-text-primary)]',
             'placeholder:text-[var(--color-text-tertiary)]',
             'border-[var(--color-border)] transition-colors duration-150',

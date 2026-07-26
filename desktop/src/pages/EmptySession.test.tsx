@@ -266,7 +266,7 @@ describe('EmptySession', () => {
     expect(screen.getByTestId('model-selector')).toHaveAttribute('data-compact', 'true')
     expect(screen.getByRole('button', { name: 'Run' })).toHaveClass('h-11', 'w-11')
     expect(screen.getByTestId('empty-session-composer-shell')).toHaveClass('px-3')
-    expect(screen.getByTestId('empty-session-composer-panel')).toHaveClass('rounded-2xl')
+    expect(screen.getByTestId('empty-session-composer-panel')).toHaveClass('rounded-[var(--radius-2xl)]')
   })
 
   it('refreshes empty-session slash commands after plugin reloads', async () => {
@@ -442,7 +442,10 @@ describe('EmptySession', () => {
     render(<EmptySession />)
 
     const panel = screen.getByTestId('empty-session-composer-panel')
-    expect(panel).toHaveClass('rounded-xl', 'p-0')
+    // 20px corner and the middle shadow step — the composer's own place on the
+    // handoff's scale. The repository controls live inside this panel, so it
+    // must stay a single rounded block rather than a split top/bottom pair.
+    expect(panel).toHaveClass('rounded-[var(--radius-2xl)]', 'p-0', 'glass-panel--composer')
     expect(panel).not.toHaveClass('rounded-b-none')
 
     fireEvent.click(screen.getByRole('button', { name: 'Pick project' }))

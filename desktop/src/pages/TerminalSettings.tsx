@@ -8,9 +8,9 @@ import { readTerminalPalette } from '../lib/terminalTheme'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
-import { IconButton } from '@/components/ui/IconButton'
+import { IconButton, type IconButtonSurface } from '@/components/ui/IconButton'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { Badge, StatusDot, type Tone } from '@/components/ui/Badge'
+import { StatusDot, type Tone } from '@/components/ui/Badge'
 import type { DesktopTerminalStartupShell } from '../types/settings'
 import { getDesktopHost } from '../lib/desktopHost'
 import {
@@ -434,6 +434,18 @@ export function TerminalSettings({
     }
   }
 
+  // The ink panel is only drawn when there is a session behind it; the page
+  // tokens are inverted against the terminal ground, so anything sitting on it
+  // has to switch together.
+  const hasTerminalPanel = status !== 'unavailable'
+  const terminalHeaderTitleClass = hasTerminalPanel
+    ? 'text-[var(--color-terminal-fg)]'
+    : 'text-[var(--color-text-primary)]'
+  const terminalHeaderMetaClass = hasTerminalPanel
+    ? 'text-[var(--color-terminal-muted)]'
+    : 'text-[var(--color-text-tertiary)]'
+  const terminalHeaderSurface: IconButtonSurface = hasTerminalPanel ? 'terminal' : 'default'
+
   return (
     <div className={`flex h-full flex-col overflow-hidden ${
       docked
@@ -442,82 +454,8 @@ export function TerminalSettings({
           ? 'min-h-0 bg-[var(--color-surface)] px-5 py-4'
           : 'min-h-[min(720px,calc(100vh-8rem))]'
     }`}>
-      <div
-        data-testid="settings-terminal-toolbar"
-        className={`${docked ? 'mb-1.5 min-h-8' : 'mb-2 min-h-9'} flex min-w-0 flex-wrap items-center gap-2`}
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--color-terminal-danger)]" aria-hidden="true" />
-          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--color-terminal-warning)]" aria-hidden="true" />
-          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--color-terminal-accent)]" aria-hidden="true" />
-          <h2 className={`${docked ? 'text-[13px]' : 'text-sm'} shrink-0 font-semibold text-[var(--color-text-primary)]`}>
-            {t('settings.terminal.title')}
-          </h2>
-          <TerminalHelpHint compact={docked} />
-          <StatusPill status={status} label={t(STATUS_LABEL_KEYS[status])} compact={docked} />
-          {shellInfo && (
-            <div className="flex min-w-0 items-center gap-1.5 text-xs text-[var(--color-text-tertiary)]">
-              <span className="shrink-0 font-mono">{shellInfo.shell}</span>
-              <span className="shrink-0 text-[var(--color-border)]">/</span>
-              <span className="min-w-0 truncate font-mono">{shellInfo.cwd}</span>
-            </div>
-          )}
-        </div>
-
-        <div className="flex shrink-0 items-center gap-1.5">
-          {onOpenInTab && (
-            <Button
-              variant="secondary"
-              size="base"
-              onClick={onOpenInTab}
-              icon={<span className="material-symbols-outlined text-[16px]">open_in_new</span>}
-            >
-              {t('terminal.openInTab')}
-            </Button>
-          )}
-          {onNewTerminal && (
-            <Button
-              variant="secondary"
-              size="base"
-              onClick={onNewTerminal}
-              icon={<span className="material-symbols-outlined text-[16px]">add</span>}
-            >
-              {t('terminal.newTab')}
-            </Button>
-          )}
-          <Button
-            variant="secondary"
-            size="base"
-            onClick={clearTerminal}
-            disabled={!runtime.terminal}
-            icon={<span className="material-symbols-outlined text-[16px]">mop</span>}
-          >
-            {t('settings.terminal.clear')}
-          </Button>
-          <Button
-            variant="primary"
-            size="base"
-            onClick={() => void startTerminal()}
-            disabled={status === 'starting'}
-            icon={<span className="material-symbols-outlined text-[16px]">restart_alt</span>}
-          >
-            {t('settings.terminal.restart')}
-          </Button>
-          {onClose && (
-            <IconButton
-              icon="close"
-              label={t('terminal.closePanel')}
-              showTooltip={false}
-              size="md"
-              tone="muted"
-              onClick={onClose}
-            />
-          )}
-        </div>
-      </div>
-
       {error && (
-        <div className="mb-3 rounded-[var(--radius-md)] border border-[var(--color-error)]/20 bg-[var(--color-error)]/10 px-3 py-2 text-sm text-[var(--color-error)]">
+        <div className="mb-3 rounded-[var(--radius-md)] border border-[var(--color-error)] bg-[var(--color-error-container)] px-3 py-2 text-sm text-[var(--color-on-error-container)]">
           {error}
         </div>
       )}
@@ -527,7 +465,7 @@ export function TerminalSettings({
           <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-4">
             <div className="flex flex-col gap-3">
               <div>
-                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
+                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>
                   {t('settings.terminal.preferencesTitle')}
                 </h3>
                 <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
@@ -601,28 +539,130 @@ export function TerminalSettings({
         </>
       )}
 
-      {status === 'unavailable' ? (
-        <EmptyState
-          className="flex-1"
-          size="md"
-          icon={<span className="material-symbols-outlined text-[20px]" aria-hidden="true">desktop_windows</span>}
-          title={t('settings.terminal.unavailableTitle')}
-          description={t('settings.terminal.unavailableBody')}
-        />
-      ) : (
+      {/* One panel, header included. The handoff draws the terminal as a warm
+          ink window (§9); its title bar belongs on that ground, not floating
+          above it on the page ground as a second toolbar. Without a session
+          there is no window to draw, so the chrome falls back to page tokens
+          rather than framing an empty state in ink. */}
+      <div
+        className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-xl)] border ${
+          hasTerminalPanel
+            ? 'border-[var(--color-terminal-border)] bg-[var(--color-terminal-bg)] shadow-[var(--shadow-card)]'
+            : 'border-[var(--color-border)] bg-[var(--color-surface-container-lowest)]'
+        }`}
+      >
         <div
-          data-testid="settings-terminal-frame"
-          onKeyDownCapture={handleTerminalKeyDownCapture}
-          onWheelCapture={handleTerminalWheelCapture}
-          className="min-h-0 flex-1 overflow-hidden rounded-[var(--radius-sm)] border border-[var(--color-terminal-border)] bg-[var(--color-terminal-bg)] shadow-[var(--shadow-dropdown)]"
+          data-testid="settings-terminal-toolbar"
+          className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-3.5 ${
+            docked ? 'min-h-9 py-1.5' : 'min-h-11 py-2'
+          } ${
+            hasTerminalPanel
+              ? 'border-[var(--color-terminal-border)] bg-[var(--color-terminal-header)]'
+              : 'border-[var(--color-border)] bg-[var(--color-surface-container-low)]'
+          }`}
         >
-          <div
-            ref={hostRef}
-            data-testid={testId}
-            className="settings-terminal-host h-full w-full overflow-hidden px-2 pb-2 pt-1.5"
-          />
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <span className="flex shrink-0 items-center gap-1.5" aria-hidden="true">
+              <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-terminal-danger)]" />
+              <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-terminal-warning)]" />
+              <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-terminal-accent)]" />
+            </span>
+            <h2
+              className={`${docked ? 'text-[12.5px]' : 'text-[13px]'} shrink-0 font-semibold ${terminalHeaderTitleClass}`}
+              style={{ fontFamily: 'var(--font-headline)' }}
+            >
+              {t('settings.terminal.title')}
+            </h2>
+            {shellInfo && (
+              <div className={`flex min-w-0 items-center gap-1.5 font-mono text-[11.5px] ${terminalHeaderMetaClass}`}>
+                <span className="min-w-0 truncate">{shellInfo.cwd}</span>
+                <span className="shrink-0">·</span>
+                <span className="shrink-0">{shellInfo.shell}</span>
+              </div>
+            )}
+            <span className={`inline-flex shrink-0 items-center gap-1.5 text-[11.5px] ${terminalHeaderMetaClass}`}>
+              <StatusDot tone={STATUS_TONE[status]} pulse={status === 'running'} />
+              {t(STATUS_LABEL_KEYS[status])}
+            </span>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-0.5">
+            <TerminalHelpHint compact={docked} surface={terminalHeaderSurface} />
+            {onOpenInTab && (
+              <IconButton
+                icon="open_in_new"
+                label={t('terminal.openInTab')}
+                size={docked ? 'sm' : 'md'}
+                tone="muted"
+                surface={terminalHeaderSurface}
+                onClick={onOpenInTab}
+              />
+            )}
+            {onNewTerminal && (
+              <IconButton
+                icon="add"
+                label={t('terminal.newTab')}
+                size={docked ? 'sm' : 'md'}
+                tone="muted"
+                surface={terminalHeaderSurface}
+                onClick={onNewTerminal}
+              />
+            )}
+            <IconButton
+              icon="mop"
+              label={t('settings.terminal.clear')}
+              size={docked ? 'sm' : 'md'}
+              tone="muted"
+              surface={terminalHeaderSurface}
+              disabled={!runtime.terminal}
+              onClick={clearTerminal}
+            />
+            <IconButton
+              icon="restart_alt"
+              label={t('settings.terminal.restart')}
+              size={docked ? 'sm' : 'md'}
+              tone="muted"
+              surface={terminalHeaderSurface}
+              disabled={status === 'starting'}
+              onClick={() => void startTerminal()}
+            />
+            {onClose && (
+              <IconButton
+                icon="close"
+                label={t('terminal.closePanel')}
+                showTooltip={false}
+                size={docked ? 'sm' : 'md'}
+                tone="muted"
+                surface={terminalHeaderSurface}
+                onClick={onClose}
+              />
+            )}
+          </div>
         </div>
-      )}
+
+        {status === 'unavailable' ? (
+          <EmptyState
+            className="flex-1"
+            size="md"
+            icon={<span className="material-symbols-outlined text-[20px]" aria-hidden="true">desktop_windows</span>}
+            title={t('settings.terminal.unavailableTitle')}
+            description={t('settings.terminal.unavailableBody')}
+          />
+        ) : (
+          <div
+            data-testid="settings-terminal-frame"
+            onKeyDownCapture={handleTerminalKeyDownCapture}
+            onWheelCapture={handleTerminalWheelCapture}
+            className="min-h-0 flex-1 overflow-hidden"
+          >
+            <div
+              ref={hostRef}
+              data-testid={testId}
+              className="settings-terminal-host h-full w-full overflow-hidden px-2.5 pb-2.5 pt-2"
+            />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -701,7 +741,10 @@ async function pasteClipboardIntoTerminal(terminal: ClipboardTerminal) {
   terminal.focus()
 }
 
-function TerminalHelpHint({ compact = false }: { compact?: boolean }) {
+function TerminalHelpHint({
+  compact = false,
+  surface = 'default',
+}: { compact?: boolean; surface?: IconButtonSurface }) {
   const t = useTranslation()
   const tooltipId = useId()
   const [open, setOpen] = useState(false)
@@ -718,6 +761,7 @@ function TerminalHelpHint({ compact = false }: { compact?: boolean }) {
         size={compact ? 'xs' : 'sm'}
         shape="circle"
         tone="muted"
+        surface={surface}
         aria-describedby={tooltipId}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -743,19 +787,6 @@ const STATUS_TONE: Record<TerminalStatus, Tone> = {
   idle: 'neutral',
   exited: 'neutral',
   unavailable: 'neutral',
-}
-
-function StatusPill({ status, label, compact = false }: { status: TerminalStatus; label: string; compact?: boolean }) {
-  return (
-    <Badge
-      tone="neutral"
-      bordered
-      size={compact ? 'xs' : 'md'}
-      icon={<StatusDot tone={STATUS_TONE[status]} />}
-    >
-      {label}
-    </Badge>
-  )
 }
 
 function BashPathSettings({ isTauri }: { isTauri: boolean }) {

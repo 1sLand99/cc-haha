@@ -86,8 +86,8 @@ export function TraceTree({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface-container-lowest)]" data-testid="trace-tree">
-      <div className="shrink-0 border-b border-[var(--color-border)] px-3 py-2.5">
+    <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface-container-low)]" data-testid="trace-tree">
+      <div className="shrink-0 border-b border-[var(--color-border)] px-4 pb-2.5 pt-3.5">
         <SearchField
           value={query}
           onChange={setQuery}
@@ -96,7 +96,7 @@ export function TraceTree({
           // so both carry the same accessible label.
           clearLabel={t('common.clearSearch')}
           placeholder={t('trace.searchSpans')}
-          size="sm"
+          size="md"
         />
         <SegmentedControl<TraceTreeFilter>
           items={TRACE_TREE_FILTERS.map((value) => ({ value, label: filterLabel(value, t) }))}
@@ -104,8 +104,7 @@ export function TraceTree({
           onChange={setFilter}
           label={t('trace.filter.aria')}
           size="sm"
-          layout="fill"
-          className="mt-2 w-full"
+          className="mt-2.5"
         />
       </div>
       <div
@@ -158,8 +157,8 @@ function TurnGroup({
   return (
     <section>
       <div
-        className={`sticky top-0 z-10 flex items-center gap-1 border-b border-[var(--color-border)]/60 bg-[var(--color-surface-container-lowest)] py-1.5 pl-1.5 pr-3 ${
-          selected ? 'shadow-[inset_2px_0_0_var(--color-brand)]' : ''
+        className={`sticky top-0 z-10 flex items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] py-1.5 pl-2.5 pr-4 ${
+          selected ? 'shadow-[inset_3px_0_0_var(--color-brand)]' : ''
         }`}
       >
         <IconButton
@@ -176,19 +175,19 @@ function TurnGroup({
           type="button"
           onClick={() => onSelect(group.turnId)}
           data-span-id={group.turnId}
-          className="flex min-w-0 flex-1 items-baseline gap-1.5 text-left"
+          className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
         >
-          <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] ${
+          <span className={`shrink-0 text-[13px] font-semibold ${
             selected ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)]'
           }`}>
             {turnLabel}
           </span>
           {preview && preview !== turnLabel ? (
-            <span className="truncate text-[11px] text-[var(--color-text-tertiary)]">{preview}</span>
+            <span className="truncate text-[12.5px] text-[var(--color-text-tertiary)]">{preview}</span>
           ) : null}
         </button>
         {group.errorCount > 0 ? (
-          <span className="shrink-0 font-mono text-[10px] font-semibold text-[var(--color-error)]">
+          <span className="shrink-0 font-mono text-[11px] font-semibold text-[var(--color-error)]">
             {group.errorCount}
           </span>
         ) : null}
@@ -219,32 +218,32 @@ function TreeRowButton({ row, selected, onSelect }: { row: TreeRow; selected: bo
       aria-level={row.depth + 1}
       data-span-id={span.id}
       onClick={onSelect}
-      className={`trace-row-cv relative flex h-[34px] w-full items-center gap-2 pr-3 text-left transition-colors ${
+      className={`trace-row-cv relative flex h-[34px] w-full items-center gap-2 pr-4 text-left transition-colors ${
         selected
-          ? 'bg-[var(--color-surface-container-high)]'
-          : 'hover:bg-[var(--color-surface-container-low)]'
+          ? 'bg-[var(--color-surface-hover)]'
+          : 'hover:bg-[var(--color-surface-hover)]'
       }`}
-      style={{ paddingLeft: `${12 + row.depth * 14}px` }}
+      style={{ paddingLeft: `${16 + row.depth * 14}px` }}
     >
-      {selected ? <span className="absolute inset-y-0 left-0 w-[2px] bg-[var(--color-brand)]" aria-hidden="true" /> : null}
+      {selected ? <span className="absolute inset-y-0 left-0 w-[3px] bg-[var(--color-brand)]" aria-hidden="true" /> : null}
       <TypeIcon span={span} />
-      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-        <span className={`shrink-0 truncate text-xs font-semibold ${
+      <span className="flex min-w-0 flex-1 items-baseline gap-2">
+        <span className={`shrink-0 truncate text-[13.5px] font-semibold ${
           selected ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)]'
         }`}>
           {spanDisplayTitle(span, t)}
         </span>
         {preview ? (
-          <span className="truncate text-[11px] text-[var(--color-text-tertiary)]">{preview}</span>
+          <span className="truncate text-[12.5px] text-[var(--color-text-tertiary)]">{preview}</span>
         ) : null}
         {span.isSidechain ? (
-          <span className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1 text-[9px] text-[var(--color-text-tertiary)]">
+          <span className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1 text-[10px] text-[var(--color-text-tertiary)]">
             {t('trace.sidechain')}
           </span>
         ) : null}
       </span>
       {duration ? (
-        <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-tertiary)]">{duration}</span>
+        <span className="shrink-0 font-mono text-[12px] text-[var(--color-text-tertiary)]">{duration}</span>
       ) : null}
       <StatusGlyph status={span.status} />
     </button>

@@ -230,7 +230,9 @@ export function Dropdown<T extends string>({
           tabIndex={-1}
           onKeyDown={handleListKeyDown}
           className={cx(
-            'absolute z-[var(--z-dropdown)] rounded-[var(--radius-lg)]',
+            // 17px — overlays are cards, not card innards. One value here
+            // settles the corner for every Dropdown menu in the app.
+            'absolute z-[var(--z-dropdown)] rounded-[var(--radius-xl)]',
             'bg-[var(--color-surface-container-lowest)] border border-[var(--color-border)]',
             'shadow-[var(--shadow-dropdown)] focus:outline-none',
             maxHeight ? 'overflow-y-auto' : 'overflow-hidden',

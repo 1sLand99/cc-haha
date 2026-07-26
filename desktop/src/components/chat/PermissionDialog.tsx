@@ -109,7 +109,7 @@ function renderPermissionPreview(toolName: string, input: unknown) {
   if (toolName === 'Bash' && typeof obj.command === 'string') {
     return (
       <div className="overflow-x-auto rounded-[var(--radius-md)] bg-[var(--color-terminal-bg)] px-3 py-2.5">
-        <pre className="font-[var(--font-mono)] text-[11px] leading-[1.3] text-[var(--color-terminal-fg)] whitespace-pre-wrap break-words">
+        <pre className="font-mono text-[11px] leading-[1.3] text-[var(--color-terminal-fg)] whitespace-pre-wrap break-words">
           <span className="text-[var(--color-terminal-accent)] select-none">$ </span>{obj.command}
         </pre>
       </div>
@@ -157,7 +157,7 @@ export function PermissionDialog({ sessionId, requestId, toolName, input, descri
       className={`mb-4 overflow-hidden rounded-[var(--radius-lg)] border ${
         isPending
           ? 'border-[var(--color-warning)] bg-[var(--color-surface-container-lowest)]'
-          : 'border-[var(--color-outline-variant)]/40 bg-[var(--color-surface-container-low)] opacity-70'
+          : 'border-[var(--color-border)] bg-[var(--color-surface-container-low)] opacity-70'
       }`}
     >
       {/* Header */}
@@ -205,11 +205,11 @@ export function PermissionDialog({ sessionId, requestId, toolName, input, descri
       </div>
 
       {/* Tool details */}
-      <div className="border-t border-[var(--color-outline-variant)]/20 px-4 py-3">
+      <div className="border-t border-[var(--color-border)] px-4 py-3">
         {preview ? (
           <div className="space-y-2">
             {details.primary && toolName !== 'Bash' ? (
-              <div className="flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-surface-container)] px-3 py-2 text-xs font-[var(--font-mono)] text-[var(--color-text-secondary)]">
+              <div className="flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-surface-container)] px-3 py-2 text-xs font-mono text-[var(--color-text-secondary)]">
                 <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-[var(--color-outline)] flex-shrink-0">
                   folder_open
                 </span>
@@ -220,7 +220,7 @@ export function PermissionDialog({ sessionId, requestId, toolName, input, descri
           </div>
         ) : details.primary ? (
           <div className="mb-2">
-            <div className="flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-surface-container)] px-3 py-2 text-xs font-[var(--font-mono)] text-[var(--color-text-secondary)]">
+            <div className="flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-surface-container)] px-3 py-2 text-xs font-mono text-[var(--color-text-secondary)]">
               <span aria-hidden="true" className="material-symbols-outlined text-[14px] text-[var(--color-outline)] flex-shrink-0">
                 {toolName === 'Glob' || toolName === 'Grep' ? 'search' : 'folder_open'}
               </span>
@@ -251,7 +251,7 @@ export function PermissionDialog({ sessionId, requestId, toolName, input, descri
         )}
 
         {allowRawToggle && showRaw && (
-          <pre className="mt-2 max-h-[220px] overflow-y-auto overflow-x-auto rounded-[var(--radius-md)] bg-[var(--color-terminal-bg)] px-3 py-2.5 font-[var(--font-mono)] text-[11px] leading-[1.3] text-[var(--color-terminal-fg)] whitespace-pre-wrap break-words">
+          <pre className="mt-2 max-h-[220px] overflow-y-auto overflow-x-auto rounded-[var(--radius-md)] bg-[var(--color-terminal-bg)] px-3 py-2.5 font-mono text-[11px] leading-[1.3] text-[var(--color-terminal-fg)] whitespace-pre-wrap break-words">
             {rawInput}
           </pre>
         )}
@@ -259,7 +259,7 @@ export function PermissionDialog({ sessionId, requestId, toolName, input, descri
 
       {/* Action buttons */}
       {isPending && (
-        <div className="flex items-center gap-2 border-t border-[var(--color-outline-variant)]/20 bg-[var(--color-surface-container-low)] px-4 py-3">
+        <div className="flex items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3">
           <Button
             variant="primary"
             size="sm"
@@ -323,15 +323,15 @@ function ExitPlanModePermissionDialog({
   return (
     <div className={`mb-4 overflow-hidden rounded-[var(--radius-lg)] border ${
       isPending
-        ? 'border-[var(--color-brand)]/60 bg-[var(--color-surface-container-lowest)]'
-        : 'border-[var(--color-outline-variant)]/40 bg-[var(--color-surface-container-low)] opacity-70'
+        ? 'border-[var(--color-primary-fixed-dim)] bg-[var(--color-surface-container-lowest)]'
+        : 'border-[var(--color-border)] bg-[var(--color-surface-container-low)] opacity-70'
     }`}>
       <div className={`flex items-center gap-3 px-4 py-3 ${
         isPending
           ? 'bg-[var(--color-surface-container)]'
           : 'bg-[var(--color-surface-container-low)]'
       }`}>
-        <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-brand)]/15">
+        <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-brand-soft)]">
           <span className="material-symbols-outlined text-[18px] text-[var(--color-brand)]">architecture</span>
         </div>
         <div className="min-w-0 flex-1">
@@ -359,7 +359,7 @@ function ExitPlanModePermissionDialog({
         </div>
       </div>
 
-      <div className="space-y-3 border-t border-[var(--color-outline-variant)]/20 px-4 py-3">
+      <div className="space-y-3 border-t border-[var(--color-border)] px-4 py-3">
         <PlanPreviewCard
           title={t('permission.planPreviewTitle')}
           plan={preview.plan}
@@ -374,13 +374,13 @@ function ExitPlanModePermissionDialog({
             onChange={(event) => setFeedback(event.target.value)}
             placeholder={t('permission.planFeedbackPlaceholder')}
             rows={3}
-            className="min-h-[72px] w-full resize-y rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-brand)]/60 focus:ring-2 focus:ring-[var(--color-brand)]/15"
+            className="min-h-[72px] w-full resize-y rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-border-focus)] focus:shadow-[var(--shadow-focus-ring)]"
           />
         ) : null}
       </div>
 
       {isPending ? (
-        <div className="flex items-center gap-2 border-t border-[var(--color-outline-variant)]/20 bg-[var(--color-surface-container-low)] px-4 py-3">
+        <div className="flex items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3">
           <Button
             variant="primary"
             size="sm"

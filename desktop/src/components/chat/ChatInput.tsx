@@ -943,7 +943,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
         isHeroComposer
           ? `bg-[var(--color-surface)] ${isMobileComposer ? 'px-4 pb-3' : 'px-8 pb-4'}`
           : compact
-            ? `border-t border-[var(--color-border)]/70 bg-[var(--color-surface)] ${isMobileComposer ? 'px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-2' : 'px-3 py-3'}`
+            ? `border-t border-[var(--color-border)] bg-[var(--color-surface)] ${isMobileComposer ? 'px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-2' : 'px-3 py-3'}`
             : `bg-[var(--color-surface)] ${isMobileComposer ? 'px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-2' : 'px-4 py-4'}`
       }
     >
@@ -953,17 +953,23 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
             ? 'mx-auto flex w-full max-w-3xl flex-col'
           : compact
               ? 'mx-auto max-w-full'
-              : `${isMobileComposer ? 'mx-0 max-w-none' : 'mx-auto max-w-[860px]'}`
+              // 900px matches the transcript column above it; at 860 the
+              // composer sat 20px narrower on each side than the messages.
+              : `${isMobileComposer ? 'mx-0 max-w-none' : 'mx-auto max-w-[900px]'}`
         }
       >
         <div
           ref={panelRef}
           data-testid="chat-input-panel"
+          // `glass-panel--composer` is the middle step of the shadow scale, the
+          // one the handoff gives the composer; `--radius-2xl` (20px) is the
+          // composer corner. Both match EmptySession's shell so the same
+          // control does not render two different panels.
           className={isHeroComposer
-            ? `glass-panel relative flex flex-col gap-3 overflow-visible ${embedLaunchControlsInHero ? 'rounded-xl' : 'rounded-t-xl rounded-b-none'} p-4 transition-colors ${isDragActive ? 'composer-drop-target-active' : ''}`
+            ? `glass-panel glass-panel--composer relative flex flex-col gap-3 overflow-visible ${embedLaunchControlsInHero ? 'rounded-[var(--radius-2xl)]' : 'rounded-t-[var(--radius-2xl)] rounded-b-none'} p-4 transition-colors ${isDragActive ? 'composer-drop-target-active' : ''}`
             : compact
-              ? `glass-panel relative overflow-visible p-3 transition-colors ${isMobileComposer ? 'rounded-2xl shadow-[0_-12px_36px_rgba(54,35,28,0.12)]' : 'rounded-xl'} ${isDragActive ? 'composer-drop-target-active' : ''}`
-              : `glass-panel relative overflow-visible transition-colors ${isMobileComposer ? 'rounded-2xl p-3 shadow-[0_-12px_36px_rgba(54,35,28,0.12)]' : 'rounded-xl p-4'} ${isDragActive ? 'composer-drop-target-active' : ''}`}
+              ? `glass-panel glass-panel--composer relative overflow-visible rounded-[var(--radius-2xl)] p-3 transition-colors ${isDragActive ? 'composer-drop-target-active' : ''}`
+              : `glass-panel glass-panel--composer relative overflow-visible rounded-[var(--radius-2xl)] transition-colors ${isMobileComposer ? 'p-3' : 'p-4'} ${isDragActive ? 'composer-drop-target-active' : ''}`}
           {...dragHandlers}
         >
           {isDragActive && (
@@ -1039,7 +1045,10 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
           {!isMemberSession && slashMenuOpen && filteredCommands.length > 0 && (
             <div
               ref={slashMenuRef}
-              className="absolute bottom-full left-0 right-0 z-50 mb-2 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-dropdown)]"
+              // `--radius-xl`, the card step: this is the same menu the
+              // zero-state composer renders, and it is the corner the context,
+              // effort, branch and worktree panels above this row already use.
+              className="absolute bottom-full left-0 right-0 z-[var(--z-dropdown)] mb-2 overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-overlay)]"
             >
               <div className="max-h-[300px] overflow-y-auto py-1">
                 {filteredCommands.map((command, index) => (
@@ -1084,12 +1093,13 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
           )}
 
           {!isMemberSession && activeTabId && queuedUserMessages.length > 0 && (
+            // Dashed outline cards stacked above the input, per §4 of the
+            // handoff. They used to be a full-bleed filled strip pinned to the
+            // panel's top edge, which read as part of the composer chrome
+            // rather than as messages waiting their turn.
             <div
               data-testid="pending-user-message-list"
-              className={[
-                'overflow-hidden border-b border-[var(--color-border-separator)]',
-                isHeroComposer ? '-mx-4 -mt-4' : useCompactControls ? '-mx-3 -mt-3' : '-mx-4 -mt-4',
-              ].join(' ')}
+              className={`flex flex-col gap-1.5 ${isHeroComposer ? '' : 'mb-2'}`}
             >
               {queuedUserMessages.map((message) => {
                 const isEditing = editingQueuedMessageId === message.id
@@ -1098,13 +1108,18 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                     key={message.id}
                     data-testid="pending-user-message"
                     className={[
-                      'flex min-w-0 items-center gap-2 px-3 py-2 text-xs',
-                      'border-t border-[var(--color-border-separator)] first:border-t-0',
-                      'bg-[var(--color-surface-container-lowest)]/70 text-[var(--color-text-secondary)]',
+                      'flex min-w-0 items-center gap-2.5 rounded-[var(--radius-lg)] px-3.5 py-2',
+                      // `--color-outline` rather than `--color-border`: a dashed
+                      // line at the lighter weight all but disappears.
+                      'border border-dashed border-[var(--color-outline)]',
+                      'text-[13.5px] text-[var(--color-text-secondary)]',
                     ].join(' ')}
                   >
-                    <span className="material-symbols-outlined shrink-0 text-[16px] text-[var(--color-text-tertiary)]" aria-hidden="true">
-                      subdirectory_arrow_right
+                    {/* The handoff labels the row in words rather than with a
+                        glyph; the arrow icon here was a stand-in from before
+                        the string existed. */}
+                    <span className="shrink-0 text-xs text-[var(--color-text-tertiary)]">
+                      {t('chat.pendingMessageQueuedLabel')}
                     </span>
                     {isEditing ? (
                       <>
@@ -1122,7 +1137,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                             }
                           }}
                           aria-label={t('chat.pendingMessageEditInput')}
-                          className="min-w-0 flex-1 rounded-[6px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-border-focus)]"
+                          className="min-w-0 flex-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-border-focus)]"
                           autoFocus
                         />
                         <Button
@@ -1148,8 +1163,9 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                         <span className="min-w-0 flex-1 truncate font-medium" title={message.displayContent}>
                           {message.displayContent}
                         </span>
+                        {/* The accent action of the three, per the handoff. */}
                         <Button
-                          variant="ghost"
+                          variant="link"
                           size="sm"
                           onClick={() => sendQueuedUserMessage(activeTabId, message.id)}
                           aria-label={t('chat.pendingMessageGuideNow')}
@@ -1249,23 +1265,23 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                       onClick={() => setPlusMenuOpen((value) => !value)}
                       aria-label={t('chat.composerTools')}
                       aria-expanded={plusMenuOpen}
-                      className={`text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] ${isMobileComposer ? 'inline-flex h-11 w-11 items-center justify-center rounded-xl' : 'rounded-[var(--radius-md)] p-1.5'}`}
+                      className={`inline-flex items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${isMobileComposer ? 'h-11 w-11' : 'h-8 w-8'}`}
                     >
                       <span className="material-symbols-outlined text-[18px]">add</span>
                     </button>
 
                     {plusMenuOpen && (
-                      <div className={`absolute bottom-full left-0 z-50 mb-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1 shadow-[var(--shadow-dropdown)] ${isMobileComposer ? 'w-[min(240px,calc(100vw-32px))]' : 'w-[240px]'}`}>
+                      <div className={`absolute bottom-full left-0 z-[var(--z-dropdown)] mb-2 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] p-1.5 shadow-[var(--shadow-overlay)] ${isMobileComposer ? 'w-[min(240px,calc(100vw-32px))]' : 'w-[240px]'}`}>
                         <button
                           onClick={openAttachmentPicker}
-                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
+                          className="flex w-full items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
                         >
                           <span className="material-symbols-outlined text-[18px] text-[var(--color-text-secondary)]">attach_file</span>
                           <span className="text-sm text-[var(--color-text-primary)]">{addFilesLabel}</span>
                         </button>
                         <button
                           onClick={insertSlashCommand}
-                          className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
+                          className="flex w-full items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
                         >
                           <span className="w-[24px] text-center text-[18px] font-bold text-[var(--color-text-secondary)]">/</span>
                           <span className="text-sm text-[var(--color-text-primary)]">{slashCommandsLabel}</span>
@@ -1303,7 +1319,13 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                   fluid={isMobileComposer}
                 />
               )}
-              <button
+              {/* Same component and same icon placement as EmptySession's run
+                  button. The two rendered mirror images of each other until it
+                  was spotted in a walkthrough — the arrow led here and trailed
+                  there, on what is the same button to the user. */}
+              <Button
+                variant={!isMemberSession && isActive ? 'danger' : 'primary'}
+                size="base"
                 onClick={!isMemberSession && isActive ? () => stopGeneration(activeTabId!) : handleSubmit}
                 disabled={!isMemberSession && isActive ? false : !canSubmit}
                 aria-label={!isMemberSession && isActive ? t('common.stop') : isMemberSession ? t('common.send') : t('common.run')}
@@ -1316,23 +1338,18 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                         : t('common.run')
                       : undefined
                 }
-                className={`flex shrink-0 items-center justify-center gap-1 rounded-lg text-xs font-semibold transition-all hover:brightness-105 disabled:opacity-30 ${
-                  iconOnlyAction ? `${isMobileComposer ? 'h-11 w-11 rounded-xl px-0 py-0' : 'h-8 w-8 px-0 py-0'}` : 'w-[112px] px-3 py-1.5'
-                } ${
-                  !isMemberSession && isActive
-                    ? 'bg-[var(--color-error-container)] text-[var(--color-on-error-container)]'
-                    : 'bg-[image:var(--gradient-btn-primary)] text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)]'
+                className={`shrink-0 ${
+                  iconOnlyAction ? (isMobileComposer ? 'h-11 w-11' : 'w-8') : 'w-[112px]'
                 }`}
+                icon={(
+                  <span className="material-symbols-outlined text-[14px]">
+                    {!isMemberSession && isActive ? 'stop' : 'arrow_forward'}
+                  </span>
+                )}
+                iconPosition="end"
               >
-                {/* Icon trails the label, matching the same control on
-                    EmptySession. The two rendered mirror images of each other
-                    until this was spotted in a walkthrough — the arrow led here
-                    and trailed there, on what is the same button to the user. */}
                 {!iconOnlyAction && (!isMemberSession && isActive ? t('common.stop') : isMemberSession ? t('common.send') : t('common.run'))}
-                <span className="material-symbols-outlined text-[14px]">
-                  {!isMemberSession && isActive ? 'stop' : 'arrow_forward'}
-                </span>
-              </button>
+              </Button>
             </div>
           </div>
 

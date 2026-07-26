@@ -7,7 +7,7 @@ import { Spinner } from './Spinner'
 export type IconButtonSize = '2xs' | 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl'
 export type IconButtonTone = 'default' | 'secondary' | 'muted' | 'brand' | 'danger'
 /** Which surface this button sits on — decides its hover fill. */
-export type IconButtonSurface = 'default' | 'sidebar'
+export type IconButtonSurface = 'default' | 'sidebar' | 'terminal'
 
 export type IconButtonProps =
   Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'aria-label' | 'title'> & {
@@ -21,7 +21,13 @@ export type IconButtonProps =
     label: string
     /** Also renders `label` as a native tooltip. Defaults to true. */
     showTooltip?: boolean
-    /** `2xs` is 20px and `xl` is 40px — the mobile touch-target minimum. */
+    /**
+     * `2xs` is 20px; `2xl` (44px) is the platform minimum for PRIMARY touch
+     * targets — `xl` (40px) is acceptable only for secondary ones. This line
+     * used to call 40px "the mobile touch-target minimum", which contradicted
+     * the type's own doc above and put the most-tapped mobile controls a size
+     * short.
+     */
     size?: IconButtonSize
     tone?: IconButtonTone
     shape?: 'square' | 'circle'
@@ -91,6 +97,29 @@ const REST_TEXT: Record<IconButtonTone, string> = {
 }
 
 /**
+ * Surfaces whose ground does not follow `--color-surface`, and so cannot use
+ * the text colors above.
+ *
+ * The terminal panel is one warm-ink block in every palette (the handoff pins
+ * it; only `ink-blue` swaps in a cool ground). Under the four paper themes
+ * `--color-text-tertiary` is a dark warm grey — invisible on it — and
+ * `--color-surface-hover` is a light cream, which flashes a pale square on the
+ * dark bar. Both have to come from the `--color-terminal-*` set instead.
+ *
+ * Partial on purpose: `default` and `sidebar` fall through to the maps above,
+ * so their output is unchanged.
+ */
+const SURFACE_REST_TEXT: Partial<Record<IconButtonSurface, Record<IconButtonTone, string>>> = {
+  terminal: {
+    default: 'text-[var(--color-terminal-fg)]',
+    secondary: 'text-[var(--color-terminal-muted)]',
+    muted: 'text-[var(--color-terminal-muted)]',
+    brand: 'text-[var(--color-terminal-cursor)]',
+    danger: 'text-[var(--color-terminal-danger)]',
+  },
+}
+
+/**
  * Hover background, keyed by tone then by the surface the button sits on.
  *
  * Kept separate from the hover *text* color below, because emitting both and
@@ -115,6 +144,13 @@ const HOVER_BG: Record<IconButtonSurface, Record<IconButtonTone, string>> = {
     brand: 'hover:bg-[var(--color-sidebar-item-hover)]',
     danger: 'hover:bg-[var(--color-sidebar-item-hover)]',
   },
+  terminal: {
+    default: 'hover:bg-[var(--color-terminal-selection)]',
+    secondary: 'hover:bg-[var(--color-terminal-selection)]',
+    muted: 'hover:bg-[var(--color-terminal-selection)]',
+    brand: 'hover:bg-[var(--color-terminal-selection)]',
+    danger: 'hover:bg-[var(--color-terminal-selection)]',
+  },
 }
 
 /** Hover text color. Muted and secondary brighten toward primary on hover. */
@@ -124,6 +160,17 @@ const HOVER_TEXT: Record<IconButtonTone, string> = {
   muted: 'hover:text-[var(--color-text-primary)]',
   brand: '',
   danger: '',
+}
+
+/** See `SURFACE_REST_TEXT`. Only one hover text color may ever be emitted. */
+const SURFACE_HOVER_TEXT: Partial<Record<IconButtonSurface, Record<IconButtonTone, string>>> = {
+  terminal: {
+    default: '',
+    secondary: 'hover:text-[var(--color-terminal-fg)]',
+    muted: 'hover:text-[var(--color-terminal-fg)]',
+    brand: '',
+    danger: '',
+  },
 }
 
 const FILLED_CLASSES: Record<IconButtonTone, string> = {
@@ -146,12 +193,16 @@ const SOLID_CLASSES: Record<IconButtonTone, string> = {
 const PRESSED_CLASSES: Record<IconButtonSurface, string> = {
   default: 'bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]',
   sidebar: 'bg-[var(--color-sidebar-item-hover)] text-[var(--color-text-primary)]',
+  terminal: 'bg-[var(--color-terminal-selection)] text-[var(--color-terminal-fg)]',
 }
 
 const BASE_CLASSES = [
   'inline-flex shrink-0 items-center justify-center',
   'transition-colors duration-150 cursor-pointer',
+  // Offset matches Button: the two sit side by side in every toolbar, and a
+  // flush ring next to a floated one reads as two different focus systems.
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]',
+  'focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)]',
   'disabled:cursor-not-allowed disabled:pointer-events-none',
 ].join(' ')
 
@@ -205,7 +256,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
         SIZE_CLASSES[size],
         // `solid` supplies both fill and foreground, so the tone's resting text
         // color and hover fill are skipped rather than left to compete.
-        solid ? SOLID_CLASSES[tone] : REST_TEXT[tone],
+        solid ? SOLID_CLASSES[tone] : (SURFACE_REST_TEXT[surface] ?? REST_TEXT)[tone],
         solid && 'hover:brightness-110',
         // A pressed button carries its own fill and hover; skipping the tone's
         // hover here keeps two `hover:bg-[…]` values from competing.
@@ -214,7 +265,9 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
         // rather than stacking on top of it, which Tailwind would silently
         // resolve the wrong way.
         !solid && !pressed && (
-          hoverTone === 'danger' ? 'hover:text-[var(--color-error)]' : HOVER_TEXT[tone]
+          hoverTone === 'danger'
+            ? 'hover:text-[var(--color-error)]'
+            : (SURFACE_HOVER_TEXT[surface] ?? HOVER_TEXT)[tone]
         ),
         filled && !pressed && !solid && FILLED_CLASSES[tone],
         bordered && !filled && 'border border-[var(--color-border)]',

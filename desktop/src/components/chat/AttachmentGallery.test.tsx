@@ -265,7 +265,9 @@ describe('AttachmentGallery', () => {
 
     const tooltip = view.getByRole('tooltip')
     expect(noteChip).toHaveAttribute('aria-describedby', tooltip.id)
-    expect(tooltip).toHaveTextContent('修改内容')
+    // Was the literal '修改内容': the heading was hard-coded Chinese and so
+    // rendered untranslated under every locale. This suite runs under `en`.
+    expect(tooltip).toHaveTextContent('Requested changes')
     expect(tooltip).toHaveTextContent('这个标题更轻一点')
 
     fireEvent.mouseLeave(noteChip)

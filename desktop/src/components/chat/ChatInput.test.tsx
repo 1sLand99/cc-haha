@@ -761,7 +761,9 @@ describe('ChatInput file mentions', () => {
     render(<ChatInput variant="hero" />)
 
     const panel = screen.getByTestId('chat-input-panel')
-    expect(panel).toHaveClass('rounded-xl')
+    // 20px composer corner + the composer step of the shadow scale, the same
+    // shell EmptySession renders (docs/redesign-paper-ink-seal.md §2).
+    expect(panel).toHaveClass('rounded-[var(--radius-2xl)]', 'glass-panel--composer')
     expect(panel).not.toHaveClass('rounded-b-none')
 
     expect(await screen.findByRole('button', { name: /Select branch: main/ })).toBeInTheDocument()
@@ -1453,7 +1455,12 @@ describe('ChatInput file mentions', () => {
     expect(screen.queryByText('Run')).not.toBeInTheDocument()
     expect(screen.getByTestId('chat-input-shell')).toHaveClass('px-3')
     expect(screen.getByTestId('chat-input-shell').className).toContain('safe-area-inset-bottom')
-    expect(screen.getByTestId('chat-input-panel')).toHaveClass('rounded-2xl')
+    // `glass-panel--composer` carries the composer step of the shadow scale.
+    // The phone branch used to swap it for a `shadow-[…]` utility, which loses
+    // to `.glass-panel`'s own `box-shadow` on stylesheet order — so the phone
+    // composer silently rendered the floating-overlay shadow instead.
+    expect(screen.getByTestId('chat-input-panel')).toHaveClass('glass-panel--composer')
+    expect(screen.getByTestId('chat-input-panel')).toHaveClass('rounded-[var(--radius-2xl)]')
     expect(screen.getByTestId('chat-input-panel')).not.toHaveClass('rounded-b-none')
     expect(screen.getByTestId('chat-input-toolbar-leading')).toHaveClass('shrink-0', 'gap-1')
     expect(screen.getByTestId('chat-input-toolbar-trailing')).toHaveClass('min-w-0', 'flex-1', 'justify-end', 'gap-1')

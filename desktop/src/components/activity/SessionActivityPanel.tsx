@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronRight, Circle, FileText, LoaderCircle, Square, Terminal, Users, X } from 'lucide-react'
-import { Badge } from '@/components/ui/Badge'
+import { Badge, StatusDot, type Tone } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
+import { Progress } from '@/components/ui/Progress'
 import { useDismissable } from '@/hooks/useDismissable'
 import { AgentMascot } from './AgentMascot'
 import { getVisibleActivitySections, type ActivityRow, type ActivitySectionId, type SessionActivityModel } from './sessionActivityModel'
@@ -157,7 +158,7 @@ function TaskStatusMarker({ status, t }: { status: ActivityRow['status']; t: Tra
     return (
       <span
         aria-label={t('session.activity.task.completed')}
-        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-[var(--color-success)] bg-[var(--color-success)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.24)]"
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-success)] text-[var(--color-surface)]"
       >
         <Check size={13} strokeWidth={3} aria-hidden="true" />
       </span>
@@ -168,7 +169,7 @@ function TaskStatusMarker({ status, t }: { status: ActivityRow['status']; t: Tra
     return (
       <span
         aria-label={t('session.activity.status.stopped')}
-        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-[var(--color-text-tertiary)]/50 bg-[var(--color-surface)] text-[var(--color-text-tertiary)]"
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--color-outline)] text-[var(--color-text-tertiary)]"
       >
         <X size={12} strokeWidth={2.4} aria-hidden="true" />
       </span>
@@ -176,24 +177,22 @@ function TaskStatusMarker({ status, t }: { status: ActivityRow['status']; t: Tra
   }
 
   if (status === 'in_progress' || status === 'running') {
+    // Not `Spinner`: this panel's markers stop under reduced motion, while
+    // `Spinner` deliberately slows instead. `SessionActivityPanel.test.tsx`
+    // asserts both the `motion-reduce:animate-none` and the absence of a bare
+    // `.animate-spin` inside a row.
     return (
       <span
         aria-label={t('session.activity.task.inProgress')}
-        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-[var(--color-brand)] bg-[var(--color-surface)] text-[var(--color-brand)]"
-      >
-        {/* Not `Spinner`: this panel's markers stop under reduced motion, while
-            `Spinner` deliberately slows instead. `SessionActivityPanel.test.tsx`
-            asserts both the `motion-reduce:animate-none` and the absence of a
-            bare `.animate-spin` inside a row. */}
-        <LoaderCircle size={13} strokeWidth={2.4} aria-hidden="true" className="motion-safe:animate-spin motion-reduce:animate-none" />
-      </span>
+        className="inline-flex h-5 w-5 shrink-0 rounded-full border-[2.5px] border-[var(--color-primary-fixed-dim)] border-t-[var(--color-brand)] motion-safe:animate-spin motion-reduce:animate-none"
+      />
     )
   }
 
   return (
     <span
       aria-label={t('session.activity.task.pending')}
-      className="inline-flex h-5 w-5 shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]"
+      className="inline-flex h-5 w-5 shrink-0 rounded-full border-[1.8px] border-[var(--color-outline)]"
     />
   )
 }
@@ -214,17 +213,18 @@ function getRowIcon(row: ActivityRow) {
   }
 }
 
-function getStatusTone(status: ActivityRow['status']) {
-  if (status === 'running' || status === 'in_progress') {
-    return 'bg-[var(--color-brand)]'
-  }
-  if (status === 'completed' || status === 'idle') {
-    return 'bg-[var(--color-success)]'
-  }
-  if (status === 'failed' || status === 'error' || status === 'stopped') {
-    return 'bg-[var(--color-error)]'
-  }
-  return 'bg-[var(--color-text-tertiary)]'
+function getStatusTone(status: ActivityRow['status']): Tone {
+  if (status === 'running' || status === 'in_progress') return 'brand'
+  if (status === 'completed' || status === 'idle') return 'success'
+  if (status === 'failed' || status === 'error' || status === 'stopped') return 'danger'
+  return 'neutral'
+}
+
+/** Visible rows only, so the ratio always matches what the section shows. */
+function getTaskProgress(rows: ActivityRow[]): { completed: number; total: number; percent: number } | null {
+  if (rows.length === 0) return null
+  const completed = rows.filter((row) => row.status === 'completed').length
+  return { completed, total: rows.length, percent: Math.round((completed / rows.length) * 100) }
 }
 
 function ActivityRowIcon({ row, sessionId }: { row: ActivityRow; sessionId: string }) {
@@ -235,7 +235,7 @@ function ActivityRowIcon({ row, sessionId }: { row: ActivityRow; sessionId: stri
   const Icon = getRowIcon(row)
 
   return (
-    <span className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-lg text-[var(--color-text-tertiary)]">
+    <span className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-tertiary)]">
       <Icon size={15} strokeWidth={2} aria-hidden="true" />
     </span>
   )
@@ -253,13 +253,11 @@ function ActivityStatusIndicator({
   const isRunning = animated && (status === 'running' || status === 'in_progress')
 
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-[var(--color-text-tertiary)]">
-      <span className="relative inline-flex h-1.5 w-1.5" aria-hidden="true">
-        {isRunning ? (
-          <span className={`absolute inline-flex h-full w-full rounded-full opacity-35 motion-safe:animate-ping motion-reduce:animate-none ${getStatusTone(status)}`} />
-        ) : null}
-        <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${getStatusTone(status)}`} />
-      </span>
+    <span className="inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-[var(--color-text-tertiary)]">
+      {/* `StatusDot`'s breathing dot rather than the expanding ping this used to
+          draw: the design language has one live-status motion (1.6s pulse) and
+          fifteen other dots in the app already run it. */}
+      <StatusDot tone={getStatusTone(status)} pulse={isRunning} />
       {label}
     </span>
   )
@@ -341,14 +339,14 @@ function ActivityRowView({
       )}
       <span className="min-w-0 flex-1 truncate text-left">
         <span
-          className={`block truncate text-[12px] font-semibold leading-4 ${isTask && row.status === 'completed' ? 'text-[var(--color-text-tertiary)] line-through decoration-[var(--color-text-tertiary)]/60' : 'text-[var(--color-text-primary)]'}`}
+          className={`block truncate font-semibold leading-5 ${isTask ? 'text-[14px]' : 'text-[13px]'} ${isTask && row.status === 'completed' ? 'text-[var(--color-text-secondary)] line-through decoration-[var(--color-text-tertiary)]' : 'text-[var(--color-text-primary)]'}`}
           title={label}
         >
           {label}
         </span>
         {detail ? (
           <span
-            className="block truncate text-[10px] leading-4 text-[var(--color-text-tertiary)]"
+            className={`mt-0.5 block truncate leading-4 text-[var(--color-text-tertiary)] ${isTask ? 'text-[12.5px]' : 'text-[12px]'}`}
             title={detail}
           >
             {detail}
@@ -368,7 +366,7 @@ function ActivityRowView({
     </>
   )
   const interactiveRowClassName =
-    'flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition-[background-color,transform] duration-150 ease-out hover:bg-[var(--color-surface-hover)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]'
+    'flex min-w-0 items-center gap-3 rounded-[var(--radius-md)] px-2.5 py-2.5 text-left transition-[background-color,transform] duration-150 ease-out hover:bg-[var(--color-surface-hover)] active:translate-y-px motion-reduce:active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]'
   const stopButton = row.section === 'backgroundTasks' && onStopBackgroundTask ? (
     <BackgroundTaskStopButton
       row={row}
@@ -440,7 +438,7 @@ function ActivityRowView({
   if (stopButton) {
     return (
       <div className="flex w-full items-center gap-1">
-        <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2.5">
+        <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[var(--radius-md)] px-2.5 py-2.5">
           {content}
         </div>
         {stopButton}
@@ -449,7 +447,7 @@ function ActivityRowView({
   }
 
   return (
-    <div className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5">
+    <div className="flex items-center gap-3 rounded-[var(--radius-md)] px-2.5 py-2.5">
       {content}
     </div>
   )
@@ -485,17 +483,17 @@ function BackgroundTaskDetail({ row }: { row: ActivityRow }) {
   if (details.length === 0) return null
 
   return (
-    <div className="mx-2.5 mb-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.54)]">
-      <div className="mb-1.5 text-[10px] font-semibold text-[var(--color-text-tertiary)]">
+    <div className="mx-2.5 mb-1.5 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-3">
+      <div className="mb-2 text-[11px] font-semibold text-[var(--color-text-tertiary)]">
         {t('session.activity.details.title')}
       </div>
-      <dl className="space-y-1.5">
+      <dl className="space-y-2">
         {details.map((detail) => (
           <div key={detail.label} className="min-w-0">
-            <dt className="text-[10px] font-semibold text-[var(--color-text-tertiary)]">
+            <dt className="text-[11px] font-semibold text-[var(--color-text-tertiary)]">
               {detail.label}
             </dt>
-            <dd className="max-h-28 overflow-auto whitespace-pre-wrap break-words text-[10px] leading-relaxed text-[var(--color-text-secondary)]">
+            <dd className="max-h-28 overflow-auto whitespace-pre-wrap break-words text-[12px] leading-relaxed text-[var(--color-text-secondary)]">
               {detail.value}
             </dd>
           </div>
@@ -561,9 +559,32 @@ export function SessionActivityPanel({
   }, [model.sections.backgroundTasks.rows, open, selectedBackgroundTaskId])
 
   if (!open) return null
+  // Both placements are out-of-flow overlays pinned to the top right of the
+  // session area. `rail` used to be an in-flow flex sibling, which is why the
+  // handoff's "content makes way over .2s" could not be built: the content
+  // column's width was whatever flex computed, and a flex-derived width is not
+  // animatable. Out of flow, the column owns its own padding and can transition
+  // it. Whoever renders this decides where it lands — the offsets resolve
+  // against the nearest positioned ancestor, which in `ActiveSession` is the
+  // session-area wrapper the chat column and this panel both sit in.
+  //
+  // `glass-panel` carries the frosted fill, hairline and `--shadow-overlay` the
+  // design gives every floating surface; the hand-rolled shadow it replaces was
+  // three hardcoded slate rgba layers plus a white gloss, none of which follow
+  // `data-theme`.
+  //
+  // The level is pinned to the `z-40` this replaced: the panel has to clear
+  // `MessageList`'s z-20 scroll button and stay under its fixed z-50 pill.
+  // `--z-scrim` is that level on the scale; the name is about where 40 sits,
+  // not about this being a scrim.
+  const shellClassName = 'glass-panel absolute top-4 z-[var(--z-scrim)] flex flex-col overflow-hidden rounded-[var(--radius-xl)] animate-overlay-in'
   const className = placement === 'rail'
-    ? 'my-4 ml-3 mr-3 flex max-h-[min(620px,calc(100vh-72px))] w-[336px] shrink-0 self-start flex-col overflow-hidden rounded-[22px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[0_24px_72px_-48px_rgba(15,23,42,0.54),0_10px_26px_-22px_rgba(15,23,42,0.32),inset_0_1px_0_rgba(255,255,255,0.82)]'
-    : 'absolute right-4 top-4 z-40 flex max-h-[calc(100%-80px)] w-[min(336px,calc(100%-32px))] flex-col overflow-hidden rounded-[22px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[0_24px_72px_-48px_rgba(15,23,42,0.54),0_10px_26px_-22px_rgba(15,23,42,0.32),inset_0_1px_0_rgba(255,255,255,0.82)]'
+    // 20px from the right edge is the handoff's number, and it is what makes
+    // the content column's 352px of padding leave the 8px gap it draws.
+    ? `${shellClassName} right-5 max-h-[min(620px,calc(100%-80px))] w-[340px]`
+    // Phone width: inset 16px on both sides, so the panel narrows instead of
+    // running off the screen.
+    : `${shellClassName} right-4 max-h-[calc(100%-80px)] w-[min(340px,calc(100%-32px))]`
 
   return (
     <div
@@ -574,8 +595,10 @@ export function SessionActivityPanel({
       data-placement={placement}
       className={className}
     >
-      <div className="flex items-center justify-between px-4 pb-1.5 pt-3.5">
-        <h2 className="text-[12px] font-semibold text-[var(--color-text-secondary)]">{t('session.activity.title')}</h2>
+      <div className="flex items-center gap-2 px-4 pb-2 pt-3.5">
+        <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--color-text-primary)]">
+          {t('session.activity.title')}
+        </h2>
         <IconButton
           icon={<X size={14} strokeWidth={2.2} aria-hidden="true" />}
           label={t('session.activity.close')}
@@ -591,6 +614,7 @@ export function SessionActivityPanel({
       >
         {visibleSections.map((section, index) => {
           const sectionTitle = getSectionTitle(section.id, t)
+          const taskProgress = section.id === 'tasks' ? getTaskProgress(section.rows) : null
 
           return (
             <section
@@ -598,15 +622,36 @@ export function SessionActivityPanel({
               aria-label={sectionTitle}
               className={index > 0 ? 'border-t border-[var(--color-border)] pt-3' : undefined}
             >
-              <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <h3 className="text-[11px] font-semibold text-[var(--color-text-tertiary)]">
+              <div className="mb-2 flex items-center justify-between gap-2 px-2.5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <h3 className="text-[13.5px] font-semibold text-[var(--color-text-secondary)]">
                     {sectionTitle}
                   </h3>
                   {section.rows.length > 0 ? (
-                    <Badge tone="neutral" size="xs">{section.rows.length}</Badge>
+                    <Badge tone="neutral" size="sm" pill={false}>{section.rows.length}</Badge>
                   ) : null}
                 </div>
+                {taskProgress ? (
+                  <span className="flex shrink-0 items-center gap-2 text-[12px] tabular-nums text-[var(--color-text-tertiary)]">
+                    {/* `Progress` is `w-full`; the wrapper is what makes it the
+                        52px rail the design calls for, since the two width
+                        utilities would otherwise resolve by stylesheet order. */}
+                    <span className="inline-flex w-[52px] shrink-0">
+                      {/* Named for what it measures, not the section: reusing the
+                          section title made screen readers announce "任务, 50%". */}
+                      <Progress
+                        size="xs"
+                        tone="success"
+                        value={taskProgress.percent}
+                        label={t('session.activity.tasksProgress', {
+                          completed: taskProgress.completed,
+                          total: taskProgress.total,
+                        })}
+                      />
+                    </span>
+                    {taskProgress.completed}/{taskProgress.total}
+                  </span>
+                ) : null}
                 {section.id === 'backgroundTasks' && finishedBackgroundTaskKeys.length > 0 && onClearFinishedBackgroundTasks ? (
                   <Button
                     variant="ghost"

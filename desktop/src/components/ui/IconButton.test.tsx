@@ -122,6 +122,48 @@ describe('IconButton', () => {
     expect(container.firstElementChild?.className).toContain('hover:bg-[var(--color-sidebar-item-hover)]')
   })
 
+  it('draws the terminal surface from the terminal palette, not the page one', () => {
+    // The terminal panel is one warm-ink block under every palette. The page
+    // tokens are inverted against it: --color-text-tertiary is a dark grey and
+    // --color-surface-hover a light cream, so a `muted` button on the default
+    // surface renders as an invisible glyph that flashes a pale square.
+    const { container } = render(
+      <IconButton icon={<span />} label="Clear" tone="muted" surface="terminal" />,
+    )
+    const className = container.firstElementChild!.className
+    expect(className).toContain('text-[var(--color-terminal-muted)]')
+    expect(className).toContain('hover:bg-[var(--color-terminal-selection)]')
+    expect(className).toContain('hover:text-[var(--color-terminal-fg)]')
+    expect(className).not.toContain('text-[var(--color-text-tertiary)]')
+    expect(className).not.toContain('hover:bg-[var(--color-surface-hover)]')
+  })
+
+  it('leaves the default and sidebar surfaces untouched by the terminal maps', () => {
+    const { container } = render(<IconButton icon={<span />} label="Act" tone="muted" />)
+    const className = container.firstElementChild!.className
+    expect(className).toContain('text-[var(--color-text-tertiary)]')
+    expect(className).toContain('hover:text-[var(--color-text-primary)]')
+  })
+
+  it('emits exactly one hover text color on the terminal surface', () => {
+    // Tailwind resolves competing arbitrary values of the same utility by
+    // sorting them, not by argument order, so a second hover:text-[…] would
+    // win or lose unpredictably.
+    const { container } = render(
+      <IconButton icon={<span />} label="Close" tone="muted" surface="terminal" hoverTone="danger" />,
+    )
+    const hovers = container.firstElementChild!.className.match(/hover:text-\[/g) ?? []
+    expect(hovers).toHaveLength(1)
+    expect(container.firstElementChild!.className).toContain('hover:text-[var(--color-error)]')
+  })
+
+  it('presses on the terminal surface with the terminal selection ground', () => {
+    const { container } = render(
+      <IconButton icon={<span />} label="Act" surface="terminal" pressed />,
+    )
+    expect(container.firstElementChild?.className).toContain('bg-[var(--color-terminal-selection)]')
+  })
+
   it('draws a border without a fill when bordered', () => {
     const { container } = render(<IconButton icon={<span />} label="Act" bordered />)
     const className = container.firstElementChild!.className

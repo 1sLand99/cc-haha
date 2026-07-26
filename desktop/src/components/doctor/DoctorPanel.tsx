@@ -120,7 +120,12 @@ export function DoctorPanel({ compact = false }: DoctorPanelProps) {
     <Card as="section" radius="md" padding={compact ? 'sm' : 'md'}>
       <div className={`flex ${compact ? 'flex-col gap-3' : 'items-start justify-between gap-4'}`}>
         <div className="min-w-0">
-          <div className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.diagnostics.doctorTitle')}</div>
+          <div
+            className="text-[14.5px] font-semibold text-[var(--color-text-primary)]"
+            style={{ fontFamily: 'var(--font-headline)' }}
+          >
+            {t('settings.diagnostics.doctorTitle')}
+          </div>
           <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
             {t('settings.diagnostics.doctorDescription')}
           </p>

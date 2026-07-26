@@ -7,7 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { useUIStore } from '../../stores/uiStore'
 import { useTranslation } from '../../i18n'
-import type { ThemeMode } from '../../types/settings'
+import { isDarkTheme, type ThemeMode } from '../../types/settings'
 
 type Props = {
   code: string
@@ -200,14 +200,17 @@ function resolveThemeColor(token: string, fallback: string) {
 }
 
 function getMermaidThemeColors(theme: ThemeMode): MermaidThemeColors {
-  const isDark = theme === 'dark'
+  const isDark = isDarkTheme(theme)
+  // The fallbacks only apply when the probe cannot resolve a token (jsdom, or
+  // a diagram rendered before first paint); the live values come from
+  // `data-theme`, so all six palettes are covered by the six token reads.
   return {
-    textColor: resolveThemeColor('--color-text-primary', isDark ? '#E5E2E1' : '#1B1C1A'),
-    mutedTextColor: resolveThemeColor('--color-text-secondary', isDark ? '#B7AAA5' : '#61514B'),
-    surfaceColor: resolveThemeColor('--color-surface-container-lowest', isDark ? '#0E0E0E' : '#FFFFFF'),
-    nodeColor: resolveThemeColor('--color-surface-container-low', isDark ? '#1C1B1B' : '#F4EFEA'),
-    accentColor: resolveThemeColor('--color-primary', isDark ? '#FFB59F' : '#8F482F'),
-    lineColor: resolveThemeColor('--color-outline', isDark ? '#BFAEAA' : '#667485'),
+    textColor: resolveThemeColor('--color-text-primary', isDark ? '#EDE6D6' : '#1F1C17'),
+    mutedTextColor: resolveThemeColor('--color-text-secondary', isDark ? '#A79B83' : '#5D5850'),
+    surfaceColor: resolveThemeColor('--color-surface-container-lowest', isDark ? '#201D17' : '#FFFFFF'),
+    nodeColor: resolveThemeColor('--color-surface-container-low', isDark ? '#1A1813' : '#F6F6F3'),
+    accentColor: resolveThemeColor('--color-primary', isDark ? '#D07B52' : '#96442B'),
+    lineColor: resolveThemeColor('--color-outline', isDark ? '#4C4433' : '#D8D5CC'),
     isDark,
   }
 }
@@ -656,12 +659,12 @@ export function MermaidRenderer({ code }: Props) {
 
   if (error) {
     return (
-      <div className="my-4 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-error)]/30">
-        <div className="flex items-center gap-2 border-b border-[var(--color-error)]/20 bg-[var(--color-error-container)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--color-error)]">
+      <div className="my-4 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-error-soft-hover)]">
+        <div className="flex items-center gap-2 border-b border-[var(--color-error-soft-hover)] bg-[var(--color-error-container)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--color-on-error-container)]">
           <span className="material-symbols-outlined text-[14px]">error</span>
           Mermaid Error
         </div>
-        <div className="bg-[var(--color-error-container)]/30 px-3 py-2 font-[var(--font-mono)] text-[11px] text-[var(--color-error)]">
+        <div className="bg-[var(--color-error-soft)] px-3 py-2 font-mono text-[11px] text-[var(--color-on-error-container)]">
           {error}
         </div>
       </div>
@@ -670,7 +673,7 @@ export function MermaidRenderer({ code }: Props) {
 
   if (!svg) {
     return (
-      <div className="my-4 flex items-center justify-center rounded-[var(--radius-lg)] border border-[var(--color-border)]/50 bg-[var(--color-surface-container-low)] py-8">
+      <div className="my-4 flex items-center justify-center rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] py-8">
         <div className="flex items-center gap-2 text-[11px] text-[var(--color-text-tertiary)]">
           <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
           Rendering diagram...
@@ -681,9 +684,9 @@ export function MermaidRenderer({ code }: Props) {
 
   return (
     <>
-      <div className="my-4 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-outline-variant)]/50 bg-[var(--color-surface-container-low)]">
+      <div className="my-4 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[var(--color-outline-variant)]/40 bg-[var(--color-surface-container)] px-3 py-1.5 text-[11px] text-[var(--color-text-tertiary)]">
+        <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface-container)] px-3 py-1.5 text-[11px] text-[var(--color-text-tertiary)]">
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-[14px]">account_tree</span>
             <span className="font-semibold uppercase tracking-[0.14em]">Mermaid</span>

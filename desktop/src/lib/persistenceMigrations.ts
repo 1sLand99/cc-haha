@@ -138,6 +138,29 @@ function migrateSessionRuntime(storage: StorageLike, report: DesktopMigrationRep
   }
 }
 
+/**
+ * The 「纸 · 墨 · 印」 redesign replaced three theme keys with six.
+ *
+ * `light` was the warm workspace, labelled 经典暖色 in the picker, so it lands
+ * on `warm-classic` — the palette carrying the same name. Without this it
+ * would fail the enum check and silently reset those users to the default,
+ * which reads as "the app forgot my theme" rather than as a rename.
+ */
+const RENAMED_THEMES: Record<string, string> = {
+  light: 'warm-classic',
+}
+
+function migrateTheme(storage: StorageLike, report: DesktopMigrationReport): void {
+  const stored = storage.getItem(THEME_STORAGE_KEY)
+  const renamed = stored === null ? null : RENAMED_THEMES[stored]
+  if (renamed) {
+    storage.setItem(THEME_STORAGE_KEY, renamed)
+    report.migratedKeys.push(THEME_STORAGE_KEY)
+    return
+  }
+  normalizeEnumKey(storage, THEME_STORAGE_KEY, [...THEME_MODES], report)
+}
+
 function normalizeEnumKey(
   storage: StorageLike,
   key: string,
@@ -196,7 +219,7 @@ export function runDesktopPersistenceMigrations(storage: StorageLike | null = ge
 
   runMigrationStep(report, TAB_STORAGE_KEY, () => migrateTabs(storage, report))
   runMigrationStep(report, SESSION_RUNTIME_STORAGE_KEY, () => migrateSessionRuntime(storage, report))
-  runMigrationStep(report, THEME_STORAGE_KEY, () => normalizeEnumKey(storage, THEME_STORAGE_KEY, [...THEME_MODES], report))
+  runMigrationStep(report, THEME_STORAGE_KEY, () => migrateTheme(storage, report))
   runMigrationStep(report, LOCALE_STORAGE_KEY, () => normalizeEnumKey(storage, LOCALE_STORAGE_KEY, SUPPORTED_LOCALES, report))
   runMigrationStep(report, APP_ZOOM_STORAGE_KEY, () => normalizeAppZoomKey(storage, report))
   try {

@@ -25,7 +25,7 @@ function StatusIcon({ ok }: { ok: boolean | null }) {
 
 function StatusRow({ label, ok, detail }: { label: string; ok: boolean | null; detail: string }) {
   return (
-    <div className="flex items-center gap-3 py-2.5 px-4 rounded-lg bg-[var(--color-surface-container-low)]">
+    <div className="flex items-center gap-3 py-2.5 px-4 rounded-[var(--radius-lg)] bg-[var(--color-surface-container-low)]">
       <StatusIcon ok={ok} />
       <div className="flex-1 min-w-0">
         <span className="text-sm font-medium text-[var(--color-text-primary)]">{label}</span>
@@ -283,7 +283,7 @@ export function ComputerUseSettings() {
       {/* Title */}
       <div>
         <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+          <h2 className="text-[24px] font-semibold leading-tight text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>
             {t('settings.computerUse.title')}
           </h2>
           <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer">
@@ -296,13 +296,13 @@ export function ComputerUseSettings() {
             {t('settings.computerUse.enabledToggle')}
           </label>
         </div>
-        <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+        <p className="mt-1.5 text-[13.5px] leading-6 text-[var(--color-text-secondary)]">
           {t('settings.computerUse.description')}
         </p>
       </div>
 
       {!computerUseEnabled && (
-        <div className="px-4 py-3 rounded-lg border border-[var(--color-warning)] bg-[var(--color-warning-container)] text-sm text-[var(--color-on-warning-container)]">
+        <div className="px-4 py-3 rounded-[var(--radius-lg)] border border-[var(--color-warning)] bg-[var(--color-warning-container)] text-sm text-[var(--color-on-warning-container)]">
           {t('settings.computerUse.disabledHint')}
         </div>
       )}
@@ -319,7 +319,7 @@ export function ComputerUseSettings() {
       ) : status ? (
         <>
           {!status.supported && (
-            <div className="px-4 py-3 rounded-lg border border-[var(--color-warning)] bg-[var(--color-warning-container)] text-sm text-[var(--color-on-warning-container)]">
+            <div className="px-4 py-3 rounded-[var(--radius-lg)] border border-[var(--color-warning)] bg-[var(--color-warning-container)] text-sm text-[var(--color-on-warning-container)]">
               {t('settings.computerUse.notSupported')}
             </div>
           )}
@@ -343,7 +343,7 @@ export function ComputerUseSettings() {
             />
           </div>
 
-          <div className="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-4">
+          <div className="space-y-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-4">
             <label htmlFor="computer-use-python-path" className="block text-sm font-medium text-[var(--color-text-primary)]">
               {t('settings.computerUse.pythonPathLabel')}
             </label>
@@ -357,7 +357,7 @@ export function ComputerUseSettings() {
                   setPythonPathMessage(null)
                 }}
                 placeholder={t('settings.computerUse.pythonPathPlaceholder')}
-                className="min-w-[220px] flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container)] px-3 py-2 font-mono text-xs text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-brand)] focus:outline-none"
+                className="min-w-[220px] flex-1 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container)] px-3 py-2 font-mono text-xs text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-brand)] focus:outline-none"
               />
               <Button
                 variant="secondary"
@@ -417,7 +417,7 @@ export function ComputerUseSettings() {
                 }
               />
               {(accessibilityNeedsAttention || screenRecordingNeedsAttention) && (
-                <div className="flex flex-col gap-2 px-4 py-3 rounded-lg border border-[var(--color-warning)] bg-[var(--color-warning-container)]">
+                <div className="flex flex-col gap-2 px-4 py-3 rounded-[var(--radius-lg)] border border-[var(--color-warning)] bg-[var(--color-warning-container)]">
                   <p className="text-xs text-[var(--color-on-warning-container)]">{t('settings.computerUse.permRestartHint')}</p>
                   <div className="flex gap-2">
                     {accessibilityNeedsAttention && (
@@ -447,14 +447,14 @@ export function ComputerUseSettings() {
           )}
 
           {allReady && (status.platform !== 'darwin' || (status.permissions.accessibility && screenRecordingReady)) && (
-            <div className="px-4 py-3 rounded-lg border border-[var(--color-success)] bg-[var(--color-success-container)] text-sm text-[var(--color-on-success-container)] flex items-center gap-2">
+            <div className="px-4 py-3 rounded-[var(--radius-lg)] border border-[var(--color-success)] bg-[var(--color-success-container)] text-sm text-[var(--color-on-success-container)] flex items-center gap-2">
               <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>verified</span>
               {t('settings.computerUse.allReady')}
             </div>
           )}
 
           {setupResult && (
-            <div className={`rounded-lg border p-4 space-y-2 ${setupResult.success ? 'border-[var(--color-success)] bg-[var(--color-success-container)]' : 'border-[var(--color-error)] bg-[var(--color-error-container)]'}`}>
+            <div className={`rounded-[var(--radius-lg)] border p-4 space-y-2 ${setupResult.success ? 'border-[var(--color-success)] bg-[var(--color-success-container)]' : 'border-[var(--color-error)] bg-[var(--color-error-container)]'}`}>
               <div className={`text-sm font-medium ${setupResult.success ? 'text-[var(--color-on-success-container)]' : 'text-[var(--color-on-error-container)]'}`}>
                 {setupResult.success ? t('settings.computerUse.setupSuccess') : t('settings.computerUse.setupFail')}
               </div>
@@ -504,7 +504,7 @@ export function ComputerUseSettings() {
           {envReady && (
             <div className="space-y-4 pt-4 border-t border-[var(--color-border)]">
               <div>
-                <h3 className="text-base font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+                <h3 className="text-base font-semibold text-[var(--color-text-primary)] flex items-center gap-2" style={{ fontFamily: 'var(--font-headline)' }}>
                   {t('settings.computerUse.appsTitle')}
                   {appsSaved && (
                     <span className="text-xs font-normal text-[var(--color-success)] flex items-center gap-1">
@@ -548,7 +548,7 @@ export function ComputerUseSettings() {
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder={t('settings.computerUse.appsSearch')}
-                  className="w-full pl-9 pr-4 py-2 text-sm bg-[var(--color-surface-container-low)] border border-[var(--color-border)] rounded-lg text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:outline-none focus:border-[var(--color-brand)]"
+                  className="w-full pl-9 pr-4 py-2 text-sm bg-[var(--color-surface-container-low)] border border-[var(--color-border)] rounded-[var(--radius-lg)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:outline-none focus:border-[var(--color-brand)]"
                 />
               </div>
 
@@ -562,7 +562,7 @@ export function ComputerUseSettings() {
                   {t('settings.computerUse.appsEmpty')}
                 </div>
               ) : (
-                <div className="max-h-[400px] overflow-y-auto rounded-lg border border-[var(--color-border)]">
+                <div className="max-h-[400px] overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--color-border)]">
                   {sortedApps.map(app => {
                     const isAuthorized = authorizedBundleIds.has(app.bundleId)
                     return (
@@ -570,7 +570,7 @@ export function ComputerUseSettings() {
                         key={app.bundleId}
                         onClick={() => toggleApp(app)}
                         className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)] border-b border-[var(--color-border)] last:border-b-0 ${
-                          isAuthorized ? 'bg-[var(--color-brand)]/5' : ''
+                          isAuthorized ? 'bg-[var(--color-brand-soft)]' : ''
                         }`}
                       >
                         <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border ${
