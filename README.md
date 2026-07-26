@@ -1,7 +1,10 @@
 # Claude Code Haha
 
 <p align="center">
-  <img src="docs/images/app-icon.png" alt="Claude Code Haha" width="240">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-horizontal-dark.png">
+    <img src="docs/images/logo-horizontal.png" alt="Claude Code Haha" width="480">
+  </picture>
 </p>
 
 <div align="center">

@@ -246,7 +246,7 @@ export function ComponentGallery() {
         </div>
       </Section>
 
-      <Section title="BrandSeal" note="The 「哈」 seal. The glyph is platform serif — check it against Songti on macOS. The inner rule appears only at xl.">
+      <Section title="BrandSeal" note="The cc-haha mark, a vector rebuild of the app icon. It sheds parts as it shrinks — sparkles only at xl, cursor drops at sm — so check each size against its neighbours.">
         <div className="flex flex-wrap items-end gap-4">
           <BrandSeal size="sm" />
           <BrandSeal size="md" />
