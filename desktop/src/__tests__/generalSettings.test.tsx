@@ -68,7 +68,7 @@ vi.mock('../api/providers', () => ({
 }))
 
 vi.mock('../lib/desktopNotifications', () => desktopNotificationsMock)
-vi.mock('../components/chat/clipboard', () => clipboardMock)
+vi.mock('@/lib/clipboard', () => clipboardMock)
 vi.mock('@tauri-apps/api/core', () => tauriCoreMock)
 vi.mock('@tauri-apps/plugin-dialog', () => tauriDialogMock)
 vi.mock('@tauri-apps/plugin-process', () => tauriProcessMock)
@@ -883,7 +883,7 @@ describe('Settings > General tab', () => {
     const trigger = screen.getByRole('button', { name: 'Response Language' })
     expect(trigger).toHaveTextContent('Default (English)')
     fireEvent.click(trigger)
-    fireEvent.click(screen.getByRole('button', { name: '中文 (Chinese)' }))
+    fireEvent.click(screen.getByRole('option', { name: '中文 (Chinese)' }))
 
     expect(useSettingsStore.getState().setResponseLanguage).toHaveBeenCalledWith('chinese')
   })
@@ -1724,8 +1724,9 @@ describe('Settings > Providers tab', () => {
     expect(within(dialog).queryByRole('combobox')).not.toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: /Anthropic Messages \(native\)/i }))
-    fireEvent.click(within(dialog).getByRole('button', { name: /OpenAI Responses API \(proxy\)/i }))
+    fireEvent.click(within(dialog).getByRole('option', { name: /OpenAI Responses API \(proxy\)/i }))
 
+    // The panel is closed now; this finds the trigger, which reflects the pick.
     expect(within(dialog).getByRole('button', { name: /OpenAI Responses API \(proxy\)/i })).toBeInTheDocument()
     expect(within(dialog).getByText('Requests will be translated via the local proxy')).toBeInTheDocument()
   })

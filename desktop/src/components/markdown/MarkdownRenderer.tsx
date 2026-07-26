@@ -6,7 +6,7 @@ import 'katex/dist/katex.min.css'
 import { marked, type Tokens } from 'marked'
 import { CodeViewer } from '../chat/CodeViewer'
 import { MermaidRenderer } from '../chat/MermaidRenderer'
-import { copyTextToClipboard } from '../chat/clipboard'
+import { copyTextToClipboard } from '@/lib/clipboard'
 
 type Props = {
   content: string
