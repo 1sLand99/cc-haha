@@ -62,7 +62,11 @@ describe('MarketHome', () => {
 
     render(<MarketHome onRequestInstall={vi.fn()} />)
 
-    expect(screen.getByTestId('market-loading')).toHaveAttribute('aria-label', 'Loading skills…')
+    // The shared skeleton carries the loading semantics on a `role="status"`
+    // element and names it with an sr-only span, rather than an `aria-label`
+    // on a plain grid div that a screen reader never reaches.
+    expect(screen.getByTestId('market-loading')).toHaveTextContent('Loading skills…')
+    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true')
     expect(screen.queryByTestId('market-grid')).not.toBeInTheDocument()
   })
 })

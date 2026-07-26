@@ -1,11 +1,14 @@
-import { useState, useRef, useEffect } from 'react'
+import { useCallback, useState, useRef } from 'react'
 import type { CronTask } from '../../types/task'
 import { useTaskStore } from '../../stores/taskStore'
 import { useTranslation } from '../../i18n'
 import { describeCron } from '../../lib/cronDescribe'
 import { TaskRunsPanel } from './TaskRunsPanel'
 import { NewTaskModal } from './NewTaskModal'
-import { ConfirmPopover } from '../shared/ConfirmPopover'
+import { ConfirmPopover } from '@/components/tasks/ConfirmPopover'
+import { StatusDot } from '@/components/ui/Badge'
+import { IconButton } from '@/components/ui/IconButton'
+import { useDismissable } from '@/hooks/useDismissable'
 
 type Props = {
   task: CronTask
@@ -26,21 +29,16 @@ export function TaskRow({ task, showLogs, onToggleLogs }: Props) {
   const menuRef = useRef<HTMLDivElement>(null)
   const confirmRef = useRef<HTMLDivElement>(null)
 
-  // Close menu / confirm on outside click
-  useEffect(() => {
-    if (!showMenu && !confirmAction) return
-    const handler = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (showMenu && menuRef.current && !menuRef.current.contains(target)) {
-        setShowMenu(false)
-      }
-      if (confirmAction && confirmRef.current && !confirmRef.current.contains(target)) {
-        setConfirmAction(null)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [showMenu, confirmAction])
+  // Two overlays with independent open states, so two subscriptions rather
+  // than one handler branching on both. The hand-rolled version listened on
+  // `mousedown`, which does not fire reliably for touch — on the H5 build
+  // tapping outside left this menu open. Escape now closes them too; neither
+  // overlay lives inside a dialog, so no propagation guard is needed.
+  const closeMenu = useCallback(() => setShowMenu(false), [])
+  const closeConfirm = useCallback(() => setConfirmAction(null), [])
+
+  useDismissable({ open: showMenu, refs: [menuRef], onDismiss: closeMenu })
+  useDismissable({ open: confirmAction !== null, refs: [confirmRef], onDismiss: closeConfirm })
 
   const handleRunNow = async () => {
     setConfirmAction(null)
@@ -68,7 +66,6 @@ export function TaskRow({ task, showLogs, onToggleLogs }: Props) {
     deleteTask(task.id)
   }
 
-  const iconBtn = 'p-1.5 rounded-[var(--radius-sm)] transition-colors'
   const menuItem = 'flex items-center gap-2.5 w-full px-3 py-2 text-xs text-left rounded-[var(--radius-sm)] transition-colors'
 
   return (
@@ -76,7 +73,11 @@ export function TaskRow({ task, showLogs, onToggleLogs }: Props) {
       <div className="flex items-center justify-between px-4 py-3 hover:bg-[var(--color-surface-hover)] transition-colors group">
         {/* Left: status + info */}
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${task.enabled ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-tertiary)]'}`} />
+          <StatusDot
+            tone={task.enabled ? 'success' : 'neutral'}
+            size="md"
+            label={task.enabled ? t('tasks.active') : t('tasks.disabled')}
+          />
           <div className="min-w-0">
             <div className="text-sm font-medium text-[var(--color-text-primary)] truncate">{task.name}</div>
             {task.description && (
@@ -100,16 +101,18 @@ export function TaskRow({ task, showLogs, onToggleLogs }: Props) {
           <div className="flex items-center gap-0.5">
             {/* Run Now */}
             <div className="relative" ref={confirmAction === 'run' ? confirmRef : undefined}>
-              <button
-                onClick={() => isRunning || !task.enabled ? undefined : setConfirmAction(confirmAction === 'run' ? null : 'run')}
+              <IconButton
+                icon={
+                  <span className={`material-symbols-outlined text-[18px] ${isRunning ? 'animate-spin' : ''}`}>
+                    {isRunning ? 'sync' : 'play_arrow'}
+                  </span>
+                }
+                label={t('tasks.runNow')}
+                showTooltip={task.enabled}
+                tone={task.enabled ? 'brand' : 'muted'}
                 disabled={isRunning || !task.enabled}
-                className={`${iconBtn} ${task.enabled ? 'text-[var(--color-brand)] hover:bg-[var(--color-surface-selected)]' : 'text-[var(--color-text-tertiary)] cursor-not-allowed'} disabled:opacity-50`}
-                title={task.enabled ? t('tasks.runNow') : undefined}
-              >
-                <span className={`material-symbols-outlined text-[18px] ${isRunning ? 'animate-spin' : ''}`}>
-                  {isRunning ? 'sync' : 'play_arrow'}
-                </span>
-              </button>
+                onClick={() => setConfirmAction(confirmAction === 'run' ? null : 'run')}
+              />
               {confirmAction === 'run' && (
                 <ConfirmPopover
                   message={t('tasks.confirmRun')}
@@ -122,22 +125,25 @@ export function TaskRow({ task, showLogs, onToggleLogs }: Props) {
             </div>
 
             {/* View Logs */}
-            <button
+            <IconButton
+              icon={<span className="material-symbols-outlined text-[18px]">receipt_long</span>}
+              label={t('tasks.viewLogs')}
+              tone={showLogs ? 'brand' : 'muted'}
+              // `tone` sets no resting background, so this does not collide.
+              className={showLogs ? 'bg-[var(--color-surface-selected)]' : undefined}
               onClick={onToggleLogs}
-              className={`${iconBtn} ${showLogs ? 'text-[var(--color-brand)] bg-[var(--color-surface-selected)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-selected)]'}`}
-              title={t('tasks.viewLogs')}
-            >
-              <span className="material-symbols-outlined text-[18px]">receipt_long</span>
-            </button>
+            />
 
             {/* More menu */}
             <div className="relative" ref={menuRef}>
-              <button
+              <IconButton
+                icon={<span className="material-symbols-outlined text-[18px]">more_vert</span>}
+                label={t('tasks.moreActions')}
+                tone="muted"
+                aria-haspopup="menu"
+                aria-expanded={showMenu}
                 onClick={() => { setShowMenu(!showMenu); setConfirmAction(null) }}
-                className={`${iconBtn} text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-selected)]`}
-              >
-                <span className="material-symbols-outlined text-[18px]">more_vert</span>
-              </button>
+              />
 
               {showMenu && !confirmAction && (
                 <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-lg py-1">

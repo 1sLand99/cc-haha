@@ -1,6 +1,10 @@
 import { useEffect } from 'react'
 import { CloudOff, PackageSearch, RefreshCw, Search, Store, X } from 'lucide-react'
 import { useTranslation } from '../../i18n'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { IconButton } from '@/components/ui/IconButton'
+import { SkeletonCards } from '@/components/ui/Skeleton'
 import { useMarketStore } from '../../stores/marketStore'
 import { FilterBar } from './FilterBar'
 import { MarketDisclaimer } from './MarketDisclaimer'
@@ -72,14 +76,13 @@ export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string
                 className="min-w-0 flex-1 bg-transparent text-[13px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
               />
               {query && (
-                <button
-                  type="button"
-                  aria-label={t('market.clearSearch')}
+                <IconButton
+                  icon={<X className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />}
+                  label={t('market.clearSearch')}
+                  size="sm"
+                  tone="muted"
                   onClick={() => setQuery('')}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)]"
-                >
-                  <X className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-                </button>
+                />
               )}
             </div>
             <FilterBar />
@@ -97,41 +100,50 @@ export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string
 
         {isLoading && <MarketGridSkeleton label={t('market.loading')} />}
 
+        {/* Kept as a bespoke region-level state rather than `ErrorState`: that
+            component is the compact left-aligned inline notice, and the three
+            market failure regions are full-height centered states with an icon.
+            `EmptyState` has no danger tone. What did change: the `/35` and `/25`
+            alpha modifiers are gone — Safari 15 WebView drops that color
+            function outright, which rendered this banner as bare text on the
+            desktop shell — and the failure now announces itself. */}
         {!isLoading && error && (
           <div
+            role="alert"
             data-testid="market-error"
-            className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-[var(--color-error)]/35 bg-[var(--color-error-container)]/25 px-6 py-14 text-center"
+            className="flex flex-col items-center gap-3 rounded-[var(--radius-lg)] border border-dashed border-[var(--color-error-soft-hover)] bg-[var(--color-error-soft)] px-6 py-14 text-center"
           >
             <CloudOff className="h-8 w-8 text-[var(--color-error)]" strokeWidth={1.7} aria-hidden="true" />
             <p className="text-sm font-medium text-[var(--color-text-primary)]">{t('market.error.list')}</p>
             <p className="max-w-md break-words text-xs text-[var(--color-text-tertiary)]">{error}</p>
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              className="mt-1"
+              icon={<RefreshCw className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />}
               onClick={() => void fetchList({ reset: true })}
-              className="mt-1 inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] active:scale-[0.98]"
             >
-              <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
               {t('market.retry')}
-            </button>
+            </Button>
           </div>
         )}
 
         {!isLoading && !error && items.length === 0 && (
-          <div
-            data-testid="market-empty"
-            className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6 py-16 text-center"
-          >
-            {hasQuery || hasActiveFilters ? (
-              <PackageSearch className="mx-auto mb-3 h-9 w-9 text-[var(--color-text-tertiary)]" strokeWidth={1.6} aria-hidden="true" />
-            ) : (
-              <Store className="mx-auto mb-3 h-9 w-9 text-[var(--color-text-tertiary)]" strokeWidth={1.6} aria-hidden="true" />
-            )}
-            <p className="text-sm text-[var(--color-text-tertiary)]">
-              {hasQuery || hasActiveFilters ? t('market.emptySearch') : t('market.empty')}
-            </p>
-            <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
-              {hasQuery || hasActiveFilters ? t('market.emptySearchHint') : t('market.emptyHint')}
-            </p>
+          <div data-testid="market-empty">
+            <EmptyState
+              size="lg"
+              icon={
+                hasQuery || hasActiveFilters
+                  ? <PackageSearch size={24} strokeWidth={1.6} />
+                  : <Store size={24} strokeWidth={1.6} />
+              }
+              title={hasQuery || hasActiveFilters ? t('market.emptySearch') : t('market.empty')}
+              description={hasQuery || hasActiveFilters ? t('market.emptySearchHint') : t('market.emptyHint')}
+              action={
+                hasQuery
+                  ? { label: t('market.clearSearch'), onClick: () => setQuery('') }
+                  : { label: t('market.retry'), onClick: () => void fetchList({ reset: true }) }
+              }
+            />
           </div>
         )}
 
@@ -151,18 +163,15 @@ export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string
 
             {nextCursor && (
               <div className="flex justify-center py-2 pb-5">
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="lg"
                   data-testid="market-load-more"
-                  disabled={isLoadingMore}
+                  loading={isLoadingMore}
                   onClick={() => void loadMore()}
-                  className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-5 text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] active:scale-[0.98] disabled:opacity-60"
                 >
-                  {isLoadingMore && (
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" aria-hidden />
-                  )}
                   {isLoadingMore ? t('market.loadingMore') : t('market.loadMore')}
-                </button>
+                </Button>
               </div>
             )}
           </>
@@ -174,29 +183,14 @@ export function MarketHome({ onRequestInstall }: { onRequestInstall: (id: string
 
 function MarketGridSkeleton({ label }: { label: string }) {
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="market-loading" aria-label={label}>
-      {Array.from({ length: 6 }, (_, index) => (
-        <div
-          key={index}
-          className="min-h-[212px] animate-pulse rounded-xl border border-[var(--color-border)]/60 bg-[var(--color-surface-container-low)] p-4"
-        >
-          <div className="flex items-start gap-3.5">
-            <div className="h-[46px] w-[46px] rounded-[14px] bg-[var(--color-surface-container-high)]" />
-            <div className="min-w-0 flex-1 pt-0.5">
-              <div className="h-3.5 w-2/3 rounded bg-[var(--color-surface-container-high)]" />
-              <div className="mt-2 h-2.5 w-1/3 rounded bg-[var(--color-surface-container)]" />
-            </div>
-          </div>
-          <div className="mt-4 h-2.5 w-full rounded bg-[var(--color-surface-container-high)]" />
-          <div className="mt-2 h-2.5 w-4/5 rounded bg-[var(--color-surface-container)]" />
-          <div className="mt-4 h-2.5 w-1/2 rounded bg-[var(--color-surface-container)]" />
-          <div className="mt-5 h-px bg-[var(--color-border)]/50" />
-          <div className="mt-3 flex items-center justify-between">
-            <div className="h-6 w-20 rounded-md bg-[var(--color-surface-container-high)]" />
-            <div className="h-6 w-24 rounded bg-[var(--color-surface-container)]" />
-          </div>
-        </div>
-      ))}
+    <div data-testid="market-loading">
+      <SkeletonCards
+        label={label}
+        count={6}
+        minHeight="212px"
+        withAvatar
+        className="grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+      />
     </div>
   )
 }

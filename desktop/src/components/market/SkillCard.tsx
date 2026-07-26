@@ -1,5 +1,6 @@
 import { ArrowUpRight, Download, Star } from 'lucide-react'
 import { useTranslation } from '../../i18n'
+import { Button } from '@/components/ui/Button'
 import type { NormalizedSkill } from '../../types/market'
 import { InstallStateBadge } from './InstallStateBadge'
 import { SecurityBadge } from './SecurityBadge'
@@ -118,20 +119,19 @@ export function SkillCard({
             </span>
           )}
           {showInstallButton && (
-            <button
-              type="button"
-              disabled={installing}
+            // The card's overlay link sets `pointer-events-none` on this
+            // footer, so the button has to opt back in and sit above it.
+            <Button
+              variant="tonal"
+              size="base"
+              className="pointer-events-auto relative z-20"
+              loading={installing}
               data-market-skill-action-id={skill.id}
+              icon={<Download className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />}
               onClick={() => onInstall?.(skill.id)}
-              className="pointer-events-auto relative z-20 inline-flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md border border-[var(--color-brand)]/25 bg-[var(--color-surface)] px-2.5 text-[11px] font-semibold text-[var(--color-brand)] transition-colors hover:border-[var(--color-brand)]/45 hover:bg-[var(--color-primary-fixed)] focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] active:scale-[0.98] disabled:opacity-50"
             >
-              {installing ? (
-                <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" aria-hidden />
-              ) : (
-                <Download className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-              )}
               {installing ? t('market.install.installing') : t('market.install.action')}
-            </button>
+            </Button>
           )}
         </div>
       </footer>

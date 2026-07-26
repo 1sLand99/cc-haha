@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeft, CircleSlash2, FileText, Folder } from 'lucide-react'
 import { useTranslation } from '../../i18n'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import type {
   InstallState,
   NotInstallableReason,
@@ -79,14 +81,17 @@ export function SkillDetailView(props: SkillDetailViewProps) {
         claim the leftover space. Narrow layouts keep the page scrolling.
       */}
       <div className="mx-auto flex w-full max-w-[1320px] flex-col px-6 py-6 lg:h-full lg:px-8">
-        <button
-          type="button"
+        {/* `size="base"` is h-8, matching the `min-h-8` this button carried
+            before it became a component. */}
+        <Button
+          variant="ghost"
+          size="base"
+          className="w-fit"
+          icon={<ArrowLeft className="h-4 w-4" strokeWidth={2} aria-hidden="true" />}
           onClick={props.onBack}
-          className="inline-flex min-h-8 w-fit items-center gap-1.5 rounded-md pr-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] active:scale-[0.98]"
         >
-          <ArrowLeft className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
           {props.backLabel}
-        </button>
+        </Button>
 
         <header className="mt-5 flex-shrink-0 border-b border-[var(--color-border)]/70 pb-6">
           <div className="flex min-w-0 items-start gap-4 sm:gap-5">
@@ -193,9 +198,7 @@ export function SkillDetailView(props: SkillDetailViewProps) {
                     <Icon className="h-4 w-4" strokeWidth={1.9} aria-hidden="true" />
                     {t(`market.detail.${key}`)}
                     {key === 'files' && (
-                      <span className="rounded-md bg-[var(--color-surface-container-high)] px-1.5 py-0.5 text-[10px] leading-4 text-[var(--color-text-tertiary)]">
-                        {props.files.length}
-                      </span>
+                      <Badge pill={false} className="leading-4">{props.files.length}</Badge>
                     )}
                   </button>
                 )

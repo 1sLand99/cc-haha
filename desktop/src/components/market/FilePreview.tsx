@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from '../../i18n'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Spinner } from '@/components/ui/Spinner'
 import { CodeViewer } from '../chat/CodeViewer'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 import { splitFrontmatter } from '../../lib/skillFrontmatter'
@@ -109,11 +112,15 @@ export function FilePreview({
   }, [])
 
   if (files.length === 0) {
+    // `min-h-0 flex-1` is carried over from the layout fix this file already
+    // had: the placeholder must claim the leftover height of the preview
+    // column rather than shrink to its content.
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6 py-12 text-center">
-        <span className="material-symbols-outlined mb-2 block text-[32px] text-[var(--color-text-tertiary)]">folder_off</span>
-        <p className="text-sm text-[var(--color-text-tertiary)]">{t('market.file.noFiles')}</p>
-      </div>
+      <EmptyState
+        icon={<span className="material-symbols-outlined text-[20px]">folder_off</span>}
+        title={t('market.file.noFiles')}
+        className="min-h-0 flex-1"
+      />
     )
   }
 
@@ -171,7 +178,7 @@ export function FilePreview({
         <div className="min-h-0 flex-1 overflow-y-auto p-4 max-lg:max-h-[70vh]">
           {state.kind === 'loading' && (
             <div className="flex justify-center py-10" data-testid="market-file-loading">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-brand)] border-t-transparent" />
+              <Spinner size={20} tone="brand" label={t('common.loading')} />
             </div>
           )}
           {state.kind === 'error' && (
@@ -179,14 +186,15 @@ export function FilePreview({
               <span className="material-symbols-outlined text-[28px] text-[var(--color-error)]">error</span>
               <p className="text-sm text-[var(--color-text-primary)]">{t('market.file.loadError')}</p>
               <p className="max-w-md break-words text-xs text-[var(--color-text-tertiary)]">{state.message}</p>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="base"
+                className="mt-1"
+                icon={<span className="material-symbols-outlined text-[14px]">refresh</span>}
                 onClick={() => activePath && void open(activePath)}
-                className="mt-1 inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-primary)] hover:border-[var(--color-border-focus)]"
               >
-                <span className="material-symbols-outlined text-[14px]">refresh</span>
                 {t('market.retry')}
-              </button>
+              </Button>
             </div>
           )}
           {state.kind === 'idle' && (

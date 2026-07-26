@@ -1,6 +1,7 @@
 import { useTranslation } from '../../i18n'
 import type { NormalizedSkill } from '../../types/market'
-import { Modal } from '../shared/Modal'
+import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 import { SecurityBadge } from './SecurityBadge'
 
 const RISK_KEYS = {
@@ -85,28 +86,20 @@ export function InstallConfirmDialog({
         <p className="text-[11px] leading-5 text-[var(--color-text-tertiary)]">{t('market.installConfirm.effectNote')}</p>
 
         <div className="flex items-center justify-end gap-2 pt-1">
-          <button
-            type="button"
-            disabled={installing}
-            onClick={onClose}
-            className="inline-flex min-h-9 items-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 text-sm text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] disabled:opacity-50"
-          >
+          <Button variant="secondary" disabled={installing} onClick={onClose}>
             {t('market.installConfirm.cancel')}
-          </button>
-          <button
-            type="button"
+          </Button>
+          {/* `primary` is the app's brand CTA (a brand gradient rather than the
+              flat brand fill this used); the flagged path keeps its solid red
+              through `danger`, which is exactly what the old class produced. */}
+          <Button
+            variant={skill.securityStatus === 'flagged' ? 'danger' : 'primary'}
             data-testid="market-install-confirm-button"
-            disabled={installing}
+            loading={installing}
             onClick={onConfirm}
-            className={`inline-flex min-h-9 items-center gap-1.5 rounded-xl px-4 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 ${
-              skill.securityStatus === 'flagged' ? 'bg-[var(--color-error)]' : 'bg-[var(--color-brand)]'
-            }`}
           >
-            {installing && (
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" aria-hidden />
-            )}
             {installing ? t('market.install.installing') : t('market.installConfirm.confirm')}
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>

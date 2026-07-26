@@ -1,6 +1,7 @@
 import { ChevronDown } from 'lucide-react'
+import { forwardRef, type ButtonHTMLAttributes } from 'react'
 import { useTranslation } from '../../i18n'
-import { Dropdown } from '../shared/Dropdown'
+import { Dropdown } from '@/components/ui/Dropdown'
 import { useMarketStore, type MarketFilters } from '../../stores/marketStore'
 import type {
   MarketInstalledFilter,
@@ -8,23 +9,39 @@ import type {
   MarketSourceFilter,
 } from '../../types/market'
 
-function FilterTrigger({ label, value, active }: { label: string; value: string; active: boolean }) {
+type FilterTriggerProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string
+  value: string
+  active: boolean
+}
+
+/**
+ * `Dropdown` clones its trigger to attach a ref, the aria state and its own
+ * click/keydown handlers. A trigger that neither forwards the ref nor spreads
+ * the rest of its props silently drops all of that — the chips render but the
+ * menu never opens.
+ */
+const FilterTrigger = forwardRef<HTMLButtonElement, FilterTriggerProps>(function FilterTrigger(
+  { label, value, active, ...props },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       type="button"
-      aria-haspopup="menu"
       className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] active:scale-[0.98] ${
         active
           ? 'border-[var(--color-brand)]/35 bg-[var(--color-primary-fixed)] text-[var(--color-brand)]'
           : 'border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)]'
       }`}
+      {...props}
     >
       <span className={active ? 'text-[var(--color-brand)]/75' : 'text-[var(--color-text-tertiary)]'}>{label}</span>
       <span className="font-medium">{value}</span>
       <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
     </button>
   )
-}
+})
 
 export function FilterBar({ className = '' }: { className?: string }) {
   const t = useTranslation()

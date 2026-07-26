@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ShieldAlert, X } from 'lucide-react'
 import { useTranslation } from '../../i18n'
+import { IconButton } from '@/components/ui/IconButton'
 
 const STORAGE_KEY = 'cc-haha-market-disclaimer-dismissed'
 
@@ -34,9 +35,11 @@ export function MarketDisclaimer() {
         <span className="font-semibold text-[var(--color-text-primary)]">{t('market.disclaimer.title')}</span>{' '}
         {t('market.disclaimer.body')}
       </p>
-      <button
-        type="button"
-        aria-label={t('market.disclaimer.dismiss')}
+      <IconButton
+        icon={<X className="h-4 w-4" strokeWidth={2} aria-hidden="true" />}
+        label={t('market.disclaimer.dismiss')}
+        tone="muted"
+        className="-mr-1"
         onClick={() => {
           setDismissed(true)
           try {
@@ -45,10 +48,7 @@ export function MarketDisclaimer() {
             // Persisting is best-effort; the banner stays dismissed for this session.
           }
         }}
-        className="-mr-1 inline-flex h-8 w-8 flex-shrink-0 cursor-pointer items-center justify-center rounded-md text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] active:scale-[0.98]"
-      >
-        <X className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-      </button>
+      />
     </div>
   )
 }

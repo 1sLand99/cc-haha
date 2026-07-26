@@ -6,16 +6,28 @@ import { useTranslation } from '../../i18n'
 import { parseRunOutput } from '../../lib/parseRunOutput'
 import type { TaskRun } from '../../types/task'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { IconButton } from '@/components/ui/IconButton'
+import { LoadingState } from '@/components/ui/LoadingState'
 
 function RunOutput({ run }: { run: TaskRun }) {
   const t = useTranslation()
 
-  // Show error prominently if present
+  // Show error prominently if present. The `/20` + `/28` alpha fills this used
+  // are exactly what Safari 15 WebView refuses to parse, so on the desktop
+  // shell the box rendered as bare red text with no panel around it.
   if (run.error) {
     return (
-      <div className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-[var(--radius-sm)] border border-[var(--color-error)]/20 bg-[var(--color-error-container)]/28 p-2.5 text-xs text-[var(--color-error)]">
-        {run.error}
-      </div>
+      <ErrorState
+        size="sm"
+        className="mt-2"
+        title={t('common.error')}
+        detail={
+          <span className="block max-h-40 overflow-y-auto whitespace-pre-wrap break-words">{run.error}</span>
+        }
+      />
     )
   }
 
@@ -229,24 +241,24 @@ export function TaskRunsPanel({ taskId, onClose, refreshKey }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--color-surface-container)]">
         <span className="text-xs font-medium text-[var(--color-text-primary)]">{t('tasks.logsTitle')}</span>
-        <button
+        <IconButton
+          icon={<span className="material-symbols-outlined text-[16px]">close</span>}
+          label={t('tasks.close')}
+          size="xs"
+          tone="muted"
           onClick={onClose}
-          className="p-0.5 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors"
-        >
-          <span className="material-symbols-outlined text-[16px]">close</span>
-        </button>
+        />
       </div>
 
       {/* Content */}
       <div className="max-h-64 overflow-y-auto">
         {loading ? (
-          <div className="flex items-center justify-center py-6">
-            <div className="animate-spin w-4 h-4 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
-          </div>
+          // Same 16px brand spinner in the same `py-6` box; the label goes from
+          // an `aria-label` on the SVG to an `aria-live` region, so the wait is
+          // announced rather than only readable on focus.
+          <LoadingState size="sm" label={t('common.loading')} labelHidden />
         ) : runs.length === 0 ? (
-          <div className="px-4 py-6 text-center text-xs text-[var(--color-text-tertiary)]">
-            {t('tasks.noLogs')}
-          </div>
+          <EmptyState variant="plain" size="sm" description={t('tasks.noLogs')} />
         ) : (
           <div className="divide-y divide-[var(--color-border-separator)]">
             {runs.map((run) => {
@@ -283,23 +295,26 @@ export function TaskRunsPanel({ taskId, onClose, refreshKey }: Props) {
                     <div className="ml-auto flex items-center gap-2">
                       {/* Open session — only after run completes (session is empty while running) */}
                       {run.sessionId && run.status !== 'running' && (
-                        <button
+                        <Button
+                          variant="tonal"
+                          size="sm"
+                          icon={<span className="material-symbols-outlined text-[14px]">open_in_new</span>}
                           onClick={() => openSession(run.sessionId!, run.taskName)}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-[var(--color-brand)] bg-[var(--color-brand)]/8 hover:bg-[var(--color-brand)]/15 rounded-[var(--radius-sm)] transition-colors"
                         >
-                          <span className="material-symbols-outlined text-[14px]">open_in_new</span>
                           {t('tasks.openSession')}
-                        </button>
+                        </Button>
                       )}
 
                       {/* Summary toggle */}
                       {(run.output || run.error || run.hasOutput || run.hasError) && (
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-expanded={isExpanded}
                           onClick={() => { void toggleOutput(run) }}
-                          className="text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"
                         >
                           {isExpanded ? t('tasks.hideOutput') : t('tasks.viewOutput')}
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -312,15 +327,13 @@ export function TaskRunsPanel({ taskId, onClose, refreshKey }: Props) {
                       {t('common.loading')}
                     </div>
                   ) : isExpanded && detailState?.runId === run.id && detailState.status === 'error' ? (
-                    <div className="mt-2 flex items-center justify-between gap-3 rounded-[var(--radius-sm)] border border-[var(--color-error)]/20 bg-[var(--color-error-container)]/28 p-2.5 text-xs text-[var(--color-error)]">
-                      <span>{t('common.error')}</span>
-                      <button
-                        onClick={() => { void loadDetail(run) }}
-                        className="font-medium underline underline-offset-2"
-                      >
-                        {t('common.retry')}
-                      </button>
-                    </div>
+                    <ErrorState
+                      size="sm"
+                      className="mt-2"
+                      title={t('common.error')}
+                      onRetry={() => { void loadDetail(run) }}
+                      retryLabel={t('common.retry')}
+                    />
                   ) : isExpanded ? (
                     <RunOutput run={run} />
                   ) : null}

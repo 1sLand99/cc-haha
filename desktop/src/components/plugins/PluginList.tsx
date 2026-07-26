@@ -3,8 +3,13 @@ import { usePluginStore, type PluginActionTarget } from '../../stores/pluginStor
 import { useSessionStore } from '../../stores/sessionStore'
 import { useTranslation } from '../../i18n'
 import { useUIStore } from '../../stores/uiStore'
-import { Button } from '../shared/Button'
-import { ConfirmDialog } from '../shared/ConfirmDialog'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { LoadingState } from '@/components/ui/LoadingState'
 import type { PluginSummary } from '../../types/plugin'
 
 type PluginBucket = 'attention' | 'enabled' | 'disabled'
@@ -161,30 +166,23 @@ export function PluginList() {
   }
 
   if (isLoading) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="animate-spin w-5 h-5 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
-      </div>
-    )
+    return <LoadingState label={t('common.loading')} labelHidden />
   }
 
   if (error) {
-    return <div className="text-sm text-[var(--color-error)] py-4">{error}</div>
+    // Was a bare red line of text with no role, so a screen reader only found
+    // the failure by walking into it.
+    return <ErrorState title={error} />
   }
 
   if (plugins.length === 0) {
     return (
-      <div className="text-center py-12 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6">
-        <span className="material-symbols-outlined text-[40px] text-[var(--color-text-tertiary)] mb-2 block">
-          extension
-        </span>
-        <p className="text-sm text-[var(--color-text-tertiary)]">
-          {t('settings.plugins.empty')}
-        </p>
-        <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-          {t('settings.plugins.emptyHint')}
-        </p>
-      </div>
+      <EmptyState
+        icon={<span className="material-symbols-outlined text-[20px]">extension</span>}
+        title={t('settings.plugins.empty')}
+        description={t('settings.plugins.emptyHint')}
+        action={{ label: t('settings.plugins.refresh'), onClick: () => void fetchPlugins(currentWorkDir) }}
+      />
     )
   }
 
@@ -211,22 +209,25 @@ export function PluginList() {
             </div>
 
             <div className="flex flex-wrap gap-2 xl:justify-end">
+              {/* `size="sm"` plus `min-h-9` was two heights fighting; `md` is
+                  h-9 outright. The material icon also moves into `icon`, so
+                  `loading` swaps it for the spinner instead of rendering both. */}
               <Button
                 variant="secondary"
-                size="sm"
-                className="min-h-9 flex-1 sm:flex-none"
+                size="md"
+                className="flex-1 sm:flex-none"
+                icon={<span className="material-symbols-outlined text-[16px]" aria-hidden="true">refresh</span>}
                 onClick={() => void fetchPlugins(currentWorkDir)}
               >
-                <span className="material-symbols-outlined text-[16px]">refresh</span>
                 {t('settings.plugins.refresh')}
               </Button>
               <Button
-                size="sm"
-                className="min-h-9 flex-1 sm:flex-none"
+                size="md"
+                className="flex-1 sm:flex-none"
+                icon={<span className="material-symbols-outlined text-[16px]" aria-hidden="true">sync</span>}
                 onClick={handleReload}
                 loading={isApplying}
               >
-                <span className="material-symbols-outlined text-[16px]">sync</span>
                 {t('settings.plugins.apply')}
               </Button>
             </div>
@@ -275,31 +276,27 @@ export function PluginList() {
               {t('settings.plugins.selectionCount', { count: String(selectedPlugins.length) })}
             </span>
             {selectedPlugins.length > 0 && (
-              <button
-                type="button"
-                onClick={clearSelection}
-                className="rounded-md px-2 py-1 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
-              >
+              <Button variant="ghost" size="sm" onClick={clearSelection}>
                 {t('settings.plugins.clearSelection')}
-              </button>
+              </Button>
             )}
           </div>
           <div className="flex flex-wrap gap-2 sm:justify-end">
             <Button
-              size="sm"
+              size="base"
+              icon={<span className="material-symbols-outlined text-[16px]" aria-hidden="true">toggle_on</span>}
               disabled={enableCandidates.length === 0 || isApplying}
               onClick={() => setConfirmBatchAction('enable')}
             >
-              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">toggle_on</span>
               {t('settings.plugins.enableSelected')}
             </Button>
             <Button
               variant="secondary"
-              size="sm"
+              size="base"
+              icon={<span className="material-symbols-outlined text-[16px]" aria-hidden="true">toggle_off</span>}
               disabled={disableCandidates.length === 0 || isApplying}
               onClick={() => setConfirmBatchAction('disable')}
             >
-              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">toggle_off</span>
               {t('settings.plugins.disableSelected')}
             </Button>
           </div>
@@ -326,15 +323,11 @@ export function PluginList() {
                   <span className="text-sm font-semibold text-[var(--color-text-primary)]">
                     {marketplace.name}
                   </span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                    marketplace.autoUpdate
-                      ? 'bg-[var(--color-success-container)] text-[var(--color-success)]'
-                      : 'bg-[var(--color-surface-container-high)] text-[var(--color-text-tertiary)]'
-                  }`}>
+                  <Badge tone={marketplace.autoUpdate ? 'success' : 'neutral'}>
                     {marketplace.autoUpdate
                       ? t('settings.plugins.marketplaceAutoUpdateOn')
                       : t('settings.plugins.marketplaceAutoUpdateOff')}
-                  </span>
+                  </Badge>
                 </div>
                 <div className="mt-2 text-xs leading-5 text-[var(--color-text-secondary)] break-words">
                   {marketplace.source}
@@ -475,11 +468,7 @@ function renderGroup(
                     </span>
                     <StatusPill plugin={plugin} />
                     <ScopePill scope={plugin.scope} />
-                    {plugin.version && (
-                      <span className="rounded-full bg-[var(--color-surface-container-high)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-tertiary)]">
-                        v{plugin.version}
-                      </span>
-                    )}
+                    {plugin.version && <Badge mono>v{plugin.version}</Badge>}
                   </div>
                   <p className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)] break-words">
                     {plugin.description || t('settings.plugins.noDescription')}
@@ -532,7 +521,7 @@ function SummaryCard({
   icon: string
 }) {
   return (
-    <div className="min-w-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3">
+    <Card radius="lg" padding="sm" className="min-w-0">
       <div className="flex min-w-0 items-center gap-1.5 text-[11px] uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
         <span className="material-symbols-outlined text-[14px] flex-shrink-0">{icon}</span>
         <span className="min-w-0 truncate text-[10px] leading-4">
@@ -542,7 +531,7 @@ function SummaryCard({
       <div className="mt-1.5 truncate text-lg font-semibold text-[var(--color-text-primary)]">
         {value}
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -550,31 +539,19 @@ function StatusPill({ plugin }: { plugin: PluginSummary }) {
   const t = useTranslation()
 
   if (plugin.hasErrors) {
-    return (
-      <span className="rounded-full bg-[var(--color-error)]/12 px-2 py-0.5 text-[10px] font-medium text-[var(--color-error)]">
-        {t('settings.plugins.status.attention')}
-      </span>
-    )
+    return <Badge tone="danger">{t('settings.plugins.status.attention')}</Badge>
   }
 
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-      plugin.enabled
-        ? 'bg-[var(--color-success-container)] text-[var(--color-success)]'
-        : 'bg-[var(--color-surface-container-high)] text-[var(--color-text-tertiary)]'
-    }`}>
+    <Badge tone={plugin.enabled ? 'success' : 'neutral'}>
       {plugin.enabled
         ? t('settings.plugins.status.enabled')
         : t('settings.plugins.status.disabled')}
-    </span>
+    </Badge>
   )
 }
 
 function ScopePill({ scope }: { scope: PluginSummary['scope'] }) {
   const t = useTranslation()
-  return (
-    <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-tertiary)]">
-      {t(`settings.plugins.scope.${scope}`)}
-    </span>
-  )
+  return <Badge variant="outline">{t(`settings.plugins.scope.${scope}`)}</Badge>
 }

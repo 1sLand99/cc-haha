@@ -1,6 +1,7 @@
 import { ModelSelector } from '../controls/ModelSelector'
-import { DirectoryPicker } from '../shared/DirectoryPicker'
+import { DirectoryPicker } from '@/components/composite/DirectoryPicker'
 import { useTranslation } from '../../i18n'
+import { Badge } from '@/components/ui/Badge'
 
 type Props = {
   value: string
@@ -49,10 +50,13 @@ export function PromptEditor({
       <div className="border-t border-[var(--color-border)]/40 px-3 py-2 flex flex-col gap-2 bg-[var(--color-surface-container-low)] rounded-b-[var(--radius-lg)]">
         {/* Row 1: Permission + Model selectors */}
         <div className="flex items-center justify-between">
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-error)]/8 px-2.5 py-1.5 text-xs font-medium text-[var(--color-error)]">
-            <span className="material-symbols-outlined text-[14px]">gavel</span>
+          <Badge
+            tone="danger"
+            size="md"
+            icon={<span className="material-symbols-outlined text-[14px]">gavel</span>}
+          >
             {t('newTask.fullPermissions')}
-          </div>
+          </Badge>
           <ModelSelector
             runtimeSelection={modelId ? { providerId: providerId ?? null, modelId } : undefined}
             onRuntimeSelectionChange={(selection) => {
@@ -67,10 +71,13 @@ export function PromptEditor({
           <DirectoryPicker value={folderPath} onChange={onFolderPathChange} />
         </div>
 
-        <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-[var(--color-error)]/8 text-[10px] text-[var(--color-error)]">
-          <span className="material-symbols-outlined text-[12px]">warning</span>
+        {/* `wrap` matters here: the sentence ends in an absolute folder path,
+            which a default badge would push onto one unbreakable line. The
+            fill also moves off `bg-[var(--color-error)]/8` — Safari 15 WebView
+            drops that color function, so the strip had no background there. */}
+        <Badge tone="danger" wrap pill={false} className="w-full" icon={<span className="material-symbols-outlined text-[12px]">warning</span>}>
           {t('promptEditor.bypassWarning')}{folderPath ? ` ${t('promptEditor.within')} ${folderPath}` : ` ${t('promptEditor.selectFolder')}`}.
-        </div>
+        </Badge>
       </div>
     </div>
   )

@@ -5,6 +5,9 @@ import { useTranslation, type TranslationKey } from '../../i18n'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useTabStore } from '../../stores/tabStore'
 import { searchApi, type SessionSearchResult, type SessionMatch, type SessionMatchRole } from '../../api/search'
+import { Badge } from '@/components/ui/Badge'
+import { IconButton } from '@/components/ui/IconButton'
+import { Spinner } from '@/components/ui/Spinner'
 
 const DEBOUNCE_MS = 250
 const RECENT_LIMIT = 8
@@ -238,20 +241,15 @@ export function GlobalSearchModal({ open, onClose }: Props) {
             aria-label={t('search.global.placeholder')}
             className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
           />
-          {loading && (
-            <span className="material-symbols-outlined animate-spin text-[16px] text-[var(--color-text-tertiary)]">
-              progress_activity
-            </span>
-          )}
-          <button
-            type="button"
+          {loading && <Spinner size={16} className="text-[var(--color-text-tertiary)]" />}
+          <IconButton
+            icon={<X className="h-4 w-4" aria-hidden="true" />}
+            label={t('search.global.close')}
+            size="sm"
+            shape="circle"
+            tone="secondary"
             onClick={onClose}
-            aria-label={t('search.global.close')}
-            title={t('search.global.close')}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-          </button>
+          />
         </div>
 
         {/* Results */}
@@ -384,15 +382,9 @@ function RoleBadge({
 }) {
   const isUser = role === 'user'
   return (
-    <span
-      className={`mt-px shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none ${
-        isUser
-          ? 'bg-[var(--color-brand)]/15 text-[var(--color-brand)]'
-          : 'bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]'
-      }`}
-    >
+    <Badge tone={isUser ? 'brand' : 'neutral'} pill={false} className="mt-px leading-none">
       {isUser ? t('search.global.roleUser') : t('search.global.roleAssistant')}
-    </span>
+    </Badge>
   )
 }
 

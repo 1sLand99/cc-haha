@@ -1,12 +1,13 @@
 import { useTranslation } from '../../i18n'
+import { StatusDot, type Tone } from '@/components/ui/Badge'
 import type { MarketSource, SourceStatusInfo } from '../../types/market'
 import { MARKET_SOURCES } from '../../types/market'
 
-const DOT_CLASSES: Record<SourceStatusInfo['status'], string> = {
-  ok: 'bg-[var(--color-success)]',
-  degraded: 'bg-[var(--color-warning)]',
-  failed: 'bg-[var(--color-error)]',
-  cached: 'bg-[var(--color-text-tertiary)]',
+const DOT_TONES: Record<SourceStatusInfo['status'], Tone> = {
+  ok: 'success',
+  degraded: 'warning',
+  failed: 'danger',
+  cached: 'neutral',
 }
 
 function formatTime(ts?: number): string {
@@ -45,7 +46,7 @@ export function SourceStatusBar({
             title={info.error || undefined}
             className="inline-flex min-h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-[var(--color-text-secondary)]"
           >
-            <span className={`h-1.5 w-1.5 rounded-full ${DOT_CLASSES[info.status]}`} aria-hidden />
+            <StatusDot tone={DOT_TONES[info.status]} />
             <span className="font-medium text-[var(--color-text-primary)]">{t(`market.source.${source}`)}</span>
             <span className="text-[var(--color-text-tertiary)]">{statusLabel}</span>
           </span>

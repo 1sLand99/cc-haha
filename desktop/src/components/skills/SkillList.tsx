@@ -2,6 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSkillStore } from '../../stores/skillStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useTranslation } from '../../i18n'
+import { Badge } from '@/components/ui/Badge'
+import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { IconButton } from '@/components/ui/IconButton'
+import { LoadingState } from '@/components/ui/LoadingState'
 import type { SkillMeta, SkillSource } from '../../types/skill'
 
 const SOURCE_ORDER: SkillSource[] = ['user', 'project', 'plugin', 'mcp', 'bundled']
@@ -81,30 +87,22 @@ export function SkillList() {
   )
 
   if (isLoading) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="animate-spin w-5 h-5 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
-      </div>
-    )
+    return <LoadingState label={t('common.loading')} labelHidden />
   }
 
   if (error) {
-    return <div className="text-sm text-[var(--color-error)] py-4">{error}</div>
+    // Was a bare red line of text with no role, so a screen reader only found
+    // the failure by walking into it.
+    return <ErrorState title={error} />
   }
 
   if (skills.length === 0) {
     return (
-      <div className="text-center py-12 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6">
-        <span className="material-symbols-outlined text-[40px] text-[var(--color-text-tertiary)] mb-2 block">
-          auto_awesome
-        </span>
-        <p className="text-sm text-[var(--color-text-tertiary)]">
-          {t('settings.skills.empty')}
-        </p>
-        <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-          {t('settings.skills.emptyHint')}
-        </p>
-      </div>
+      <EmptyState
+        icon={<span className="material-symbols-outlined text-[20px]">auto_awesome</span>}
+        title={t('settings.skills.empty')}
+        description={t('settings.skills.emptyHint')}
+      />
     )
   }
 
@@ -143,14 +141,14 @@ export function SkillList() {
                   className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
                 />
                 {searchQuery && (
-                  <button
-                    type="button"
-                    aria-label={t('settings.skills.clearSearch')}
+                  <IconButton
+                    icon="close"
+                    label={t('settings.skills.clearSearch')}
+                    size="sm"
+                    shape="circle"
+                    tone="muted"
                     onClick={() => setSearchQuery('')}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">close</span>
-                  </button>
+                  />
                 )}
               </div>
               {normalizedSearchQuery && (
@@ -189,17 +187,12 @@ export function SkillList() {
       </section>
 
       {filteredSkills.length === 0 && (
-        <div className="text-center py-12 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-6">
-          <span className="material-symbols-outlined text-[40px] text-[var(--color-text-tertiary)] mb-2 block">
-            search_off
-          </span>
-          <p className="text-sm text-[var(--color-text-tertiary)]">
-            {t('settings.skills.noSearchResults')}
-          </p>
-          <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-            {t('settings.skills.noSearchResultsHint')}
-          </p>
-        </div>
+        <EmptyState
+          icon={<span className="material-symbols-outlined text-[20px]">search_off</span>}
+          title={t('settings.skills.noSearchResults')}
+          description={t('settings.skills.noSearchResultsHint')}
+          action={{ label: t('settings.skills.clearSearch'), onClick: () => setSearchQuery('') }}
+        />
       )}
 
       <div className={`grid gap-4 ${visibleGroupCount >= 2 ? 'xl:grid-cols-2' : ''}`}>
@@ -265,30 +258,25 @@ export function SkillList() {
                           <span className="text-sm font-semibold text-[var(--color-text-primary)] break-all">
                             {skill.displayName || skill.name}
                           </span>
-                          {skill.version && (
-                            <span className="rounded-full bg-[var(--color-surface-container-high)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-tertiary)]">
-                              v{skill.version}
-                            </span>
-                          )}
+                          {skill.version && <Badge mono>v{skill.version}</Badge>}
                           {skill.userInvocable && (
-                            <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-text-tertiary)]">
-                              {t('settings.skills.slashCommand')}
-                            </span>
+                            <Badge variant="outline">{t('settings.skills.slashCommand')}</Badge>
                           )}
                           {/* Only flagged for `.agents`: `.claude` is the norm and
                               badging it would be noise on every existing skill. */}
                           {skill.rootFlavor === 'agents' && (
-                            <span
-                              className="rounded-full bg-[var(--color-surface-container-high)] px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--color-text-tertiary)]"
-                              // The badge covers both scopes, and they are not
-                              // equally trusted: a project one ships with the
-                              // repository rather than being installed by the user.
+                            // The badge covers both scopes, and they are not
+                            // equally trusted: a project one ships with the
+                            // repository rather than being installed by the
+                            // user — hence two hint strings.
+                            <Badge
+                              mono
                               title={t(skill.source === 'project'
                                 ? 'settings.skills.agentsDirProjectHint'
                                 : 'settings.skills.agentsDirHint')}
                             >
                               {t('settings.skills.agentsDirBadge')}
-                            </span>
+                            </Badge>
                           )}
                         </div>
                         <p className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)] break-words">
@@ -328,7 +316,7 @@ function SummaryCard({
   className?: string
 }) {
   return (
-    <div className={`rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3 min-w-0 ${className}`}>
+    <Card radius="lg" padding="sm" className={`min-w-0 ${className}`}>
       <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.12em] text-[var(--color-text-tertiary)] min-w-0">
         <span className="material-symbols-outlined text-[14px] flex-shrink-0">{icon}</span>
         <span className="truncate">{label}</span>
@@ -336,6 +324,6 @@ function SummaryCard({
       <div className="mt-2 text-lg font-semibold text-[var(--color-text-primary)] truncate">
         {value}
       </div>
-    </div>
+    </Card>
   )
 }

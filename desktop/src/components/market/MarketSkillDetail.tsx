@@ -1,6 +1,8 @@
 import { useCallback, useMemo } from 'react'
 import { ArrowLeft, CircleAlert, Download, KeyRound, RefreshCw, Trash2 } from 'lucide-react'
 import { useTranslation } from '../../i18n'
+import { Button } from '@/components/ui/Button'
+import { Skeleton, SkeletonGroup } from '@/components/ui/Skeleton'
 import { useMarketStore } from '../../stores/marketStore'
 import { SkillDetailView, type SkillDetailMetaItem } from './SkillDetailView'
 
@@ -79,32 +81,31 @@ export function MarketSkillDetail({
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[var(--color-surface-container-lowest)]" data-testid="market-detail-loading">
         <div className="mx-auto w-full max-w-[1320px] px-6 py-6 lg:px-8">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="base"
+            icon={<ArrowLeft className="h-4 w-4" strokeWidth={2} aria-hidden="true" />}
             onClick={backToList}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-md pr-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)]"
           >
-            <ArrowLeft className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
             {t('market.detail.back')}
-          </button>
-          <div className="mt-5 animate-pulse">
+          </Button>
+          <SkeletonGroup label={t('market.loading')} className="mt-5">
             <div className="flex items-start gap-5 border-b border-[var(--color-border)]/70 pb-6">
-              <div className="h-16 w-16 flex-shrink-0 rounded-[14px] bg-[var(--color-surface-container-high)]" />
+              <Skeleton shape="block" width="4rem" height="4rem" radius="lg" tone="strong" className="flex-shrink-0" />
               <div className="min-w-0 flex-1 pt-1">
-                <div className="h-2.5 w-24 rounded bg-[var(--color-surface-container)]" />
-                <div className="mt-3 h-6 w-64 max-w-full rounded bg-[var(--color-surface-container-high)]" />
-                <div className="mt-4 h-3 w-[min(100%,36rem)] rounded bg-[var(--color-surface-container)]" />
+                <Skeleton height="0.625rem" className="w-24" />
+                <Skeleton height="1.5rem" tone="strong" className="mt-3 w-64 max-w-full" />
+                <Skeleton height="0.75rem" className="mt-4 w-[min(100%,36rem)]" />
               </div>
             </div>
             <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
               <div>
-                <div className="h-10 w-52 rounded bg-[var(--color-surface-container)]" />
+                <Skeleton height="2.5rem" className="w-52" />
                 <div className="mt-5 h-72 rounded-xl border border-[var(--color-border)]/60 bg-[var(--color-surface-container-low)]" />
               </div>
               <div className="order-first h-72 rounded-xl border border-[var(--color-border)]/60 bg-[var(--color-surface-container-low)] lg:order-none" />
             </div>
-          </div>
-          <p className="sr-only">{t('market.loading')}</p>
+          </SkeletonGroup>
         </div>
       </div>
     )
@@ -117,21 +118,16 @@ export function MarketSkillDetail({
         <p className="text-sm font-medium text-[var(--color-text-primary)]">{t('market.detail.loadError')}</p>
         {detailError && <p className="max-w-md break-words text-xs text-[var(--color-text-tertiary)]">{detailError}</p>}
         <div className="mt-1 flex items-center gap-2">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            icon={<RefreshCw className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />}
             onClick={() => void refreshDetail(selectedId)}
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] active:scale-[0.98]"
           >
-            <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
             {t('market.retry')}
-          </button>
-          <button
-            type="button"
-            onClick={backToList}
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-4 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] active:scale-[0.98]"
-          >
+          </Button>
+          <Button variant="ghost" onClick={backToList}>
             {t('market.detail.back')}
-          </button>
+          </Button>
         </div>
       </div>
     )
@@ -147,38 +143,29 @@ export function MarketSkillDetail({
   const actions = (
     <>
       {detail.installState === 'installable' && (
-        <button
-          type="button"
+        <Button
+          size="lg"
           data-testid="market-install-button"
           data-market-skill-action-id={detail.id}
-          disabled={installing}
+          loading={installing}
+          icon={<Download className="h-4 w-4" strokeWidth={2} aria-hidden="true" />}
           onClick={() => onRequestInstall(detail.id)}
-          className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-[image:var(--gradient-btn-primary)] px-5 text-sm font-semibold text-[var(--color-btn-primary-fg)] shadow-[var(--shadow-button-primary)] transition-[filter,transform] hover:brightness-105 focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus-ring)] active:translate-y-px disabled:opacity-50"
         >
-          {installing ? (
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" aria-hidden />
-          ) : (
-            <Download className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-          )}
           {installing ? t('market.install.installing') : t('market.install.action')}
-        </button>
+        </Button>
       )}
       {detail.installState === 'installed' && (
-        <button
-          type="button"
+        <Button
+          variant="danger-outline"
+          size="lg"
           data-testid="market-uninstall-button"
           data-market-skill-action-id={detail.id}
-          disabled={installing}
+          loading={installing}
+          icon={<Trash2 className="h-4 w-4" strokeWidth={2} aria-hidden="true" />}
           onClick={() => onRequestUninstall(detail.id)}
-          className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--color-error)]/25 bg-[var(--color-surface)] px-5 text-sm font-medium text-[var(--color-error)] transition-colors hover:border-[var(--color-error)]/50 hover:bg-[var(--color-error-container)]/35 focus-visible:outline-none focus-visible:shadow-[var(--shadow-error-ring)] active:scale-[0.98] disabled:opacity-50"
         >
-          {installing ? (
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" aria-hidden />
-          ) : (
-            <Trash2 className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-          )}
           {installing ? t('market.uninstall.uninstalling') : t('market.uninstall.action')}
-        </button>
+        </Button>
       )}
     </>
   )

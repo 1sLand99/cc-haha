@@ -6,7 +6,9 @@ import { marketApi } from '../../api/market'
 import { useMarketStore } from '../../stores/marketStore'
 import { SkillDetailView, type SkillDetailMetaItem } from '../market/SkillDetailView'
 import type { PreviewFileContent } from '../market/FilePreview'
-import { ConfirmDialog } from '../shared/ConfirmDialog'
+import { Button } from '@/components/ui/Button'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { LoadingState } from '@/components/ui/LoadingState'
 
 export function SkillDetail() {
   const { selectedSkill, selectedSkillReturnTab, isDetailLoading, clearSelection, fetchSkills } = useSkillStore()
@@ -67,11 +69,7 @@ export function SkillDetail() {
   }, [selectedSkill, t])
 
   if (isDetailLoading) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="animate-spin w-5 h-5 border-2 border-[var(--color-brand)] border-t-transparent rounded-full" />
-      </div>
-    )
+    return <LoadingState label={t('common.loading')} labelHidden />
   }
 
   if (!selectedSkill) return null
@@ -117,20 +115,16 @@ export function SkillDetail() {
   }
 
   const actions = marketMeta ? (
-    <button
-      type="button"
+    <Button
+      variant="danger-outline"
+      size="lg"
       data-testid="local-skill-uninstall-button"
-      disabled={uninstalling}
+      loading={uninstalling}
+      icon={<span className="material-symbols-outlined text-[18px]" aria-hidden>delete</span>}
       onClick={() => setConfirmUninstall(true)}
-      className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 text-sm text-[var(--color-error)] transition-colors hover:border-[var(--color-error)]/50 disabled:opacity-50"
     >
-      {uninstalling ? (
-        <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" aria-hidden />
-      ) : (
-        <span className="material-symbols-outlined text-[18px]" aria-hidden>delete</span>
-      )}
       {uninstalling ? t('market.uninstall.uninstalling') : t('market.uninstall.action')}
-    </button>
+    </Button>
   ) : undefined
 
   return (

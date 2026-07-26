@@ -5,10 +5,13 @@ import {
   notifyConversationFindContentChanged,
   registerConversationFindController,
 } from './conversationFindBridge'
+import { useSettingsStore } from '../../stores/settingsStore'
 
 describe('FindInPageModal', () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
+    // The bar's copy is translated; assertions below spell the English strings.
+    useSettingsStore.setState({ locale: 'en' })
   })
 
   it('keeps DOM-scoped search for non-chat pages', async () => {
