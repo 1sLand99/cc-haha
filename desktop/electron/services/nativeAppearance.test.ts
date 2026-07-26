@@ -37,11 +37,18 @@ function appearance(overrides: Partial<AppliedAppearance> = {}): AppliedAppearan
   }
 }
 
-function makeApp(): { app: App; home: string } {
+function makeApp(): { app: App; home: string; env: NodeJS.ProcessEnv } {
   const home = mkdtempSync(path.join(tmpdir(), 'electron-appearance-'))
   tempDirs.push(home)
   return {
     home,
+    // Every case below has to resolve inside its own `home`. Left to default,
+    // these functions read `process.env`, and a CLAUDE_CONFIG_DIR set there
+    // outranks `app.getPath('home')` — collapsing every case onto one shared
+    // file, where one reads what another wrote. That is not hypothetical: the
+    // sandboxed environment `check:coverage` runs under sets it, which is why
+    // this file passed under `check:desktop` and failed under coverage.
+    env: {},
     app: { getPath: vi.fn(() => home) } as unknown as App,
   }
 }
@@ -73,43 +80,43 @@ describe('appearance state persistence', () => {
   })
 
   it('round-trips what the renderer reported', () => {
-    const { app } = makeApp()
+    const { app, env } = makeApp()
     const state = appearance({ isDark: true, background: '#201D17', lightBackground: WARM_LIGHT, followSystem: true })
 
-    writeAppearanceState(app, state)
+    writeAppearanceState(app, state, env)
 
-    expect(readAppearanceState(app)).toEqual(state)
+    expect(readAppearanceState(app, env)).toEqual(state)
   })
 
   it('returns null rather than throwing on a missing or corrupt cache', () => {
-    const { app } = makeApp()
-    expect(readAppearanceState(app)).toBeNull()
+    const { app, env } = makeApp()
+    expect(readAppearanceState(app, env)).toBeNull()
 
-    const statePath = appearanceStatePath(app)
-    writeAppearanceState(app, appearance())
+    const statePath = appearanceStatePath(app, env)
+    writeAppearanceState(app, appearance(), env)
     writeFileSync(statePath, '{ not json')
 
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    expect(readAppearanceState(app)).toBeNull()
+    expect(readAppearanceState(app, env)).toBeNull()
     error.mockRestore()
   })
 
   it('rejects a cache whose background is not a plain hex color', () => {
-    const { app } = makeApp()
-    writeAppearanceState(app, appearance())
+    const { app, env } = makeApp()
+    writeAppearanceState(app, appearance(), env)
     writeFileSync(
-      appearanceStatePath(app),
+      appearanceStatePath(app, env),
       JSON.stringify({ ...appearance(), background: 'url(evil)' }),
     )
 
-    expect(readAppearanceState(app)).toBeNull()
+    expect(readAppearanceState(app, env)).toBeNull()
   })
 
   it('refuses to persist a malformed payload', () => {
-    const { app } = makeApp()
-    writeAppearanceState(app, appearance({ background: 'red' }))
+    const { app, env } = makeApp()
+    writeAppearanceState(app, appearance({ background: 'red' }), env)
 
-    expect(readAppearanceState(app)).toBeNull()
+    expect(readAppearanceState(app, env)).toBeNull()
   })
 })
 
@@ -170,25 +177,25 @@ describe('startupWindowBackground', () => {
 
 describe('applyAppliedAppearance', () => {
   it('repaints every live window and caches the result', () => {
-    const { app } = makeApp()
+    const { app, env } = makeApp()
     const first = fakeWindow()
     const second = fakeWindow()
     const state = appearance({ isDark: true, background: '#201D17', lightBackground: WARM_LIGHT })
 
-    applyAppliedAppearance(state, { app, windows: () => [first, second] })
+    applyAppliedAppearance(state, { app, windows: () => [first, second], env })
 
     expect(first.setBackgroundColor).toHaveBeenCalledWith('#201D17')
     expect(second.setBackgroundColor).toHaveBeenCalledWith('#201D17')
-    expect(JSON.parse(readFileSync(appearanceStatePath(app), 'utf-8'))).toEqual(state)
+    expect(JSON.parse(readFileSync(appearanceStatePath(app, env), 'utf-8'))).toEqual(state)
   })
 
   it('skips windows that were already torn down', () => {
     // quit/quitAndInstall can leave destroyed windows in the list; touching
     // one throws "Object has been destroyed".
-    const { app } = makeApp()
+    const { app, env } = makeApp()
     const destroyed = fakeWindow(true)
 
-    applyAppliedAppearance(appearance({ followSystem: true }), { app, windows: () => [destroyed] })
+    applyAppliedAppearance(appearance({ followSystem: true }), { app, windows: () => [destroyed], env })
 
     expect(destroyed.setBackgroundColor).not.toHaveBeenCalled()
   })
