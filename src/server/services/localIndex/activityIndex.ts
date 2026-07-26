@@ -223,21 +223,25 @@ export function writeActivityProjection(
   const lastTime = activity.lastTimestamp
     ? Date.parse(activity.lastTimestamp)
     : Number.NaN
+  // Calendar span from first to last message. Kept for callers that want the wall-clock reach of a
+  // session; `active_duration_ms` is what "task length" should be measured with, because a session
+  // resumed the next morning spans the whole night without anyone working through it.
   const duration = Number.isFinite(firstTime) && Number.isFinite(lastTime)
     ? lastTime - firstTime
     : 0
   operation.run(`
     INSERT INTO activity_sessions (
       transcript_path, session_id, first_timestamp, last_timestamp,
-      duration_ms, message_count, start_hour, speculation_time_saved_ms,
-      shot_count
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      duration_ms, active_duration_ms, message_count, start_hour,
+      speculation_time_saved_ms, shot_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   source.path,
   source.parentSessionId,
   activity.firstTimestamp,
   activity.lastTimestamp,
   duration,
+  activity.activeDurationMs,
   activity.messageCount,
   activity.startHour,
   activity.speculationTimeSavedMs,
@@ -521,12 +525,14 @@ export function createActivityIndex(
         const sessionStats = operation.all<{
           session_id: string
           duration_ms: number
+          active_duration_ms: number
           message_count: number
           first_timestamp: string
           start_hour: number | null
           source_mtime_ms: number
         }>(`
           SELECT activity_sessions.session_id, activity_sessions.duration_ms,
+            activity_sessions.active_duration_ms,
             activity_sessions.message_count, activity_sessions.first_timestamp,
             activity_sessions.start_hour,
             activity_sources.mtime_ms AS source_mtime_ms
@@ -541,7 +547,8 @@ export function createActivityIndex(
         `, ...sessionRange.bindings)
         const sessions: SessionStats[] = sessionStats.map(row => ({
           sessionId: row.session_id,
-          duration: row.duration_ms,
+          // Active working time, not the calendar span — see active_duration_ms in migrations.
+          duration: row.active_duration_ms,
           messageCount: row.message_count,
           timestamp: row.first_timestamp,
         }))

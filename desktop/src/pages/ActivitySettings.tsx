@@ -172,6 +172,36 @@ function getModelTokenTotal(usage: ActivityStatsResponse['modelUsage'][string] |
   )
 }
 
+/**
+ * Tokens the model actually had to process, as opposed to prefix it read back from cache. Cache
+ * reads dominate the headline total — over 90% of it on a heavy agentic workload — and bill at a
+ * tenth of input, so the raw total on its own says very little about what was spent.
+ */
+function getFreshTokenTotal(usage: ActivityStatsResponse['modelUsage'][string] | undefined) {
+  if (!usage) return 0
+  return (
+    (usage.inputTokens ?? 0) +
+    (usage.outputTokens ?? 0) +
+    (usage.cacheCreationInputTokens ?? 0)
+  )
+}
+
+function formatCostUSD(cost: number, locale: Locale) {
+  return new Intl.NumberFormat(DATE_LOCALES[locale], {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: cost >= 100 ? 0 : 2,
+  }).format(cost)
+}
+
+function formatShare(part: number, whole: number, locale: Locale) {
+  if (whole <= 0) return '0%'
+  return new Intl.NumberFormat(DATE_LOCALES[locale], {
+    maximumFractionDigits: part / whole < 0.1 ? 1 : 0,
+    style: 'percent',
+  }).format(part / whole)
+}
+
 function formatModelName(model: string) {
   return model
     .replace(/^claude-/i, '')
@@ -573,6 +603,18 @@ export function ActivitySettings() {
       return Math.max(peak, dayTotal)
     }, 0)
   }, [stats])
+  const tokenBreakdown = useMemo(() => {
+    let fresh = 0
+    let cached = 0
+    let costUSD = 0
+    for (const usage of Object.values(stats?.modelUsage ?? {})) {
+      fresh += getFreshTokenTotal(usage)
+      cached += usage.cacheReadInputTokens ?? 0
+      costUSD += usage.costUSD ?? 0
+    }
+    return { fresh, cached, costUSD }
+  }, [stats])
+  const unpricedModelCount = stats?.unpricedModels?.length ?? 0
   const topPluginItems = useMemo(() => buildPluginAndSkillRankItems(stats), [stats])
   const metrics: SummaryMetric[] = [
     {
@@ -610,6 +652,29 @@ export function ActivitySettings() {
       label: t('settings.activity.mostUsedModel'),
       value: topModel ? formatModelName(topModel.model) : t('settings.activity.none'),
       detail: topModel ? `${formatTokens(topModel.tokens)} ${t('settings.activity.tokens')}` : undefined,
+    },
+    {
+      label: t('settings.activity.freshTokens'),
+      value: formatTokens(tokenBreakdown.fresh),
+      detail: t('settings.activity.ofTotal', {
+        percent: formatShare(tokenBreakdown.fresh, totalTokens, locale),
+      }),
+    },
+    {
+      label: t('settings.activity.cachedTokens'),
+      value: formatTokens(tokenBreakdown.cached),
+      detail: t('settings.activity.ofTotal', {
+        percent: formatShare(tokenBreakdown.cached, totalTokens, locale),
+      }),
+    },
+    {
+      label: t('settings.activity.estimatedCost'),
+      value: formatCostUSD(tokenBreakdown.costUSD, locale),
+      // A partial total presented as a complete one would understate spend for anyone running
+      // third-party models, so say what it leaves out.
+      detail: unpricedModelCount > 0
+        ? t('settings.activity.costExcludesModels', { count: unpricedModelCount })
+        : undefined,
     },
     {
       label: t('settings.activity.exploredSkills'),
