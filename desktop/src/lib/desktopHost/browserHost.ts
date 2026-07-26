@@ -119,6 +119,12 @@ export const browserHost: DesktopHost = {
     async createFromAtlas() {
       unsupported('Creating custom pets')
     },
+    async pickSourceSheet() {
+      unsupported('Creating custom pets')
+    },
+    async createFromAtlasBytes() {
+      unsupported('Creating custom pets')
+    },
     async openFolder() {
       unsupported('Opening the custom pets folder')
     },

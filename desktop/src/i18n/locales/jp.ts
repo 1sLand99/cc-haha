@@ -281,42 +281,90 @@ export const jp: Record<TranslationKey, string> = {
   'settings.pets.retry': '再試行',
   'settings.pets.refresh': '更新',
   'settings.pets.create': 'ペットを追加',
-  'settings.pets.createTitle': 'カスタムペットを作成',
-  'settings.pets.createMethodIntro': '作成方法を選択してください。インポートはローカルで処理され、現在のチャットモデルで画像を生成することはありません。',
+  'settings.pets.createTitle': '自分だけのペットを作る',
+  'settings.pets.createMethodIntro': '作り方を選んでください。画像はすべて自分のパソコンの中で処理されます。アップロードされず、チャットの利用量も消費しません。',
   'settings.pets.createRecommended': 'おすすめ',
-  'settings.pets.createImageTitle': '1 枚の画像に軽い動きを追加',
-  'settings.pets.createImageDescription': '背景が透明な PNG または WebP を、やさしく動くペットにします。',
-  'settings.pets.createImageDetail': 'ローカル処理 · 画像モデルや動画生成は不要',
-  'settings.pets.createImageHint': '背景が透明な静止 PNG または WebP（各辺 32～4096px、最大 8MB）を選択します。呼吸、浮遊、タスク状態に応じた軽い動きをローカルで追加します。フレーム単位で生成する完全なアニメーションではありません。',
-  'settings.pets.createImageSubmit': '画像を選択して作成',
-  'settings.pets.createAtlasTitle': 'プロ向けアニメーションアトラスを読み込む',
-  'settings.pets.createAtlasDescription': '作成済みのフレームアニメーション用スプライトアトラスで、完全なキャラクター動作を使います。',
-  'settings.pets.createAtlasDetail': '上級 · 1536×2288 の v2 PNG または WebP が必須',
-  'settings.pets.createAtlasSubmit': 'アトラスを選択して作成',
-  'settings.pets.createAiTitle': 'AI で完全なアニメーションを生成',
-  'settings.pets.createAiDescription': '画像生成サービスでキャラクターとアクションフレームを作成します。',
-  'settings.pets.createAiUnavailable': '現在利用できません。別の画像生成サービスを設定する必要があります。現在のチャットモデルは使用しません。',
-  'settings.pets.createBack': '作成方法を選び直す',
+  'settings.pets.createImageTitle': '手元にある画像を使う',
+  'settings.pets.createImageDescription': 'キャラクターの画像が 1 枚あれば始められます。そっと呼吸して上下に浮かび、作業中は一緒に動きます。',
+  'settings.pets.createImageDetail': '1 分ほど · ただし走ったり手を振ったりはしません',
+  'settings.pets.createImageBadge': 'いちばん手軽',
+  'settings.pets.createImageHint': 'このあと背景が透明な PNG または WebP を選びます（縦横とも 32〜4096 ピクセル、8MB 以下）。このタイプは軽く揺れるだけで、実際に走ることはありません。走る・跳ぶ・手を振る動きが欲しいときは、前の画面で「AI に走って跳ぶペットを描いてもらう」を選んでください。',
+  'settings.pets.createImageSubmit': '画像を選んで作る',
+  'settings.pets.createAtlasTitle': 'アクションシートはもう持っている',
+  'settings.pets.createAtlasDescription': '描き上がったコマ割りのアクションシートをそのまま読み込み、手順をとばします。',
+  'settings.pets.createAtlasDetail': 'サイズ計算は不要 · 自動でぴったり合わせます',
+  'settings.pets.createAtlasSubmit': 'アクションシートを選んで作る',
+  'settings.pets.createAtlasHint': 'このあと横 8 コマ・縦 9 行のアクションシートを選びます。サイズはぴったりでなくて大丈夫です。自動で切り分けて拡大縮小し、「左に走る」の行はミラーで作られます。完成済みの 1536×2288 のアトラスもそのまま使えます。',
+  'settings.pets.createAiTitle': 'AI に走って跳ぶペットを描いてもらう',
+  'settings.pets.createAiDescription': '3 ステップです。プロンプトをコピーし、AI に描いてもらい、その画像を選ぶだけ。プロンプトと見本のテンプレートは用意してあります。',
+  'settings.pets.createAiDetail': '10 分ほど · 画像を描ける AI が必要です',
+  'settings.pets.createBack': '別の作り方にする',
   'settings.pets.createId': 'ペット ID',
-  'settings.pets.createIdHint': '小文字、数字、単一のハイフンのみ使用できます。',
+  'settings.pets.createIdHint': '英数字の短い名前です。小文字・数字・間のハイフンのみ（例: moon-cat）。',
   'settings.pets.createName': '表示名',
   'settings.pets.createDescription': '説明',
-  'settings.pets.createAtlasHint': '透明背景・隙間なしの 1536×2288 PNG/WebP（8列×11行、各セル 192×208）を選択します。行は idle、右走り、左走り、wave、jump、fail、wait、work、review、最後の2行に16方向の視線です。',
   'settings.pets.createCancel': 'キャンセル',
   'settings.pets.createSubmit': '作成',
-  'settings.pets.createError': 'カスタムペットを作成できませんでした。',
-  'settings.pets.createError.invalidId': 'ペット ID には小文字、数字、単一のハイフンのみ使用できます。',
-  'settings.pets.createError.duplicateId': 'この ID のカスタムペットはすでに存在します。',
-  'settings.pets.createError.unsupportedFormat': 'PNG または WebP 画像を選択してください。',
-  'settings.pets.createError.imageTooLarge': '選択する画像は 8 MB 以下にしてください。',
-  'settings.pets.createError.imageDimensions': 'ペット画像は各辺 32～4096 ピクセル、総画素数 16,777,216 以下である必要があります。',
-  'settings.pets.createError.atlasDimensions': 'アニメーションアトラスは正確に 1536×2288 ピクセルである必要があります。',
-  'settings.pets.createError.invalidImage': '選択した画像を読み込めません。静止 PNG または WebP 画像を選択してください。',
-  'settings.pets.createError.storage': 'カスタムペットフォルダーにペットを保存できませんでした。',
-  'settings.pets.dialog.imageTitle': '透明背景のペット画像を選択',
+  'settings.pets.guide.intro': '3 ステップ、10 分ほど。すべて自分のパソコンの中で完結します。',
+  'settings.pets.guide.step1Title': 'AI にアクションシートを描いてもらう',
+  'settings.pets.guide.step1Body': '画像を描ける AI を開き、下の文章をまるごと送ってください。冒頭の「キャラクター」の 2 行を好きな内容に置き換えます（例:「黄色い帽子をかぶった柴犬」）。',
+  'settings.pets.guide.step1Tools': 'Nano Banana、ChatGPT の画像生成、Midjourney、Stable Diffusion、Jimeng などが使えます（推奨ではなく一例です）。うまくいかないときは描き直しを頼むか、「キャラクターはそのままで 2 行目だけ描き直して」と伝えてください。',
+  'settings.pets.guide.prompt': `ゲームキャラクターのアクションシート（スプライトシート）を描いてください。
+
+【キャラクター】
+まるい頭のオレンジ色の子猫。青い小さなマフラーを巻いた
+三頭身のデフォルメ、3D カートゥーン調、やわらかい光沢、
+明るい色づかい。
+（この 2 行を好きなキャラクターに置き換えてください。具体的なほど良いです）
+
+【全体の条件】
+・背景は完全に透明。背景色、グリッド線、文字、影は入れない
+・画像全体を 8 列 × 9 行、合計 72 個の同じ大きさのマスに均等に分割する
+・1 マスに 1 コマ。キャラクターはマスの中央に置き、周囲に少し余白を残す
+・すべてのマスで同じキャラクター。体型・配色・画風を完全に統一する
+・使わないマスは完全に透明のままにする
+
+【各行に描く内容】
+1 行目 左から 6 マス：立ち止まり、呼吸でわずかに上下する
+2 行目 8 マスすべて：右に走る一連の動き。つねに右を向く
+3 行目 左から 4 マス：手を上げて挨拶する
+4 行目 左から 5 マス：しゃがむ、跳ぶ、着地する
+5 行目 8 マスすべて：がっかりしてうつむき、ため息をつく
+6 行目 左から 6 マス：その場で待ちながら、あたりを見回す
+7 行目 左から 6 マス：うつむいて作業に集中する
+8 行目 8 マスすべて：頭と視線が真上から右へゆっくり回り、右上・右・右下を通って真下の手前まで
+9 行目 8 マスすべて：前の行に続き、真下から左へ回り、左下・左・左上を通って真上の手前まで`,
+  'settings.pets.guide.promptCopy': 'このプロンプトをコピー',
+  'settings.pets.guide.promptCopied': 'コピーしました',
+  'settings.pets.guide.copyFailed': '自動でコピーできませんでした。上の文章を選んで手動でコピーしてください。',
+  'settings.pets.guide.step2Title': 'テンプレートと見比べる',
+  'settings.pets.guide.step2Body': '画像ができたら、下のテンプレートと見比べて 3 点を確認してください。違っていたら読み込む前に描き直してもらいましょう。',
+  'settings.pets.guide.check1': '背景が透けている（白ではない）。白い背景はデスクトップ上で四角い板になります',
+  'settings.pets.guide.check2': '横に 8 コマ、縦に 9 行。1 マスにつき 1 コマ',
+  'settings.pets.guide.check3': '9 行を通して同じキャラクター。途中で顔や色が変わっていない',
+  'settings.pets.guide.templateAlt': 'アクションシートのテンプレート: 8 列 9 行、各行に描く内容を注記',
+  'settings.pets.guide.templateExpand': '画像をタップして全体を表示',
+  'settings.pets.guide.templateCollapse': '画像をタップして閉じる',
+  'settings.pets.guide.saveTemplate': 'テンプレートを保存',
+  'settings.pets.guide.saveFailed': 'テンプレート画像を保存できませんでした。少し待ってからお試しください。',
+  'settings.pets.guide.step3Title': '選ぶだけ',
+  'settings.pets.guide.step3Body': '次の画面で名前を入れ、いま作った画像を選びます。サイズを自分で調整する必要はありません。「左に走る」の行も自動でミラー生成されます。',
+  'settings.pets.guide.continue': '描けた、次へ',
+  'settings.pets.guide.backToSteps': '手順に戻る',
+  'settings.pets.createError': 'このペットを作れませんでした。',
+  'settings.pets.createError.invalidId': 'ペット ID には小文字、数字、間のハイフンのみ使用できます。',
+  'settings.pets.createError.duplicateId': 'この ID のペットはすでにあります。別の ID にしてください。',
+  'settings.pets.createError.unsupportedFormat': 'PNG または WebP 形式の画像を選んでください。',
+  'settings.pets.createError.imageTooLarge': '画像が大きすぎます。8 MB 以下にしてください。',
+  'settings.pets.createError.imageDimensions': '画像は縦横とも 32〜4096 ピクセル、総画素数 16,777,216 以下にしてください。',
+  'settings.pets.createError.atlasDimensions': 'この画像は 8 列 × 9 行に分割できません。横 8 コマ・縦 9 行になっているか確認するか、完成済みの 1536×2288 のアトラスを使ってください。',
+  'settings.pets.createError.opaqueBackground': 'この画像には透明な背景がないため、デスクトップ上で四角い板になってしまいます。背景が透明な PNG（白背景ではないもの）を書き出し直してもらってください。',
+  'settings.pets.createError.invalidImage': 'この画像を読み込めません。静止画の PNG または WebP を選んでください（アニメーション画像は使えません）。',
+  'settings.pets.createError.storage': 'ペットをローカルのフォルダーに保存できませんでした。',
+  'settings.pets.dialog.imageTitle': '背景が透明なペット画像を選択',
   'settings.pets.dialog.imageFilter': 'ペット画像',
-  'settings.pets.dialog.atlasTitle': 'v2 ペットアニメーションアトラスを選択',
-  'settings.pets.dialog.atlasFilter': 'ペットアニメーションアトラス',
+  'settings.pets.dialog.atlasTitle': 'ペットのアクションシートを選択',
+  'settings.pets.dialog.atlasFilter': 'ペットのアクションシート',
   'settings.pets.builtInTitle': '内蔵ペット',
   'settings.pets.customTitle': 'あなたのペット',
   'settings.pets.customEmpty': 'カスタムペットはまだありません。',

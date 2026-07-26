@@ -39,14 +39,7 @@ const isSafeUiLabel = (value: unknown) =>
   && value.length <= 120
   && !/[\u0000-\u001f\u007f-\u009f]/.test(value)
 
-const petCreateFromAtlas: Validator = value => {
-  if (!isRecord(value) || !hasOnlyKeys(value, [
-    'slug',
-    'displayName',
-    'description',
-    'dialogTitle',
-    'dialogFilterName',
-  ])) return false
+const hasValidPetIdentity = (value: Record<string, unknown>): boolean => {
   if (
     typeof value.slug !== 'string'
     || value.slug.length === 0
@@ -59,8 +52,46 @@ const petCreateFromAtlas: Validator = value => {
     && typeof value.description === 'string'
     && value.description.trim().length > 0
     && value.description.length <= 500
+}
+
+const petCreateFromAtlas: Validator = value => {
+  if (!isRecord(value) || !hasOnlyKeys(value, [
+    'slug',
+    'displayName',
+    'description',
+    'dialogTitle',
+    'dialogFilterName',
+  ])) return false
+  return hasValidPetIdentity(value)
     && (value.dialogTitle === undefined || isSafeUiLabel(value.dialogTitle))
     && (value.dialogFilterName === undefined || isSafeUiLabel(value.dialogFilterName))
+}
+
+const petPickSourceSheet: Validator = value => {
+  if (value === undefined) return true
+  if (!isRecord(value) || !hasOnlyKeys(value, ['dialogTitle', 'dialogFilterName'])) return false
+  return (value.dialogTitle === undefined || isSafeUiLabel(value.dialogTitle))
+    && (value.dialogFilterName === undefined || isSafeUiLabel(value.dialogFilterName))
+}
+
+/** Matches DEFAULT_CUSTOM_PET_MAX_IMAGE_BYTES so oversized atlases are dropped at the boundary. */
+const MAX_PET_ATLAS_PAYLOAD_BYTES = 8 * 1024 * 1024
+
+const petCreateFromAtlasBytes: Validator = value => {
+  if (!isRecord(value) || !hasOnlyKeys(value, [
+    'slug',
+    'displayName',
+    'description',
+    'atlasData',
+    'mimeType',
+  ])) return false
+  if (
+    !(value.atlasData instanceof Uint8Array)
+    || value.atlasData.byteLength === 0
+    || value.atlasData.byteLength > MAX_PET_ATLAS_PAYLOAD_BYTES
+  ) return false
+  if (value.mimeType !== 'image/png' && value.mimeType !== 'image/webp') return false
+  return hasValidPetIdentity(value)
 }
 
 const petContextMenu: Validator = value => {
@@ -186,6 +217,8 @@ export const ELECTRON_IPC_VALIDATORS = {
   [ELECTRON_IPC_CHANNELS.petsList]: noPayload,
   [ELECTRON_IPC_CHANNELS.petsCreateFromImage]: petCreateFromAtlas,
   [ELECTRON_IPC_CHANNELS.petsCreateFromAtlas]: petCreateFromAtlas,
+  [ELECTRON_IPC_CHANNELS.petsPickSourceSheet]: petPickSourceSheet,
+  [ELECTRON_IPC_CHANNELS.petsCreateFromAtlasBytes]: petCreateFromAtlasBytes,
   [ELECTRON_IPC_CHANNELS.petsOpenFolder]: noPayload,
   [ELECTRON_IPC_CHANNELS.petsShow]: noPayload,
   [ELECTRON_IPC_CHANNELS.petsHide]: noPayload,

@@ -40,9 +40,9 @@ The animation switch affects the pet only. Turning it off does not stop sessions
 
 ## Create a custom pet
 
-Select **Add pet** under **Your pets**. The creation dialog offers two working local import paths and shows a third, currently unavailable AI path.
+Select **Add pet** under **Your pets**. The dialog offers three ways to make one. Images are processed entirely on your own computer: nothing is uploaded, and no chat quota is used.
 
-![Custom Pet creation dialog with local image, sprite-sheet, and unavailable AI options](../../images/desktop_ui/15_pet_create_methods.png)
+![Custom pet creation dialog with three ways to make a pet](../../images/desktop_ui/15_pet_create_methods.png)
 
 Before choosing a file, enter:
 
@@ -52,41 +52,120 @@ Before choosing a file, enter:
 
 The ID must be unique among your custom pets.
 
-### Option 1: animate one image
+### Option 1: use a picture you already have
 
-This is the recommended path for most users.
+The quickest route, about a minute. Pick a static image with a transparent background and the app adds breathing, floating and status motion locally.
 
-Use a static image with:
+The image must have:
 
-- PNG or WebP format;
-- a transparent background for the cleanest floating-window result;
+- PNG or WebP format (APNG and animated WebP are rejected);
 - width and height between `32px` and `4096px`;
 - no more than `16,777,216` total pixels;
 - a file size no larger than `8MB`.
 
-Claude Code Haha copies and validates the image locally, then adds lightweight breathing, floating, and status motion. It does not invent new action frames, and it does not call the model selected for chat.
+This kind of pet only sways gently. It **will not run, and it will not track your cursor**. For full motion, use option 2.
 
-### Option 2: import a v2 animation atlas
+### Option 2: draw one with AI that runs and jumps
 
-Use this path only when you already have a correctly prepared frame atlas.
+About ten minutes, and you need an AI that can draw. The dialog walks you through the prompt, the reference template and the checks.
 
-The atlas must be a static PNG or WebP with:
+#### Step 1: have an AI draw an action sheet
 
-| Property | Required value |
-|---|---|
-| Full size | Exactly `1536×2288` |
-| Grid | `8` columns × `11` rows |
-| Cell size | `192×208` |
-| Spacing | No padding or gaps between cells |
-| Background | Transparent |
+Open any AI that can draw (Nano Banana, ChatGPT image generation, Midjourney, Stable Diffusion and Jimeng all work — these are examples, not endorsements) and send it the whole block below, replacing the two "Character" lines with what you want:
 
-Rows are assigned to idle, run right, run left, wave, jump, failed, waiting, working, review, and two rows containing 16 gaze directions. The review row is part of the asset format; its presence does not guarantee that the current runtime will surface a separate review state.
+```text
+Draw me a game character action sheet (sprite sheet).
 
-Every row may use fewer than eight visible action frames, but the grid dimensions and row positions must remain unchanged.
+[Character]
+A round-headed orange kitten wearing a small blue scarf, chibi
+three-heads-tall proportions, 3D cartoon render, soft glossy
+surface, bright cheerful colours.
+(Replace these lines with your own character - the more specific the better)
 
-### AI animation is not available
+[Whole image]
+- Fully transparent background: no backdrop colour, no grid lines, no text, no drop shadow
+- Divide the image evenly into 8 columns x 9 rows, 72 equally sized cells
+- One action frame per cell, character centred with a little margin around it
+- Every cell must show the same character with identical proportions, colours and art style
+- Leave unused cells fully transparent
 
-**AI-generate full animation** is displayed as an unavailable future path. It requires a separate image-generation service and does not fall back to the current chat model. A disabled card in this dialog is therefore expected behavior, not a provider configuration error.
+[What to draw in each row]
+Row 1, first 6 cells: standing still with a gentle breathing bob
+Row 2, all 8 cells: a full run cycle facing right, always facing right
+Row 3, first 4 cells: raising a hand and waving hello
+Row 4, first 5 cells: crouch, leap, land
+Row 5, all 8 cells: dejected and downcast, head lowered, sighing
+Row 6, first 6 cells: waiting in place, glancing around
+Row 7, first 6 cells: head down, busy working
+Row 8, all 8 cells: head and gaze starting straight up, turning slowly to the right through upper-right, right and lower-right, ending near straight down
+Row 9, all 8 cells: continuing from straight down, turning left through lower-left, left and upper-left, back to near straight up
+```
+
+Getting it wrong on the first try is normal. Ask for a redraw, or say "keep the character, redraw row 2 only".
+
+#### Step 2: check it against the template
+
+![Action sheet template: 8 columns by 9 rows, labelled with what each row should contain](../../images/desktop_ui/17_pet_action_sheet_en.png)
+
+When the picture is ready, check three things before importing:
+
+1. **The background is see-through, not white.** A white backdrop becomes a square on your desktop; this is the most common mistake.
+2. **8 cells across, 9 rows down**, one action per cell.
+3. **The same character throughout**, with no change of face, colours or proportions.
+
+**Save the template** in the dialog writes this reference image to disk so you can lay out frames against it.
+
+#### Step 3: pick the file
+
+Fill in the ID, name and description, then select the picture. **You do not need to resize anything** — see "Sizes are aligned for you" below.
+
+### Option 3: I already have an action sheet
+
+If you have drawn a sheet already, or hold a finished atlas, this path skips the walkthrough and goes straight to the form. Validation is identical to option 2.
+
+### What to draw in each row
+
+You only draw **nine rows**; the app derives the rest:
+
+| Row | Content | Frames needed |
+|-----|---------|---------------|
+| 1 | Idle: standing still with a gentle breathing bob | 6 |
+| 2 | Run right: full run cycle, always facing right | 8 |
+| 3 | Wave: raise a hand and greet | 4 |
+| 4 | Jump: crouch, leap, land | 5 |
+| 5 | Fail: discouraged, head down, sighing | 8 |
+| 6 | Wait: looking around, shifting in place | 6 |
+| 7 | Work: head down, busy | 6 |
+| 8 | Gaze, upper half: straight up turning clockwise to near straight down | 8 |
+| 9 | Gaze, lower half: continuing from straight down back to near straight up | 8 |
+
+Notes:
+
+- **You do not draw "run left".** The app mirrors row 2 horizontally to produce it.
+- **The last two rows are optional in practice.** Repeat the first idle frame and the pet simply will not track your cursor; everything else still works.
+- Leave unused cells at the right of each row fully transparent.
+
+### Sizes are aligned for you
+
+After you pick the file, the app assembles the runtime atlas locally: it slices the sheet on an 8 × 9 grid, rescales each cell to `192 × 208`, centres the character, mirrors the run row, and fills in the remaining runtime rows to reach `1536 × 2288`.
+
+That means:
+
+- **Exact dimensions are not required.** Common AI output sizes such as `1024 × 1152` work; a ratio close to 8:9 gives the best result. The reference size is `1536 × 1872`.
+- **A finished `1536 × 2288` atlas is kept byte-for-byte** and is never resampled.
+- The assembled file stays under `8MB`; WebP encoding is used automatically if a lossless PNG would exceed it.
+
+### Common problems
+
+| Message | Cause and fix |
+|---------|---------------|
+| This image has no transparent background… | The sheet was exported on a white or coloured backdrop. Ask for a transparent PNG, or remove the background with an editor. |
+| This image cannot be sliced into 8 columns by 9 rows | The row or column count is off. Confirm 8 across and 9 down, or use a finished `1536 × 2288` atlas. |
+| That image could not be read | An animated file (APNG / animated WebP) or a corrupt one. Use a static PNG or WebP. |
+| That image is too big | The source exceeds 8 MB. Compress it, or ask for smaller output. |
+| A pet with this ID already exists | Choose a different Pet ID, or remove the existing one (see "Storage and removal"). |
+
+When the size, format, or image content does not meet these rules, the app refuses to create the pet and shows the matching error instead of adding an invalid entry.
 
 After a successful import, the new pet is selected automatically and appears under **Your pets**.
 

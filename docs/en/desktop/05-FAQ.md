@@ -92,7 +92,8 @@ A custom pet made from one image receives lightweight breathing, floating, and t
 Check each requirement:
 
 - A single image must be PNG or WebP, 32–4096 pixels on each side, no larger than 8 MB, and no more than 16,777,216 total pixels.
-- A v2 animation atlas must be exactly 1536×2288 pixels and use the documented 8-column × 11-row frame layout.
+- An action sheet must use an 8-column × 9-row layout. Exact pixel dimensions are not required — it is sliced and rescaled on import. A finished 1536×2288 atlas is kept as-is.
+- An action sheet must have a transparent background. White or coloured backdrops are rejected because the pet would render as a square on the desktop.
 - The pet ID may be at most 73 characters, contain only lowercase letters, numbers, and single hyphens, and must not duplicate an existing ID.
 - Display name and description are required.
 
@@ -110,11 +111,9 @@ There is no in-app delete button in the current version. Select a built-in pet f
 
 Delete only the confirmed pet directory under `${CLAUDE_CONFIG_DIR:-~/.claude}/cc-haha/pets`. Do not delete the entire `~/.claude` directory. Built-in pets ship with the app and are not removed here.
 
-### Why is “Generate full animation with AI” unavailable?
+### Does “Draw one with AI that runs and jumps” use my chat quota?
 
-That path requires a separately configured image-generation service. The current chat model is not used to generate pet artwork or action frames, so the option is explicitly unavailable when no suitable service is configured.
-
-You can use the recommended single-image animation path now, or import a prepared v2 animation atlas.
+No. That path never calls the chat model selected for the session, and the app does not request any image-generation service on your behalf. It gives you a prompt and a reference template; you generate the picture in whichever drawing tool you like and then pick the file. Assembly and import both happen on your own machine.
 
 ### Can the pet approve permissions or send replies?
 

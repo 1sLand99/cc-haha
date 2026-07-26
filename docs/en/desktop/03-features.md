@@ -110,11 +110,13 @@ The window also supports direct interaction:
 
 Select **Add pet** to choose a local creation path.
 
-![Add pet dialog with single-image animation, professional atlas, and unavailable AI generation options](../../images/desktop_ui/15_pet_create_methods.png)
+![Add pet dialog with three ways to make a pet](../../images/desktop_ui/15_pet_create_methods.png)
 
-- **Animate one image** turns a static transparent PNG or WebP into a lightweight locally animated pet.
-- **Import professional animation atlas** accepts the supported `1536×2288` v2 sprite-sheet format.
-- **Generate full animation with AI** is visible for context but is currently unavailable.
+- **Use a picture you already have** turns a static transparent PNG or WebP into a lightweight locally animated pet. It will not run or track the cursor.
+- **Draw one with AI that runs and jumps** supplies a copyable prompt, a reference template and a checklist, so any drawing AI can produce an 8-column × 9-row action sheet you then pick.
+- **I already have an action sheet** skips the walkthrough and imports a sheet or finished atlas directly.
+
+The last two paths slice, rescale and mirror the sheet locally on import, so exact source dimensions are not required; a finished `1536×2288` atlas is kept as-is.
 
 Imports stay local and do not call the selected chat model. After a successful import, the custom companion appears under **Your pets** and becomes the selected pet.
 

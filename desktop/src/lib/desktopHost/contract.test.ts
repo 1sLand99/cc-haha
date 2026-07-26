@@ -41,6 +41,14 @@ describe('desktop host contract', () => {
       displayName: 'Moon Cat',
       description: 'A quiet companion.',
     })).rejects.toThrow('desktop app runtime')
+    await expect(browserHost.pets.pickSourceSheet({})).rejects.toThrow('desktop app runtime')
+    await expect(browserHost.pets.createFromAtlasBytes({
+      slug: 'moon-cat',
+      displayName: 'Moon Cat',
+      description: 'A quiet moonlight companion.',
+      atlasData: new Uint8Array([1, 2, 3]),
+      mimeType: 'image/png',
+    })).rejects.toThrow('desktop app runtime')
     await expect(browserHost.pets.openFolder()).rejects.toThrow('desktop app runtime')
     await expect(browserHost.pets.show()).rejects.toThrow('desktop app runtime')
     await expect(browserHost.pets.hide()).rejects.toThrow('desktop app runtime')

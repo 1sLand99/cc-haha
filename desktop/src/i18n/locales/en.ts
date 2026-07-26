@@ -279,42 +279,90 @@ export const en = {
   'settings.pets.retry': 'Retry',
   'settings.pets.refresh': 'Refresh',
   'settings.pets.create': 'Add pet',
-  'settings.pets.createTitle': 'Create a custom pet',
-  'settings.pets.createMethodIntro': 'Choose how to make this pet. Imports stay local, and your current chat model is never used to generate images.',
+  'settings.pets.createTitle': 'Make your own pet',
+  'settings.pets.createMethodIntro': 'Pick how you want to make it. Everything happens on your own computer — nothing is uploaded, and none of your chat quota is used.',
   'settings.pets.createRecommended': 'Recommended',
-  'settings.pets.createImageTitle': 'Animate one image',
-  'settings.pets.createImageDescription': 'Turn one transparent PNG or WebP into a gently moving pet.',
-  'settings.pets.createImageDetail': 'Local only · No image model or video generation required',
-  'settings.pets.createImageHint': 'Choose a static transparent PNG or WebP (32–4096px per side, up to 8MB). The app keeps it local and adds lightweight breathing, floating, and task-state motion; it is not frame-by-frame generated animation.',
-  'settings.pets.createImageSubmit': 'Choose image and create',
-  'settings.pets.createAtlasTitle': 'Import professional animation atlas',
-  'settings.pets.createAtlasDescription': 'Use a prepared frame-by-frame sprite atlas for full character motion.',
-  'settings.pets.createAtlasDetail': 'Advanced · Exact 1536×2288 v2 PNG or WebP',
-  'settings.pets.createAtlasSubmit': 'Choose atlas and create',
-  'settings.pets.createAiTitle': 'Generate full animation with AI',
-  'settings.pets.createAiDescription': 'Create original artwork and action frames with an image-generation service.',
-  'settings.pets.createAiUnavailable': 'Unavailable: configure a separate image-generation service first. The current chat model is not used.',
-  'settings.pets.createBack': 'Choose another method',
+  'settings.pets.createImageTitle': 'Use a picture you already have',
+  'settings.pets.createImageDescription': 'One character image is enough. It will breathe gently, float, and stir while you are busy.',
+  'settings.pets.createImageDetail': 'About a minute · But it will not run or wave',
+  'settings.pets.createImageBadge': 'Easiest',
+  'settings.pets.createImageHint': 'You will pick a PNG or WebP with a transparent background (32–4096 pixels per side, under 8 MB). This kind of pet only sways gently — for running, jumping and waving, go back and choose "Draw one with AI".',
+  'settings.pets.createImageSubmit': 'Pick a picture',
+  'settings.pets.createAtlasTitle': 'I already have an action sheet',
+  'settings.pets.createAtlasDescription': 'Import a multi-frame action sheet you have already drawn and skip the walkthrough.',
+  'settings.pets.createAtlasDetail': 'No maths needed · Sizes are aligned for you',
+  'settings.pets.createAtlasSubmit': 'Pick an action sheet',
+  'settings.pets.createAtlasHint': 'You will pick an action sheet 8 cells wide and 9 rows tall. The size does not have to be exact — it is sliced, rescaled and the "run left" row is mirrored for you. A finished 1536×2288 atlas also works and is kept as-is.',
+  'settings.pets.createAiTitle': 'Draw one with AI that runs and jumps',
+  'settings.pets.createAiDescription': 'Three steps: copy a prompt, let an AI draw it, pick the picture. The prompt and a reference template are ready for you.',
+  'settings.pets.createAiDetail': 'Around ten minutes · Needs an AI that can draw',
+  'settings.pets.createBack': 'Pick a different way',
   'settings.pets.createId': 'Pet ID',
-  'settings.pets.createIdHint': 'Use lowercase letters, numbers, and single hyphens.',
+  'settings.pets.createIdHint': 'A short English handle: lowercase letters, numbers and single hyphens, like moon-cat.',
   'settings.pets.createName': 'Display name',
   'settings.pets.createDescription': 'Description',
-  'settings.pets.createAtlasHint': 'Choose a transparent, gapless 1536×2288 PNG/WebP: 8 columns × 11 rows, with 192×208 cells. Rows are idle, run right, run left, wave, jump, fail, wait, work, review, then 16 gaze directions across the last two rows.',
   'settings.pets.createCancel': 'Cancel',
   'settings.pets.createSubmit': 'Create',
-  'settings.pets.createError': 'The custom pet could not be created.',
+  'settings.pets.guide.intro': 'Three steps, about ten minutes, all on your own computer.',
+  'settings.pets.guide.step1Title': 'Have an AI draw an action sheet',
+  'settings.pets.guide.step1Body': 'Open any AI that can draw and send it everything below. Replace the two "Character" lines with whatever you want, for example "a shiba inu in a yellow hat".',
+  'settings.pets.guide.step1Tools': 'Nano Banana, ChatGPT image generation, Midjourney, Stable Diffusion and Jimeng all work (examples, not endorsements). If it comes out wrong, ask for a redraw, or say "keep the character, redraw row 2 only".',
+  'settings.pets.guide.prompt': `Draw me a game character action sheet (sprite sheet).
+
+[Character]
+A round-headed orange kitten wearing a small blue scarf, chibi
+three-heads-tall proportions, 3D cartoon render, soft glossy
+surface, bright cheerful colours.
+(Replace these lines with your own character — the more specific the better)
+
+[Whole image]
+- Fully transparent background: no backdrop colour, no grid lines, no text, no drop shadow
+- Divide the image evenly into 8 columns x 9 rows, 72 equally sized cells
+- One action frame per cell, character centred with a little margin around it
+- Every cell must show the same character with identical proportions, colours and art style
+- Leave unused cells fully transparent
+
+[What to draw in each row]
+Row 1, first 6 cells: standing still with a gentle breathing bob
+Row 2, all 8 cells: a full run cycle facing right, always facing right
+Row 3, first 4 cells: raising a hand and waving hello
+Row 4, first 5 cells: crouch, leap, land
+Row 5, all 8 cells: dejected and downcast, head lowered, sighing
+Row 6, first 6 cells: waiting in place, glancing around
+Row 7, first 6 cells: head down, busy working
+Row 8, all 8 cells: head and gaze starting straight up, turning slowly to the right through upper-right, right and lower-right, ending near straight down
+Row 9, all 8 cells: continuing from straight down, turning left through lower-left, left and upper-left, back to near straight up`,
+  'settings.pets.guide.promptCopy': 'Copy this prompt',
+  'settings.pets.guide.promptCopied': 'Copied',
+  'settings.pets.guide.copyFailed': 'Could not copy automatically — select the text above and copy it manually.',
+  'settings.pets.guide.step2Title': 'Check it against the template',
+  'settings.pets.guide.step2Body': 'When the picture is ready, check these three things against the template below. If something is off, ask for a redraw before importing.',
+  'settings.pets.guide.check1': 'The background is see-through, not white — a white backdrop becomes a square on your desktop',
+  'settings.pets.guide.check2': '8 cells across, 9 rows down, one action per cell',
+  'settings.pets.guide.check3': 'The same character all the way through, with no change of face or colours',
+  'settings.pets.guide.templateAlt': 'Action sheet template: 8 columns by 9 rows, labelled with what each row should contain',
+  'settings.pets.guide.templateExpand': 'Tap the image for the full template',
+  'settings.pets.guide.templateCollapse': 'Tap the image to collapse',
+  'settings.pets.guide.saveTemplate': 'Save the template',
+  'settings.pets.guide.saveFailed': 'Could not save the template image. Try again shortly.',
+  'settings.pets.guide.step3Title': 'Just pick the file',
+  'settings.pets.guide.step3Body': 'Give it a name on the next page, then pick the picture you just made. You do not need to resize anything, and the "run left" row is mirrored for you.',
+  'settings.pets.guide.continue': 'Done drawing, next',
+  'settings.pets.guide.backToSteps': 'Back to the steps',
+  'settings.pets.createError': 'This pet could not be created.',
   'settings.pets.createError.invalidId': 'Use a lowercase pet ID containing only letters, numbers, and single hyphens.',
-  'settings.pets.createError.duplicateId': 'A custom pet with this ID already exists.',
+  'settings.pets.createError.duplicateId': 'A pet with this ID already exists — pick another one.',
   'settings.pets.createError.unsupportedFormat': 'Choose a PNG or WebP image.',
-  'settings.pets.createError.imageTooLarge': 'The selected image must be no larger than 8 MB.',
-  'settings.pets.createError.imageDimensions': 'The pet image must be 32–4096 pixels per side and contain no more than 16,777,216 pixels.',
-  'settings.pets.createError.atlasDimensions': 'The animation atlas must be exactly 1536×2288 pixels.',
-  'settings.pets.createError.invalidImage': 'The selected image could not be read. Choose a static PNG or WebP image.',
-  'settings.pets.createError.storage': 'The pet could not be saved in the custom pet folder.',
-  'settings.pets.dialog.imageTitle': 'Choose a transparent pet image',
+  'settings.pets.createError.imageTooLarge': 'That image is too big. Keep it under 8 MB.',
+  'settings.pets.createError.imageDimensions': 'The image must be 32–4096 pixels per side and contain no more than 16,777,216 pixels.',
+  'settings.pets.createError.atlasDimensions': 'This image cannot be sliced into 8 columns by 9 rows. Check that it is 8 cells across and 9 rows down, or use a finished 1536×2288 atlas.',
+  'settings.pets.createError.opaqueBackground': 'This image has no transparent background, so the pet would show up as a square on your desktop. Ask the AI to export a PNG with a transparent background (not a white one).',
+  'settings.pets.createError.invalidImage': 'That image could not be read. Choose a static PNG or WebP (animated files will not work).',
+  'settings.pets.createError.storage': 'The pet could not be saved to the local folder.',
+  'settings.pets.dialog.imageTitle': 'Choose a pet image with a transparent background',
   'settings.pets.dialog.imageFilter': 'Pet image',
-  'settings.pets.dialog.atlasTitle': 'Choose a v2 pet animation atlas',
-  'settings.pets.dialog.atlasFilter': 'Pet animation atlas',
+  'settings.pets.dialog.atlasTitle': 'Choose a pet action sheet',
+  'settings.pets.dialog.atlasFilter': 'Pet action sheet',
   'settings.pets.builtInTitle': 'Built-in pets',
   'settings.pets.customTitle': 'Your pets',
   'settings.pets.customEmpty': 'No custom pets yet.',

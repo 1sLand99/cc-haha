@@ -1,9 +1,23 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, FolderOpen, Grid3X3, ImageIcon, Plus, RefreshCw, Sparkles } from 'lucide-react'
+import {
+  ArrowLeft,
+  Check,
+  Copy,
+  Download,
+  FolderOpen,
+  Grid3X3,
+  ImageIcon,
+  Plus,
+  RefreshCw,
+  Sparkles,
+} from 'lucide-react'
 import {
   desktopUiPreferencesApi,
   type DesktopPetPreferences,
 } from '../../api/desktopUiPreferences'
+import actionSheetGuideEn from '../../assets/pets/action-sheet-guide.en.png'
+import actionSheetGuideZh from '../../assets/pets/action-sheet-guide.zh.png'
+import { useSettingsStore } from '../../stores/settingsStore'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -16,12 +30,18 @@ import { useTranslation, type TranslationKey } from '../../i18n'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { BUILTIN_PETS } from './builtinPets'
 import { PetRenderer } from './PetRenderer'
+import { importPetFromActionSheet } from './petSheetImport'
 import type { CustomPet, PetDescriptor } from './types'
 
 const PET_SIZE_MIN = 96
 const PET_SIZE_MAX = 192
 const PET_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-type PetCreationMethod = 'image' | 'atlas'
+
+/**
+ * `guided` and `atlas` share the same import pipeline; they differ only in whether
+ * the walkthrough is shown first.
+ */
+type PetCreationMethod = 'image' | 'guided' | 'atlas'
 
 const PET_CREATE_ERROR_KEYS: Record<string, TranslationKey> = {
   'invalid-id': 'settings.pets.createError.invalidId',
@@ -31,6 +51,7 @@ const PET_CREATE_ERROR_KEYS: Record<string, TranslationKey> = {
   'total-image-bytes-exceeded': 'settings.pets.createError.imageTooLarge',
   'decode-budget-exceeded': 'settings.pets.createError.imageTooLarge',
   'invalid-image': 'settings.pets.createError.invalidImage',
+  'opaque-background': 'settings.pets.createError.opaqueBackground',
   'missing-image': 'settings.pets.createError.invalidImage',
   'symlink-image': 'settings.pets.createError.invalidImage',
   'invalid-renderer': 'settings.pets.createError.invalidImage',
@@ -67,6 +88,13 @@ export function PetSettings() {
   const [createError, setCreateError] = useState<string | null>(null)
   const [createMethod, setCreateMethod] = useState<PetCreationMethod | null>(null)
   const [createForm, setCreateForm] = useState({ slug: '', displayName: '', description: '' })
+  const [walkthroughVisible, setWalkthroughVisible] = useState(false)
+  const [promptCopied, setPromptCopied] = useState(false)
+  const [guideExpanded, setGuideExpanded] = useState(false)
+  const locale = useSettingsStore((s) => s.locale)
+  const actionSheetGuide = locale === 'zh' || locale === 'zh-TW'
+    ? actionSheetGuideZh
+    : actionSheetGuideEn
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -208,6 +236,40 @@ export function PetSettings() {
     setCreateMethod(null)
     setCreateError(null)
     setCreateForm({ slug: '', displayName: '', description: '' })
+    setWalkthroughVisible(false)
+    setPromptCopied(false)
+    setGuideExpanded(false)
+  }
+
+  const selectCreateMethod = (method: PetCreationMethod) => {
+    setCreateMethod(method)
+    setCreateError(null)
+    setWalkthroughVisible(method === 'guided')
+  }
+
+  const handleCopyPrompt = async () => {
+    try {
+      await getDesktopHost().clipboard.writeText(t('settings.pets.guide.prompt'))
+      setPromptCopied(true)
+      window.setTimeout(() => setPromptCopied(false), 2000)
+    } catch {
+      setCreateError(t('settings.pets.guide.copyFailed'))
+    }
+  }
+
+  const handleSaveGuide = async () => {
+    try {
+      const response = await fetch(actionSheetGuide)
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'pet-action-sheet-guide.png'
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      setCreateError(t('settings.pets.guide.saveFailed'))
+    }
   }
 
   const handleCreate = async () => {
@@ -230,9 +292,17 @@ export function PetSettings() {
           ? t('settings.pets.dialog.imageFilter')
           : t('settings.pets.dialog.atlasFilter'),
       }
-      created = createMethod === 'image'
-        ? await host.pets.createFromImage(input)
-        : await host.pets.createFromAtlas(input)
+      if (createMethod === 'image') {
+        created = await host.pets.createFromImage(input)
+      } else {
+        // Normalizes an action sheet of any size into the v2 grid before install.
+        const outcome = await importPetFromActionSheet(host, input)
+        created = outcome.status === 'cancelled'
+          ? null
+          : outcome.status === 'created'
+            ? { id: outcome.id }
+            : { errorCode: outcome.errorCode }
+      }
     } catch {
       setCreateError(t('settings.pets.createError'))
       setCreateBusy(false)
@@ -420,6 +490,7 @@ export function PetSettings() {
 
       <Modal
         open={createOpen}
+        width={640}
         title={t('settings.pets.createTitle')}
         onClose={() => {
           if (!createBusy) resetCreateDialog()
@@ -429,7 +500,11 @@ export function PetSettings() {
             <Button variant="secondary" disabled={createBusy} onClick={resetCreateDialog}>
               {t('settings.pets.createCancel')}
             </Button>
-            {createMethod && (
+            {walkthroughVisible ? (
+              <Button onClick={() => setWalkthroughVisible(false)}>
+                {t('settings.pets.guide.continue')}
+              </Button>
+            ) : createMethod && (
               <Button
                 loading={createBusy}
                 disabled={!createFormValid}
@@ -453,23 +528,122 @@ export function PetSettings() {
               title={t('settings.pets.createImageTitle')}
               description={t('settings.pets.createImageDescription')}
               detail={t('settings.pets.createImageDetail')}
+              badge={t('settings.pets.createImageBadge')}
+              onClick={() => selectCreateMethod('image')}
+            />
+            <CreationMethodCard
+              icon={<Sparkles size={20} aria-hidden="true" />}
+              title={t('settings.pets.createAiTitle')}
+              description={t('settings.pets.createAiDescription')}
+              detail={t('settings.pets.createAiDetail')}
               badge={t('settings.pets.createRecommended')}
-              onClick={() => setCreateMethod('image')}
+              onClick={() => selectCreateMethod('guided')}
             />
             <CreationMethodCard
               icon={<Grid3X3 size={20} aria-hidden="true" />}
               title={t('settings.pets.createAtlasTitle')}
               description={t('settings.pets.createAtlasDescription')}
               detail={t('settings.pets.createAtlasDetail')}
-              onClick={() => setCreateMethod('atlas')}
+              onClick={() => selectCreateMethod('atlas')}
             />
-            <CreationMethodCard
-              icon={<Sparkles size={20} aria-hidden="true" />}
-              title={t('settings.pets.createAiTitle')}
-              description={t('settings.pets.createAiDescription')}
-              detail={t('settings.pets.createAiUnavailable')}
-              disabled
-            />
+          </div>
+        ) : walkthroughVisible ? (
+          <div className="space-y-4">
+            <Button
+              variant="link"
+              size="sm"
+              icon={<ArrowLeft size={15} aria-hidden="true" />}
+              onClick={() => {
+                setCreateMethod(null)
+                setCreateError(null)
+                setWalkthroughVisible(false)
+              }}
+            >
+              {t('settings.pets.createBack')}
+            </Button>
+
+            <p className="text-sm leading-6 text-[var(--color-text-secondary)]">
+              {t('settings.pets.guide.intro')}
+            </p>
+
+            <GuideStep index={1} title={t('settings.pets.guide.step1Title')}>
+              <p className="text-xs leading-5 text-[var(--color-text-secondary)]">
+                {t('settings.pets.guide.step1Body')}
+              </p>
+              <div className="mt-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+                <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap px-3 py-2.5 text-[11.5px] leading-5 text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-mono, ui-monospace, monospace)' }}>
+                  {t('settings.pets.guide.prompt')}
+                </pre>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={promptCopied
+                    ? <Check size={14} aria-hidden="true" />
+                    : <Copy size={14} aria-hidden="true" />}
+                  onClick={() => void handleCopyPrompt()}
+                >
+                  {promptCopied
+                    ? t('settings.pets.guide.promptCopied')
+                    : t('settings.pets.guide.promptCopy')}
+                </Button>
+              </div>
+              <p className="mt-2 text-[11px] leading-4 text-[var(--color-text-tertiary)]">
+                {t('settings.pets.guide.step1Tools')}
+              </p>
+            </GuideStep>
+
+            <GuideStep index={2} title={t('settings.pets.guide.step2Title')}>
+              <p className="text-xs leading-5 text-[var(--color-text-secondary)]">
+                {t('settings.pets.guide.step2Body')}
+              </p>
+              <ul className="mt-2 space-y-1">
+                {([
+                  'settings.pets.guide.check1',
+                  'settings.pets.guide.check2',
+                  'settings.pets.guide.check3',
+                ] as const).map((key) => (
+                  <li key={key} className="flex items-start gap-1.5 text-xs leading-5 text-[var(--color-text-secondary)]">
+                    <Check size={13} className="mt-0.5 flex-none text-[var(--color-brand)]" aria-hidden="true" />
+                    <span>{t(key)}</span>
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                className="mt-2.5 block w-full overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)]"
+                onClick={() => setGuideExpanded((current) => !current)}
+                aria-label={t('settings.pets.guide.templateAlt')}
+              >
+                <img
+                  src={actionSheetGuide}
+                  alt={t('settings.pets.guide.templateAlt')}
+                  className={guideExpanded ? 'w-full' : 'h-40 w-full object-cover object-top'}
+                />
+              </button>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={<Download size={14} aria-hidden="true" />}
+                  onClick={() => void handleSaveGuide()}
+                >
+                  {t('settings.pets.guide.saveTemplate')}
+                </Button>
+                <span className="text-[11px] leading-4 text-[var(--color-text-tertiary)]">
+                  {guideExpanded
+                    ? t('settings.pets.guide.templateCollapse')
+                    : t('settings.pets.guide.templateExpand')}
+                </span>
+              </div>
+            </GuideStep>
+
+            <GuideStep index={3} title={t('settings.pets.guide.step3Title')}>
+              <p className="text-xs leading-5 text-[var(--color-text-secondary)]">
+                {t('settings.pets.guide.step3Body')}
+              </p>
+            </GuideStep>
           </div>
         ) : (
           <div className="space-y-4">
@@ -479,17 +653,24 @@ export function PetSettings() {
               icon={<ArrowLeft size={15} aria-hidden="true" />}
               disabled={createBusy}
               onClick={() => {
+                if (createMethod === 'guided') {
+                  setWalkthroughVisible(true)
+                  setCreateError(null)
+                  return
+                }
                 setCreateMethod(null)
                 setCreateError(null)
               }}
             >
-              {t('settings.pets.createBack')}
+              {createMethod === 'guided'
+                ? t('settings.pets.guide.backToSteps')
+                : t('settings.pets.createBack')}
             </Button>
             <div className="rounded-[var(--radius-lg)] bg-[var(--color-surface-hover)] px-3.5 py-3">
               <h3 className="text-sm font-semibold text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>
-                {createMethod === 'image'
-                  ? t('settings.pets.createImageTitle')
-                  : t('settings.pets.createAtlasTitle')}
+                {createMethod === 'image' ? t('settings.pets.createImageTitle')
+                  : createMethod === 'guided' ? t('settings.pets.createAiTitle')
+                    : t('settings.pets.createAtlasTitle')}
               </h3>
               <p className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)]">
                 {createMethod === 'image'
@@ -534,6 +715,33 @@ export function PetSettings() {
         )}
       </Modal>
     </div>
+  )
+}
+
+function GuideStep({
+  index,
+  title,
+  children,
+}: {
+  index: number
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5">
+      <div className="flex items-center gap-2">
+        <span className="flex h-5 w-5 flex-none items-center justify-center rounded-full bg-[var(--color-brand)] text-[11px] font-semibold text-[var(--color-on-primary)]">
+          {index}
+        </span>
+        <h4
+          className="text-sm font-semibold text-[var(--color-text-primary)]"
+          style={{ fontFamily: 'var(--font-headline)' }}
+        >
+          {title}
+        </h4>
+      </div>
+      <div className="mt-2">{children}</div>
+    </section>
   )
 }
 

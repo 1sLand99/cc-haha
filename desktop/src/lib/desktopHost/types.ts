@@ -198,6 +198,31 @@ export type DesktopPetCreateResult =
   | { id: string }
   | { errorCode: string }
 
+export type DesktopPetSheetPickInput = {
+  dialogTitle?: string
+  dialogFilterName?: string
+}
+
+/** Decoded pixels of a user-picked action sheet, ready to be normalized on a canvas. */
+export type DesktopPetSourceSheet = {
+  bytes: Uint8Array
+  mimeType: 'image/png' | 'image/webp'
+  width: number
+  height: number
+}
+
+export type DesktopPetSheetPickResult =
+  | DesktopPetSourceSheet
+  | { errorCode: string }
+
+export type DesktopPetCreateFromAtlasBytesInput = {
+  slug: string
+  displayName: string
+  description: string
+  atlasData: Uint8Array
+  mimeType: 'image/png' | 'image/webp'
+}
+
 export type DesktopPetWindowDrag = {
   phase: 'start' | 'move' | 'end'
   x: number
@@ -249,6 +274,10 @@ export type DesktopHost = {
     list(): Promise<DesktopPetListResult>
     createFromImage(input: DesktopPetCreateInput): Promise<DesktopPetCreateResult | null>
     createFromAtlas(input: DesktopPetCreateInput): Promise<DesktopPetCreateResult | null>
+    pickSourceSheet(input: DesktopPetSheetPickInput): Promise<DesktopPetSheetPickResult | null>
+    createFromAtlasBytes(
+      input: DesktopPetCreateFromAtlasBytesInput,
+    ): Promise<DesktopPetCreateResult | null>
     openFolder(): Promise<void>
     show(): Promise<void>
     hide(): Promise<void>

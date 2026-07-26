@@ -12,6 +12,8 @@ export const ELECTRON_IPC_CHANNELS = {
   petsList: 'desktop:pets:list',
   petsCreateFromImage: 'desktop:pets:create-from-image',
   petsCreateFromAtlas: 'desktop:pets:create-from-atlas',
+  petsPickSourceSheet: 'desktop:pets:pick-source-sheet',
+  petsCreateFromAtlasBytes: 'desktop:pets:create-from-atlas-bytes',
   petsOpenFolder: 'desktop:pets:open-folder',
   petsShow: 'desktop:pets:show',
   petsHide: 'desktop:pets:hide',

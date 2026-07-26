@@ -113,6 +113,8 @@ export function createElectronHost(bridge: ElectronHostBridge): DesktopHost {
       list: () => invoke(ELECTRON_IPC_CHANNELS.petsList),
       createFromImage: input => invoke(ELECTRON_IPC_CHANNELS.petsCreateFromImage, input),
       createFromAtlas: input => invoke(ELECTRON_IPC_CHANNELS.petsCreateFromAtlas, input),
+      pickSourceSheet: input => invoke(ELECTRON_IPC_CHANNELS.petsPickSourceSheet, input),
+      createFromAtlasBytes: input => invoke(ELECTRON_IPC_CHANNELS.petsCreateFromAtlasBytes, input),
       openFolder: () => invoke(ELECTRON_IPC_CHANNELS.petsOpenFolder),
       show: () => invoke(ELECTRON_IPC_CHANNELS.petsShow),
       hide: () => invoke(ELECTRON_IPC_CHANNELS.petsHide),

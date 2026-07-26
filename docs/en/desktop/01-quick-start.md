@@ -123,7 +123,7 @@ Open **Settings → Pets** and enable **Show desktop pet**.
 3. Enable the active-task panel if you want it to open automatically while a task is running. The panel remains hidden when no task is active.
 4. Hover for a small reaction, click the pet to focus the main window, or drag it to another position. Right-click the pet to close it; return to **Settings → Pets** to show it again.
 
-Select **Add pet** to make a lightweight local animation from a transparent PNG or WebP, or import a supported `1536×2288` v2 animation atlas. The AI full-animation option is currently unavailable. Pets run only in the Electron desktop app and are not supported in H5.
+Select **Add pet** to make one of your own: use a transparent PNG or WebP you already have, or follow the in-dialog prompt to have any drawing AI produce an action sheet and pick that (sizes are aligned for you). Everything happens locally, without calling the current chat model or using chat quota. Pets run only in the Electron desktop app and are not supported in H5.
 
 Follow the complete [Desktop Pet Guide](./pets.md) for custom-image requirements, task states, and interaction details.
 

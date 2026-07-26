@@ -281,42 +281,89 @@ export const zh: Record<TranslationKey, string> = {
   'settings.pets.retry': '重試',
   'settings.pets.refresh': '重新整理',
   'settings.pets.create': '新增寵物',
-  'settings.pets.createTitle': '建立自訂寵物',
-  'settings.pets.createMethodIntro': '選擇製作方式。匯入過程都在本機完成，不會呼叫目前的聊天模型產生圖片。',
+  'settings.pets.createTitle': '做一隻自己的寵物',
+  'settings.pets.createMethodIntro': '選一種做法。圖片都在你自己的電腦上處理，不會上傳，也不會消耗你的對話額度。',
   'settings.pets.createRecommended': '推薦',
-  'settings.pets.createImageTitle': '用一張圖片製作輕動畫',
-  'settings.pets.createImageDescription': '把一張透明背景 PNG 或 WebP 變成會輕柔活動的寵物。',
-  'settings.pets.createImageDetail': '本機處理 · 不需要圖片模型或影片生成',
-  'settings.pets.createImageHint': '選擇一張透明背景的靜態 PNG 或 WebP（單邊 32–4096px、最大 8MB）。應用程式會在本機加入呼吸、漂浮和任務狀態等輕動畫；這不是逐格生成的完整動畫。',
-  'settings.pets.createImageSubmit': '選擇圖片並建立',
-  'settings.pets.createAtlasTitle': '匯入專業動畫圖集',
-  'settings.pets.createAtlasDescription': '匯入已經製作好的逐格精靈圖集，取得完整角色動作。',
-  'settings.pets.createAtlasDetail': '進階 · 必須是 1536×2288 的 v2 PNG 或 WebP',
-  'settings.pets.createAtlasSubmit': '選擇圖集並建立',
-  'settings.pets.createAiTitle': 'AI 生成完整動畫',
-  'settings.pets.createAiDescription': '透過圖片生成服務創作角色和動作格。',
-  'settings.pets.createAiUnavailable': '目前未設定：需要獨立的圖片生成服務；不會使用目前的聊天模型。',
-  'settings.pets.createBack': '重新選擇製作方式',
+  'settings.pets.createImageTitle': '用一張現成的圖',
+  'settings.pets.createImageDescription': '手邊有一張角色圖就能開始。牠會輕輕呼吸、上下浮動，你忙的時候牠也跟著動。',
+  'settings.pets.createImageDetail': '一分鐘搞定 · 但牠不會跑、也不會揮手',
+  'settings.pets.createImageBadge': '最省事',
+  'settings.pets.createImageHint': '等一下選一張背景透明的 PNG 或 WebP（長寬都在 32 到 4096 像素之間，檔案不超過 8MB）。這種寵物只會輕輕晃動，不會真的跑起來——想要能跑能跳會揮手，回上一頁選「用 AI 畫一隻會跑會跳的」。',
+  'settings.pets.createImageSubmit': '選圖片，做寵物',
+  'settings.pets.createAtlasTitle': '我已經有動作圖了',
+  'settings.pets.createAtlasDescription': '直接把畫好的多格動作圖選進來，跳過教學。',
+  'settings.pets.createAtlasDetail': '尺寸不用自己算 · 選進來會自動對齊',
+  'settings.pets.createAtlasSubmit': '選動作圖，做寵物',
+  'settings.pets.createAtlasHint': '等一下選一張 8 格寬、9 列高的動作圖。尺寸不用剛好，選進來會自動切格、縮放，還會幫你把「向左跑」那一列鏡像補出來。已經做好的 1536×2288 成品圖集也能直接用，會原樣保留。',
+  'settings.pets.createAiTitle': '用 AI 畫一隻會跑會跳的',
+  'settings.pets.createAiDescription': '照著三步走：複製一段提示詞、讓 AI 畫圖、把圖選進來。提示詞和對照範本都替你準備好了。',
+  'settings.pets.createAiDetail': '十來分鐘 · 需要一個會畫圖的 AI',
+  'settings.pets.createBack': '換一種做法',
   'settings.pets.createId': '寵物 ID',
-  'settings.pets.createIdHint': '僅使用小寫字母、數字和單個連字號。',
+  'settings.pets.createIdHint': '給牠一個英文小名，只能用小寫字母、數字和中間的連字號，例如 moon-cat。',
   'settings.pets.createName': '顯示名稱',
   'settings.pets.createDescription': '寵物描述',
-  'settings.pets.createAtlasHint': '選擇透明背景、無間距的 1536×2288 PNG/WebP：8 欄×11 列，每格 192×208。列順序為待機、向右跑、向左跑、揮手、跳躍、失敗、等待、工作、複核，以及最後兩列的 16 個視線方向。',
   'settings.pets.createCancel': '取消',
   'settings.pets.createSubmit': '建立',
-  'settings.pets.createError': '無法建立自訂寵物。',
-  'settings.pets.createError.invalidId': '寵物 ID 只能使用小寫字母、數字和單一連字號。',
-  'settings.pets.createError.duplicateId': '已有使用此 ID 的自訂寵物。',
-  'settings.pets.createError.unsupportedFormat': '請選擇 PNG 或 WebP 圖片。',
-  'settings.pets.createError.imageTooLarge': '所選圖片不得超過 8 MB。',
-  'settings.pets.createError.imageDimensions': '寵物圖片每邊必須為 32–4096 像素，且總像素數不得超過 16,777,216。',
-  'settings.pets.createError.atlasDimensions': '動畫圖集尺寸必須恰好為 1536×2288 像素。',
-  'settings.pets.createError.invalidImage': '無法讀取所選圖片，請選擇靜態 PNG 或 WebP 圖片。',
-  'settings.pets.createError.storage': '無法將寵物儲存到自訂寵物資料夾。',
-  'settings.pets.dialog.imageTitle': '選擇透明背景的寵物圖片',
+  'settings.pets.guide.intro': '三步，大約十分鐘，全程在你自己的電腦上完成。',
+  'settings.pets.guide.step1Title': '讓 AI 畫一張動作圖',
+  'settings.pets.guide.step1Body': '打開一個會畫圖的 AI，把下面這段整個發給它。開頭「角色」那兩行換成你想要的樣子，例如「一隻戴黃色帽子的柴犬」。',
+  'settings.pets.guide.step1Tools': '即夢、Nano Banana、ChatGPT 畫圖、Midjourney、Stable Diffusion 都行（隨手舉例，不是推薦）。畫得不對就讓它重畫，或者說「角色保持不變，只重畫第 2 列」。',
+  'settings.pets.guide.prompt': `幫我畫一張遊戲角色動作表（sprite sheet）。
+
+【角色】
+一隻圓頭圓腦的橘色小貓，戴著藍色小圍巾，Q 版三頭身，
+3D 卡通渲染，表面柔和有光澤，顏色明快。
+（把這兩行換成你想要的角色，寫得越具體越好）
+
+【整張圖的要求】
+· 背景完全透明，不要背景色、不要格線、不要文字、不要投影
+· 整張圖平均分成 8 欄 × 9 列，一共 72 個一樣大的方格
+· 每格放一個動作格，角色在格子裡置中，四周留一點空隙
+· 所有格子裡必須是同一隻角色，體型、配色、畫風完全一致
+· 用不到的格子保持完全透明
+
+【每一列畫什麼】
+第 1 列 前 6 格：站著不動，輕微呼吸起伏
+第 2 列 全 8 格：向右跑的完整循環，角色始終朝右
+第 3 列 前 4 格：抬起手揮手打招呼
+第 4 列 前 5 格：下蹲、起跳、落地
+第 5 列 全 8 格：失落沮喪，垂頭嘆氣
+第 6 列 前 6 格：原地等待，東張西望
+第 7 列 前 6 格：低頭忙碌工作
+第 8 列 全 8 格：頭和視線從正上方開始向右慢慢轉，經過右上、右邊、右下，轉到接近正下方
+第 9 列 全 8 格：接著上一列，從正下方繼續向左轉，經過左下、左邊、左上，轉回接近正上方`,
+  'settings.pets.guide.promptCopy': '複製這段提示詞',
+  'settings.pets.guide.promptCopied': '複製好了',
+  'settings.pets.guide.copyFailed': '沒能自動複製，手動選取上面的文字複製一下。',
+  'settings.pets.guide.step2Title': '照著範本檢查一遍',
+  'settings.pets.guide.step2Body': '圖出來以後，對著下面這張範本看三件事。不對就讓 AI 重畫，別急著選進來。',
+  'settings.pets.guide.check1': '背景是透空的，不是白底——白底會在桌面上變成一個方塊',
+  'settings.pets.guide.check2': '橫著數 8 格，直著數 9 列，每格一個動作',
+  'settings.pets.guide.check3': '九列裡從頭到尾是同一隻，沒有中途換臉換配色',
+  'settings.pets.guide.templateAlt': '動作表範本：8 欄 9 列，標註了每一列該畫什麼',
+  'settings.pets.guide.templateExpand': '點圖片看完整範本',
+  'settings.pets.guide.templateCollapse': '點圖片收起',
+  'settings.pets.guide.saveTemplate': '把範本存下來',
+  'settings.pets.guide.saveFailed': '沒能儲存範本圖，稍後再試。',
+  'settings.pets.guide.step3Title': '選進來就好',
+  'settings.pets.guide.step3Body': '下一頁填個名字，然後選取剛才那張圖。尺寸不用自己調，長寬差一點也沒關係；「向左跑」那一列也會自動鏡像補上，不用你畫。',
+  'settings.pets.guide.continue': '畫好了，下一步',
+  'settings.pets.guide.backToSteps': '回去看步驟',
+  'settings.pets.createError': '沒能做成這隻寵物。',
+  'settings.pets.createError.invalidId': '寵物 ID 只能用小寫字母、數字和中間的連字號。',
+  'settings.pets.createError.duplicateId': '已經有一隻用這個 ID 的寵物了，換一個。',
+  'settings.pets.createError.unsupportedFormat': '請選 PNG 或 WebP 格式的圖片。',
+  'settings.pets.createError.imageTooLarge': '圖片太大了，請控制在 8 MB 以內。',
+  'settings.pets.createError.imageDimensions': '圖片長寬都要在 32 到 4096 像素之間，總像素數不超過 16,777,216。',
+  'settings.pets.createError.atlasDimensions': '這張圖沒辦法按 8 欄 × 9 列切開。請確認橫著 8 格、直著 9 列，或者直接用 1536×2288 的成品圖集。',
+  'settings.pets.createError.opaqueBackground': '這張圖沒有透明背景，做出來會是桌面上的一個方塊。請讓 AI 重新匯出透明背景的 PNG（不要白底）。',
+  'settings.pets.createError.invalidImage': '讀不出這張圖，請換一張靜態的 PNG 或 WebP（動圖不行）。',
+  'settings.pets.createError.storage': '沒能把寵物存到本機資料夾。',
+  'settings.pets.dialog.imageTitle': '選一張背景透明的寵物圖片',
   'settings.pets.dialog.imageFilter': '寵物圖片',
-  'settings.pets.dialog.atlasTitle': '選擇 v2 寵物動畫圖集',
-  'settings.pets.dialog.atlasFilter': '寵物動畫圖集',
+  'settings.pets.dialog.atlasTitle': '選擇寵物動作圖',
+  'settings.pets.dialog.atlasFilter': '寵物動作圖',
   'settings.pets.builtInTitle': '內建寵物',
   'settings.pets.customTitle': '你的寵物',
   'settings.pets.customEmpty': '還沒有自訂寵物。',

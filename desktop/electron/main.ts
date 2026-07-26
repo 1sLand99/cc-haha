@@ -60,10 +60,12 @@ import {
 import {
   createCustomPetCatalogLoader,
   createCustomPetFromAtlas,
+  createCustomPetFromAtlasBytes,
   createCustomPetFromImage,
   ensureCustomPetsRoot,
   getPetPackageErrorCode,
   loadCustomPets,
+  readCustomPetSourceImage,
 } from './services/pets'
 import {
   installWindowLifecycle,
@@ -467,6 +469,51 @@ function registerIpcHandlers() {
           displayName: input.displayName,
           description: input.description,
           atlasPath,
+        }, {
+          inspectImageSize: ({ data }) => nativeImage.createFromBuffer(data).getSize(),
+        }))
+      return { id: pet.id }
+    } catch (error) {
+      return { errorCode: getPetPackageErrorCode(error) }
+    }
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.petsPickSourceSheet, async (event, payload) => {
+    const input = payload as { dialogTitle?: string, dialogFilterName?: string }
+    const imagePath = await openDialog(currentWindow(event), {
+      title: input.dialogTitle || 'Choose a pet action sheet',
+      filters: [{ name: input.dialogFilterName || 'Pet action sheet', extensions: ['png', 'webp'] }],
+    })
+    if (typeof imagePath !== 'string') return null
+    try {
+      const source = await readCustomPetSourceImage(imagePath)
+      // The renderer needs the pixels to assemble the atlas on a canvas; the path
+      // itself is deliberately never handed over.
+      return {
+        bytes: source.data,
+        mimeType: source.mimeType,
+        width: source.width,
+        height: source.height,
+      }
+    } catch (error) {
+      return { errorCode: getPetPackageErrorCode(error) }
+    }
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.petsCreateFromAtlasBytes, async (_event, payload) => {
+    const input = payload as {
+      slug: string
+      displayName: string
+      description: string
+      atlasData: Uint8Array
+      mimeType: 'image/png' | 'image/webp'
+    }
+    try {
+      const pet = await loadCustomPetCatalog.invalidateAfter(() =>
+        createCustomPetFromAtlasBytes({
+          slug: input.slug,
+          displayName: input.displayName,
+          description: input.description,
+          atlasData: input.atlasData,
+          mimeType: input.mimeType,
         }, {
           inspectImageSize: ({ data }) => nativeImage.createFromBuffer(data).getSize(),
         }))

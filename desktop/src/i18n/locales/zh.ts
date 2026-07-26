@@ -281,42 +281,89 @@ export const zh: Record<TranslationKey, string> = {
   'settings.pets.retry': '重试',
   'settings.pets.refresh': '刷新',
   'settings.pets.create': '添加宠物',
-  'settings.pets.createTitle': '创建自定义宠物',
-  'settings.pets.createMethodIntro': '选择制作方式。导入过程都在本地完成，不会调用当前聊天模型生成图片。',
+  'settings.pets.createTitle': '做一只自己的宠物',
+  'settings.pets.createMethodIntro': '选一种做法。图片都在你自己的电脑上处理，不会上传，也不会消耗你的对话额度。',
   'settings.pets.createRecommended': '推荐',
-  'settings.pets.createImageTitle': '用一张图片制作轻动画',
-  'settings.pets.createImageDescription': '把一张透明背景 PNG 或 WebP 变成会轻柔活动的宠物。',
-  'settings.pets.createImageDetail': '本地处理 · 无需图片模型或视频生成',
-  'settings.pets.createImageHint': '选择一张透明背景、静态 PNG 或 WebP（单边 32–4096px、最大 8MB）。应用会在本地添加呼吸、漂浮和任务状态等轻动画；这不是逐帧生成的完整动画。',
-  'settings.pets.createImageSubmit': '选择图片并创建',
-  'settings.pets.createAtlasTitle': '导入专业动画图集',
-  'settings.pets.createAtlasDescription': '导入已经制作好的逐帧精灵图集，获得完整角色动作。',
-  'settings.pets.createAtlasDetail': '高级 · 必须是 1536×2288 的 v2 PNG 或 WebP',
-  'settings.pets.createAtlasSubmit': '选择图集并创建',
-  'settings.pets.createAiTitle': 'AI 生成完整动画',
-  'settings.pets.createAiDescription': '通过图片生成服务创作角色和动作帧。',
-  'settings.pets.createAiUnavailable': '当前未配置：需要单独的图片生成服务；不会使用当前聊天模型。',
-  'settings.pets.createBack': '重新选择制作方式',
+  'settings.pets.createImageTitle': '用一张现成的图',
+  'settings.pets.createImageDescription': '手里有一张角色图就能开始。它会轻轻呼吸、上下浮动，你忙的时候它也跟着动。',
+  'settings.pets.createImageDetail': '一分钟搞定 · 但它不会跑、也不会挥手',
+  'settings.pets.createImageBadge': '最省事',
+  'settings.pets.createImageHint': '待会儿选一张背景透明的 PNG 或 WebP（长宽都在 32 到 4096 像素之间，文件不超过 8MB）。这种宠物只会轻轻晃动，不会真的跑起来——想要能跑能跳会挥手，回上一页选「用 AI 画一只会跑会跳的」。',
+  'settings.pets.createImageSubmit': '选图片，做宠物',
+  'settings.pets.createAtlasTitle': '我已经有动作图了',
+  'settings.pets.createAtlasDescription': '直接把画好的多格动作图选进来，跳过教程。',
+  'settings.pets.createAtlasDetail': '尺寸不用自己算 · 选进来会自动对齐',
+  'settings.pets.createAtlasSubmit': '选动作图，做宠物',
+  'settings.pets.createAtlasHint': '待会儿选一张 8 格宽、9 行高的动作图。尺寸不用刚好，选进来会自动切格、缩放，还会帮你把「向左跑」那一行镜像补出来。已经做好的 1536×2288 成品图也能直接用，会原样保留。',
+  'settings.pets.createAiTitle': '用 AI 画一只会跑会跳的',
+  'settings.pets.createAiDescription': '照着三步走：复制一段提示词、让 AI 画图、把图选进来。提示词和对照模板都替你准备好了。',
+  'settings.pets.createAiDetail': '十来分钟 · 需要一个会画图的 AI',
+  'settings.pets.createBack': '换一种做法',
   'settings.pets.createId': '宠物 ID',
-  'settings.pets.createIdHint': '仅使用小写字母、数字和单个连字符。',
+  'settings.pets.createIdHint': '给它一个英文小名，只能用小写字母、数字和中间的连字符，比如 moon-cat。',
   'settings.pets.createName': '显示名称',
   'settings.pets.createDescription': '宠物描述',
-  'settings.pets.createAtlasHint': '选择透明背景、无间距的 1536×2288 PNG/WebP：8列×11行，每格 192×208。行顺序为待机、向右跑、向左跑、挥手、跳跃、失败、等待、工作、复核，以及最后两行的 16 个视线方向。',
   'settings.pets.createCancel': '取消',
   'settings.pets.createSubmit': '创建',
-  'settings.pets.createError': '无法创建自定义宠物。',
-  'settings.pets.createError.invalidId': '宠物 ID 只能使用小写字母、数字和单个连字符。',
-  'settings.pets.createError.duplicateId': '已存在使用此 ID 的自定义宠物。',
-  'settings.pets.createError.unsupportedFormat': '请选择 PNG 或 WebP 图片。',
-  'settings.pets.createError.imageTooLarge': '所选图片不能超过 8 MB。',
-  'settings.pets.createError.imageDimensions': '宠物图片每边必须为 32–4096 像素，且总像素数不能超过 16,777,216。',
-  'settings.pets.createError.atlasDimensions': '动画图集尺寸必须恰好为 1536×2288 像素。',
-  'settings.pets.createError.invalidImage': '无法读取所选图片，请选择静态 PNG 或 WebP 图片。',
-  'settings.pets.createError.storage': '无法将宠物保存到自定义宠物目录。',
-  'settings.pets.dialog.imageTitle': '选择透明背景的宠物图片',
+  'settings.pets.guide.intro': '三步，大约十分钟，全程在你自己的电脑上完成。',
+  'settings.pets.guide.step1Title': '让 AI 画一张动作图',
+  'settings.pets.guide.step1Body': '打开一个会画图的 AI，把下面这段整个发给它。开头「角色」那两行换成你想要的样子，比如「一只戴黄色帽子的柴犬」。',
+  'settings.pets.guide.step1Tools': '即梦、Nano Banana、ChatGPT 画图、Midjourney、Stable Diffusion 都行（随手举例，不是推荐）。画得不对就让它重画，或者说「角色保持不变，只重画第 2 行」。',
+  'settings.pets.guide.prompt': `帮我画一张游戏角色动作表（sprite sheet）。
+
+【角色】
+一只圆头圆脑的橘色小猫，戴着蓝色小围巾，Q 版三头身，
+3D 卡通渲染，表面柔和有光泽，颜色明快。
+（把这两行换成你想要的角色，写得越具体越好）
+
+【整张图的要求】
+· 背景完全透明，不要背景色、不要格子线、不要文字、不要投影
+· 整张图平均分成 8 列 × 9 行，一共 72 个一样大的方格
+· 每格放一个动作帧，角色在格子里居中，四周留一点空隙
+· 所有格子里必须是同一只角色，体型、配色、画风完全一致
+· 用不到的格子保持完全透明
+
+【每一行画什么】
+第 1 行 前 6 格：站着不动，轻微呼吸起伏
+第 2 行 全 8 格：向右跑的完整循环，角色始终朝右
+第 3 行 前 4 格：抬起手挥手打招呼
+第 4 行 前 5 格：下蹲、起跳、落地
+第 5 行 全 8 格：失落沮丧，垂头叹气
+第 6 行 前 6 格：原地等待，东张西望
+第 7 行 前 6 格：低头忙碌工作
+第 8 行 全 8 格：头和视线从正上方开始向右慢慢转，经过右上、右边、右下，转到接近正下方
+第 9 行 全 8 格：接着上一行，从正下方继续向左转，经过左下、左边、左上，转回接近正上方`,
+  'settings.pets.guide.promptCopy': '复制这段提示词',
+  'settings.pets.guide.promptCopied': '复制好了',
+  'settings.pets.guide.copyFailed': '没能自动复制，手动选中上面的文字复制一下。',
+  'settings.pets.guide.step2Title': '照着模板检查一遍',
+  'settings.pets.guide.step2Body': '图出来以后，对着下面这张模板看三件事。不对就让 AI 重画，别急着选进来。',
+  'settings.pets.guide.check1': '背景是透空的，不是白底——白底会在桌面上变成一个方块',
+  'settings.pets.guide.check2': '横着数 8 格，竖着数 9 行，每格一个动作',
+  'settings.pets.guide.check3': '九行里从头到尾是同一只，没有中途换脸换配色',
+  'settings.pets.guide.templateAlt': '动作表模板：8 列 9 行，标注了每一行该画什么',
+  'settings.pets.guide.templateExpand': '点图片看完整模板',
+  'settings.pets.guide.templateCollapse': '点图片收起',
+  'settings.pets.guide.saveTemplate': '把模板存下来',
+  'settings.pets.guide.saveFailed': '没能保存模板图，稍后再试。',
+  'settings.pets.guide.step3Title': '选进来就好',
+  'settings.pets.guide.step3Body': '下一页填个名字，然后选中刚才那张图。尺寸不用自己调，长宽差一点也没关系；「向左跑」那一行也会自动镜像补上，不用你画。',
+  'settings.pets.guide.continue': '画好了，下一步',
+  'settings.pets.guide.backToSteps': '回去看步骤',
+  'settings.pets.createError': '没能做成这只宠物。',
+  'settings.pets.createError.invalidId': '宠物 ID 只能用小写字母、数字和中间的连字符。',
+  'settings.pets.createError.duplicateId': '已经有一只用这个 ID 的宠物了，换一个。',
+  'settings.pets.createError.unsupportedFormat': '请选 PNG 或 WebP 格式的图片。',
+  'settings.pets.createError.imageTooLarge': '图片太大了，请控制在 8 MB 以内。',
+  'settings.pets.createError.imageDimensions': '图片长宽都要在 32 到 4096 像素之间，总像素数不超过 16,777,216。',
+  'settings.pets.createError.atlasDimensions': '这张图没法按 8 列 × 9 行切开。请确认横着 8 格、竖着 9 行，或者直接用 1536×2288 的成品图集。',
+  'settings.pets.createError.opaqueBackground': '这张图没有透明背景，做出来会是桌面上的一个方块。请让 AI 重新导出透明背景的 PNG（不要白底）。',
+  'settings.pets.createError.invalidImage': '读不出这张图，请换一张静态的 PNG 或 WebP（动图不行）。',
+  'settings.pets.createError.storage': '没能把宠物存到本地文件夹。',
+  'settings.pets.dialog.imageTitle': '选一张背景透明的宠物图片',
   'settings.pets.dialog.imageFilter': '宠物图片',
-  'settings.pets.dialog.atlasTitle': '选择 v2 宠物动画图集',
-  'settings.pets.dialog.atlasFilter': '宠物动画图集',
+  'settings.pets.dialog.atlasTitle': '选择宠物动作图',
+  'settings.pets.dialog.atlasFilter': '宠物动作图',
   'settings.pets.builtInTitle': '内置宠物',
   'settings.pets.customTitle': '你的宠物',
   'settings.pets.customEmpty': '还没有自定义宠物。',

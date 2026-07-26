@@ -281,42 +281,90 @@ export const kr: Record<TranslationKey, string> = {
   'settings.pets.retry': '다시 시도',
   'settings.pets.refresh': '새로 고침',
   'settings.pets.create': '펫 추가',
-  'settings.pets.createTitle': '사용자 지정 펫 만들기',
-  'settings.pets.createMethodIntro': '펫을 만드는 방법을 선택하세요. 가져오기는 로컬에서 처리되며 현재 채팅 모델로 이미지를 생성하지 않습니다.',
+  'settings.pets.createTitle': '나만의 펫 만들기',
+  'settings.pets.createMethodIntro': '만드는 방법을 골라 주세요. 이미지는 모두 내 컴퓨터 안에서 처리되며, 업로드되지 않고 대화 사용량도 쓰지 않습니다.',
   'settings.pets.createRecommended': '추천',
-  'settings.pets.createImageTitle': '이미지 한 장에 가벼운 애니메이션 추가',
-  'settings.pets.createImageDescription': '투명 배경 PNG 또는 WebP를 부드럽게 움직이는 펫으로 만듭니다.',
-  'settings.pets.createImageDetail': '로컬 처리 · 이미지 모델이나 비디오 생성 불필요',
-  'settings.pets.createImageHint': '투명 배경의 정적 PNG 또는 WebP(각 변 32~4096px, 최대 8MB)를 선택하세요. 앱이 로컬에서 호흡, 떠오름, 작업 상태에 따른 가벼운 움직임을 추가합니다. 프레임별로 생성된 완전한 애니메이션은 아닙니다.',
-  'settings.pets.createImageSubmit': '이미지를 선택해 만들기',
-  'settings.pets.createAtlasTitle': '전문 애니메이션 아틀라스 가져오기',
-  'settings.pets.createAtlasDescription': '미리 제작한 프레임별 스프라이트 아틀라스로 완전한 캐릭터 동작을 사용합니다.',
-  'settings.pets.createAtlasDetail': '고급 · 정확히 1536×2288인 v2 PNG 또는 WebP',
-  'settings.pets.createAtlasSubmit': '아틀라스를 선택해 만들기',
-  'settings.pets.createAiTitle': 'AI로 전체 애니메이션 생성',
-  'settings.pets.createAiDescription': '이미지 생성 서비스로 캐릭터와 동작 프레임을 만듭니다.',
-  'settings.pets.createAiUnavailable': '현재 사용할 수 없습니다. 별도의 이미지 생성 서비스를 설정해야 하며 현재 채팅 모델은 사용하지 않습니다.',
-  'settings.pets.createBack': '다른 제작 방법 선택',
+  'settings.pets.createImageTitle': '가지고 있는 그림 사용하기',
+  'settings.pets.createImageDescription': '캐릭터 그림 한 장이면 충분합니다. 가볍게 숨을 쉬듯 떠오르고, 바쁠 때는 함께 움직입니다.',
+  'settings.pets.createImageDetail': '1분이면 완료 · 다만 달리거나 손을 흔들지는 않습니다',
+  'settings.pets.createImageBadge': '가장 간단',
+  'settings.pets.createImageHint': '잠시 후 배경이 투명한 PNG 또는 WebP를 고릅니다(가로세로 32~4096픽셀, 8MB 이하). 이 방식은 살짝 흔들리기만 하고 실제로 달리지는 않습니다. 달리고 뛰고 손을 흔들게 하려면 이전 화면에서 "AI로 달리고 뛰는 펫 그리기"를 선택하세요.',
+  'settings.pets.createImageSubmit': '그림 골라서 만들기',
+  'settings.pets.createAtlasTitle': '이미 동작 시트가 있어요',
+  'settings.pets.createAtlasDescription': '이미 그려 둔 여러 칸짜리 동작 시트를 바로 가져오고 안내는 건너뜁니다.',
+  'settings.pets.createAtlasDetail': '크기 계산 불필요 · 알아서 맞춰 줍니다',
+  'settings.pets.createAtlasSubmit': '동작 시트 골라서 만들기',
+  'settings.pets.createAtlasHint': '잠시 후 가로 8칸, 세로 9줄짜리 동작 시트를 고릅니다. 크기가 딱 맞지 않아도 됩니다. 알아서 칸을 나누고 크기를 조정하며, "왼쪽으로 달리기" 줄은 좌우 반전으로 채워 줍니다. 이미 완성된 1536×2288 아틀라스도 그대로 쓸 수 있습니다.',
+  'settings.pets.createAiTitle': 'AI로 달리고 뛰는 펫 그리기',
+  'settings.pets.createAiDescription': '세 단계입니다. 프롬프트를 복사하고, AI에게 그리게 하고, 그 그림을 고르면 끝. 프롬프트와 참고용 템플릿을 준비해 두었습니다.',
+  'settings.pets.createAiDetail': '10분쯤 · 그림을 그릴 수 있는 AI가 필요합니다',
+  'settings.pets.createBack': '다른 방법 고르기',
   'settings.pets.createId': '펫 ID',
-  'settings.pets.createIdHint': '소문자, 숫자, 단일 하이픈만 사용하세요.',
+  'settings.pets.createIdHint': '짧은 영문 이름입니다. 소문자, 숫자, 가운데 하이픈만 사용하세요(예: moon-cat).',
   'settings.pets.createName': '표시 이름',
   'settings.pets.createDescription': '설명',
-  'settings.pets.createAtlasHint': '투명 배경과 여백 없는 1536×2288 PNG/WebP(8열×11행, 각 셀 192×208)를 선택하세요. 행 순서는 idle, 오른쪽 달리기, 왼쪽 달리기, wave, jump, fail, wait, work, review, 마지막 두 행의 16개 시선 방향입니다.',
   'settings.pets.createCancel': '취소',
   'settings.pets.createSubmit': '만들기',
-  'settings.pets.createError': '사용자 지정 펫을 만들 수 없습니다.',
-  'settings.pets.createError.invalidId': '펫 ID에는 소문자, 숫자, 단일 하이픈만 사용할 수 있습니다.',
-  'settings.pets.createError.duplicateId': '이 ID를 사용하는 사용자 지정 펫이 이미 있습니다.',
-  'settings.pets.createError.unsupportedFormat': 'PNG 또는 WebP 이미지를 선택하세요.',
-  'settings.pets.createError.imageTooLarge': '선택한 이미지는 8MB 이하여야 합니다.',
-  'settings.pets.createError.imageDimensions': '펫 이미지는 각 변이 32~4096픽셀이고 전체 픽셀 수가 16,777,216 이하여야 합니다.',
-  'settings.pets.createError.atlasDimensions': '애니메이션 아틀라스는 정확히 1536×2288픽셀이어야 합니다.',
-  'settings.pets.createError.invalidImage': '선택한 이미지를 읽을 수 없습니다. 정적 PNG 또는 WebP 이미지를 선택하세요.',
-  'settings.pets.createError.storage': '사용자 지정 펫 폴더에 펫을 저장할 수 없습니다.',
-  'settings.pets.dialog.imageTitle': '투명 배경 펫 이미지 선택',
+  'settings.pets.guide.intro': '세 단계, 10분쯤 걸립니다. 전부 내 컴퓨터 안에서 끝납니다.',
+  'settings.pets.guide.step1Title': 'AI에게 동작 시트를 그리게 하기',
+  'settings.pets.guide.step1Body': '그림을 그릴 수 있는 AI를 열고 아래 글을 통째로 보내세요. 맨 앞 "캐릭터" 두 줄을 원하는 모습으로 바꾸면 됩니다(예: "노란 모자를 쓴 시바견").',
+  'settings.pets.guide.step1Tools': 'Nano Banana, ChatGPT 이미지 생성, Midjourney, Stable Diffusion, Jimeng 모두 됩니다(추천이 아니라 예시입니다). 잘 안 나오면 다시 그려 달라고 하거나 "캐릭터는 그대로 두고 2번째 줄만 다시 그려 줘"라고 하세요.',
+  'settings.pets.guide.prompt': `게임 캐릭터 동작 시트(스프라이트 시트)를 그려 주세요.
+
+[캐릭터]
+동그란 머리의 주황색 새끼 고양이, 파란 목도리를 두른
+3등신 SD 비율, 3D 카툰 렌더링, 부드럽고 윤기 있는 표면,
+밝고 산뜻한 색감.
+(이 두 줄을 원하는 캐릭터로 바꾸세요. 구체적일수록 좋습니다)
+
+[전체 조건]
+· 배경은 완전히 투명하게. 배경색, 격자선, 글자, 그림자 없이
+· 전체를 가로 8열 × 세로 9행, 총 72개의 같은 크기 칸으로 고르게 나눌 것
+· 한 칸에 한 동작. 캐릭터는 칸 가운데에 두고 주변에 여백을 조금 남길 것
+· 모든 칸에 같은 캐릭터. 체형, 색 배합, 그림체를 완전히 통일할 것
+· 쓰지 않는 칸은 완전히 투명하게 둘 것
+
+[각 줄에 그릴 내용]
+1번째 줄 앞 6칸: 가만히 서서 숨 쉬듯 살짝 위아래로 움직임
+2번째 줄 8칸 전부: 오른쪽으로 달리는 한 사이클. 항상 오른쪽을 향할 것
+3번째 줄 앞 4칸: 손을 들어 인사하기
+4번째 줄 앞 5칸: 웅크리기, 뛰어오르기, 착지하기
+5번째 줄 8칸 전부: 실망해서 고개를 떨구고 한숨 쉬기
+6번째 줄 앞 6칸: 제자리에서 기다리며 두리번거리기
+7번째 줄 앞 6칸: 고개를 숙이고 바쁘게 작업하기
+8번째 줄 8칸 전부: 머리와 시선이 정면 위에서 시작해 오른쪽으로 천천히 돌아 오른쪽 위, 오른쪽, 오른쪽 아래를 지나 정면 아래 직전까지
+9번째 줄 8칸 전부: 앞 줄에 이어 정면 아래에서 왼쪽으로 돌아 왼쪽 아래, 왼쪽, 왼쪽 위를 지나 정면 위 직전까지`,
+  'settings.pets.guide.promptCopy': '이 프롬프트 복사',
+  'settings.pets.guide.promptCopied': '복사했습니다',
+  'settings.pets.guide.copyFailed': '자동으로 복사하지 못했습니다. 위 글을 직접 선택해 복사하세요.',
+  'settings.pets.guide.step2Title': '템플릿과 비교해 확인하기',
+  'settings.pets.guide.step2Body': '그림이 나오면 아래 템플릿과 비교해 세 가지를 확인하세요. 다르면 가져오기 전에 다시 그려 달라고 하세요.',
+  'settings.pets.guide.check1': '배경이 비쳐 보이고 흰색이 아닌지 — 흰 배경은 바탕화면에서 네모난 판이 됩니다',
+  'settings.pets.guide.check2': '가로 8칸, 세로 9줄, 한 칸에 한 동작인지',
+  'settings.pets.guide.check3': '아홉 줄 내내 같은 캐릭터이고 중간에 얼굴이나 색이 바뀌지 않았는지',
+  'settings.pets.guide.templateAlt': '동작 시트 템플릿: 가로 8열 세로 9행, 각 줄에 그릴 내용 표시',
+  'settings.pets.guide.templateExpand': '이미지를 눌러 전체 템플릿 보기',
+  'settings.pets.guide.templateCollapse': '이미지를 눌러 접기',
+  'settings.pets.guide.saveTemplate': '템플릿 저장하기',
+  'settings.pets.guide.saveFailed': '템플릿 이미지를 저장하지 못했습니다. 잠시 후 다시 시도하세요.',
+  'settings.pets.guide.step3Title': '고르기만 하면 끝',
+  'settings.pets.guide.step3Body': '다음 화면에서 이름을 적고, 방금 만든 그림을 고르세요. 크기를 직접 맞출 필요 없고 "왼쪽으로 달리기" 줄도 알아서 좌우 반전으로 채워집니다.',
+  'settings.pets.guide.continue': '다 그렸어요, 다음',
+  'settings.pets.guide.backToSteps': '단계로 돌아가기',
+  'settings.pets.createError': '이 펫을 만들지 못했습니다.',
+  'settings.pets.createError.invalidId': '펫 ID에는 소문자, 숫자, 가운데 하이픈만 사용할 수 있습니다.',
+  'settings.pets.createError.duplicateId': '이 ID를 쓰는 펫이 이미 있습니다. 다른 ID로 바꿔 주세요.',
+  'settings.pets.createError.unsupportedFormat': 'PNG 또는 WebP 형식의 이미지를 선택하세요.',
+  'settings.pets.createError.imageTooLarge': '이미지가 너무 큽니다. 8MB 이하로 맞춰 주세요.',
+  'settings.pets.createError.imageDimensions': '이미지는 가로세로 32~4096픽셀이고 전체 픽셀 수가 16,777,216 이하여야 합니다.',
+  'settings.pets.createError.atlasDimensions': '이 이미지는 가로 8열 세로 9행으로 나눌 수 없습니다. 가로 8칸 세로 9줄인지 확인하거나, 완성된 1536×2288 아틀라스를 사용하세요.',
+  'settings.pets.createError.opaqueBackground': '이 이미지에는 투명 배경이 없어 바탕화면에서 네모난 판으로 보이게 됩니다. 배경이 투명한 PNG(흰 배경 말고)로 다시 내보내 달라고 하세요.',
+  'settings.pets.createError.invalidImage': '이 이미지를 읽을 수 없습니다. 움직이지 않는 PNG 또는 WebP를 선택하세요(움직이는 이미지는 안 됩니다).',
+  'settings.pets.createError.storage': '펫을 로컬 폴더에 저장하지 못했습니다.',
+  'settings.pets.dialog.imageTitle': '배경이 투명한 펫 이미지 선택',
   'settings.pets.dialog.imageFilter': '펫 이미지',
-  'settings.pets.dialog.atlasTitle': 'v2 펫 애니메이션 아틀라스 선택',
-  'settings.pets.dialog.atlasFilter': '펫 애니메이션 아틀라스',
+  'settings.pets.dialog.atlasTitle': '펫 동작 시트 선택',
+  'settings.pets.dialog.atlasFilter': '펫 동작 시트',
   'settings.pets.builtInTitle': '기본 펫',
   'settings.pets.customTitle': '내 펫',
   'settings.pets.customEmpty': '아직 사용자 지정 펫이 없습니다.',
