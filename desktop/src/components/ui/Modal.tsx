@@ -75,7 +75,7 @@ export function Modal({ open, onClose, title, children, width = 560, footer }: M
     <div className="fixed inset-0 z-[var(--z-dialog)] flex items-center justify-center">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-[var(--color-overlay-scrim)] transition-opacity duration-200"
+        className="absolute inset-0 bg-[var(--color-modal-scrim)] transition-opacity duration-200"
         onClick={onClose}
       />
 
@@ -83,7 +83,9 @@ export function Modal({ open, onClose, title, children, width = 560, footer }: M
       <div
         ref={dialogRef}
         // 24px — the top of the handoff's corner scale, reserved for modals.
-        className="glass-panel relative rounded-[var(--radius-3xl)] max-h-[85vh] flex flex-col"
+        // `dialog-panel`, not `glass-panel`: the fill has to be opaque on its
+        // own rather than leaning on a blur that may never run.
+        className="dialog-panel relative rounded-[var(--radius-3xl)] max-h-[85vh] flex flex-col"
         style={{ width, maxWidth: 'calc(100vw - 48px)' }}
         role="dialog"
         aria-modal="true"
