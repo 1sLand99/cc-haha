@@ -35,10 +35,6 @@ vi.mock('../../i18n', () => ({
       'sidebar.noMatching': 'No matching sessions',
       'sidebar.sessionListFailed': 'Session list failed',
       'sidebar.refreshSessions': 'Refresh sessions',
-      'sidebar.indexBuilding': 'Optimizing history',
-      'sidebar.indexBuildingProgress': 'Optimizing history {indexed}/{discovered}',
-      'sidebar.indexReady': 'History optimization complete',
-      'sidebar.indexOff': 'History optimization inactive',
       'sidebar.indexDegraded': 'Using standard history loading',
       'search.global.trigger': 'Search chats',
       'sidebar.projects': 'Projects',
@@ -1294,7 +1290,9 @@ describe('Sidebar', () => {
     expect(screen.queryByText('No sessions')).not.toBeInTheDocument()
   })
 
-  it('shows quiet building progress while keeping indexed rows visible', () => {
+  // Indexing is background housekeeping the user cannot act on, so a partially
+  // built index must look exactly like a finished one: rows visible, no counter.
+  it('keeps indexed rows visible while building without surfacing progress', () => {
     useSessionStore.setState({
       sessions: [makeSession('indexed-row', 'Indexed row', '/workspace/alpha', '2026-07-15T00:00:00.000Z')],
       indexStatus: {
@@ -1313,7 +1311,9 @@ describe('Sidebar', () => {
     render(<Sidebar />)
 
     expect(screen.getByRole('button', { name: /Indexed row/ })).toBeInTheDocument()
-    expect(screen.getByTestId('sidebar-index-progress')).toHaveTextContent('Optimizing history 2/10')
+    expect(screen.queryByTestId('sidebar-index-progress')).not.toBeInTheDocument()
+    expect(screen.queryByText(/2\s*\/\s*10/)).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toBeEmptyDOMElement()
   })
 
   it.each(['ready', 'off'] as const)('hides visible index status when state is %s', (state) => {
@@ -1565,14 +1565,17 @@ describe('Sidebar', () => {
     }
   })
 
-  it('announces state transitions without exposing numeric progress to the live region', () => {
+  // The live region exists for the one transition a user can perceive: history
+  // is being served the slow way. Building/ready/off are silent there too, so a
+  // screen reader is not told about work that needs no reaction.
+  it.each(['building', 'ready', 'off'] as const)('stays silent in the live region while %s', (state) => {
     useSessionStore.setState({
       sessions: [makeSession('live-row', 'Live row', '/workspace/alpha', '2026-07-15T00:00:00.000Z')],
       indexStatus: {
-        mode: 'on',
-        state: 'building',
+        mode: state === 'off' ? 'off' : 'on',
+        state,
         discovered: 10,
-        indexed: 2,
+        indexed: state === 'building' ? 2 : 10,
         degradedSources: 0,
         databaseBytes: 4096,
         walBytes: 0,
@@ -1583,10 +1586,31 @@ describe('Sidebar', () => {
 
     render(<Sidebar />)
 
+    expect(screen.getByRole('status')).toBeEmptyDOMElement()
+  })
+
+  it('announces the degraded fallback in the live region', () => {
+    useSessionStore.setState({
+      sessions: [makeSession('live-row', 'Live row', '/workspace/alpha', '2026-07-15T00:00:00.000Z')],
+      indexStatus: {
+        mode: 'on',
+        state: 'degraded',
+        discovered: 10,
+        indexed: 2,
+        degradedSources: 1,
+        databaseBytes: 4096,
+        walBytes: 0,
+        lastUpdatedAt: '2026-07-15T00:00:00.000Z',
+        lastErrorCode: 'source_unreadable',
+      },
+    })
+
+    render(<Sidebar />)
+
     const liveRegion = screen.getByRole('status')
-    expect(liveRegion).toHaveTextContent('Optimizing history')
+    expect(liveRegion).toHaveTextContent('Using standard history loading')
     expect(liveRegion).not.toHaveTextContent('2/10')
-    expect(screen.getByTestId('sidebar-index-progress')).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByTestId('sidebar-index-degraded')).toHaveAttribute('aria-hidden', 'true')
   })
 
   it('refreshes sessions manually and through low-frequency visible polling', async () => {
