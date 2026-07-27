@@ -72,7 +72,8 @@ export const content = {
           label: '预览',
           title: '页面效果，会话里直接验证',
           body: '内置浏览器打开本地服务，改完当场看效果；截图和元素选择都能带回对话继续说。',
-          image: workspacePreview
+          image: workspacePreview,
+          shot: 'wide'
         },
         {
           id: 'models',
@@ -100,7 +101,8 @@ export const content = {
           label: '手机',
           title: '离开电脑，会话不断',
           body: '扫码用手机浏览器接着聊。锁屏切后台也不会打断正在跑的任务，回来就能看结果。',
-          image: h5Session
+          image: h5Session,
+          shot: 'tall'
         }
       ]
     },
@@ -190,11 +192,11 @@ export const content = {
       tabs: [
         { id: 'session', label: 'Session', title: 'Say it once. Watch it get done.', body: 'Pick a project, a permission mode and a model. Every file it read, every command it ran and every line it changed stays in the thread.', image: sessionMain },
         { id: 'review', label: 'Review', title: 'Know exactly what changed', body: 'The workspace lists this turn’s edits; open any file for a syntax-highlighted diff. Don’t like it? Undo the whole turn.', image: workspaceDiff },
-        { id: 'preview', label: 'Preview', title: 'Check the page without leaving', body: 'Open your dev server in the built-in browser, see the result immediately, and bring screenshots or picked elements back into the thread.', image: workspacePreview },
+        { id: 'preview', label: 'Preview', title: 'Check the page without leaving', body: 'Open your dev server in the built-in browser, see the result immediately, and bring screenshots or picked elements back into the thread.', image: workspacePreview, shot: 'wide' },
         { id: 'models', label: 'Models', title: 'Bring your own model', body: 'Sign in to Claude, ChatGPT or Grok, or point it at DeepSeek, Kimi, Zhipu, MiniMax — or LM Studio and Ollama running on your own machine.', image: providerAdd },
         { id: 'skills', label: 'Skills', title: 'Missing a trick? Install it.', body: 'The marketplace aggregates ClawHub and SkillHub, and labels every skill with its source and safety status before you install.', image: skillMarket },
         { id: 'schedule', label: 'Schedule', title: 'Set the time. It comes back with results.', body: 'Choose a cadence, model, directory and notification. Jobs run in their own sessions and every run leaves a record.', image: scheduleCreate },
-        { id: 'remote', label: 'Mobile', title: 'Step away, keep the session', body: 'Scan the QR code and continue in your phone browser. Locking the screen won’t kill a running task.', image: h5Session }
+        { id: 'remote', label: 'Mobile', title: 'Step away, keep the session', body: 'Scan the QR code and continue in your phone browser. Locking the screen won’t kill a running task.', image: h5Session, shot: 'tall' }
       ]
     },
     crew: {

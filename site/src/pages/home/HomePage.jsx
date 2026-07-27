@@ -136,7 +136,7 @@ function Tour({ c, locale }) {
             <h3>{active.title}</h3>
             <p>{active.body}</p>
           </div>
-          <div className={active.id === 'remote' ? 'tour__shot tour__shot--tall' : 'tour__shot'}>
+          <div className={active.shot ? `tour__shot tour__shot--${active.shot}` : 'tour__shot'}>
             <img alt={active.title} key={active.id} loading="lazy" src={active.image} />
           </div>
         </div>
