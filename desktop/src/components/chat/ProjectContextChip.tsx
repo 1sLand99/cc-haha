@@ -13,7 +13,10 @@ type Props = {
   /**
    * `toolbar` is the read-only twin of the run-location pill: same row, same
    * metrics, minus the border and the chevron. Sending the first message swaps
-   * one for the other in place, so nothing moves.
+   * one for the other in place, so nothing moves. It is what the wide desktop
+   * composer renders; `chip` is left for the narrow layouts (H5, and the
+   * desktop composer beside an open workspace panel), which keep the location
+   * on its own line below the panel.
    */
   variant?: 'chip' | 'toolbar'
 }
@@ -98,6 +101,7 @@ export function ProjectContextChip({
   return (
     <div
       title={title}
+      data-testid="run-location-outside"
       className={`inline-flex max-w-full items-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] text-[var(--color-text-secondary)] ${
         compact ? 'gap-1.5 px-3 py-1.5 text-xs' : 'gap-2 px-4 py-2 text-sm'
       }`}

@@ -803,16 +803,35 @@ describe('ChatInput file mentions', () => {
   // Sending the first message used to move the run location from inside the
   // panel to a chip below it. It stays in the toolbar now and only loses its
   // affordances, so nothing shifts under the cursor.
+  //
+  // The variant here is `default` on purpose: ActiveSession renders the hero
+  // composer only while the session is empty, so a live session is always the
+  // default one. Asserting this against `hero` passed while the shipped
+  // composer still dropped the chip below the panel.
   it('swaps the pill for a read-only chip in the same row once the session has messages', async () => {
     // beforeEach seeds one message, so this is a live session, not a draft.
-    render(<ChatInput variant="hero" />)
+    render(<ChatInput variant="default" />)
 
     const chip = await screen.findByTestId('run-location-readonly')
     expect(chip).toHaveTextContent('repo')
     expect(chip).toHaveTextContent('main')
 
     expect(screen.getByTestId('chat-input-toolbar')).toContainElement(chip)
+    expect(screen.getByTestId('chat-input-panel')).toContainElement(chip)
+    expect(screen.queryByTestId('run-location-outside')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Location/ })).not.toBeInTheDocument()
+  })
+
+  // The narrow layouts never adopted the in-toolbar pill: there is no room for
+  // it beside the model selector, so they keep the location on its own line
+  // below the panel.
+  it('keeps the run location below the panel on the composer beside a workspace panel', async () => {
+    render(<ChatInput compact />)
+
+    const chip = await screen.findByTestId('run-location-outside')
+    expect(chip).toHaveTextContent('repo')
+    expect(screen.getByTestId('chat-input-panel')).not.toContainElement(chip)
+    expect(screen.queryByTestId('run-location-readonly')).not.toBeInTheDocument()
   })
 
   it('uses the persisted message count to keep reopened sessions in context mode while history loads', async () => {
@@ -1530,9 +1549,36 @@ describe('ChatInput file mentions', () => {
     const toolbar = screen.getByTestId('chat-input-toolbar')
 
     expect(toolbar).not.toHaveClass('absolute')
-    expect(toolbar).toHaveClass('mt-2')
+    expect(toolbar).toHaveClass('mt-3')
     expect(input).not.toHaveClass('pb-12')
     expect(input).not.toHaveClass('pb-14')
+  })
+
+  // The draft and the live session render the same composer, so the row that
+  // carries the location, the permission mode and the model has to sit in the
+  // same place in both. The live one used to weld itself to the panel edge
+  // with `-mx-4 -mb-4`, which pulled every control 4px left and stretched the
+  // divider across the panel the moment the first message landed.
+  it('keeps the wide composer toolbar inset when a draft turns into a live session', async () => {
+    const { unmount } = render(<ChatInput variant="hero" />)
+
+    const draftToolbar = screen.getByTestId('chat-input-toolbar')
+    expect(draftToolbar).toHaveClass('pt-3')
+    expect(draftToolbar.className).not.toMatch(/-m[xy]-\d/)
+    unmount()
+
+    const live = render(<ChatInput variant="default" />)
+
+    const liveToolbar = screen.getByTestId('chat-input-toolbar')
+    expect(liveToolbar).toHaveClass('pt-3')
+    expect(liveToolbar.className).not.toMatch(/-m[xy]-\d/)
+    live.unmount()
+
+    // The narrow composer keeps the band: `p-3` leaves too little room to
+    // spend on inset, and it never swaps variants mid-session.
+    render(<ChatInput compact />)
+
+    expect(screen.getByTestId('chat-input-toolbar')).toHaveClass('-mx-3')
   })
 
   it('uses Ctrl or Command Enter to send when that composer preference is selected', async () => {

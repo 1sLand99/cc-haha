@@ -205,8 +205,14 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   // stays there for the whole session: editable while the session is still a
   // draft, read-only once the first message lands. It used to jump from inside
   // the panel to a chip below it at that moment.
-  const showLocationInToolbar = isHeroComposer && !useCompactControls && !isMemberSession
-  const embedLaunchControlsInHero = showLocationInToolbar && showLaunchControls
+  //
+  // Deliberately not keyed on `isHeroComposer`: ActiveSession only renders the
+  // hero variant while the session is empty, so keying on it moved the location
+  // out of the toolbar at the exact moment it was supposed to stay put — the
+  // first message swaps the variant and the draft state in the same render.
+  // The condition is the composer's width, not its variant.
+  const showLocationInToolbar = !useCompactControls && !isMemberSession
+  const embedLaunchControlsInToolbar = showLocationInToolbar && showLaunchControls
   const pendingSlashUiAction = !isMemberSession && input.trim().startsWith('/')
     ? resolveSlashUiAction(input.trim().slice(1))
     : null
@@ -1245,17 +1251,35 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
               placeholder={composerPlaceholder}
               disabled={isWorkspaceMissing}
               rows={1}
-              className={`w-full resize-none bg-transparent text-sm leading-relaxed text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] disabled:opacity-50 ${
+              // `block`: a textarea is inline-block by default, so it carries a
+              // ~6px descender gap under it. The hero branch escapes it through
+              // its flex row; this one is a plain block child and was sitting
+              // 18px above the divider where the hero sits 12px.
+              className={`block w-full resize-none bg-transparent text-sm leading-relaxed text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] disabled:opacity-50 ${
                 useCompactControls ? 'py-1.5' : 'py-2'
               }`}
             />
           )}
 
-          <div data-testid="chat-input-toolbar" className={isHeroComposer
-            ? 'flex items-center justify-between border-t border-[var(--color-border-separator)] pt-3'
-            : `mt-2 flex items-center justify-between border-t border-[var(--color-border-separator)] ${
-              useCompactControls ? `-mx-3 -mb-3 px-2.5 py-2 ${isMobileComposer ? 'gap-1' : 'gap-2'}` : '-mx-4 -mb-4 px-3 py-3'
-            }`}>
+          {/*
+            The wide composer keeps one geometry for the whole session. The
+            draft and the live session used to render two different rows — the
+            draft's divider was inset inside the panel's padding, the live one
+            ran edge to edge over a `-mx-4 -mb-4` band — so the first message
+            shifted every control left by 4px and widened the divider by 34px.
+            The hero spacing wins because EmptySession renders the same row.
+            Its top gap comes from the panel's own `flex-col gap-3`, which the
+            live panel does not have, so that one repeats here as `mt-3`.
+            The narrow layouts keep the band: `p-3` leaves too little room to
+            spend on inset, and they never swap variants mid-session anyway.
+          */}
+          <div data-testid="chat-input-toolbar" className={`flex items-center justify-between border-t border-[var(--color-border-separator)] ${
+            isHeroComposer
+              ? 'pt-3'
+              : useCompactControls
+                ? `mt-2 -mx-3 -mb-3 px-2.5 py-2 ${isMobileComposer ? 'gap-1' : 'gap-2'}`
+                : 'mt-3 pt-3'
+          }`}>
             <div
               data-testid="chat-input-toolbar-leading"
               className={`flex min-w-0 items-center ${isMobileComposer ? 'shrink-0 gap-1' : 'gap-2'}`}
@@ -1302,7 +1326,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                   <PermissionModeSelector compact={useCompactControls} />
 
                   {showLocationInToolbar && (
-                    embedLaunchControlsInHero ? (
+                    embedLaunchControlsInToolbar ? (
                       <RepositoryLaunchControls
                         workDir={activeLaunchWorkDir}
                         onWorkDirChange={handleLaunchWorkDirChange}
