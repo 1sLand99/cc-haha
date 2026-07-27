@@ -42,16 +42,14 @@ v0.5.0 shipped a full UI redesign — six colour themes that can follow your sys
 
 <table>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/session-main.webp" alt="Desktop session view"><br><b>Say it once. Watch it get done.</b><br><sub>Tool calls, thinking and every edit stay in the thread</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/workspace-diff.webp" alt="Workspace diff review"><br><b>Know exactly what changed</b><br><sub>Syntax-highlighted diffs; nothing lands without your nod</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/session-main.webp" alt="Desktop session view"><br><b>Say it once, watch it finish</b><br><sub>Tool calls and every edit stay in the thread</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/workspace-diff.webp" alt="Workspace diff review"><br><b>See exactly what changed</b><br><sub>Syntax-highlighted diffs; you decide what lands</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/workspace-preview.webp" alt="Built-in browser previewing the page that was just changed"><br><b>Verify on the spot</b><br><sub>Open your dev server inside the app</sub></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/workspace-preview.webp" alt="Built-in browser previewing the page that was just changed"><br><b>Verify on the spot</b><br><sub>Open your dev server inside the app and bring the result back</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/session-dark.webp" alt="Session view in the dark theme"><br><b>Six themes, optionally following the system</b><br><sub>White · Paper · Warm classic · Celadon · Ink night · Ink blue</sub></td>
-  </tr>
-  <tr>
-    <td align="center" width="50%"><img src="docs/images/app/skill-market.webp" alt="Skill marketplace"><br><b>Missing a trick? Install it.</b><br><sub>Source and safety status shown before you install</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/pet-desktop.webp" alt="Desktop pet settings with the floating pet"><br><b>Company while it works</b><br><sub>Dada, Huhu, Bubu and Huihui move with the task at hand</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/session-dark.webp" alt="Session view in the dark theme"><br><b>Six themes, follows the system</b><br><sub>Light and dark, six palettes in all</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/skill-market.webp" alt="Skill marketplace"><br><b>Missing a trick? Install it</b><br><sub>Source and safety status shown up front</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/pet-desktop.webp" alt="Desktop pet settings with the floating pet"><br><b>Company while it works</b><br><sub>Dada, Huhu, Bubu and Huihui follow the task</sub></td>
   </tr>
 </table>
 

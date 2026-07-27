@@ -42,16 +42,14 @@ v0.5.0 做了一次全量 UI 重设计（「纸·墨·印」），六套配色�
 
 <table>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/session-main.webp" alt="桌面端会话主界面"><br><b>说一句话，看它一步步做完</b><br><sub>工具调用、思考过程和每一处改动都留在对话里</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/workspace-diff.webp" alt="工作区 Diff 评审"><br><b>改了什么，逐个文件看清楚</b><br><sub>带语法高亮的 Diff，不点头就不落地</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/session-main.webp" alt="桌面端会话主界面"><br><b>说一句话，看它做完</b><br><sub>工具调用和每处改动都留在对话里</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/workspace-diff.webp" alt="工作区 Diff 评审"><br><b>改了什么，逐个文件看</b><br><sub>带语法高亮的 Diff，你点头才落地</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/workspace-preview.webp" alt="内置浏览器预览刚改完的页面"><br><b>改完当场验证</b><br><sub>内置浏览器打开本地服务看效果</sub></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/workspace-preview.webp" alt="内置浏览器预览刚改完的页面"><br><b>改完当场验证</b><br><sub>内置浏览器打开本地服务，效果直接带回会话</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/session-dark.webp" alt="墨夜主题下的会话界面"><br><b>六套配色，可跟随系统深浅色</b><br><sub>纯白 · 纸墨 · 经典暖色 · 青瓷 · 墨夜 · 墨夜蓝</sub></td>
-  </tr>
-  <tr>
-    <td align="center" width="50%"><img src="docs/images/app/skill-market.webp" alt="技能市场"><br><b>缺什么手艺，装什么手艺</b><br><sub>来源和安全状态摆在明处，装之前先看清楚</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/pet-desktop.webp" alt="桌面宠物设置与悬浮宠物"><br><b>干活的时候，桌面上有个伴</b><br><sub>搭搭、弧弧、补补、回回随任务状态换动作</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/session-dark.webp" alt="墨夜主题下的会话界面"><br><b>六套配色可跟随系统</b><br><sub>纯白 · 纸墨 · 经典暖色 · 青瓷 · 墨夜 · 墨夜蓝</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/skill-market.webp" alt="技能市场"><br><b>缺什么手艺装什么</b><br><sub>来源和安全状态摆在明处</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/pet-desktop.webp" alt="桌面宠物设置与悬浮宠物"><br><b>桌面上有个伴</b><br><sub>搭搭、弧弧、补补、回回随任务换动作</sub></td>
   </tr>
 </table>
 
