@@ -35,6 +35,7 @@ import {
   setAppMode,
 } from './services/appMode'
 import { installMacOsChromiumKeychainPromptGuard } from './services/keychain'
+import { installStdioWriteFailureGuards } from './services/stdioGuards'
 import { applyWindowsAppUserModelId } from './services/appIdentity'
 import { installMainWindowNavigationGuards, installPreviewNavigationGuards } from './services/navigationGuards'
 import { installPreviewCleanupOnRendererNavigation } from './services/previewLifecycle'
@@ -90,6 +91,9 @@ const traceWindows = new Map<string, BrowserWindow>()
 let isQuitting = false
 let trayController: TrayController | null = null
 
+// Must run before anything logs: a Finder/Dock launch inherits unreadable
+// stdio, and an unguarded write failure there surfaces as a crash dialog.
+installStdioWriteFailureGuards()
 installMacOsChromiumKeychainPromptGuard(app)
 
 function appRoot() {
