@@ -32,7 +32,7 @@ A Claude Code build repaired from the source leaked from Anthropic's npm registr
 
 The Claude Code Haha desktop app brings sessions, multi-project navigation, branch / Worktree controls, file changes, diff review, permission approval, model setup, and remote access into one graphical workspace for daily development beyond the terminal.
 
-v0.5.0 shipped a full UI redesign — six colour themes that can follow your system's light/dark setting. All four shots below are from a real v0.5.0 build.
+v0.5.0 shipped a full UI redesign — six colour themes that can follow your system's light/dark setting. All six shots below are from a real v0.5.0 build.
 
 <p align="center">
   <a href="https://github.com/NanmiCoder/cc-haha/releases"><img src="https://img.shields.io/badge/⬇_Download_Desktop-macOS_%7C_Windows_%7C_Linux-FF7A00?style=for-the-badge" alt="Download Desktop"></a>
@@ -42,12 +42,16 @@ v0.5.0 shipped a full UI redesign — six colour themes that can follow your sys
 
 <table>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/session-main.webp" alt="Desktop session view"><br><b>Session, tool calls & inline diff</b></td>
-    <td align="center" width="50%"><img src="docs/images/app/workspace-diff.webp" alt="Workspace diff review"><br><b>Review every edit, file by file</b></td>
+    <td align="center" width="50%"><img src="docs/images/app/session-main.webp" alt="Desktop session view"><br><b>Say it once. Watch it get done.</b><br><sub>Tool calls, thinking and every edit stay in the thread</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/workspace-diff.webp" alt="Workspace diff review"><br><b>Know exactly what changed</b><br><sub>Syntax-highlighted diffs; nothing lands without your nod</sub></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/session-dark.webp" alt="Session view in the dark theme"><br><b>Six themes, optionally following the system</b></td>
-    <td align="center" width="50%"><img src="docs/images/app/skill-market.webp" alt="Skill marketplace"><br><b>Skill marketplace with source and safety labels</b></td>
+    <td align="center" width="50%"><img src="docs/images/app/workspace-preview.webp" alt="Built-in browser previewing the page that was just changed"><br><b>Verify on the spot</b><br><sub>Open your dev server inside the app and bring the result back</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/session-dark.webp" alt="Session view in the dark theme"><br><b>Six themes, optionally following the system</b><br><sub>White · Paper · Warm classic · Celadon · Ink night · Ink blue</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><img src="docs/images/app/skill-market.webp" alt="Skill marketplace"><br><b>Missing a trick? Install it.</b><br><sub>Source and safety status shown before you install</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/pet-desktop.webp" alt="Desktop pet settings with the floating pet"><br><b>Company while it works</b><br><sub>Dada, Huhu, Bubu and Huihui move with the task at hand</sub></td>
   </tr>
 </table>
 
