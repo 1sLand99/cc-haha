@@ -2255,6 +2255,7 @@ export const jp: Record<TranslationKey, string> = {
   'trace.copySessionId': 'Session ID をコピー',
   'trace.refresh': 'Trace を更新',
   'trace.openWindow': '別ウィンドウで開く',
+  'trace.backToList': '一覧に戻る',
   'trace.delete': 'Trace を削除',
   'trace.noResponse': 'レスポンス本文はキャプチャされていません',
   'trace.emptyTitle': 'Trace 呼び出しはまだありません',

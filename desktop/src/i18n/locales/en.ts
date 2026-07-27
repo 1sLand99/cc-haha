@@ -2253,6 +2253,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'trace.copySessionId': 'Copy session ID',
   'trace.refresh': 'Refresh trace',
   'trace.openWindow': 'Open in separate window',
+  'trace.backToList': 'Back to list',
   'trace.delete': 'Delete trace',
   'trace.noResponse': 'No response body captured',
   'trace.emptyTitle': 'No trace calls yet',

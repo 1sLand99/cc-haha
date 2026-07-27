@@ -277,8 +277,20 @@ export function Settings() {
 }
 
 function TabButton({ icon, label, active, onClick }: { icon: string; label: string; active: boolean; onClick: () => void }) {
+  const ref = useRef<HTMLButtonElement>(null)
+
+  // The rail is taller than its viewport, and Settings remounts whenever the
+  // tab is re-entered — from a trace tab's "back to list", say — with the
+  // scroll position reset to the top. Without this the selected section can be
+  // highlighted somewhere off-screen. `nearest` is a no-op when already visible.
+  useEffect(() => {
+    if (!active) return
+    ref.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [active])
+
   return (
     <button
+      ref={ref}
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       className={`w-full flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-[13.5px] text-left transition-[background-color,color] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-container-low)] ${

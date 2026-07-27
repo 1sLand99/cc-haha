@@ -2255,6 +2255,7 @@ export const kr: Record<TranslationKey, string> = {
   'trace.copySessionId': 'Session ID 복사',
   'trace.refresh': 'Trace 새로고침',
   'trace.openWindow': '별도 창에서 열기',
+  'trace.backToList': '목록으로',
   'trace.delete': 'Trace 삭제',
   'trace.noResponse': '응답 본문이 캡처되지 않았습니다',
   'trace.emptyTitle': '아직 Trace 호출이 없습니다',

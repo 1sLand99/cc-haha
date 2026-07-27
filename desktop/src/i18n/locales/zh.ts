@@ -2254,6 +2254,7 @@ export const zh: Record<TranslationKey, string> = {
   'trace.copySessionId': '复制 Session ID',
   'trace.refresh': '刷新 Trace',
   'trace.openWindow': '在独立窗口打开',
+  'trace.backToList': '返回列表',
   'trace.delete': '删除 Trace',
   'trace.noResponse': '未捕获响应正文',
   'trace.emptyTitle': '暂无 Trace 调用',

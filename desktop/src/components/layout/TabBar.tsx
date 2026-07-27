@@ -647,6 +647,11 @@ const TabItem = forwardRef<HTMLDivElement, {
       {tab.type === 'workbench' && (
         <span className="material-symbols-outlined text-[14px] flex-shrink-0 text-[var(--color-text-tertiary)]">view_sidebar</span>
       )}
+      {/* Same glyph as the Settings rail entry the trace list sits behind, so a
+          trace tab reads as that section rather than as another chat. */}
+      {tab.type === 'trace' && (
+        <span className="material-symbols-outlined text-[14px] flex-shrink-0 text-[var(--color-text-tertiary)]">account_tree</span>
+      )}
 
       <span className={`flex-1 truncate text-xs ${isActive ? 'text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-secondary)]'}`}>
         {displayTitle}
