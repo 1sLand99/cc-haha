@@ -5559,6 +5559,56 @@ describe('chatStore history mapping', () => {
     expect(userMessages).toHaveLength(1)
   })
 
+  it('keeps an image-only replay before the assistant response', () => {
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          messages: [
+            {
+              id: 'live-user',
+              type: 'user_text',
+              content: '',
+              attachments: [{
+                type: 'image',
+                name: 'screenshot.png',
+                data: 'data:image/png;base64,AAAA',
+                mimeType: 'image/png',
+              }],
+              timestamp: 1,
+            },
+            {
+              id: 'assistant-answer',
+              type: 'assistant_text',
+              content: 'The screenshot shows a repository list.',
+              timestamp: 2,
+            },
+          ],
+          chatState: 'thinking',
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'user_message_replay',
+      content: [
+        'Please analyze the attached image.',
+        '[Image source: /Users/me/.claude/uploads/session/screenshot.png]',
+      ].join('\n'),
+    })
+
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toMatchObject([
+      {
+        type: 'user_text',
+        content: '',
+        attachments: [{ type: 'image', name: 'screenshot.png' }],
+      },
+      {
+        type: 'assistant_text',
+        content: 'The screenshot shows a repository list.',
+      },
+    ])
+  })
+
   it('dedupes a path-backed image after the server inlines it into replay content', () => {
     const prompt = '检查这张截图'
     const imagePath = 'C:\\Users\\tester\\Desktop\\screen.png'

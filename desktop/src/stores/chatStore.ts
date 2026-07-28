@@ -3749,6 +3749,7 @@ function extractRestoredUserDisplay(text: string): RestoredUserDisplay {
 // ConversationService stores data-only files as `${randomUUID()}-${sanitizedName}`
 // and omits successfully inlined images from the replayed text content.
 const MATERIALIZED_UPLOAD_NAME_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-(.+)$/i
+const IMAGE_ONLY_REPLAY_FALLBACK = 'Please analyze the attached image.'
 
 function isLikelyInlineImageAttachment(attachment: UIAttachment): boolean {
   if (attachment.type === 'image') return true
@@ -3800,12 +3801,23 @@ function replayMatchesCurrentUserMessage(
   const currentModelContent = (message.modelContent ?? message.content).trim()
   if (currentModelContent === replayModelContent) return true
 
+  const currentAttachments = message.attachments ?? []
+  if (
+    message.content.trim() === '' &&
+    replayDisplay.content.trim() === IMAGE_ONLY_REPLAY_FALLBACK &&
+    !replayDisplay.attachments?.length &&
+    currentAttachments.length > 0 &&
+    currentAttachments.every(isLikelyInlineImageAttachment)
+  ) {
+    return true
+  }
+
   const currentDisplay = extractRestoredUserDisplay(currentModelContent)
   if (currentDisplay.content.trim() !== replayDisplay.content.trim()) return false
 
   return replayAttachmentsMatchCurrent(
     replayDisplay.attachments ?? [],
-    message.attachments ?? [],
+    currentAttachments,
   )
 }
 
