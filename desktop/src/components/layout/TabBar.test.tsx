@@ -710,6 +710,98 @@ describe('TabBar', () => {
     expect(screen.queryByTestId('session-activity-badge')).not.toBeInTheDocument()
   })
 
+  it('gives session tabs an icon and keeps the title still when one starts running', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+
+    useTabStore.setState({
+      tabs: [
+        { sessionId: 'tab-1', title: 'Idle Session', type: 'session', status: 'idle' },
+      ],
+      activeTabId: 'tab-1',
+    })
+    useChatStore.setState({
+      sessions: {},
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    // #1123 asked for icons on the tabs. Five special kinds already had one;
+    // the session kind — the overwhelming majority — did not.
+    const idleLabel = screen.getByText('Idle Session')
+    expect(idleLabel.previousElementSibling?.textContent).toBe('chat_bubble')
+    const siblingsBeforeLabel = Array.from(idleLabel.parentElement?.children ?? [])
+      .indexOf(idleLabel)
+
+    await act(async () => {
+      useTabStore.setState({
+        tabs: [
+          { sessionId: 'tab-1', title: 'Idle Session', type: 'session', status: 'running' },
+        ],
+        activeTabId: 'tab-1',
+      })
+    })
+
+    // The real bug behind the icon request: the running dot used to be
+    // *inserted* ahead of the label, so a title jumped sideways the moment its
+    // session started and jumped back when it finished. The dot now swaps into
+    // the icon slot, so the label keeps its position in the row.
+    const runningLabel = screen.getByText('Idle Session')
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(Array.from(runningLabel.parentElement?.children ?? []).indexOf(runningLabel))
+      .toBe(siblingsBeforeLabel)
+  })
+
+  it('scrolls by a fraction of the visible strip rather than a fixed tab width', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+
+    useTabStore.setState({
+      tabs: [
+        { sessionId: 'tab-1', title: 'First Session', type: 'session', status: 'idle' },
+        { sessionId: 'tab-2', title: 'Second Session', type: 'session', status: 'idle' },
+        { sessionId: 'tab-3', title: 'Third Session', type: 'session', status: 'idle' },
+      ],
+      activeTabId: 'tab-1',
+    })
+    useChatStore.setState({
+      sessions: {},
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    const scrollRegion = screen.getByTestId('tab-bar-scroll-region')
+    const scrollByMock = vi.fn()
+    Object.defineProperty(scrollRegion, 'clientWidth', { configurable: true, get: () => 400 })
+    Object.defineProperty(scrollRegion, 'scrollWidth', { configurable: true, get: () => 1200 })
+    Object.defineProperty(scrollRegion, 'scrollLeft', { configurable: true, get: () => 0 })
+    Object.defineProperty(scrollRegion, 'scrollBy', { configurable: true, value: scrollByMock })
+
+    act(() => {
+      fireEvent.scroll(scrollRegion)
+    })
+
+    const rightButton = await waitFor(() => {
+      const button = screen.getByText('chevron_right').closest('button')
+      expect(button).toBeInTheDocument()
+      return button as HTMLButtonElement
+    })
+
+    fireEvent.click(rightButton)
+
+    // Tabs size to their titles now, so the old fixed 180px step would
+    // overshoot a row of short ones and undershoot a row of long ones.
+    expect(scrollByMock).toHaveBeenCalledWith({ left: 300, behavior: 'smooth' })
+  })
+
   it('scrolls the active tab into view when the active tab changes', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')
@@ -880,7 +972,7 @@ describe('TabBar', () => {
     expect(screen.getByTestId('tab-bar-drag-gutter')).toHaveClass('min-h-[52px]')
   })
 
-  it('marks the active tab with a rule rather than a filled pill', async () => {
+  it('lifts the active tab onto the paper ground without turning it into a pill', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')
     const { useChatStore } = await import('../../stores/chatStore')
@@ -905,10 +997,92 @@ describe('TabBar', () => {
     const inactive = screen.getByText('Inactive One').closest('.tab-bar-interactive')
 
     expect(active?.className).toContain('shadow-[inset_0_-3px_0_var(--color-brand)]')
-    // The active tab shares the strip's ground; giving it its own fill is what
-    // turned the underline treatment back into a pill.
-    expect(active?.className).toContain('bg-transparent')
+
+    // The fill is the point, and it is not a pill. #1123 landed because the
+    // strip, the active tab and the content below it were all
+    // `--color-surface`: three planes, one colour, nothing but a 3px rule to
+    // separate them. The strip now sits on the sidebar's ground and the active
+    // tab is filled with paper, so it reads as a sheet lifted off the desk and
+    // continuous with the view it opens onto.
+    expect(active?.className).toContain('bg-[var(--color-surface)]')
+    expect(active?.className).not.toContain('bg-transparent')
+    expect(inactive?.className).toContain('bg-transparent')
     expect(inactive?.className).not.toContain('inset_0_-3px')
+
+    // What stays banned is the *shape*, not the fill. A pill is a rounded
+    // block floating clear of both the strip and the content; a document tab
+    // is square and flush. Guard the three properties that would turn one into
+    // the other.
+    expect(active?.className).not.toMatch(/\brounded/)
+    expect(active?.className).not.toMatch(/\bshadow-\[0/)
+    expect(active?.className).not.toMatch(/\bm[xlr]?-/)
+
+    // Hover shares paper with the active tab instead of using
+    // `--color-surface-hover`. That token is tuned for hovering *on* paper, so
+    // on the ink themes it sits brighter than paper (dark #2B271F vs #201D17)
+    // and a hovered tab would outshine the selected one. Selection stays
+    // strictly stronger because only it adds the rule and the label weight.
+    expect(inactive?.className).toContain('hover:bg-[var(--color-surface)]')
+    expect(inactive?.className).not.toContain('hover:bg-[var(--color-surface-hover)]')
+  })
+
+  it('keeps the strip on the frame ground so the active tab can lift off it', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+
+    useTabStore.setState({
+      tabs: [
+        { sessionId: 'tab-1', title: 'Active One', type: 'session', status: 'idle' },
+      ],
+      activeTabId: 'tab-1',
+    })
+    useChatStore.setState({
+      sessions: {},
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    // The two halves of the contract. If the strip ever goes back to
+    // `--color-surface` the active tab's fill stops reading as a lift and the
+    // whole bar flattens again, which is the regression #1123 reported.
+    expect(screen.getByTestId('tab-bar')).toHaveClass('bg-[var(--color-surface-sidebar)]')
+    expect(screen.getByText('Active One').closest('.tab-bar-interactive')?.className)
+      .toContain('bg-[var(--color-surface)]')
+  })
+
+  it('sizes tabs to their titles instead of a fixed width', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+
+    useTabStore.setState({
+      tabs: [
+        { sessionId: 'tab-1', title: 'Short', type: 'session', status: 'idle' },
+      ],
+      activeTabId: 'tab-1',
+    })
+    useChatStore.setState({
+      sessions: {},
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    const tab = screen.getByText('Short').closest('.tab-bar-interactive') as HTMLElement
+
+    expect(tab.className).toContain('min-w-[140px]')
+    expect(tab.className).toContain('max-w-[200px]')
+    // The inline `width`/`maxWidth` pair is what pinned every tab to 180px and
+    // left short titles trailing dead space. Only `transform` belongs inline
+    // now — it carries the drag offset.
+    expect(tab.style.width).toBe('')
+    expect(tab.style.maxWidth).toBe('')
   })
 
   it('passes the active session workdir into the open-project control', async () => {

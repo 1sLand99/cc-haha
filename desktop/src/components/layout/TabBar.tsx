@@ -11,6 +11,7 @@ import {
   WORKBENCH_TAB_PREFIX,
   useTabStore,
   type Tab,
+  type TabType,
 } from '../../stores/tabStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useSessionStore } from '../../stores/sessionStore'
@@ -34,8 +35,26 @@ import { SessionActivityButton } from '../activity/SessionActivityButton'
 import { useActivityPanelStore } from '../../stores/activityPanelStore'
 import { getSessionBrowsablePath } from '../../lib/sessionWorkspace'
 
-const TAB_WIDTH = 180
 const DRAG_START_THRESHOLD = 4
+// Fraction of the visible strip a chevron press travels. Tabs size to their
+// titles, so a fixed pixel step would overshoot a row of short ones and
+// undershoot a row of long ones; leaving a quarter behind keeps the tab you
+// were looking at on screen as an anchor.
+const SCROLL_STEP_RATIO = 0.75
+// One glyph per tab kind, so the icon slot is never empty and every title
+// starts at the same x. `trace` and `traces` share the Settings rail's glyph
+// on purpose — a trace tab should read as that section, not as another chat.
+const TAB_TYPE_ICON: Partial<Record<TabType, string>> = {
+  session: 'chat_bubble',
+  settings: 'settings',
+  scheduled: 'schedule',
+  market: 'storefront',
+  terminal: 'terminal',
+  trace: 'account_tree',
+  traces: 'account_tree',
+  workbench: 'view_sidebar',
+  subagent: 'smart_toy',
+}
 const desktopHost = getDesktopHost()
 const isDesktopRuntime = desktopHost.isDesktop
 const EMPTY_DISMISSED_BACKGROUND_TASK_KEYS: readonly string[] = []
@@ -222,7 +241,8 @@ export function TabBar() {
   const scroll = (direction: 'left' | 'right') => {
     const el = scrollRef.current
     if (!el) return
-    el.scrollBy({ left: direction === 'left' ? -TAB_WIDTH : TAB_WIDTH, behavior: 'smooth' })
+    const step = el.clientWidth * SCROLL_STEP_RATIO
+    el.scrollBy({ left: direction === 'left' ? -step : step, behavior: 'smooth' })
   }
 
   const closeTabWithCleanup = useCallback((tab: Tab) => {
@@ -405,7 +425,14 @@ export function TabBar() {
     <div
       data-testid="tab-bar"
       data-desktop-drag-region={isDesktopRuntime ? true : undefined}
-      className="flex min-h-[52px] items-stretch bg-[var(--color-surface)] select-none border-b border-[var(--color-border)]"
+      /*
+        The strip is frame, not paper: it sits on the sidebar's ground so the
+        active tab can be filled with `--color-surface` and read as a sheet
+        lifted off the desk, continuous with the content below it. Painting the
+        strip `--color-surface` instead collapses strip, active tab and content
+        into one flat plane, which is what #1123 reported as "粗犷".
+      */
+      className="flex min-h-[52px] items-stretch bg-[var(--color-surface-sidebar)] select-none border-b border-[var(--color-border)]"
     >
 
       {canScrollLeft && (
@@ -611,49 +638,52 @@ const TabItem = forwardRef<HTMLDivElement, {
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
       className={`
-        tab-bar-interactive group relative flex min-h-[52px] flex-shrink-0 items-center gap-1.5 px-3
+        tab-bar-interactive group relative flex min-h-[52px] min-w-[140px] max-w-[200px] flex-shrink-0 items-center gap-1.5 px-3
         ${isDragging ? 'z-[var(--z-sticky)] cursor-grabbing' : 'cursor-grab'}
         transition-[background-color,box-shadow,opacity,transform] duration-150 ease-out
         ${isActive
-          // Underline, not a pill: the active tab shares the bar's ground and is
-          // marked by a 3px terracotta rule plus weight on the label.
-          ? 'bg-transparent shadow-[inset_0_-3px_0_var(--color-brand)]'
-          : 'bg-transparent hover:bg-[var(--color-surface-hover)]'
+          // A filled document tab, still not a pill. The distinction that
+          // matters is the shape, not the fill: this is a square, full-height
+          // block flush with the content it opens onto, so paper runs unbroken
+          // from the tab into the view below. A pill is a rounded block that
+          // floats clear of both, which is what stays banned here — no radius,
+          // no drop shadow, no gap between neighbours.
+          ? 'bg-[var(--color-surface)] shadow-[inset_0_-3px_0_var(--color-brand)]'
+          // Hover rises toward paper, it does not fall away from it. The
+          // obvious `--color-surface-hover` is wrong here: it is tuned for
+          // hovering *on* paper, so on the two ink themes it lands brighter
+          // than paper itself (dark #2B271F vs #201D17) and a hovered tab
+          // outshines the selected one. Sharing paper with the active tab and
+          // letting the terracotta rule plus the label weight carry selection
+          // makes the active state strictly stronger in all six themes.
+          : 'bg-transparent hover:bg-[var(--color-surface)]'
         }
         ${isDragging ? 'opacity-95 shadow-[var(--shadow-overlay)] ring-1 ring-[var(--color-border)]' : ''}
         ${isDragOver ? 'before:absolute before:left-0 before:top-[4px] before:bottom-[4px] before:w-[3px] before:bg-[var(--color-brand)] before:rounded-full' : ''}
       `}
       style={{
-        width: TAB_WIDTH,
-        maxWidth: TAB_WIDTH,
         transform: isDragging ? `translateX(${dragOffsetX}px) scale(1.02)` : undefined,
       }}
     >
-      {tab.type === 'session' && isRunning && (
-        <StatusDot tone="brand" pulse label={runningLabel} className="flex-shrink-0" />
-      )}
-      {tab.type === 'session' && tab.status === 'error' && (
-        <StatusDot tone="danger" className="flex-shrink-0" />
-      )}
-      {tab.type === 'settings' && (
-        <span className="material-symbols-outlined text-[14px] flex-shrink-0 text-[var(--color-text-tertiary)]">settings</span>
-      )}
-      {tab.type === 'scheduled' && (
-        <span className="material-symbols-outlined text-[14px] flex-shrink-0 text-[var(--color-text-tertiary)]">schedule</span>
-      )}
-      {tab.type === 'terminal' && (
-        <span className="material-symbols-outlined text-[14px] flex-shrink-0 text-[var(--color-text-tertiary)]">terminal</span>
-      )}
-      {tab.type === 'workbench' && (
-        <span className="material-symbols-outlined text-[14px] flex-shrink-0 text-[var(--color-text-tertiary)]">view_sidebar</span>
-      )}
-      {/* Same glyph as the Settings rail entry the trace list sits behind, so a
-          trace tab reads as that section rather than as another chat. */}
-      {tab.type === 'trace' && (
-        <span className="material-symbols-outlined text-[14px] flex-shrink-0 text-[var(--color-text-tertiary)]">account_tree</span>
-      )}
+      {/*
+        One fixed slot, not a run of conditional siblings. The status dot used
+        to be *inserted* ahead of the label, so a session shoved its own title
+        sideways the moment it started running and pulled it back when it
+        finished. Swapping the slot's contents keeps the title still.
+      */}
+      <span className="flex h-[14px] w-[14px] flex-shrink-0 items-center justify-center">
+        {tab.type === 'session' && isRunning ? (
+          <StatusDot tone="brand" pulse label={runningLabel} />
+        ) : tab.type === 'session' && tab.status === 'error' ? (
+          <StatusDot tone="danger" />
+        ) : (
+          <span className="material-symbols-outlined text-[14px] leading-none text-[var(--color-text-tertiary)]">
+            {TAB_TYPE_ICON[tab.type] ?? TAB_TYPE_ICON.session}
+          </span>
+        )}
+      </span>
 
-      <span className={`flex-1 truncate text-xs ${isActive ? 'text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-secondary)]'}`}>
+      <span className={`min-w-0 flex-1 truncate text-xs ${isActive ? 'text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-secondary)]'}`}>
         {displayTitle}
       </span>
 
