@@ -15,8 +15,6 @@ import { useTranslation } from '../i18n'
 import { useUIStore } from '../stores/uiStore'
 import { useMcpStore } from '../stores/mcpStore'
 import { useSessionStore } from '../stores/sessionStore'
-import { sessionsApi } from '../api/sessions'
-import { mcpApi } from '../api/mcp'
 import type { McpServerRecord, McpUpsertPayload, McpWritableScope } from '../types/mcp'
 
 type EditorMode =
@@ -462,7 +460,7 @@ function ServerRow({
 }
 
 export function McpSettings() {
-  const { servers, selectedServer, isLoading, error, fetchServers, createServer, updateServer, deleteServer, toggleServer, reconnectServer, refreshServerStatus, selectServer } = useMcpStore()
+  const { servers, selectedServer, isLoading, error, fetchServersForKnownProjects, createServer, updateServer, deleteServer, toggleServer, reconnectServer, refreshServerStatus, selectServer } = useMcpStore()
   const addToast = useUIStore((s) => s.addToast)
   const sessions = useSessionStore((s) => s.sessions)
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
@@ -474,7 +472,6 @@ export function McpSettings() {
   const [busyServerKey, setBusyServerKey] = useState<string | null>(null)
   const [pendingDeleteServer, setPendingDeleteServer] = useState<McpServerRecord | null>(null)
   const [isInitialLoading, setIsInitialLoading] = useState(true)
-  const projectPathsForFetchRef = useRef<string[] | undefined>(undefined)
   const refreshInFlightRef = useRef(new Set<string>())
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
@@ -487,23 +484,7 @@ export function McpSettings() {
 
     const loadServers = async () => {
       try {
-        const [recentProjectPaths, privateMcpProjectPaths] = await Promise.all([
-          sessionsApi.getRecentProjects(8)
-            .then(({ projects }) => projects.map((project) => project.realPath))
-            .catch(() => []),
-          mcpApi.projectPaths()
-            .then(({ projectPaths }) => projectPaths)
-            .catch(() => []),
-        ])
-        if (cancelled) return
-        const paths = [
-          currentWorkDir,
-          ...recentProjectPaths,
-          ...privateMcpProjectPaths,
-        ].filter((path): path is string => !!path)
-        const projectPathsForFetch = Array.from(new Set(paths))
-        projectPathsForFetchRef.current = projectPathsForFetch.length ? projectPathsForFetch : undefined
-        await fetchServers(projectPathsForFetchRef.current, currentWorkDir)
+        await fetchServersForKnownProjects(currentWorkDir)
       } finally {
         if (!cancelled) setIsInitialLoading(false)
       }
@@ -514,7 +495,7 @@ export function McpSettings() {
     return () => {
       cancelled = true
     }
-  }, [fetchServers, currentWorkDir])
+  }, [fetchServersForKnownProjects, currentWorkDir])
 
   const groupedServers = useMemo(() => {
     const groups: Partial<Record<McpGroupKey, McpServerRecord[]>> = {}
@@ -1117,7 +1098,7 @@ export function McpSettings() {
               size="lg"
               title={error}
               retryLabel={t('common.retry')}
-              onRetry={() => void fetchServers(projectPathsForFetchRef.current, currentWorkDir)}
+              onRetry={() => void fetchServersForKnownProjects(currentWorkDir)}
             />
           ) : servers.length === 0 ? (
             <EmptyState
