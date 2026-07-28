@@ -1840,6 +1840,10 @@ export const zh: Record<TranslationKey, string> = {
   'question.submit': '提交',
   'question.answeredPrefix': '已回答: ',
   'question.resultPrefix': '結果: ',
+  'question.chatAboutThis': '和 Claude 聊聊',
+  'question.chatAboutThisHint': '選項都不合適？交給 Claude 追問，已填的答案會一併帶上',
+  'question.chatRequested': '已轉為對話，Claude 會接著追問',
+  'question.chatBadge': '已轉對話',
 
   // ─── Thinking Block ──────────────────────────────────────
   'thinking.label': '思考中',

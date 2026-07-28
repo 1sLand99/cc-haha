@@ -1841,6 +1841,10 @@ export const jp: Record<TranslationKey, string> = {
   'question.submit': '送信',
   'question.answeredPrefix': '回答: ',
   'question.resultPrefix': '結果: ',
+  'question.chatAboutThis': 'Claude と相談する',
+  'question.chatAboutThisHint': '選択肢が合わない場合は Claude に聞き返してもらいます。入力済みの回答も一緒に渡されます',
+  'question.chatRequested': '相談に切り替えました。Claude が確認します',
+  'question.chatBadge': '相談中',
 
   // ─── Thinking Block ──────────────────────────────────────
   'thinking.label': '思考中',

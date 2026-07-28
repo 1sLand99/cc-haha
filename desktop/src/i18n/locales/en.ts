@@ -1839,6 +1839,10 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'question.submit': 'Submit',
   'question.answeredPrefix': 'Answered: ',
   'question.resultPrefix': 'Result: ',
+  'question.chatAboutThis': 'Chat about this',
+  'question.chatAboutThisHint': 'None of these fit? Hand it back to Claude to follow up — anything already filled in comes along.',
+  'question.chatRequested': 'Handed back to Claude, which will follow up',
+  'question.chatBadge': 'Handed off',
 
   // ─── Thinking Block ──────────────────────────────────────
   'thinking.label': 'Thinking',

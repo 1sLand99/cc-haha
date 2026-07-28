@@ -36,6 +36,8 @@ import {
   resolveClaudeCliLauncher,
 } from '../../utils/desktopBundledCli.js'
 import {
+  ASK_USER_QUESTION_CLARIFY_MESSAGE,
+  ASK_USER_QUESTION_CLARIFY_WITH_QUESTIONS_PREFIX,
   PLAN_REJECTION_MESSAGE,
   PLAN_REJECTION_WITH_REASON_PREFIX,
   REJECT_MESSAGE,
@@ -89,8 +91,9 @@ export function cliExitSeverity(code: number | null): 'info' | 'error' {
  * Builds the denial text the CLI hands to the model as tool_result content.
  *
  * The model reads this verbatim, so it has to carry the instruction the desktop
- * UI can't: a plain tool denial means "stop and wait for me", while a rejected
- * plan means "keep planning". Both renderers (the CLI's
+ * UI can't: a plain tool denial means "stop and wait for me", a rejected plan
+ * means "keep planning", and a question the user wants to talk over means "ask
+ * them what needs clarifying". Both plan renderers (the CLI's
  * renderToolUseRejectedMessage, the desktop's extractPlanPreview) read the plan
  * from the tool input, so nothing here needs to echo the plan back.
  */
@@ -103,6 +106,14 @@ export function buildDenyMessage(
     return feedback
       ? `${PLAN_REJECTION_WITH_REASON_PREFIX}${feedback}`
       : PLAN_REJECTION_MESSAGE
+  }
+  // "Chat about this" is a denial only in transport terms — the user wants to
+  // keep talking, not to stop the turn. REJECT_MESSAGE's "STOP and wait" would
+  // contradict that and leave them staring at a silent turn.
+  if (toolName === 'AskUserQuestion') {
+    return feedback
+      ? `${ASK_USER_QUESTION_CLARIFY_WITH_QUESTIONS_PREFIX}${feedback}`
+      : ASK_USER_QUESTION_CLARIFY_MESSAGE
   }
   return feedback
     ? `${REJECT_MESSAGE_WITH_REASON_PREFIX}${feedback}`

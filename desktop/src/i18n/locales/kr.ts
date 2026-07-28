@@ -1841,6 +1841,10 @@ export const kr: Record<TranslationKey, string> = {
   'question.submit': '제출',
   'question.answeredPrefix': '응답: ',
   'question.resultPrefix': '결과: ',
+  'question.chatAboutThis': 'Claude와 상의하기',
+  'question.chatAboutThisHint': '적합한 선택지가 없나요? Claude가 다시 물어보도록 넘깁니다. 이미 입력한 답변도 함께 전달됩니다',
+  'question.chatRequested': '대화로 전환했습니다. Claude가 이어서 물어봅니다',
+  'question.chatBadge': '상의 중',
 
   // ─── Thinking Block ──────────────────────────────────────
   'thinking.label': '사고 중',

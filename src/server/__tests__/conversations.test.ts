@@ -21,6 +21,7 @@ import {
   conversationService,
 } from '../services/conversationService.js'
 import {
+  ASK_USER_QUESTION_CLARIFY_MESSAGE,
   PLAN_REJECTION_MESSAGE,
   PLAN_REJECTION_WITH_REASON_PREFIX,
   REJECT_MESSAGE,
@@ -468,6 +469,32 @@ describe('ConversationService', () => {
       expect(buildDenyMessage('Write', undefined)).toContain('STOP what you are doing')
       expect(buildDenyMessage('ExitPlanMode', undefined)).toContain(
         'Do not start implementing',
+      )
+    })
+
+    // "Chat about this" rides the deny channel but means the opposite of a
+    // denial: the model has to open the conversation, not stop and wait.
+    it('tells the model to ask what needs clarifying when a question is handed back', () => {
+      const message = buildDenyMessage('AskUserQuestion', undefined)
+
+      expect(message).toBe(ASK_USER_QUESTION_CLARIFY_MESSAGE)
+      expect(message).toContain('ask')
+      expect(message).not.toContain('STOP what you are doing')
+    })
+
+    it('carries the partial answers back so handing off does not discard them', () => {
+      const answered = '- "Persist data?"\n  Answer: Yes\n- "Which store?"\n  (No answer provided)'
+      const message = buildDenyMessage('AskUserQuestion', answered)
+
+      expect(message).toContain('Questions asked:')
+      expect(message).toContain('Answer: Yes')
+      expect(message).toContain('(No answer provided)')
+      expect(message).not.toContain('STOP what you are doing')
+    })
+
+    it('treats whitespace-only clarify feedback as no feedback', () => {
+      expect(buildDenyMessage('AskUserQuestion', '  \n ')).toBe(
+        ASK_USER_QUESTION_CLARIFY_MESSAGE,
       )
     })
   })
