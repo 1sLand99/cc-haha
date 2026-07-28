@@ -4,7 +4,7 @@ import path from 'node:path'
 import { generateDocsManifest, paths } from './generate-docs-manifest.mjs'
 
 const distDir = path.join(paths.siteDir, 'dist')
-const expectedCustomDomain = 'claudecode-haha.relakkesyang.org'
+const expectedCustomDomain = 'cchaha.ai'
 
 async function pathExists(targetPath) {
   return fs.access(targetPath).then(() => true, () => false)

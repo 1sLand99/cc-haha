@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/github/license/NanmiCoder/cc-haha)](https://github.com/NanmiCoder/cc-haha/blob/main/LICENSE)
 [![中文](https://img.shields.io/badge/🇨🇳_中文-Available-green)](README.md)
 [![English](https://img.shields.io/badge/🇺🇸_English-当前-blue)](README.en.md)
-[![Docs](https://img.shields.io/badge/📖_Documentation-Visit-FF7A00)](https://claudecode-haha.relakkesyang.org)
+[![Docs](https://img.shields.io/badge/📖_Documentation-Visit-FF7A00)](https://cchaha.ai)
 
 </div>
 
@@ -95,7 +95,7 @@ See [environment variables](docs/en/cli/env.md) and [CLI setup](docs/en/cli/inde
 
 ## More Documentation
 
-Full documentation site: <https://claudecode-haha.relakkesyang.org>
+Full documentation site: <https://cchaha.ai>
 
 | Section | Documents |
 |------|------|

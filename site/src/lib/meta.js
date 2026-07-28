@@ -1,4 +1,4 @@
-const SITE_ORIGIN = 'https://claudecode-haha.relakkesyang.org'
+const SITE_ORIGIN = 'https://cchaha.ai'
 
 function upsert(selector, create) {
   let node = document.head.querySelector(selector)
