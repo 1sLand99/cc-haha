@@ -121,17 +121,6 @@ This project is maintained in the author's spare time. Corporate or individual s
   <tbody>
     <tr>
       <td align="center" valign="middle">
-        <a href="https://jiekou.ai/referral?invited_code=OBNU3K">
-          <img src="docs/images/sponsors/jiekou-logo.svg" width="72" alt="JieKou AI"><br>
-          <strong>接口AI</strong>
-        </a>
-      </td>
-      <td valign="middle">
-        Thanks to <a href="https://jiekou.ai/referral?invited_code=OBNU3K">JieKou AI</a> for sponsoring this project. JieKou AI provides official model resources with stable, high-performance API access. Subscription bundles are priced at 20% off the official rate; new users who register through <a href="https://jiekou.ai/referral?invited_code=OBNU3K">this link</a> and bind GitHub can claim a $3 coupon.
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="middle">
         <a href="https://www.shengsuanyun.com/?from=CH_LEJ88KWR">
           <img src="docs/images/sponsors/shengsuanyun-logo.svg" width="180" alt="ShengSuanYun">
         </a>

@@ -839,10 +839,10 @@ describe('ConversationService', () => {
   test('buildChildEnv clears stale api key for bearer-token providers', async () => {
     const providerService = new ProviderService()
     const provider = await providerService.addProvider({
-      presetId: 'jiekouai',
-      name: 'Jiekou',
+      presetId: 'shengsuanyun',
+      name: 'ShengSuanYun',
       apiKey: 'provider-key',
-      baseUrl: 'https://api.jiekou.ai/anthropic',
+      baseUrl: 'https://router.shengsuanyun.com/api',
       apiFormat: 'anthropic',
       models: {
         main: 'claude-sonnet-4-6',
@@ -858,7 +858,7 @@ describe('ConversationService', () => {
       model: 'claude-sonnet-4-6',
     })) as Record<string, string>
 
-    expect(env.ANTHROPIC_BASE_URL).toBe('https://api.jiekou.ai/anthropic')
+    expect(env.ANTHROPIC_BASE_URL).toBe('https://router.shengsuanyun.com/api')
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe('provider-key')
     expect(env.ANTHROPIC_API_KEY).toBe('')
     expect(env.ANTHROPIC_MODEL).toBe('claude-sonnet-4-6')

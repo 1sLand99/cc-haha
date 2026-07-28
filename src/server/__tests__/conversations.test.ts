@@ -3154,10 +3154,10 @@ describe('WebSocket Chat Integration', () => {
   it('should pass the active provider id into default desktop sessions', async () => {
     const providerService = new ProviderService()
     const provider = await providerService.addProvider({
-      presetId: 'jiekouai',
+      presetId: 'shengsuanyun',
       name: 'Active Default Provider',
       apiKey: 'key-active-default',
-      baseUrl: 'https://api.jiekou.ai/anthropic',
+      baseUrl: 'https://router.shengsuanyun.com/api',
       apiFormat: 'anthropic',
       models: {
         main: 'active-main',

@@ -121,17 +121,6 @@ cp .env.example .env
   <tbody>
     <tr>
       <td align="center" valign="middle">
-        <a href="https://jiekou.ai/referral?invited_code=OBNU3K">
-          <img src="docs/images/sponsors/jiekou-logo.svg" width="72" alt="接口AI"><br>
-          <strong>接口AI</strong>
-        </a>
-      </td>
-      <td valign="middle">
-        感谢 <a href="https://jiekou.ai/referral?invited_code=OBNU3K">接口AI</a> 赞助本项目！接口AI 提供官方资源直供与稳定高性能 API 体验，订阅包价格为官方 8 折；使用 <a href="https://jiekou.ai/referral?invited_code=OBNU3K">专属链接</a> 注册并绑定 GitHub，可领取 3 美元优惠券。
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="middle">
         <a href="https://www.shengsuanyun.com/?from=CH_LEJ88KWR">
           <img src="docs/images/sponsors/shengsuanyun-logo.svg" width="180" alt="胜算云">
         </a>
