@@ -119,6 +119,38 @@ export type SlashCommandOption = {
   argumentHint?: string
 }
 
+export type SlashCommandGroups = {
+  system: SlashCommandOption[]
+  skills: SlashCommandOption[]
+  ordered: SlashCommandOption[]
+}
+
+function isSystemSlashCommand(command: SlashCommandOption): boolean {
+  const rootCommand = command.name.trim().split(/\s+/, 1)[0]
+  return Boolean(rootCommand && BUILT_IN_COMMAND_NAMES.has(rootCommand))
+}
+
+export function groupSlashCommands(
+  commands: ReadonlyArray<SlashCommandOption>,
+): SlashCommandGroups {
+  const system: SlashCommandOption[] = []
+  const skills: SlashCommandOption[] = []
+
+  for (const command of commands) {
+    if (isSystemSlashCommand(command)) {
+      system.push(command)
+    } else {
+      skills.push(command)
+    }
+  }
+
+  return {
+    system,
+    skills,
+    ordered: [...system, ...skills],
+  }
+}
+
 export type AgentSlashCommandSource = {
   agentType: string
   description?: string

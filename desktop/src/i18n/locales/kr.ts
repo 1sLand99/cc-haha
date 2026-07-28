@@ -1582,6 +1582,7 @@ export const kr: Record<TranslationKey, string> = {
   'chat.conversationNavigator.label': '대화 탐색',
   'chat.conversationNavigator.attachments': '첨부 파일 {count}개',
   'chat.slashCommands': '슬래시 명령',
+  'chat.slashSkillPersonal': '개인',
   'chat.pendingMessageGuide': '가이드',
   'chat.pendingMessageGuideNow': '지금 가이드',
   'chat.pendingMessageEdit': '대기 메시지 편집',

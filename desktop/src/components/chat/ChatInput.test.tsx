@@ -1475,7 +1475,7 @@ describe('ChatInput file mentions', () => {
         selectionStart: 1,
       },
     })
-    expect(await screen.findByText('/mcp')).toBeInTheDocument()
+    expect(await screen.findByText('mcp')).toBeInTheDocument()
     expect(panel).toHaveClass('overflow-visible')
     expect(panel).not.toHaveClass('overflow-hidden')
 
@@ -1672,10 +1672,46 @@ describe('ChatInput file mentions', () => {
 
     await waitFor(() => {
       const commandButtons = screen
-        .getAllByRole('button')
-        .filter((button) => button.textContent?.startsWith('/'))
-      expect(commandButtons[0]).toHaveTextContent('/superpowers:brainstorming')
+        .getAllByRole('option')
+        .filter((option) => option.textContent?.includes('Creative work planning.'))
+      expect(commandButtons[0]).toHaveTextContent('superpowers:brainstorming')
+      expect(commandButtons[0]).toHaveTextContent('Personal')
     })
+  })
+
+  it('shows app commands before the personal skills section', async () => {
+    useChatStore.setState({
+      sessions: {
+        [sessionId]: {
+          ...useChatStore.getState().sessions[sessionId]!,
+          slashCommands: [
+            {
+              name: 'audit',
+              description: 'Audit product UX.',
+            },
+          ],
+        },
+      },
+    })
+
+    render(<ChatInput />)
+
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(input, {
+      target: { value: '/', selectionStart: 1 },
+    })
+
+    const systemCommand = await screen.findByText('mcp')
+    const skillsHeading = screen.getByText('Skills')
+    const personalSkill = screen.getByText('audit')
+
+    expect(systemCommand.compareDocumentPosition(skillsHeading)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    expect(skillsHeading.compareDocumentPosition(personalSkill)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    expect(personalSkill.closest('[role="option"]')).toHaveTextContent('Personal')
   })
 
   it('offers active agents as slash entries that insert /agent with the selected type', async () => {
@@ -1703,7 +1739,7 @@ describe('ChatInput file mentions', () => {
       target: { value: '/debug', selectionStart: 6 },
     })
 
-    const agentOption = await screen.findByText('/agent debugger')
+    const agentOption = await screen.findByText('agent debugger')
     fireEvent.click(agentOption)
 
     expect(input).toHaveValue('/agent debugger ')
@@ -1737,7 +1773,7 @@ describe('ChatInput file mentions', () => {
       target: { value: '/agent', selectionStart: 6 },
     })
 
-    await screen.findByText('/agent debugger')
+    await screen.findByText('agent debugger')
     fireEvent.keyDown(input, { key: 'ArrowDown' })
     fireEvent.keyDown(input, { key: 'Enter' })
 
