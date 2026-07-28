@@ -23,7 +23,7 @@
 Claude Code Haha 基于 2026-03-31 从 Anthropic npm registry 泄露的 Claude Code 源码修复而来，现在主要是一个**桌面端 Claude Code 工作台**：把会话、多项目、分支 / Worktree、工作区改动与 Diff 审阅、权限审批、模型配置、Computer Use、H5 远程访问、IM 接入和定时任务集中到一个 macOS / Windows / Linux APP 里。
 
 <p align="center">
-  <a href="#桌面端预览">桌面端预览</a> · <a href="#安装桌面端">安装桌面端</a> · <a href="#桌面端亮点">桌面端亮点</a> · <a href="#赞助与合作">赞助与合作</a> · <a href="#更多文档">更多文档</a>
+  <a href="#桌面端预览">桌面端预览</a> · <a href="#安装桌面端">安装桌面端</a> · <a href="#桌面端亮点">桌面端亮点</a> · <a href="#更多文档">更多文档</a> · <a href="#赞助与合作">赞助与合作</a> · <a href="#用户交流群">用户交流群</a>
 </p>
 
 ---
@@ -143,6 +143,16 @@ cp .env.example .env
 </table>
 
 📧 **联系邮箱**：relakkes@gmail.com
+
+---
+
+## 用户交流群
+
+使用过程中有问题、想反馈 Bug，或者想看看别人怎么用，欢迎扫码加入 cc-haha 飞书用户群。也可以直接来 [Issues](https://github.com/NanmiCoder/cc-haha/issues) 提问。
+
+<p align="center">
+  <img src="docs/images/community/feishu-group-qr.png" width="300" alt="cc-haha 飞书用户群二维码">
+</p>
 
 ---
 
