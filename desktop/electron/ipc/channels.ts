@@ -80,6 +80,7 @@ export const ELECTRON_EVENT_CHANNELS = {
   previewEvent: 'desktop:preview:event',
   petNavigateSession: 'desktop:pets:navigate-session',
   petVisibilityChanged: 'desktop:pets:visibility-changed',
+  petPanelPlacementChanged: 'desktop:pets:panel-placement-changed',
 } as const
 
 export const ELECTRON_INTERNAL_CHANNELS = {

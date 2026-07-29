@@ -331,6 +331,10 @@ function getPetWindowController() {
       installMainWindowNavigationGuards(window.webContents, { openExternal: openExternalUrl })
     },
     load: window => loadRendererEntry(window, { petWindow: '1' }),
+    onPanelPlacementChanged: (window, placement) => {
+      if (window.isDestroyed()) return
+      window.webContents.send(ELECTRON_EVENT_CHANNELS.petPanelPlacementChanged, placement)
+    },
   })
   return petWindowController
 }
@@ -574,21 +578,19 @@ function registerIpcHandlers() {
       Menu,
     )
   })
-  registerHandler(ELECTRON_IPC_CHANNELS.petsDragWindow, (event, payload) => {
+  registerHandler(ELECTRON_IPC_CHANNELS.petsDragWindow, (event, payload) =>
     getPetWindowController().dragWindow(
       currentWindow(event),
       payload as PetWindowDragPayload,
-    )
-  })
+    ))
   registerHandler(ELECTRON_IPC_CHANNELS.petsSetIgnoreMouseEvents, (event, payload) => {
     getPetWindowController().setIgnoreMouseEvents(currentWindow(event), Boolean(payload))
   })
-  registerHandler(ELECTRON_IPC_CHANNELS.petsSetInteractiveRegions, (event, payload) => {
+  registerHandler(ELECTRON_IPC_CHANNELS.petsSetInteractiveRegions, (event, payload) =>
     getPetWindowController().setInteractiveRegions(
       currentWindow(event),
       payload as Electron.Rectangle[],
-    )
-  })
+    ))
   registerHandler(ELECTRON_IPC_CHANNELS.petsFocusMainWindow, (event) => {
     if (!getPetWindowController().owns(currentWindow(event))) {
       throw new Error('Pet window IPC sender does not own the companion window')

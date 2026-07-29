@@ -230,6 +230,18 @@ export type DesktopPetWindowDrag = {
   y: number
 }
 
+/**
+ * Which side of the mascot the host wants the activity panel drawn on.
+ *
+ * The mascot is clamped to the display edge through the window's transparent
+ * padding, so at the top of the screen the panel that shares that padding ends
+ * up behind the menu bar. Only the host knows the window position and the work
+ * area, so it decides and the renderer follows.
+ */
+export type DesktopPetPanelPlacement = {
+  vertical: 'above' | 'below'
+}
+
 export type AppModeConfig = SettingsAppModeConfig
 
 export type AppModeSetInput = {
@@ -287,13 +299,18 @@ export type DesktopHost = {
     show(): Promise<void>
     hide(): Promise<void>
     showContextMenu(closeLabel: string): Promise<boolean>
-    dragWindow(payload: DesktopPetWindowDrag): Promise<void>
+    dragWindow(payload: DesktopPetWindowDrag): Promise<DesktopPetPanelPlacement>
     setIgnoreMouseEvents(ignore: boolean): Promise<void>
-    setInteractiveRegions(regions: DesktopPetInteractiveRegion[]): Promise<void>
+    setInteractiveRegions(
+      regions: DesktopPetInteractiveRegion[],
+    ): Promise<DesktopPetPanelPlacement>
     focusMainWindow(): Promise<void>
     focusSession(sessionId: string): Promise<void>
     onNavigateSession(handler: (sessionId: string) => void): Promise<DesktopHostUnlisten>
     onVisibilityChanged(handler: (visible: boolean) => void): Promise<DesktopHostUnlisten>
+    onPanelPlacementChanged(
+      handler: (placement: DesktopPetPanelPlacement) => void,
+    ): Promise<DesktopHostUnlisten>
   }
   dialogs: {
     open(options?: DialogOpenOptions): Promise<string | string[] | null>

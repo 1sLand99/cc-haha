@@ -2132,6 +2132,15 @@ html[data-window-kind='pet'] #root {
   pointer-events: none;
 }
 
+/* Dragging clamps against the mascot alone so it can reach every display edge,
+   which by construction pushes the rest of the window off-screen. At the top
+   edge that is the menu bar eating the activity panel, so the host asks for the
+   panel below the mascot instead and the whole stack flips. */
+.pet-window-stack[data-panel-placement='below'] {
+  justify-content: flex-start;
+  padding: 12px 12px 0;
+}
+
 .pet-mascot-button {
   position: relative;
   z-index: 10;
@@ -2159,6 +2168,10 @@ html[data-window-kind='pet'] #root {
   flex: 0 0 auto;
   place-items: center;
   pointer-events: none;
+}
+
+.pet-window-stack[data-panel-placement='below'] .pet-mascot-wrap {
+  order: 1;
 }
 
 .pet-task-badge {
@@ -2305,6 +2318,12 @@ html[data-window-kind='pet'] #root {
 .pet-activity-card[data-expanded='true'] {
   border-radius: 22px;
   padding-right: 7px;
+}
+
+.pet-window-stack[data-panel-placement='below'] .pet-activity-card {
+  order: 2;
+  margin-top: 12px;
+  margin-bottom: 0;
 }
 
 html[data-theme='dark'] .pet-activity-card,
@@ -2475,6 +2494,13 @@ html[data-theme='ink-blue'] .pet-session-status {
 .pet-activity-card[data-expanded='true'] .pet-panel-toggle {
   top: auto;
   transform: translateX(50%);
+}
+
+/* Flipped, the control stays on the mascot-facing side of the card so the card,
+   the control, and the mascot remain one compact stack. */
+.pet-window-stack[data-panel-placement='below'] .pet-activity-card .pet-panel-toggle {
+  top: -31px;
+  bottom: auto;
 }
 
 .pet-panel-toggle:hover {

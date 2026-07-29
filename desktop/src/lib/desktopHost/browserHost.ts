@@ -165,6 +165,9 @@ export const browserHost: DesktopHost = {
     async focusSession() {
       unsupported('Focusing a pet session')
     },
+    async onPanelPlacementChanged() {
+      return noopUnlisten
+    },
     async onNavigateSession() {
       return noopUnlisten
     },
