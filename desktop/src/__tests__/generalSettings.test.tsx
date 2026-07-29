@@ -146,6 +146,7 @@ function installElectronDesktopHost() {
       zoom: true,
     },
     app: {
+      ...browserHost.app,
       getVersion: vi.fn().mockResolvedValue('0.3.2'),
     },
     dialogs: {
@@ -2414,6 +2415,7 @@ describe('Settings > About tab', () => {
         updates: true,
       },
       app: {
+        ...browserHost.app,
         getVersion: vi.fn().mockRejectedValue(new Error('version IPC failed')),
       },
     }

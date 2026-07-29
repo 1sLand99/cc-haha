@@ -2,6 +2,7 @@ import type {
   AppMode as SettingsAppMode,
   AppModeConfig as SettingsAppModeConfig,
 } from '../../types/settings'
+import type { Locale } from '../../i18n/locale'
 
 export type DesktopHostKind = 'browser' | 'electron'
 
@@ -246,6 +247,10 @@ export type DesktopHost = {
   }
   app: {
     getVersion(): Promise<string>
+    getLocalePreference(): Promise<Locale | null>
+    setLocalePreference(locale: Locale): Promise<void>
+    getPreferredSystemLanguages(): Promise<string[]>
+    onLocaleChanged(handler: (locale: Locale) => void): Promise<DesktopHostUnlisten>
   }
   commands: {
     invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>

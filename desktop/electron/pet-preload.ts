@@ -4,7 +4,9 @@ import {
   validateElectronIpcPayload,
 } from './ipc/capabilities'
 import { ELECTRON_IPC_CHANNELS, type ElectronIpcChannel } from './ipc/channels'
+import { ELECTRON_EVENT_CHANNELS } from './ipc/channels'
 import type { DesktopHost } from '../src/lib/desktopHost/types'
+import type { Locale } from '../src/i18n/locale'
 
 function invoke<T>(channel: ElectronIpcChannel, payload?: unknown): Promise<T> {
   if (!isElectronIpcChannelAllowedForPetWindow(channel)) {
@@ -36,6 +38,19 @@ const petHost = {
     // Keep the shared renderer bootstrap contract while returning only the
     // server-enforced companion capability, never the desktop master token.
     getLocalAccessToken: () => invoke<string | null>(ELECTRON_IPC_CHANNELS.runtimeGetPetAccessToken),
+  },
+  app: {
+    getLocalePreference: () =>
+      invoke<Locale | null>(ELECTRON_IPC_CHANNELS.appGetLocalePreference),
+    getPreferredSystemLanguages: () =>
+      invoke<string[]>(ELECTRON_IPC_CHANNELS.appGetPreferredSystemLanguages),
+    onLocaleChanged: (handler: (locale: Locale) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, locale: Locale) => handler(locale)
+      ipcRenderer.on(ELECTRON_EVENT_CHANNELS.appLocaleChanged, listener)
+      return Promise.resolve(() => {
+        ipcRenderer.removeListener(ELECTRON_EVENT_CHANNELS.appLocaleChanged, listener)
+      })
+    },
   },
   appearance: {
     // The pet window is transparent and shares the renderer bootstrap, which

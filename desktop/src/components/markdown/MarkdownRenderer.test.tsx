@@ -17,6 +17,11 @@ vi.mock('../chat/MermaidRenderer', () => ({
 }))
 
 import { MarkdownRenderer, __markdownParseCacheInternals } from './MarkdownRenderer'
+import { useSettingsStore } from '../../stores/settingsStore'
+
+beforeEach(() => {
+  useSettingsStore.setState({ locale: 'zh' })
+})
 
 function visibleMathText(container: HTMLElement): string {
   const clone = container.cloneNode(true) as HTMLElement

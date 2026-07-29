@@ -59,6 +59,11 @@ import {
   type PetWindowDragPayload,
 } from './services/petWindow'
 import {
+  readLocalePreference,
+  writeLocalePreference,
+} from './services/localePreference'
+import type { Locale } from '../src/i18n/locale'
+import {
   createCustomPetCatalogLoader,
   createCustomPetFromAtlas,
   createCustomPetFromAtlasBytes,
@@ -378,6 +383,13 @@ function emitNotificationAction(payload: unknown) {
   mainWindow?.webContents.send(ELECTRON_EVENT_CHANNELS.notificationAction, payload)
 }
 
+function broadcastLocaleChanged(locale: Locale) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue
+    window.webContents.send(ELECTRON_EVENT_CHANNELS.appLocaleChanged, locale)
+  }
+}
+
 async function handleCommandInvoke(payload: unknown): Promise<unknown> {
   const { command, args } = payload as { command: string, args?: Record<string, unknown> }
 
@@ -409,6 +421,22 @@ function registerIpcHandlers() {
     void getPreviewService().sendMessageToRenderer(event.sender, raw, mainWindow?.webContents)
   })
   registerHandler(ELECTRON_IPC_CHANNELS.appGetVersion, () => app.getVersion())
+  registerHandler(
+    ELECTRON_IPC_CHANNELS.appGetLocalePreference,
+    () => readLocalePreference(app),
+  )
+  registerHandler(ELECTRON_IPC_CHANNELS.appSetLocalePreference, (event, payload) => {
+    if (currentWindow(event) !== mainWindow) {
+      throw new Error('Only the main window can change the locale preference')
+    }
+    const locale = payload as Locale
+    writeLocalePreference(app, locale)
+    broadcastLocaleChanged(locale)
+  })
+  registerHandler(
+    ELECTRON_IPC_CHANNELS.appGetPreferredSystemLanguages,
+    () => app.getPreferredSystemLanguages(),
+  )
   registerHandler(ELECTRON_IPC_CHANNELS.runtimeGetServerUrl, () => getServerRuntime().getServerUrl())
   registerHandler(
     ELECTRON_IPC_CHANNELS.runtimeGetLocalAccessToken,

@@ -80,6 +80,10 @@ export function createElectronHost(bridge: ElectronHostBridge): DesktopHost {
     },
     app: {
       getVersion: () => invoke(ELECTRON_IPC_CHANNELS.appGetVersion),
+      getLocalePreference: () => invoke(ELECTRON_IPC_CHANNELS.appGetLocalePreference),
+      setLocalePreference: locale => invoke(ELECTRON_IPC_CHANNELS.appSetLocalePreference, locale),
+      getPreferredSystemLanguages: () => invoke(ELECTRON_IPC_CHANNELS.appGetPreferredSystemLanguages),
+      onLocaleChanged: handler => subscribe(ELECTRON_EVENT_CHANNELS.appLocaleChanged, handler),
     },
     commands: {
       invoke: (command, args) => invoke(ELECTRON_IPC_CHANNELS.commandInvoke, { command, args }),
