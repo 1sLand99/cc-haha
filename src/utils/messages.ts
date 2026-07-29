@@ -2310,9 +2310,21 @@ export function normalizeMessagesForAPI(
           return
         }
         case 'attachment': {
-          const rawAttachmentMessage = normalizeAttachmentForAPI(
-            message.attachment,
-          )
+          let rawAttachmentMessage: UserMessage[]
+          try {
+            rawAttachmentMessage = normalizeAttachmentForAPI(message.attachment)
+          } catch (error) {
+            const attachmentType = (message as {
+              attachment?: { type?: unknown }
+            }).attachment?.type
+            logForDebugging(
+              `Dropping malformed attachment during API normalization: ${
+                typeof attachmentType === 'string' ? attachmentType : 'unknown'
+              }: ${error instanceof Error ? error.message : String(error)}`,
+              { level: 'warn' },
+            )
+            return
+          }
           const attachmentMessage = checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
             'tengu_chair_sermon',
           )
