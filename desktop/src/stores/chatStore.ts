@@ -597,6 +597,21 @@ function appendAssistantTextMessage(
   ) {
     return messages
   }
+  // 上面那道只在尾部仍是那条 hydrated 消息时才够得着。整轮重放时，正文到达前
+  // 尾部早被 thinking / tool_result 顶掉了，于是重复的回复照样追加进来。
+  // 这里比的是"逐字相同"而不是子串：整段重发的正文会与某条 hydrated 回复完全一致，
+  // 而正常流式送来的是碎片（碎片几乎必然是某条历史回复的子串，用子串判定会误伤）。
+  if (
+    !transcriptMessageId &&
+    messages.some(
+      (message) =>
+        message.type === 'assistant_text' &&
+        message.transcriptMessageId &&
+        message.content.trim() === trimmedContent,
+    )
+  ) {
+    return messages
+  }
 
   const canMergeIntoLast =
     last?.type === 'assistant_text' &&
@@ -2179,7 +2194,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         if (receivedLiveDelta && get().sessions[sessionId]?.chatState !== 'idle') ensureElapsedTimer()
         break
 
-      case 'thinking':
+      case 'thinking': {
         if (get().sessions[sessionId]?.suppressNextTaskNotificationResponse) {
           consumePendingDelta(sessionId)
           update(() => ({
@@ -2189,11 +2204,28 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }))
           break
         }
+        // 重放/空块都不该冒出一个新的「已思考」气泡，也不该把会话拖回 thinking 态
+        // 或者启动计时器 —— 那正是"打开一个早就结束的会话，它自己开始输出"的观感。
+        let skippedThinkingBlock = false
         update((s) => {
           const pendingText = `${s.streamingText}${consumePendingDelta(sessionId)}`
           const base = pendingText.trim()
             ? appendAssistantTextMessage(s.messages, pendingText, Date.now())
             : s.messages
+          // 服务端两个 thinking 发射点都做了非空过滤，但 `&& delta.thinking` 是真值
+          // 判断，纯空白仍能漏过来，落到下面就是一个点开什么都没有的空壳气泡。
+          if (!msg.text.trim()) {
+            skippedThinkingBlock = true
+            return { messages: base, streamingText: '' }
+          }
+          // 真正的重放源已在服务端按 uuid 挡掉（conversationService.isReplayedSdkMessage）。
+          // 这里再兜一道：thinking 没有 transcriptMessageId 之类的身份，任何漏网的
+          // 重放都只能靠"整块内容与已有 thinking 逐字相同"来认。流式 delta 是碎片，
+          // 不会命中；命中的必然是被整块重发的同一段思考。
+          if (base.some((message) => message.type === 'thinking' && message.content === msg.text)) {
+            skippedThinkingBlock = true
+            return { messages: base, streamingText: '' }
+          }
           const lastIndex = findStreamMergeTargetIndex(base)
           const last = lastIndex >= 0 ? base[lastIndex] : undefined
           if (last && last.type === 'thinking') {
@@ -2216,8 +2248,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             streamingResponseChars: s.streamingResponseChars + msg.text.length,
           }
         })
-        ensureElapsedTimer()
+        if (!skippedThinkingBlock) ensureElapsedTimer()
         break
+      }
 
       case 'tool_use_complete': {
         clearPendingToolInputDelta(sessionId)
@@ -2226,26 +2259,37 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const toolUseId = msg.toolUseId || session?.activeToolUseId || ''
         const parentToolUseId = msg.parentToolUseId ?? getPendingToolParentUseId(sessionId, toolUseId)
         rememberPendingToolParentUseId(sessionId, toolUseId, parentToolUseId)
-        update((s) => ({
-          messages: toolUseId
-            ? upsertToolUseMessage(s.messages, toolUseId, (existing) => ({
-                id: existing?.id ?? nextId(),
-                type: 'tool_use',
-                toolName,
-                toolUseId,
-                input: msg.input,
-                timestamp: existing?.timestamp ?? Date.now(),
-                parentToolUseId,
-                isPending: false,
-              }))
-            : [...s.messages, {
-                id: nextId(), type: 'tool_use', toolName,
-                toolUseId,
-                input: msg.input, timestamp: Date.now(), parentToolUseId,
-                isPending: false,
-              }],
-          activeToolUseId: null, activeToolName: null, activeThinkingId: null, streamingToolInput: '',
-        }))
+        update((s) => {
+          // 流式路径上，工具块的 content_start 已经把待定正文冲刷成一条消息了
+          // （见 case 'content_start' 里 blockType !== 'text' 的分支）。但整块兜底
+          // 路径只发 tool_use_complete、不发 content_start —— 不在这里补一次冲刷，
+          // 工具调用前后的两段正文就会跨消息粘成一条。
+          const pendingText = `${s.streamingText}${consumePendingDelta(sessionId)}`
+          const base = pendingText.trim()
+            ? appendAssistantTextMessage(s.messages, pendingText, Date.now())
+            : s.messages
+          return {
+            messages: toolUseId
+              ? upsertToolUseMessage(base, toolUseId, (existing) => ({
+                  id: existing?.id ?? nextId(),
+                  type: 'tool_use',
+                  toolName,
+                  toolUseId,
+                  input: msg.input,
+                  timestamp: existing?.timestamp ?? Date.now(),
+                  parentToolUseId,
+                  isPending: false,
+                }))
+              : [...base, {
+                  id: nextId(), type: 'tool_use', toolName,
+                  toolUseId,
+                  input: msg.input, timestamp: Date.now(), parentToolUseId,
+                  isPending: false,
+                }],
+            streamingText: '',
+            activeToolUseId: null, activeToolName: null, activeThinkingId: null, streamingToolInput: '',
+          }
+        })
         if (toolName === 'TodoWrite' && Array.isArray((msg.input as any)?.todos)) {
           useCLITaskStore.getState().setTasksFromTodos((msg.input as any).todos, sessionId)
         } else if (TASK_TOOL_NAMES.has(toolName)) {

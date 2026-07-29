@@ -68,6 +68,13 @@ export const MAX_CAPTURED_SDK_MESSAGE_BYTES = 64 * 1024
 export const MAX_CAPTURED_SDK_TOTAL_BYTES = 512 * 1024
 const MAX_CAPTURED_SDK_DIAGNOSTIC_TEXT_BYTES = 4 * 1024
 const CONTROL_READY_POLL_MS = 50
+/**
+ * 记住多少条已处理的 SDK 消息 uuid，用来挡掉 CLI 重连时的重放。
+ * CLI 侧重放缓冲是 DEFAULT_MAX_BUFFER_SIZE = 1000 条
+ * （src/cli/transports/WebSocketTransport.ts），这里留一倍余量，
+ * 保证整个缓冲区被重放时每一条都还认得出来。
+ */
+const MAX_SEEN_SDK_MESSAGE_UUIDS = 2_000
 const AUTO_MEMORY_DIRNAME = 'memory'
 export const DESKTOP_CLI_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 6_000
 
@@ -186,6 +193,11 @@ type SessionProcess = {
   stdoutLines: string[]
   stderrLines: string[]
   outputDrain: Promise<void>
+  /**
+   * UUID 的 SDK 消息一旦处理过就记在这里，用于挡掉 CLI 重连时的整轮重放。
+   * 详见 handleSdkPayload 里的说明。插入顺序即淘汰顺序（Set 保序）。
+   */
+  seenSdkMessageUuids: Set<string>
   sdkMessages: any[]
   sdkMessageBytes?: number
   initMessage: any | null
@@ -443,6 +455,7 @@ export class ConversationService {
       networkDerivedFirstTokenTimeout: networkRuntimeMetadata.firstTokenTimeoutDerived,
       sdkToken: this.getSdkTokenFromUrl(sdkUrl),
       sdkSocket: null,
+      seenSdkMessageUuids: new Set<string>(),
       sdkAttached,
       resolveSdkAttached,
       pendingOutbound: [],
@@ -955,6 +968,35 @@ export class ConversationService {
     }
   }
 
+  /**
+   * CLI 的 WebSocketTransport 在每次重连成功后会把它的整个发送缓冲区重放一遍，
+   * 并且明确假定「The server deduplicates by UUID」
+   * （src/cli/transports/WebSocketTransport.ts:204）。这个契约以前没有实现：
+   * 笔记本睡眠导致连接断开后（该 transport 有专门的睡眠检测，会无限重置重连预算），
+   * CLI 重连时会把最多 1000 条**早已完成**的消息重新推上来，server 原样转发给前端，
+   * 前端便把一整轮结束很久的对话当成实时输出重新渲染一遍 —— 表现为满屏「已思考」。
+   *
+   * 只有带 uuid 的消息才会进入 CLI 的重放缓冲（同文件 write()），所以这里也只按
+   * uuid 判重；没有 uuid 的消息（如 control_request）本就不会被重放，照常处理。
+   */
+  private isReplayedSdkMessage(session: SessionProcess, msg: any): boolean {
+    const uuid = typeof msg?.uuid === 'string' ? msg.uuid : ''
+    if (!uuid) return false
+
+    // 会话对象并非只有 startSession 一条构造路径，缺字段时按空集合起步而不是抛错。
+    const seen = session.seenSdkMessageUuids ?? new Set<string>()
+    session.seenSdkMessageUuids = seen
+    if (seen.has(uuid)) return true
+
+    if (seen.size >= MAX_SEEN_SDK_MESSAGE_UUIDS) {
+      // Set 保持插入顺序，最早进来的就是最该淘汰的。
+      const oldest = seen.values().next().value
+      if (oldest !== undefined) seen.delete(oldest)
+    }
+    seen.add(uuid)
+    return false
+  }
+
   handleSdkPayload(sessionId: string, rawPayload: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
@@ -967,6 +1009,7 @@ export class ConversationService {
     for (const line of lines) {
       try {
         const msg = JSON.parse(line)
+        if (this.isReplayedSdkMessage(session, msg)) continue
         this.retainSdkMessage(session, msg, Buffer.byteLength(line, 'utf-8'))
         const sdkError = this.extractSdkErrorEvent(msg)
         if (sdkError) {

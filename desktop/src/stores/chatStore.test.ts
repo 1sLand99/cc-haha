@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MessageEntry } from '../types/session'
 import { useSessionRuntimeStore } from './sessionRuntimeStore'
 
@@ -1330,6 +1330,50 @@ describe('chatStore history mapping', () => {
       },
     ])
     expect(notifyDesktopMock).not.toHaveBeenCalled()
+  })
+
+  // Same reconnect replay as above, one block type over. A thinking UIMessage
+  // carries no transcriptMessageId (types/chat.ts:291), so neither the
+  // appendAssistantTextMessage guard nor dropDuplicateTranscriptTextMessages
+  // can reach it — a replayed thinking block has nothing identifying it.
+  it('does not duplicate a hydrated thinking block when live output replays after reconnect', () => {
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          messages: [
+            {
+              id: 'live-user',
+              type: 'user_text',
+              content: 'live prompt',
+              transcriptMessageId: 'transcript-user-1',
+              timestamp: 1,
+            },
+            { id: 'live-thinking', type: 'thinking', content: 'weighing the options', timestamp: 2 },
+            {
+              id: 'live-assistant',
+              type: 'assistant_text',
+              content: 'live answer',
+              transcriptMessageId: 'transcript-assistant-1',
+              timestamp: 3,
+            },
+          ],
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'thinking',
+      text: 'weighing the options',
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.messages).toMatchObject([
+      { id: 'live-user', type: 'user_text' },
+      { id: 'live-thinking', type: 'thinking', content: 'weighing the options' },
+      { id: 'live-assistant', type: 'assistant_text', content: 'live answer' },
+    ])
+    if (session?.elapsedTimer) clearInterval(session.elapsedTimer)
   })
 
   it('collapses duplicate assistant replies after transcript id hydration', async () => {
@@ -6317,5 +6361,211 @@ describe('chatStore history mapping', () => {
     expect(session?.streamingResponseChars).toBe(0)
     if (session?.elapsedTimer) clearInterval(session.elapsedTimer)
     vi.useRealTimers()
+  })
+})
+
+// A desktop window left open for hours re-renders a long-finished session as a
+// wall of collapsed "已思考" bubbles with no reply text between them. No new LLM
+// call happens — the finished turn's stream events are pushed at the renderer a
+// second time on top of already-hydrated history. appendAssistantTextMessage
+// guards against exactly that replay, `case 'thinking'` does not.
+type FinishedTurnStep =
+  | { kind: 'thinking'; text: string }
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; id: string; name: string }
+
+// Verbatim block order of session fd09ae78-297a-427e-a849-5251731bf30c (Kimi
+// k3, a Computer Use run): 13 thinking blocks, 5 of them empty. Only the very
+// last assistant reply is elided — it is a long markdown table.
+const FINISHED_COMPUTER_USE_TURN: FinishedTurnStep[] = [
+  { kind: 'thinking', text: 'User wants Computer Use. I need to load the computer-use tools. Let me fetch the tool schemas first.' },
+  { kind: 'text', text: '我先加载 Computer Use 工具，然后严格按顺序执行。' },
+  { kind: 'tool', id: 'tool_aJGuYYOY4gzHHHFIaTus4M3e', name: 'ToolSearch' },
+  { kind: 'thinking', text: 'Start: get_app_state to find search box, then step 1 click it. User wants get_app_state after each step and report the search field content.' },
+  { kind: 'tool', id: 'tool_kosJoZ93D4WBqAWnmelI9Rik', name: 'mcp__computer-use__get_app_state' },
+  { kind: 'thinking', text: 'Search box at approx (410, 50). Step 1: single click.' },
+  { kind: 'text', text: '初始状态：搜索框为空（只有放大镜占位图标），位置约 (410, 50)。\n\n**第 1 步：单击搜索框**' },
+  { kind: 'tool', id: 'tool_KlLouIdZHyPcj0Jbmy5nfJOf', name: 'mcp__computer-use__click' },
+  { kind: 'thinking', text: '' },
+  { kind: 'tool', id: 'tool_lNWmFSm7Er61dyZJcWGkGH6b', name: 'mcp__computer-use__get_app_state' },
+  { kind: 'thinking', text: 'Step 1 done: search box still empty (only magnifier icon). Step 2: type "test".' },
+  { kind: 'text', text: '第 1 步后：搜索框里**为空**（只有放大镜占位图标，无文字）。\n\n**第 2 步：type_text 输入 "test"**' },
+  { kind: 'tool', id: 'tool_hTHyhielyvIaUIWN6YJDz2g5', name: 'mcp__computer-use__type_text' },
+  { kind: 'thinking', text: '' },
+  { kind: 'tool', id: 'tool_951Y0sQNx8tMZGGMS7XjVeOL', name: 'mcp__computer-use__get_app_state' },
+  { kind: 'thinking', text: 'Step 2 done: search box still empty — "test" did not appear. Report honestly. Step 3: type "abc".' },
+  { kind: 'text', text: '第 2 步后：搜索框里**为空** —— "test" 没有显示出来。\n\n**第 3 步：type_text 输入 "abc"**' },
+  { kind: 'tool', id: 'tool_Y1MzoPySfdwd7tNrFj389CEN', name: 'mcp__computer-use__type_text' },
+  { kind: 'thinking', text: 'Continue: get_app_state after step 3.' },
+  { kind: 'tool', id: 'tool_8TrKG2qCE6Q4bDYE5hMvngSW', name: 'mcp__computer-use__get_app_state' },
+  { kind: 'thinking', text: 'Step 3 done: still empty. Step 4: double-click search box.' },
+  { kind: 'text', text: '第 3 步后：搜索框里**依然为空** —— "abc" 也没有显示。\n\n**第 4 步：双击搜索框**' },
+  { kind: 'tool', id: 'tool_qguIh8LXvDxOn6wE4aSlys2K', name: 'mcp__computer-use__click' },
+  { kind: 'thinking', text: '' },
+  { kind: 'tool', id: 'tool_T4513oOu6to3GY1EeEPMLvFr', name: 'mcp__computer-use__get_app_state' },
+  { kind: 'thinking', text: '' },
+  { kind: 'text', text: '第 4 步后：搜索框里**仍然为空**，界面无任何变化。\n\n**第 5 步：type_text 输入 "xyz"**' },
+  { kind: 'tool', id: 'tool_XhJWl5aNuSPaUXctFQ91KSPM', name: 'mcp__computer-use__type_text' },
+  { kind: 'thinking', text: '' },
+  { kind: 'tool', id: 'tool_b2c5HshyO48rmbYqmlcGj94K', name: 'mcp__computer-use__get_app_state' },
+  { kind: 'thinking', text: 'Done. Report all 5 steps faithfully.' },
+  { kind: 'text', text: '5 步全部完成，如实汇报每步后搜索框的内容：' },
+]
+
+const FIRST_THINKING = FINISHED_COMPUTER_USE_TURN[0] as { kind: 'thinking'; text: string }
+const LAST_THINKING = FINISHED_COMPUTER_USE_TURN[30] as { kind: 'thinking'; text: string }
+
+/** The CLI persists one transcript entry per content block; mirror that shape. */
+function buildFinishedTurnHistory(): MessageEntry[] {
+  const entries: MessageEntry[] = [{
+    id: 'cu-prompt',
+    type: 'user',
+    timestamp: '2026-07-28T15:00:00.000Z',
+    content: '用 Computer Use 操作网易云音乐，严格按顺序做，每步做完立刻 get_app_state。',
+  }]
+  FINISHED_COMPUTER_USE_TURN.forEach((step, index) => {
+    const timestamp = new Date(Date.UTC(2026, 6, 28, 15, 1, index)).toISOString()
+    if (step.kind === 'thinking') {
+      entries.push({ id: `cu-a-${index}`, type: 'assistant', timestamp, content: [{ type: 'thinking', thinking: step.text }] })
+      return
+    }
+    if (step.kind === 'text') {
+      entries.push({ id: `cu-a-${index}`, type: 'assistant', timestamp, content: [{ type: 'text', text: step.text }] })
+      return
+    }
+    entries.push({ id: `cu-a-${index}`, type: 'assistant', timestamp, content: [{ type: 'tool_use', name: step.name, id: step.id, input: {} }] })
+    entries.push({ id: `cu-u-${index}`, type: 'user', timestamp, content: [{ type: 'tool_result', tool_use_id: step.id, content: 'ok', is_error: false }] })
+  })
+  return entries
+}
+
+/**
+ * Push the finished turn at the renderer exactly as the server emits it. Both
+ * emit paths skip falsy thinking (`handler.ts` thinking_delta and the
+ * no-stream-events assistant fallback), so the five empty transcript blocks
+ * never reach the wire — `withEmptyThinking` exists only for the defensive case.
+ */
+function replayFinishedTurn(options: { withText: boolean; withEmptyThinking?: boolean }) {
+  const store = useChatStore.getState()
+  for (const step of FINISHED_COMPUTER_USE_TURN) {
+    if (step.kind === 'thinking') {
+      if (step.text || options.withEmptyThinking) {
+        store.handleServerMessage(TEST_SESSION_ID, { type: 'thinking', text: step.text })
+      }
+      continue
+    }
+    if (step.kind === 'text') {
+      if (options.withText) store.handleServerMessage(TEST_SESSION_ID, { type: 'content_delta', text: step.text })
+      continue
+    }
+    store.handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_use_complete',
+      toolName: step.name,
+      toolUseId: step.id,
+      input: {},
+    })
+    store.handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_result',
+      toolUseId: step.id,
+      content: 'ok',
+      isError: false,
+    })
+  }
+}
+
+function thinkingBlocks() {
+  return (useChatStore.getState().sessions[TEST_SESSION_ID]?.messages ?? [])
+    .filter((message) => message.type === 'thinking')
+    .map((message) => message.content)
+}
+
+describe('chatStore wake replay of a finished thinking turn', () => {
+  beforeEach(async () => {
+    sendMock.mockReset()
+    notifyDesktopMock.mockReset()
+    updateTabStatusMock.mockReset()
+    getMemberBySessionIdMock.mockReset()
+    getMemberBySessionIdMock.mockReturnValue(null)
+    connectionStateHandlers.clear()
+    vi.mocked(sessionsApi.getMessages).mockReset()
+    vi.mocked(sessionsApi.getMessages).mockResolvedValue({ messages: buildFinishedTurnHistory() })
+    localStorage.clear()
+    useSettingsStore.setState({ locale: 'en' })
+    useChatStore.setState({
+      ...initialState,
+      sessions: { [TEST_SESSION_ID]: makeSession({ chatState: 'idle', messages: [] }) },
+    })
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+  })
+
+  afterEach(() => {
+    const timer = useChatStore.getState().sessions[TEST_SESSION_ID]?.elapsedTimer
+    if (timer) clearInterval(timer)
+  })
+
+  it('hydrates the finished turn as eight non-empty thinking blocks', () => {
+    // Sanity check on the fixture: history mapping drops the five empty
+    // thinking blocks, so anything empty on screen came from the stream path.
+    expect(thinkingBlocks()).toHaveLength(8)
+    expect(thinkingBlocks().every((content) => content.trim().length > 0)).toBe(true)
+  })
+
+  it('does not re-append hydrated thinking when a finished turn is replayed after wake', () => {
+    const before = thinkingBlocks()
+
+    replayFinishedTurn({ withText: false })
+
+    expect(thinkingBlocks()).toEqual(before)
+  })
+
+  // Defensive. The transcript really does hold five empty thinking blocks and
+  // history mapping filters them, but no server emit path puts an empty
+  // thinking event on the wire today — so a collapsed "已思考" row on screen is
+  // not by itself proof that an empty block was streamed.
+  it('does not spawn empty thinking bubbles from replayed empty thinking events', () => {
+    replayFinishedTurn({ withText: false, withEmptyThinking: true })
+
+    expect(thinkingBlocks().filter((content) => !content.trim())).toEqual([])
+  })
+
+  it('does not merge the turn tail into the turn head when the replay wraps around', () => {
+    replayFinishedTurn({ withText: false })
+    replayFinishedTurn({ withText: false })
+
+    // The last thinking block of one replay round and the first of the next
+    // arrive back to back with nothing between them, so the merge branch glues
+    // two unrelated reasoning blocks into a single bubble.
+    expect(thinkingBlocks().filter((content) =>
+      content.includes(LAST_THINKING.text) && content.includes(FIRST_THINKING.text),
+    )).toEqual([])
+  })
+
+  it('does not grow the thinking wall with every extra replay round', () => {
+    const hydrated = thinkingBlocks().length
+
+    replayFinishedTurn({ withText: false })
+    const afterFirst = thinkingBlocks().length
+    replayFinishedTurn({ withText: false })
+    const afterSecond = thinkingBlocks().length
+
+    expect({ afterFirst, afterSecond }).toEqual({
+      afterFirst: hydrated,
+      afterSecond: hydrated,
+    })
+  })
+
+  // Secondary gap. The reported screenshot has no reply text between the
+  // bubbles, so the observed replay carries thinking only — but the existing
+  // appendAssistantTextMessage guard would not have held either: it only
+  // matches while the tail still is the hydrated assistant message.
+  it('does not re-append replayed reply text once the tail moves past the hydrated message', () => {
+    const assistantTextOf = () => (useChatStore.getState().sessions[TEST_SESSION_ID]?.messages ?? [])
+      .filter((message) => message.type === 'assistant_text')
+      .map((message) => message.content)
+    const before = assistantTextOf()
+
+    replayFinishedTurn({ withText: true })
+
+    expect(assistantTextOf()).toEqual(before)
   })
 })
