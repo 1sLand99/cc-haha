@@ -43,8 +43,10 @@ vi.mock('../../i18n', () => ({
     'repoLaunch.branch': 'Branch',
     'repoLaunch.checkedOut': 'Checked out',
     'repoLaunch.checkedOutWarning': 'Branch is checked out elsewhere',
+    'repoLaunch.checkedOutWarningCompact': 'Branch already checked out',
     'repoLaunch.currentBranch': 'Current branch',
     'repoLaunch.dirtyWarning': 'Dirty worktree',
+    'repoLaunch.dirtyWarningCompact': 'Uncommitted changes',
     'repoLaunch.launchLocation': 'Location',
     'repoLaunch.localBranch': 'Local branch',
     'repoLaunch.missingWorkdir': 'Missing working directory',
@@ -272,6 +274,35 @@ describe('RepositoryLaunchControls', () => {
 
     const pill = await screen.findByRole('button', { name: 'Location: cc-haha / main' })
     expect(pill).toHaveClass('h-10')
+  })
+
+  it('keeps a dirty-branch warning compact and inline in the toolbar', async () => {
+    apiMocks.getRepositoryContext.mockResolvedValue({
+      ...okRepositoryContext,
+      dirty: true,
+    })
+
+    renderControls({ branch: 'feature/h5', placement: 'toolbar' })
+
+    const warning = await screen.findByRole('status', { name: 'Dirty worktree' })
+    expect(warning).toHaveTextContent('Uncommitted changes')
+    expect(warning).toHaveAttribute('title', 'Dirty worktree')
+    expect(within(warning).getByText('Uncommitted changes')).toHaveClass('hidden', '2xl:inline')
+    expect(warning.parentElement).toHaveClass('flex-row')
+    expect(screen.queryByText('Dirty worktree')).not.toBeInTheDocument()
+  })
+
+  it('keeps the complete dirty-branch explanation outside the toolbar', async () => {
+    apiMocks.getRepositoryContext.mockResolvedValue({
+      ...okRepositoryContext,
+      dirty: true,
+    })
+
+    renderControls({ branch: 'feature/h5', placement: 'outside' })
+
+    expect(await screen.findByRole('status', { name: 'Dirty worktree' }))
+      .toHaveTextContent('Dirty worktree')
+    expect(screen.queryByText('Uncommitted changes')).not.toBeInTheDocument()
   })
 
   // The dropdown used to close on its own `mousedown` listener, which does not

@@ -1560,7 +1560,9 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'repoLaunch.worktreeBadge': 'Isolated',
   'repoLaunch.missingWorkdir': 'Working directory is missing.',
   'repoLaunch.dirtyWarning': 'Uncommitted changes detected. Direct switching may be blocked; use isolated worktree to continue without touching this folder.',
+  'repoLaunch.dirtyWarningCompact': 'Uncommitted changes',
   'repoLaunch.checkedOutWarning': 'Selected branch is already checked out in another worktree. Direct launch may be blocked by Git; use "Isolated worktree" to avoid changing directories.',
+  'repoLaunch.checkedOutWarningCompact': 'Branch already checked out',
 
   // ─── Chat Input ──────────────────────────────────────
   'chat.placeholder': 'Ask Claude to edit, debug or explain...',
@@ -1582,6 +1584,8 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'chat.conversationNavigator.attachments': '{count} attachments',
   'chat.slashCommands': 'Slash commands',
   'chat.slashSkillPersonal': 'Personal',
+  'chat.slashSkillProject': 'Project',
+  'chat.slashSkillPlugin': 'Plugin',
   'chat.pendingMessageGuide': 'Guide',
   'chat.pendingMessageGuideNow': 'Guide now',
   'chat.pendingMessageEdit': 'Edit queued message',

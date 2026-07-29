@@ -34,6 +34,11 @@ import type {
   TokenUsage,
   PermissionUpdate,
 } from '../types/chat'
+import type {
+  SlashCommandKind,
+  SlashCommandOption,
+  SlashCommandSource,
+} from '../types/slashCommand'
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
 type ToolCall = Extract<UIMessage, { type: 'tool_use' }>
@@ -126,7 +131,7 @@ export type PerSessionState = {
   apiRetry?: ApiRetryState | null
   // 流式恢复/非流式降级提示（活动回合状态，与 apiRetry 同清除时机）。
   streamingFallback?: StreamingFallbackState | null
-  slashCommands: Array<{ name: string; description: string; argumentHint?: string }>
+  slashCommands: SlashCommandOption[]
   agentTaskNotifications: Record<string, AgentTaskNotification>
   backgroundAgentTasks?: Record<string, BackgroundAgentTask>
   stoppingBackgroundTaskIds?: Record<string, boolean>
@@ -1014,14 +1019,30 @@ type SlashCommandState = PerSessionState['slashCommands'][number]
 
 function normalizeSlashCommand(command: unknown): SlashCommandState | null {
   if (!command || typeof command !== 'object') return null
-  const candidate = command as { name?: unknown; description?: unknown; argumentHint?: unknown }
+  const candidate = command as {
+    name?: unknown
+    description?: unknown
+    argumentHint?: unknown
+    kind?: unknown
+    source?: unknown
+  }
   if (typeof candidate.name !== 'string' || !candidate.name) return null
+  const kind: SlashCommandKind | undefined =
+    candidate.kind === 'command' || candidate.kind === 'skill' || candidate.kind === 'agent'
+      ? candidate.kind
+      : undefined
+  const source: SlashCommandSource | undefined =
+    candidate.source === 'user' || candidate.source === 'project' || candidate.source === 'plugin'
+      ? candidate.source
+      : undefined
   return {
     name: candidate.name,
     description: typeof candidate.description === 'string' ? candidate.description : '',
     ...(typeof candidate.argumentHint === 'string' && candidate.argumentHint
       ? { argumentHint: candidate.argumentHint }
       : {}),
+    ...(kind ? { kind } : {}),
+    ...(source ? { source } : {}),
   }
 }
 
@@ -1040,7 +1061,18 @@ function mergeSlashCommandUpdates(
     if (command.name) merged.set(command.name, command)
   }
   for (const command of incoming) {
-    if (command.name) merged.set(command.name, command)
+    if (!command.name) continue
+    const currentCommand = merged.get(command.name)
+    merged.set(command.name, {
+      ...currentCommand,
+      ...command,
+      ...(command.kind ?? currentCommand?.kind
+        ? { kind: command.kind ?? currentCommand?.kind }
+        : {}),
+      ...(command.source ?? currentCommand?.source
+        ? { source: command.source ?? currentCommand?.source }
+        : {}),
+    })
   }
   return [...merged.values()]
 }

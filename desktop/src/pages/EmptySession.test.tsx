@@ -355,11 +355,60 @@ describe('EmptySession', () => {
     })
 
     await waitFor(() => {
-      const commandButtons = screen
-        .getAllByRole('button')
-        .filter((button) => button.textContent?.startsWith('/'))
-      expect(commandButtons[0]).toHaveTextContent('/superpowers:brainstorming')
+      const commandOptions = screen.getAllByRole('option')
+      expect(commandOptions[0]).toHaveTextContent('superpowers:brainstorming')
     })
+  })
+
+  it('uses the grouped accessible slash menu and preserves skill source labels', async () => {
+    mocks.listSkills.mockResolvedValueOnce({
+      skills: [
+        {
+          name: 'project-audit',
+          description: 'Audit this project.',
+          source: 'project',
+          userInvocable: true,
+        },
+        {
+          name: 'drawing:render',
+          description: 'Render with the drawing plugin.',
+          source: 'plugin',
+          userInvocable: true,
+        },
+      ],
+    })
+
+    render(<EmptySession />)
+
+    await waitFor(() => {
+      expect(mocks.listSkills).toHaveBeenCalledTimes(1)
+    })
+
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(input, {
+      target: { value: '/', selectionStart: 1 },
+    })
+
+    const listbox = await screen.findByRole('listbox', { name: 'Slash commands' })
+    const combobox = screen.getByRole('combobox')
+    const systemCommand = screen.getByText('mcp')
+    const skillsHeading = screen.getByText('Skills')
+    const projectSkill = screen.getByText('project-audit')
+    const pluginSkill = screen.getByText('drawing:render')
+
+    expect(systemCommand.compareDocumentPosition(skillsHeading)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    expect(skillsHeading.compareDocumentPosition(projectSkill)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    expect(projectSkill.closest('[role="option"]')).toHaveTextContent('Project')
+    expect(pluginSkill.closest('[role="option"]')).toHaveTextContent('Plugin')
+    expect(combobox).toHaveAttribute('aria-controls', listbox.id)
+    expect(combobox).toHaveAttribute(
+      'aria-activedescendant',
+      screen.getAllByRole('option')[0]!.id,
+    )
   })
 
   it('offers active agents as slash entries that insert /agent with the selected type', async () => {
@@ -387,7 +436,7 @@ describe('EmptySession', () => {
       target: { value: '/debug', selectionStart: 6 },
     })
 
-    const agentOption = await screen.findByText('/agent debugger')
+    const agentOption = await screen.findByText('agent debugger')
     fireEvent.click(agentOption)
 
     expect(input).toHaveValue('/agent debugger ')
@@ -444,7 +493,7 @@ describe('EmptySession', () => {
       target: { value: '/agent', selectionStart: 6 },
     })
 
-    await screen.findByText('/agent debugger')
+    await screen.findByText('agent debugger')
     fireEvent.keyDown(input, { key: 'ArrowDown' })
     fireEvent.keyDown(input, { key: 'Enter' })
 
@@ -826,7 +875,7 @@ describe('EmptySession', () => {
         selectionStart: 1,
       },
     })
-    expect(await screen.findByText('/mcp')).toBeInTheDocument()
+    expect(await screen.findByText('mcp')).toBeInTheDocument()
     expect(panel).toHaveClass('overflow-visible')
     expect(panel).not.toHaveClass('overflow-hidden')
 
@@ -1063,7 +1112,14 @@ describe('EmptySession', () => {
       expect(screen.getByText('main')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('Selected branch is already checked out in another worktree. Direct launch may be blocked by Git; use "Isolated worktree" to avoid changing directories.')).toBeInTheDocument()
+    const warning = screen.getByRole('status', {
+      name: 'Selected branch is already checked out in another worktree. Direct launch may be blocked by Git; use "Isolated worktree" to avoid changing directories.',
+    })
+    expect(warning).toHaveTextContent('Branch already checked out')
+    expect(warning).toHaveAttribute(
+      'title',
+      'Selected branch is already checked out in another worktree. Direct launch may be blocked by Git; use "Isolated worktree" to avoid changing directories.',
+    )
 
     // Staying on the current worktree has to remain a live choice even when the
     // fallback branch is checked out elsewhere — it must not render disabled.

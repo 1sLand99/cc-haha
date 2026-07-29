@@ -1646,14 +1646,20 @@ describe('ChatInput file mentions', () => {
             {
               name: 'agent-team-orchestrator',
               description: 'Agent Teams can use Subagent orchestration.',
+              kind: 'skill',
+              source: 'user',
             },
             {
               name: 'lark-calendar',
               description: 'Includes suggestion helpers.',
+              kind: 'skill',
+              source: 'user',
             },
             {
               name: 'superpowers:brainstorming',
               description: 'Creative work planning.',
+              kind: 'skill',
+              source: 'user',
             },
           ],
         },
@@ -1679,15 +1685,28 @@ describe('ChatInput file mentions', () => {
     })
   })
 
-  it('shows app commands before the personal skills section', async () => {
+  it('groups commands before skills and shows each skill source accurately', async () => {
     useChatStore.setState({
       sessions: {
         [sessionId]: {
           ...useChatStore.getState().sessions[sessionId]!,
           slashCommands: [
             {
+              name: 'future-native-command',
+              description: 'A CLI command unknown to this desktop build.',
+              kind: 'command',
+            },
+            {
               name: 'audit',
               description: 'Audit product UX.',
+              kind: 'skill',
+              source: 'project',
+            },
+            {
+              name: 'drawing:render',
+              description: 'Render an illustration.',
+              kind: 'skill',
+              source: 'plugin',
             },
           ],
         },
@@ -1702,16 +1721,29 @@ describe('ChatInput file mentions', () => {
     })
 
     const systemCommand = await screen.findByText('mcp')
+    const futureNativeCommand = screen.getByText('future-native-command')
     const skillsHeading = screen.getByText('Skills')
-    const personalSkill = screen.getByText('audit')
+    const projectSkill = screen.getByText('audit')
+    const pluginSkill = screen.getByText('drawing:render')
+    const listbox = screen.getByRole('listbox', { name: 'Slash commands' })
+    const combobox = screen.getByRole('combobox')
 
     expect(systemCommand.compareDocumentPosition(skillsHeading)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     )
-    expect(skillsHeading.compareDocumentPosition(personalSkill)).toBe(
+    expect(futureNativeCommand.compareDocumentPosition(skillsHeading)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     )
-    expect(personalSkill.closest('[role="option"]')).toHaveTextContent('Personal')
+    expect(skillsHeading.compareDocumentPosition(projectSkill)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    expect(projectSkill.closest('[role="option"]')).toHaveTextContent('Project')
+    expect(pluginSkill.closest('[role="option"]')).toHaveTextContent('Plugin')
+    expect(combobox).toHaveAttribute('aria-controls', listbox.id)
+    expect(combobox).toHaveAttribute(
+      'aria-activedescendant',
+      screen.getAllByRole('option')[0]!.id,
+    )
   })
 
   it('offers active agents as slash entries that insert /agent with the selected type', async () => {

@@ -1,28 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import {
-  Bot,
-  Box,
-  Bug,
-  CircleDollarSign,
-  CircleGauge,
-  Command as CommandIcon,
-  Eraser,
-  GitCommitHorizontal,
-  GitPullRequest,
-  HelpCircle,
-  LogIn,
-  LogOut,
-  Package,
-  PanelTop,
-  Settings,
-  ShieldCheck,
-  Sparkles,
-  Target,
-  Terminal,
-  Wrench,
-  Zap,
-  type LucideIcon,
-} from 'lucide-react'
+import { useState, useRef, useEffect, useCallback, useMemo, useId } from 'react'
 import { useDismissable } from '@/hooks/useDismissable'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
@@ -50,6 +26,7 @@ import { ProjectContextChip } from '@/components/chat/ProjectContextChip'
 import { RepositoryLaunchControls } from '@/components/chat/RepositoryLaunchControls'
 import { FileSearchMenu, type FileSearchMenuHandle } from './FileSearchMenu'
 import { LocalSlashCommandPanel, type LocalSlashCommandName } from './LocalSlashCommandPanel'
+import { getSlashCommandOptionId, SlashCommandMenu } from './SlashCommandMenu'
 import { ContextUsageIndicator } from './ContextUsageIndicator'
 import {
   appendAgentSlashCommands,
@@ -85,38 +62,6 @@ type ChatInputProps = {
 }
 
 const EMPTY_WORKSPACE_REFERENCES: WorkspaceChatReference[] = []
-
-const SYSTEM_SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
-  agent: Bot,
-  mcp: Wrench,
-  skills: Package,
-  help: HelpCircle,
-  status: CircleGauge,
-  cost: CircleDollarSign,
-  context: PanelTop,
-  plugin: Package,
-  memory: Sparkles,
-  doctor: Wrench,
-  compact: Zap,
-  clear: Eraser,
-  goal: Target,
-  review: ShieldCheck,
-  commit: GitCommitHorizontal,
-  pr: GitPullRequest,
-  bug: Bug,
-  config: Settings,
-  login: LogIn,
-  logout: LogOut,
-  model: Bot,
-  permissions: ShieldCheck,
-  'terminal-setup': Terminal,
-  vim: CommandIcon,
-}
-
-function getSystemSlashCommandIcon(commandName: string): LucideIcon {
-  const rootCommand = commandName.trim().split(/\s+/, 1)[0] ?? ''
-  return SYSTEM_SLASH_COMMAND_ICONS[rootCommand] ?? CommandIcon
-}
 
 function workspaceReferenceToAttachment(reference: WorkspaceChatReference): Attachment {
   return {
@@ -179,6 +124,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const fileSearchRef = useRef<FileSearchMenuHandle>(null)
   const slashItemRefs = useRef<(HTMLElement | null)[]>([])
+  const slashMenuId = useId()
   const previousActiveTabIdRef = useRef<string | null>(null)
   const inputRef = useRef(input)
   const attachmentsRef = useRef(attachments)
@@ -521,6 +467,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   }, [allSlashCommands, slashFilter])
 
   const filteredCommands = filteredCommandGroups.ordered
+  const isSlashMenuVisible = !isMemberSession && slashMenuOpen && filteredCommands.length > 0
 
   const exactSlashCommand = useMemo(() => {
     const normalized = slashFilter.trim().toLowerCase()
@@ -1116,117 +1063,17 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
             </div>
           )}
 
-          {!isMemberSession && slashMenuOpen && filteredCommands.length > 0 && (
-            <div
+          {isSlashMenuVisible && (
+            <SlashCommandMenu
               ref={slashMenuRef}
-              // `--radius-xl`, the card step: this is the same menu the
-              // zero-state composer renders, and it is the corner the context,
-              // effort, branch and worktree panels above this row already use.
-              className="absolute bottom-full left-0 right-0 z-[var(--z-dropdown)] mb-2 overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-overlay)]"
-            >
-              <div
-                role="listbox"
-                aria-label={t('chat.slashCommands')}
-                className="max-h-[420px] overflow-y-auto p-1.5"
-              >
-                {filteredCommandGroups.system.map((command, index) => {
-                  const Icon = getSystemSlashCommandIcon(command.name)
-                  return (
-                    <div
-                      key={command.name}
-                      role="option"
-                      tabIndex={-1}
-                      aria-selected={index === slashSelectedIndex}
-                      ref={(el) => { slashItemRefs.current[index] = el }}
-                      onClick={() => selectSlashCommand(command.name)}
-                      onMouseEnter={() => setSlashSelectedIndex(index)}
-                      className={`flex w-full cursor-default items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-left transition-colors ${
-                        index === slashSelectedIndex
-                          ? 'bg-[var(--color-surface-hover)]'
-                          : 'hover:bg-[var(--color-surface-hover)]'
-                      }`}
-                    >
-                      <Icon
-                        aria-hidden="true"
-                        className="h-4 w-4 shrink-0 text-[var(--color-text-secondary)]"
-                        strokeWidth={1.8}
-                      />
-                      <span className="flex min-w-0 max-w-[52%] shrink-0 items-baseline gap-1.5">
-                        <span className="shrink-0 text-sm font-medium text-[var(--color-text-primary)]">
-                          {command.name}
-                        </span>
-                        {command.argumentHint ? (
-                          <span className="min-w-0 truncate font-mono text-[11px] text-[var(--color-text-tertiary)]">
-                            {command.argumentHint}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-right text-xs text-[var(--color-text-tertiary)]">
-                        {command.description}
-                      </span>
-                    </div>
-                  )
-                })}
-
-                {filteredCommandGroups.skills.length > 0 ? (
-                  <div
-                    role="group"
-                    aria-label={t('sidebar.skills')}
-                    className={filteredCommandGroups.system.length > 0
-                      ? 'mt-1 border-t border-[var(--color-border-separator)] pt-1'
-                      : ''}
-                  >
-                    <div className="px-2.5 py-1.5 text-xs font-medium text-[var(--color-text-tertiary)]">
-                      {t('sidebar.skills')}
-                    </div>
-                    {filteredCommandGroups.skills.map((command, skillIndex) => {
-                      const index = filteredCommandGroups.system.length + skillIndex
-                      return (
-                        <div
-                          key={command.name}
-                          role="option"
-                          tabIndex={-1}
-                          aria-selected={index === slashSelectedIndex}
-                          ref={(el) => { slashItemRefs.current[index] = el }}
-                          onClick={() => selectSlashCommand(command.name)}
-                          onMouseEnter={() => setSlashSelectedIndex(index)}
-                          className={`flex w-full cursor-default items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-left transition-colors ${
-                            index === slashSelectedIndex
-                              ? 'bg-[var(--color-surface-hover)]'
-                              : 'hover:bg-[var(--color-surface-hover)]'
-                          }`}
-                        >
-                          <Box
-                            aria-hidden="true"
-                            className="h-4 w-4 shrink-0 text-[var(--color-text-secondary)]"
-                            strokeWidth={1.8}
-                          />
-                          <span className="min-w-0 shrink-0 truncate text-sm font-medium text-[var(--color-text-primary)]">
-                            {command.name}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate text-right text-xs text-[var(--color-text-tertiary)]">
-                            {command.description}
-                          </span>
-                          <span className="shrink-0 text-xs text-[var(--color-text-tertiary)]">
-                            {t('chat.slashSkillPersonal')}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : null}
-              </div>
-              {!isMobileComposer ? (
-                <div className="flex items-center gap-1.5 border-t border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-tertiary)]">
-                  <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1.5 py-0.5 font-mono text-[10px]">Up/Down</kbd>
-                  <span>{t('chat.navigate')}</span>
-                  <kbd className="ml-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd>
-                  <span>{t('chat.select')}</span>
-                  <kbd className="ml-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1.5 py-0.5 font-mono text-[10px]">Esc</kbd>
-                  <span>{t('chat.dismiss')}</span>
-                </div>
-              ) : null}
-            </div>
+              id={slashMenuId}
+              groups={filteredCommandGroups}
+              selectedIndex={slashSelectedIndex}
+              itemRefs={slashItemRefs}
+              onSelect={selectSlashCommand}
+              onHighlight={setSlashSelectedIndex}
+              showKeyboardHints={!isMobileComposer}
+            />
           )}
 
           {!isMemberSession && activeTabId && queuedUserMessages.length > 0 && (
@@ -1357,6 +1204,13 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                 onPaste={handlePaste}
                 placeholder={composerPlaceholder}
                 disabled={isWorkspaceMissing}
+                role={isSlashMenuVisible ? 'combobox' : undefined}
+                aria-autocomplete={isSlashMenuVisible ? 'list' : undefined}
+                aria-expanded={isSlashMenuVisible ? true : undefined}
+                aria-controls={isSlashMenuVisible ? slashMenuId : undefined}
+                aria-activedescendant={isSlashMenuVisible
+                  ? getSlashCommandOptionId(slashMenuId, slashSelectedIndex)
+                  : undefined}
                 rows={2}
                 className="flex-1 resize-none border-none bg-transparent py-2 leading-relaxed text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] disabled:opacity-50"
               />
@@ -1372,6 +1226,13 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
               onPaste={handlePaste}
               placeholder={composerPlaceholder}
               disabled={isWorkspaceMissing}
+              role={isSlashMenuVisible ? 'combobox' : undefined}
+              aria-autocomplete={isSlashMenuVisible ? 'list' : undefined}
+              aria-expanded={isSlashMenuVisible ? true : undefined}
+              aria-controls={isSlashMenuVisible ? slashMenuId : undefined}
+              aria-activedescendant={isSlashMenuVisible
+                ? getSlashCommandOptionId(slashMenuId, slashSelectedIndex)
+                : undefined}
               rows={1}
               // `block`: a textarea is inline-block by default, so it carries a
               // ~6px descender gap under it. The hero branch escapes it through

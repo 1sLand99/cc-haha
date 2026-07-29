@@ -1561,7 +1561,9 @@ export const zh: Record<TranslationKey, string> = {
   'repoLaunch.worktreeBadge': '獨立',
   'repoLaunch.missingWorkdir': '工作目錄不存在。',
   'repoLaunch.dirtyWarning': '檢測到未提交變更，直接切換可能會被阻止；使用獨立工作樹可以繼續，且不會改動當前目錄。',
+  'repoLaunch.dirtyWarningCompact': '未提交變更',
   'repoLaunch.checkedOutWarning': '選中的分支已在其他工作樹中檢出。直接啟動可能會被 Git 阻止；使用“獨立工作樹”可以避免切換當前目錄。',
+  'repoLaunch.checkedOutWarningCompact': '分支已被檢出',
 
   // ─── Chat Input ──────────────────────────────────────
   'chat.placeholder': '讓 Claude 編輯、除錯或解釋程式碼...',
@@ -1583,6 +1585,8 @@ export const zh: Record<TranslationKey, string> = {
   'chat.conversationNavigator.attachments': '{count} 個附件',
   'chat.slashCommands': '斜槓命令',
   'chat.slashSkillPersonal': '個人',
+  'chat.slashSkillProject': '專案',
+  'chat.slashSkillPlugin': '外掛',
   'chat.pendingMessageGuide': '引導',
   'chat.pendingMessageGuideNow': '立即引導',
   'chat.pendingMessageEdit': '編輯排隊訊息',

@@ -2439,6 +2439,46 @@ describe('chatStore history mapping', () => {
     ])
   })
 
+  it('keeps skill source metadata while a live CLI slash update is being reconciled', async () => {
+    const projectSkill = {
+      name: 'project-audit',
+      description: 'Project skill',
+      kind: 'skill' as const,
+      source: 'project' as const,
+    }
+
+    vi.mocked(sessionsApi.getSlashCommands).mockResolvedValueOnce({
+      commands: [projectSkill],
+    })
+
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          slashCommands: [projectSkill],
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'slash_commands',
+      data: [{ name: 'project-audit', description: 'CLI description' }],
+    })
+
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.slashCommands).toContainEqual({
+      name: 'project-audit',
+      description: 'CLI description',
+      kind: 'skill',
+      source: 'project',
+    })
+
+    await Promise.resolve()
+
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.slashCommands).toEqual([
+      projectSkill,
+    ])
+  })
+
   it('syncs live TodoWrite tool input into the task store for that session', () => {
     const todos = [{ content: 'Live todo', status: 'in_progress' }]
     useChatStore.setState({

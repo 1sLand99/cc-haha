@@ -242,13 +242,19 @@ export function RepositoryLaunchControls({
     ))
   }, [branchFilter, context])
 
-  const warningMessage = useMemo(() => {
+  const warning = useMemo(() => {
     if (context?.state !== 'ok' || !selectedBranch || useWorktree) return null
     if (selectedBranch.name !== context.currentBranch && context.dirty) {
-      return t('repoLaunch.dirtyWarning')
+      return {
+        message: t('repoLaunch.dirtyWarning'),
+        compactLabel: t('repoLaunch.dirtyWarningCompact'),
+      }
     }
     if (selectedBranch.name !== context.currentBranch && selectedBranch.checkedOut) {
-      return t('repoLaunch.checkedOutWarning')
+      return {
+        message: t('repoLaunch.checkedOutWarning'),
+        compactLabel: t('repoLaunch.checkedOutWarningCompact'),
+      }
     }
     return null
   }, [context, selectedBranch, t, useWorktree])
@@ -581,7 +587,22 @@ export function RepositoryLaunchControls({
       // width, never the width of "+" or the permission selector beside it.
       className={`flex min-w-0 flex-col ${isToolbar ? 'shrink gap-0' : 'gap-1.5'}`}
     >
-      {pill}
+      {isToolbar ? (
+        <div className="flex min-w-0 flex-row items-center gap-2">
+          {pill}
+          {warning && (
+            <div
+              role="status"
+              aria-label={warning.message}
+              title={warning.message}
+              className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-md)] bg-[var(--color-warning-container)] px-2 text-[11px] font-medium text-[var(--color-on-warning-container)]"
+            >
+              <AlertCircle size={13} aria-hidden="true" className="shrink-0 text-[var(--color-warning)]" />
+              <span className="hidden 2xl:inline">{warning.compactLabel}</span>
+            </div>
+          )}
+        </div>
+      ) : pill}
 
       {message && workDir && (
         <div className="flex items-center gap-2 px-1 text-[11px] text-[var(--color-text-tertiary)]">
@@ -590,10 +611,14 @@ export function RepositoryLaunchControls({
         </div>
       )}
 
-      {warningMessage && (
-        <div className="flex items-center gap-2 px-1 text-[11px] text-[var(--color-warning)]">
-          <AlertCircle size={13} className="shrink-0" />
-          <span>{warningMessage}</span>
+      {warning && !isToolbar && (
+        <div
+          role="status"
+          aria-label={warning.message}
+          className="flex items-center gap-2 px-1 text-[11px] text-[var(--color-warning)]"
+        >
+          <AlertCircle size={13} aria-hidden="true" className="shrink-0" />
+          <span>{warning.message}</span>
         </div>
       )}
 
