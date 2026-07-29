@@ -795,6 +795,7 @@ export const kr: Record<TranslationKey, string> = {
   'settings.adapters.waAllowedUsersPlaceholder': '예: 15551234567@s.whatsapp.net',
   'settings.adapters.defaultProject': '기본 프로젝트',
   'settings.adapters.defaultProjectHint': '새 IM 세션의 기본 작업 디렉터리입니다. 비어 있으면 봇은 현재 사용자 작업 디렉터리를 사용합니다.',
+  'settings.adapters.clearDefaultProject': '기본 프로젝트 지우기',
   'settings.adapters.streamingCard': '스트리밍 카드 모드',
   'settings.adapters.streamingCardDesc': '더 나은 환경을 위해 카드를 실시간으로 업데이트합니다',
   'settings.adapters.serverUrl': '서버 URL',

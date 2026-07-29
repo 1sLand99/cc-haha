@@ -793,6 +793,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'settings.adapters.waAllowedUsersPlaceholder': 'e.g. 15551234567@s.whatsapp.net',
   'settings.adapters.defaultProject': 'Default Project',
   'settings.adapters.defaultProjectHint': 'Default working directory for new IM sessions. If empty, the bot uses the current user working directory.',
+  'settings.adapters.clearDefaultProject': 'Clear default project',
   'settings.adapters.streamingCard': 'Streaming Card Mode',
   'settings.adapters.streamingCardDesc': 'Real-time card updates for better experience',
   'settings.adapters.serverUrl': 'Server URL',

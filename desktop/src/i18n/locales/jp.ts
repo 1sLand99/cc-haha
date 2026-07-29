@@ -795,6 +795,7 @@ export const jp: Record<TranslationKey, string> = {
   'settings.adapters.waAllowedUsersPlaceholder': '例: 15551234567@s.whatsapp.net',
   'settings.adapters.defaultProject': 'デフォルトプロジェクト',
   'settings.adapters.defaultProjectHint': '新しい IM セッションのデフォルト作業ディレクトリ。空欄の場合、ボットは現在のユーザーの作業ディレクトリを使用します。',
+  'settings.adapters.clearDefaultProject': 'デフォルトプロジェクトをクリア',
   'settings.adapters.streamingCard': 'ストリーミングカードモード',
   'settings.adapters.streamingCardDesc': 'より快適な体験のためにカードをリアルタイムで更新します',
   'settings.adapters.serverUrl': 'サーバー URL',

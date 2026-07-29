@@ -794,6 +794,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.adapters.waAllowedUsersPlaceholder': '如 15551234567@s.whatsapp.net',
   'settings.adapters.defaultProject': '預設專案',
   'settings.adapters.defaultProjectHint': '新 IM 會話的預設工作目錄。留空則使用當前使用者工作目錄。',
+  'settings.adapters.clearDefaultProject': '清除預設專案',
   'settings.adapters.streamingCard': '流式卡片模式',
   'settings.adapters.streamingCardDesc': '實時更新訊息內容，體驗更好',
   'settings.adapters.serverUrl': '伺服器地址',
