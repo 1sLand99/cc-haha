@@ -196,13 +196,14 @@ cp .env.example .env
 | API | Anthropic SDK |
 | 协议 | MCP, LSP |
 
-## 感谢
+## 致谢
 
 感谢以下开源项目和社区实践为本项目提供参考与启发：
 
 - [React](https://github.com/facebook/react)：前端工程与组件化 UI 生态。
 - [Electron](https://github.com/electron/electron)：跨端桌面应用能力与工程实践。
 - [cc-switch](https://github.com/farion1231/cc-switch)：模型供应商配置能力参考。
+- [LINUX DO](https://linux.do/)：新的理想型开发者社区。
 
 ---
 
