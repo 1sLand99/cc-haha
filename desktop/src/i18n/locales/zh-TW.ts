@@ -1581,6 +1581,7 @@ export const zh: Record<TranslationKey, string> = {
   'chat.conversationNavigator.label': '對話導覽',
   'chat.conversationNavigator.attachments': '{count} 個附件',
   'chat.slashCommands': '斜槓命令',
+  'chat.slashSkillPersonal': '個人',
   'chat.pendingMessageGuide': '引導',
   'chat.pendingMessageGuideNow': '立即引導',
   'chat.pendingMessageEdit': '編輯排隊訊息',

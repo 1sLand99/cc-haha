@@ -1582,6 +1582,7 @@ export const jp: Record<TranslationKey, string> = {
   'chat.conversationNavigator.label': '会話ナビゲーション',
   'chat.conversationNavigator.attachments': '添付ファイル {count} 件',
   'chat.slashCommands': 'スラッシュコマンド',
+  'chat.slashSkillPersonal': '個人',
   'chat.pendingMessageGuide': '誘導',
   'chat.pendingMessageGuideNow': '今すぐ誘導',
   'chat.pendingMessageEdit': 'キュー中のメッセージを編集',
