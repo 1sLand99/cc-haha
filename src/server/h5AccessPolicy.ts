@@ -80,9 +80,18 @@ function isCrossSiteSubresource(headers: Headers): boolean {
 function isLocalDesktopOrNavigationOrigin(
   request: Request,
   origin: string | null,
+  context: H5RequestContext,
 ): boolean {
   if (!origin) return !isCrossSiteSubresource(request.headers)
-  return LOCAL_DESKTOP_ORIGINS.has(origin) || isLoopbackBrowserOrigin(origin)
+  if (LOCAL_DESKTOP_ORIGINS.has(origin)) return true
+
+  // A configured process credential distinguishes the Electron renderer from
+  // arbitrary pages served by another loopback process. Keep tokenless
+  // navigation, OAuth callbacks and CLI/adapters working above, but never
+  // grant an Origin-bearing browser page that credential by locality alone.
+  if (context.localAccessTokenConfigured) return false
+
+  return isLoopbackBrowserOrigin(origin)
 }
 
 function hasProxyTraceHeaders(headers: Headers): boolean {
@@ -113,7 +122,7 @@ function isLocalTrustedRequest(
 
   return isLoopbackHost(clientAddress) &&
     isLoopbackHost(url.hostname) &&
-    isLocalDesktopOrNavigationOrigin(request, origin)
+    isLocalDesktopOrNavigationOrigin(request, origin, context)
 }
 
 function isFilesystemCapabilityPath(pathname: string): boolean {

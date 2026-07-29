@@ -45,6 +45,15 @@ const MARKDOWN_SANITIZE_CONFIG = {
   ADD_ATTR: ['xlink:href'],
   FORBID_TAGS: ['style'],
   FORBID_ATTR: ['style'],
+  // Blob URLs are origin-bound object URLs. Remote network URLs are removed
+  // below after sanitization, before the markup reaches the renderer.
+  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+}
+
+function isSafeMarkdownImageSource(value: string | null): boolean {
+  if (!value) return false
+  if (/^blob:/i.test(value)) return true
+  return /^data:image\/(?:avif|gif|jpe?g|png|webp);base64,[a-z0-9+/=\r\n]+$/i.test(value)
 }
 
 function normalizeCodeLanguage(language: string | undefined): string | undefined {
@@ -276,7 +285,7 @@ function renderMath(block: MathBlock): string {
 function enhanceMarkdownHtml(html: string, mathBlocks: MathBlock[]): string {
   const cleanHtml = DOMPurify.sanitize(html, MARKDOWN_SANITIZE_CONFIG)
 
-  const needsDomEnhancement = mathBlocks.length > 0 || /<(?:a|table)\b/i.test(cleanHtml)
+  const needsDomEnhancement = mathBlocks.length > 0 || /<(?:a|table|img|source)\b/i.test(cleanHtml)
   if (!needsDomEnhancement) {
     return cleanHtml
   }
@@ -288,6 +297,13 @@ function enhanceMarkdownHtml(html: string, mathBlocks: MathBlock[]): string {
   const container = document.createElement('div')
   container.innerHTML = cleanHtml
   const mathById = new Map(mathBlocks.map((block) => [block.id, block]))
+
+  container.querySelectorAll<HTMLImageElement | HTMLSourceElement>('img, source').forEach((image) => {
+    if (!isSafeMarkdownImageSource(image.getAttribute('src'))) image.removeAttribute('src')
+    // srcset can trigger several independent fetches and is never needed for
+    // assistant Markdown. Keep it absent even when an img has a safe src.
+    image.removeAttribute('srcset')
+  })
 
   container.querySelectorAll<HTMLElement>('[data-math-id]').forEach((placeholder) => {
     const block = mathById.get(placeholder.dataset.mathId ?? '')

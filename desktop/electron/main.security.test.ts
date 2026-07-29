@@ -11,6 +11,14 @@ const desktopRoot = existsSync(path.resolve(process.cwd(), 'electron', 'main.ts'
   ? process.cwd()
   : path.resolve(process.cwd(), 'desktop')
 const mainSource = readFileSync(path.join(desktopRoot, 'electron', 'main.ts'), 'utf8')
+const previewServiceSource = mainSource.slice(
+  mainSource.indexOf('function getPreviewService()'),
+  mainSource.indexOf('function getPetWindowController()'),
+)
+const mainWindowSource = mainSource.slice(
+  mainSource.indexOf('async function createMainWindow()'),
+  mainSource.indexOf('if (!acquireSingleInstanceLock'),
+)
 
 describe('Electron preview security boundary', () => {
   it('does not give the pet preload the desktop master access token', () => {
@@ -29,6 +37,13 @@ describe('Electron preview security boundary', () => {
     expect(firstPartition.startsWith('persist:')).toBe(false)
     expect(secondPartition).not.toBe(firstPartition)
     expect(mainSource).toContain('partition: createPreviewSessionPartition()')
+  })
+
+  it('does not implicitly authenticate arbitrary preview or main-renderer subresources', () => {
+    expect(previewServiceSource).not.toContain('configureLocalServerRequestAuth')
+    expect(previewServiceSource).not.toContain('resolveLocalServerAccess')
+    expect(mainWindowSource).not.toContain('configureLocalServerRequestAuth')
+    expect(mainWindowSource).not.toContain('resolveLocalServerAccess')
   })
 
   it('denies preview permission checks and requests by default', () => {
@@ -61,7 +76,6 @@ describe('Electron preview security boundary', () => {
     const callback = (allowed: boolean) => expect(allowed).toBe(false)
     handlers.request?.(null, 'media', callback)
     expect(mainSource).toContain('configurePreviewSessionPermissions(view.webContents.session)')
-    expect(mainSource).toContain('mainWindow.webContents.session.webRequest')
 
     const localCallback = vi.fn()
     handlers.beforeSendHeaders?.({

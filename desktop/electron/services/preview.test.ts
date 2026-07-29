@@ -588,6 +588,7 @@ describe('Electron preview service', () => {
       width: 100,
       height: 100,
     })
+    await service.message({ v: 1, type: 'enter-picker' })
 
     await service.sendMessageToRenderer(view.webContents, JSON.stringify({
       v: 1,
@@ -615,6 +616,41 @@ describe('Electron preview service', () => {
         },
       },
     ])
+  })
+
+  it('drops unarmed and replayed selection events before capture or renderer forwarding', async () => {
+    const view = new FakeView()
+    const renderer = new FakeWebContents()
+    const service = new ElectronPreviewService({
+      createView: () => view,
+      previewScriptPath: previewScript(),
+    })
+    await service.open({ contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } }, 'https://example.com', {
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+    })
+    const selection = JSON.stringify({
+      v: 1,
+      type: 'selection',
+      payload: {
+        pageUrl: 'https://example.com',
+        element: { selector: '#todo', tag: 'input', classes: [] },
+        screenshot: { kind: 'region' },
+      },
+    })
+
+    await service.sendMessageToRenderer(view.webContents, selection, renderer)
+    expect(view.webContents.capturePage).not.toHaveBeenCalled()
+    expect(renderer.sent).toEqual([])
+
+    await service.message({ v: 1, type: 'enter-picker' })
+    await service.sendMessageToRenderer(view.webContents, selection, renderer)
+    await service.sendMessageToRenderer(view.webContents, selection, renderer)
+
+    expect(view.webContents.capturePage).toHaveBeenCalledTimes(1)
+    expect(renderer.sent).toHaveLength(1)
   })
 
   it('rejects host messages before a preview view exists', async () => {

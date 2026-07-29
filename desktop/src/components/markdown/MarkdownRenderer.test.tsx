@@ -268,6 +268,40 @@ describe('MarkdownRenderer', () => {
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
   })
 
+  it('removes automatic network image sources from untrusted markdown', () => {
+    const { container } = render(
+      <MarkdownRenderer
+        content={[
+          '![loopback](http://127.0.0.1:3456/api/status)',
+          '![remote](https://attacker.example/track.png)',
+          '<img alt="responsive" srcset="https://attacker.example/a.png 1x">',
+        ].join('\n')}
+      />,
+    )
+
+    const images = Array.from(container.querySelectorAll('img'))
+    expect(images).toHaveLength(3)
+    expect(images.every((image) => !image.hasAttribute('src'))).toBe(true)
+    expect(images.every((image) => !image.hasAttribute('srcset'))).toBe(true)
+  })
+
+  it('preserves local in-memory image sources in markdown', () => {
+    const { container } = render(
+      <MarkdownRenderer
+        content={[
+          '![inline](data:image/png;base64,AAAA)',
+          '![object-url](blob:https://desktop.invalid/1234)',
+        ].join('\n')}
+      />,
+    )
+
+    const images = Array.from(container.querySelectorAll('img'))
+    expect(images.map((image) => image.getAttribute('src'))).toEqual([
+      'data:image/png;base64,AAAA',
+      'blob:https://desktop.invalid/1234',
+    ])
+  })
+
   it('strips style tags from assistant text before injecting markdown html', () => {
     const { container } = render(
       <MarkdownRenderer

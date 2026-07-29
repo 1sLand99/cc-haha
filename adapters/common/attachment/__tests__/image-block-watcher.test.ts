@@ -2,16 +2,10 @@ import { describe, it, expect } from 'bun:test'
 import { ImageBlockWatcher } from '../image-block-watcher.js'
 
 describe('ImageBlockWatcher', () => {
-  it('extracts a markdown image with http URL', () => {
+  it('rejects a markdown image with an http URL', () => {
     const w = new ImageBlockWatcher()
     const out = w.feed('Here is ![alt](https://example.com/foo.png) an image.')
-    expect(out.length).toBe(1)
-    const source = out[0]!.source
-    expect(source.kind).toBe('url')
-    if (source.kind === 'url') {
-      expect(source.url).toBe('https://example.com/foo.png')
-    }
-    expect(out[0]!.alt).toBe('alt')
+    expect(out).toEqual([])
   })
 
   it('extracts a markdown image with absolute local path', () => {
@@ -46,8 +40,8 @@ describe('ImageBlockWatcher', () => {
 
   it('deduplicates the same image across multiple feeds', () => {
     const w = new ImageBlockWatcher()
-    const a = w.feed('![](https://x/y.png)')
-    const b = w.feed(' repeated ![](https://x/y.png) again')
+    const a = w.feed('![](/tmp/y.png)')
+    const b = w.feed(' repeated ![](/tmp/y.png) again')
     expect(a.length).toBe(1)
     expect(b.length).toBe(0)
   })
@@ -100,10 +94,9 @@ describe('ImageBlockWatcher', () => {
   it('extracts multiple images from a single feed chunk in order', () => {
     const w = new ImageBlockWatcher()
     const out = w.feed('![a](/tmp/a.png) ![b](https://x/b.png) ![c](data:image/png;base64,QQ==)')
-    expect(out.length).toBe(3)
+    expect(out.length).toBe(2)
     expect(out[0]!.source.kind).toBe('path')
-    expect(out[1]!.source.kind).toBe('url')
-    expect(out[2]!.source.kind).toBe('base64')
+    expect(out[1]!.source.kind).toBe('base64')
   })
 
   it('rejects malformed data URI (not base64)', () => {

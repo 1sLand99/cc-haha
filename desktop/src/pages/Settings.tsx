@@ -1614,12 +1614,13 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
     setTestResult(null)
     try {
       let result: ProviderTestResult
-      if (mode === 'edit' && provider && !apiKey.trim()) {
+      const savedConfigUnchanged = mode === 'edit' && provider && !apiKey.trim() &&
+        baseUrl.trim() === provider.baseUrl.trim() &&
+        apiFormat === provider.apiFormat &&
+        authStrategy === provider.authStrategy
+      if (savedConfigUnchanged && provider) {
         result = await useProviderStore.getState().testProvider(provider.id, {
-          baseUrl: baseUrl.trim(),
           modelId: models.main.trim(),
-          apiFormat,
-          authStrategy,
         })
       } else {
         if (requiresApiKey && !apiKey.trim()) return

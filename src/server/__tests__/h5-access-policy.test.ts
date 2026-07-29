@@ -76,7 +76,12 @@ describe('h5AccessPolicy', () => {
     expect(shouldRequireH5Token({ request, url: new URL(request.url), h5Enabled: true, context: localContext })).toBe(false)
   })
 
-  test('keeps loopback browser origins tokenless for local dev capability routes', () => {
+  test('requires the local process credential for loopback browser origins when configured', () => {
+    const desktopContext = {
+      clientAddress: '127.0.0.1',
+      localAccessTokenConfigured: true,
+      localAccessAuthorized: false,
+    }
     for (const pathname of [
       '/api/status',
       '/api/adapters',
@@ -94,17 +99,26 @@ describe('h5AccessPolicy', () => {
         const request = req(`http://127.0.0.1:3456${pathname}`, {
           headers: { Origin: origin },
         })
-        expect(classifyH5Request(request, new URL(request.url), localContext)).toBe('local-trusted')
-        expect(shouldRequireH5Token({ request, url: new URL(request.url), h5Enabled: true, context: localContext })).toBe(false)
+        expect(classifyH5Request(request, new URL(request.url), desktopContext)).toBe('h5-browser')
+        expect(shouldRequireH5Token({ request, url: new URL(request.url), h5Enabled: true, context: desktopContext })).toBe(true)
         expect(shouldBlockDisabledH5Access({
           request,
           url: new URL(request.url),
           h5Enabled: false,
           explicitAuthRequired: false,
-          context: localContext,
-        })).toBe(false)
+          context: desktopContext,
+        })).toBe(true)
       }
     }
+  })
+
+  test('keeps loopback browser origins usable for tokenless local development servers', () => {
+    const request = req('http://127.0.0.1:3456/api/status', {
+      headers: { Origin: 'http://localhost:5173' },
+    })
+
+    expect(classifyH5Request(request, new URL(request.url), localContext)).toBe('local-trusted')
+    expect(shouldRequireH5Token({ request, url: new URL(request.url), h5Enabled: true, context: localContext })).toBe(false)
   })
 
   test('does not trust adapter requests from non-loopback browser origins', () => {

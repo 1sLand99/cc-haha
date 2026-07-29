@@ -101,11 +101,27 @@ export async function handleProvidersApi(
     // /api/providers/:id/test
     if (action === 'test') {
       if (req.method !== 'POST') throw methodNotAllowed(req.method)
-      let overrides: { baseUrl?: string; modelId?: string; apiFormat?: string; authStrategy?: string } | undefined
+      let body: unknown
       try {
-        const body = await req.json()
-        if (body && typeof body === 'object') overrides = body as typeof overrides
+        body = await req.json()
       } catch { /* no body is fine — uses saved values */ }
+      let overrides: { modelId?: string } | undefined
+      if (body && typeof body === 'object') {
+        const candidate = body as Record<string, unknown>
+        for (const field of ['baseUrl', 'apiFormat', 'authStrategy']) {
+          if (Object.prototype.hasOwnProperty.call(candidate, field)) {
+            throw ApiError.badRequest(
+              `${field} cannot be overridden when testing with a saved provider key`,
+            )
+          }
+        }
+        if (candidate.modelId !== undefined && typeof candidate.modelId !== 'string') {
+          throw ApiError.badRequest('modelId must be a string')
+        }
+        overrides = candidate.modelId === undefined
+          ? undefined
+          : { modelId: candidate.modelId as string }
+      }
       const result = await providerService.testProvider(id, overrides)
       if (!result.connectivity.success || result.proxy?.success === false) {
         void diagnosticsService.recordEvent({
@@ -115,7 +131,6 @@ export async function handleProvidersApi(
           details: {
             providerId: id,
             httpStatus: result.connectivity.httpStatus ?? result.proxy?.httpStatus,
-            apiFormat: overrides?.apiFormat,
             modelId: overrides?.modelId,
             connectivity: result.connectivity,
             proxy: result.proxy,

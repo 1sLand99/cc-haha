@@ -561,13 +561,13 @@ export class ProviderService {
 
   async testProvider(
     id: string,
-    overrides?: { baseUrl?: string; modelId?: string; apiFormat?: ApiFormat; authStrategy?: ProviderAuthStrategy },
+    overrides?: { modelId?: string },
   ): Promise<ProviderTestResult> {
     const provider = await this.getProvider(id)
-    const baseUrl = overrides?.baseUrl || provider.baseUrl
+    const baseUrl = provider.baseUrl
     const modelId = overrides?.modelId || provider.models.main
-    const apiFormat = overrides?.apiFormat ?? provider.apiFormat ?? 'anthropic'
-    const authStrategy = overrides?.authStrategy ?? provider.authStrategy ?? getPresetAuthStrategy(provider.presetId)
+    const apiFormat = provider.apiFormat ?? 'anthropic'
+    const authStrategy = provider.authStrategy ?? getPresetAuthStrategy(provider.presetId)
     const presetDefaultEnv = getPresetDefaultEnv(provider.presetId)
     const apiKey = provider.apiKey
       || presetDefaultEnv.ANTHROPIC_AUTH_TOKEN

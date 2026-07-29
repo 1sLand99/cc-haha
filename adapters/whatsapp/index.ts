@@ -258,13 +258,6 @@ async function dispatchOutboundMedia(chatId: string, pending: PendingUpload): Pr
         buffer = await fs.readFile(pending.source.path)
         mime = pending.source.mime ?? 'image/png'
         break
-      case 'url': {
-        const resp = await fetch(pending.source.url)
-        if (!resp.ok) throw new Error(`fetch ${pending.source.url} -> ${resp.status}`)
-        buffer = Buffer.from(await resp.arrayBuffer())
-        mime = pending.source.mime ?? resp.headers.get('content-type') ?? 'image/png'
-        break
-      }
     }
     const check = checkAttachmentLimit('image', buffer.length, mime)
     if (!check.ok) {

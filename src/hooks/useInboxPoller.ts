@@ -37,6 +37,7 @@ import { TEAM_LEAD_NAME } from '../utils/swarm/constants.js'
 import { getLeaderToolUseConfirmQueue } from '../utils/swarm/leaderPermissionBridge.js'
 import { sendPermissionResponseViaMailbox } from '../utils/swarm/permissionSync.js'
 import {
+  readTeamFileAsync,
   removeTeammateFromTeamFile,
   setMemberMode,
 } from '../utils/swarm/teamHelpers.js'
@@ -49,6 +50,7 @@ import {
 } from '../utils/teammate.js'
 import { isInProcessTeammate } from '../utils/teammateContext.js'
 import {
+  getTrustedShutdownApproval,
   isModeSetRequest,
   isPermissionRequest,
   isPermissionResponse,
@@ -59,6 +61,7 @@ import {
   isShutdownApproved,
   isShutdownRequest,
   isTeamPermissionUpdate,
+  isTrustedTeamLeaderMessage,
   markMessagesAsRead,
   readUnreadMessages,
   type TeammateMessage,
@@ -370,6 +373,8 @@ export function useInboxPoller({
       )
 
       for (const m of permissionResponses) {
+        if (!isTrustedTeamLeaderMessage(m)) continue
+
         const parsed = isPermissionResponse(m.text)
         if (!parsed) continue
 
@@ -469,6 +474,8 @@ export function useInboxPoller({
       )
 
       for (const m of sandboxPermissionResponses) {
+        if (!isTrustedTeamLeaderMessage(m)) continue
+
         const parsed = isSandboxPermissionResponse(m.text)
         if (!parsed) continue
 
@@ -501,6 +508,8 @@ export function useInboxPoller({
       )
 
       for (const m of teamPermissionUpdates) {
+        if (!isTrustedTeamLeaderMessage(m)) continue
+
         const parsed = isTeamPermissionUpdate(m.text)
         if (!parsed) {
           logForDebugging(
@@ -554,7 +563,7 @@ export function useInboxPoller({
 
       for (const m of modeSetRequests) {
         // Only accept mode changes from team-lead
-        if (m.from !== 'team-lead') {
+        if (m.from !== TEAM_LEAD_NAME) {
           logForDebugging(
             `[InboxPoller] Ignoring mode set request from non-team-lead: ${m.from}`,
           )
@@ -683,11 +692,17 @@ export function useInboxPoller({
         `[InboxPoller] Found ${shutdownApprovals.length} shutdown approval(s)`,
       )
 
+      const teamName = currentAppState.teamContext?.teamName
+      const trustedTeamFile = teamName ? await readTeamFileAsync(teamName) : null
+
       for (const m of shutdownApprovals) {
-        const parsed = isShutdownApproved(m.text)
+        const parsed = getTrustedShutdownApproval(
+          m,
+          trustedTeamFile?.members ?? [],
+        )
         if (!parsed) continue
 
-        // Kill the pane if we have the info (pane-based teammates)
+        // Pane selection comes only from leader-owned team state.
         if (parsed.paneId && parsed.backendType) {
           void (async () => {
             try {
@@ -702,27 +717,23 @@ export function useInboxPoller({
                 !insideTmux,
               )
               logForDebugging(
-                `[InboxPoller] Killed pane ${parsed.paneId} for ${parsed.from}: ${success}`,
+                `[InboxPoller] Killed pane ${parsed.paneId} for ${parsed.name}: ${success}`,
               )
             } catch (error) {
               logForDebugging(
-                `[InboxPoller] Failed to kill pane for ${parsed.from}: ${error}`,
+                `[InboxPoller] Failed to kill pane for ${parsed.name}: ${error}`,
               )
             }
           })()
         }
 
         // Remove the teammate from teamContext.teammates so the count is accurate
-        const teammateToRemove = parsed.from
+        const teammateToRemove = parsed.name
         if (teammateToRemove && currentAppState.teamContext?.teammates) {
-          // Find the teammate ID by name
-          const teammateId = Object.entries(
-            currentAppState.teamContext.teammates,
-          ).find(([, t]) => t.name === teammateToRemove)?.[0]
+          const teammateId = parsed.agentId
 
           if (teammateId) {
             // Remove from team file (leader owns team file mutations)
-            const teamName = currentAppState.teamContext?.teamName
             if (teamName) {
               removeTeammateFromTeamFile(teamName, {
                 agentId: teammateId,

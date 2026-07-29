@@ -24,6 +24,5 @@ export interface PendingUpload {
   source:
     | { kind: 'base64'; data: string; mime: string }
     | { kind: 'path'; path: string; mime?: string }
-    | { kind: 'url'; url: string; mime?: string }
   alt?: string
 }

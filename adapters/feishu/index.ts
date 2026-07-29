@@ -154,19 +154,6 @@ async function dispatchOutboundImage(chatId: string, pending: PendingUpload): Pr
         mime = pending.source.mime ?? 'image/png'
         break
       }
-      case 'url': {
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), 30_000)
-        try {
-          const resp = await fetch(pending.source.url, { signal: controller.signal })
-          if (!resp.ok) throw new Error(`fetch ${pending.source.url} -> ${resp.status}`)
-          buffer = Buffer.from(await resp.arrayBuffer())
-          mime = pending.source.mime ?? resp.headers.get('content-type') ?? 'image/png'
-        } finally {
-          clearTimeout(timer)
-        }
-        break
-      }
     }
 
     const check = checkAttachmentLimit('image', buffer.length, mime)

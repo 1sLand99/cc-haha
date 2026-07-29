@@ -61,7 +61,7 @@ export const providersApi = {
     return api.put<ProvidersReorderResponse>('/api/providers/reorder', { orderedIds })
   },
 
-  test(id: string, overrides?: { baseUrl?: string; modelId?: string; apiFormat?: string; authStrategy?: string }) {
+  test(id: string, overrides?: { modelId?: string }) {
     return api.post<TestResultResponse>(`/api/providers/${id}/test`, overrides)
   },
 

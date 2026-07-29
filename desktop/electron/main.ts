@@ -237,14 +237,6 @@ function getServerRuntime() {
   return serverRuntime
 }
 
-function resolveLocalServerAccess(): PreviewLocalAccess | null {
-  const runtime = getServerRuntime()
-  const serverUrl = runtime.getActiveServerUrl()
-  return serverUrl
-    ? { serverUrl, token: runtime.getLocalAccessToken() }
-    : null
-}
-
 function resolvePetServerAccess(): PreviewLocalAccess | null {
   const runtime = getServerRuntime()
   const serverUrl = runtime.getActiveServerUrl()
@@ -299,10 +291,6 @@ function getPreviewService() {
         },
       })
       configurePreviewSessionPermissions(view.webContents.session)
-      configureLocalServerRequestAuth(
-        view.webContents.session.webRequest,
-        resolveLocalServerAccess,
-      )
       installPreviewNavigationGuards(view.webContents, { openExternal: openExternalUrl })
       return view
     },
@@ -706,11 +694,6 @@ async function createMainWindow() {
       sandbox: true,
     },
   })
-  configureLocalServerRequestAuth(
-    mainWindow.webContents.session.webRequest,
-    resolveLocalServerAccess,
-  )
-
   installMainWindowNavigationGuards(mainWindow.webContents, { openExternal: openExternalUrl })
   installPreviewCleanupOnRendererNavigation(mainWindow.webContents, () => {
     previewService?.close()

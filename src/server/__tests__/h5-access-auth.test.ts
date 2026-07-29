@@ -354,6 +354,24 @@ describe('remote H5 auth and CORS integration', () => {
     await expect(desktopResponse.json()).resolves.toMatchObject({ status: 'ok' })
   })
 
+  test('rejects tokenless loopback browser origins when desktop local auth is configured', async () => {
+    process.env.CC_HAHA_LOCAL_ACCESS_TOKEN = 'desktop-local-secret'
+    await restartRemoteServer()
+
+    const browserResponse = await fetch(`${baseUrl}/api/status`, {
+      headers: { Origin: 'http://localhost:5173' },
+    })
+    expect(browserResponse.status).toBe(403)
+
+    const desktopResponse = await fetch(`${baseUrl}/api/status`, {
+      headers: {
+        Origin: 'http://localhost:5173',
+        Authorization: 'Bearer desktop-local-secret',
+      },
+    })
+    expect(desktopResponse.status).toBe(200)
+  })
+
   test('still requires the desktop process token for the H5 control plane', async () => {
     process.env.CC_HAHA_LOCAL_ACCESS_TOKEN = 'desktop-local-secret'
     await restartRemoteServer()
