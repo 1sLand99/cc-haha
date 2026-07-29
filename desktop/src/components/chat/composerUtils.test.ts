@@ -5,6 +5,7 @@ import {
   filterSlashCommands,
   findSlashToken,
   getLocalizedFallbackCommands,
+  groupSlashCommands,
   insertSlashTrigger,
   mergeSlashCommands,
   replaceSlashCommand,
@@ -158,6 +159,33 @@ describe('composerUtils', () => {
       'superpowers:systematic-debugging',
       'lark-calendar',
       'agent-team-orchestrator',
+    ])
+  })
+
+  it('groups built-in app commands before personal skills without changing their relative order', () => {
+    const groups = groupSlashCommands([
+      { name: 'amazon-review-scraper', description: 'Collect Amazon reviews' },
+      { name: 'status', description: 'Show session status' },
+      { name: 'agent debugger', description: 'Run the debugger agent' },
+      { name: 'audit', description: 'Audit product UX' },
+      { name: 'model', description: 'Switch model' },
+    ])
+
+    expect(groups.system.map((command) => command.name)).toEqual([
+      'status',
+      'agent debugger',
+      'model',
+    ])
+    expect(groups.skills.map((command) => command.name)).toEqual([
+      'amazon-review-scraper',
+      'audit',
+    ])
+    expect(groups.ordered.map((command) => command.name)).toEqual([
+      'status',
+      'agent debugger',
+      'model',
+      'amazon-review-scraper',
+      'audit',
     ])
   })
 

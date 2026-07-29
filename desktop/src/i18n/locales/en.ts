@@ -1581,6 +1581,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'chat.conversationNavigator.label': 'Conversation navigation',
   'chat.conversationNavigator.attachments': '{count} attachments',
   'chat.slashCommands': 'Slash commands',
+  'chat.slashSkillPersonal': 'Personal',
   'chat.pendingMessageGuide': 'Guide',
   'chat.pendingMessageGuideNow': 'Guide now',
   'chat.pendingMessageEdit': 'Edit queued message',
