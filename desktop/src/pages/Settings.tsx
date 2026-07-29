@@ -40,7 +40,8 @@ import { PermissionModeSelector } from '../components/controls/PermissionModeSel
 import { isDarkThemeMode, isLightThemeMode } from '../types/settings'
 import type { ThemeMode, UpdateProxyMode, NetworkProxyMode, WebSearchMode, AppMode, ChatSendBehavior, OutputStyleSource } from '../types/settings'
 import type { Locale } from '../i18n'
-import type { SavedProvider, UpdateProviderInput, ProviderTestResult, ModelMapping, Model1mSupport, ApiFormat, ProviderAuthStrategy } from '../types/provider'
+import type { SavedProvider, UpdateProviderInput, ProviderTestResult, ModelMapping, Model1mSupport, ApiFormat, ProviderAuthStrategy, ProviderModelInfo, ProviderModelsErrorCode } from '../types/provider'
+import { groupProviderModels, providerModelsErrorKey } from '../lib/providerModels'
 import type { ProviderPreset } from '../types/providerPreset'
 import { AdapterSettings } from './AdapterSettings'
 import { useSessionStore } from '../stores/sessionStore'
@@ -64,6 +65,7 @@ import { ClaudeOfficialLogin } from '../components/settings/ClaudeOfficialLogin'
 import { ChatGPTOfficialLogin } from '../components/settings/ChatGPTOfficialLogin'
 import { GrokOfficialLogin } from '../components/settings/GrokOfficialLogin'
 import { AgentManager } from '../components/settings/AgentManager'
+import { CcSwitchImportModal } from '../components/settings/CcSwitchImportModal'
 import {
   BUILT_IN_PROVIDER_IDS,
   CLAUDE_OFFICIAL_PROVIDER_ID,
@@ -403,6 +405,7 @@ function ProviderSettings() {
   const t = useTranslation()
   const [editingProvider, setEditingProvider] = useState<SavedProvider | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showCcSwitchImport, setShowCcSwitchImport] = useState(false)
   const [pendingDeleteProvider, setPendingDeleteProvider] = useState<SavedProvider | null>(null)
   const [isDeletingProvider, setIsDeletingProvider] = useState(false)
   const [testResults, setTestResults] = useState<Record<string, { loading: boolean; result?: ProviderTestResult }>>({})
@@ -489,13 +492,23 @@ function ProviderSettings() {
         title={t('settings.providers.title')}
         description={t('settings.providers.description')}
         action={(
-          <Button
-            size="base"
-            onClick={() => setShowCreateModal(true)}
-            icon={<span className="material-symbols-outlined text-[16px]">add</span>}
-          >
-            {t('settings.providers.addProvider')}
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              size="base"
+              onClick={() => setShowCcSwitchImport(true)}
+              icon={<span className="material-symbols-outlined text-[16px]">download</span>}
+            >
+              {t('settings.providers.ccSwitch.importButton')}
+            </Button>
+            <Button
+              size="base"
+              onClick={() => setShowCreateModal(true)}
+              icon={<span className="material-symbols-outlined text-[16px]">add</span>}
+            >
+              {t('settings.providers.addProvider')}
+            </Button>
+          </>
         )}
       />
 
@@ -654,6 +667,11 @@ function ProviderSettings() {
       {/* Edit Modal */}
       {editingProvider && (
         <ProviderFormModal key={editingProvider.id} open={true} onClose={() => setEditingProvider(null)} mode="edit" provider={editingProvider} presets={presets} />
+      )}
+
+      {/* cc-switch import — conditionally rendered so the scan reruns each time */}
+      {showCcSwitchImport && (
+        <CcSwitchImportModal open={true} onClose={() => setShowCcSwitchImport(false)} />
       )}
 
       <ConfirmDialog
@@ -1256,7 +1274,7 @@ function openExternalUrl(url: string) {
 }
 
 function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderFormProps) {
-  const { createProvider, updateProvider, testConfig } = useProviderStore()
+  const { createProvider, updateProvider, testConfig, fetchModels } = useProviderStore()
   const fetchSettings = useSettingsStore((s) => s.fetchAll)
   const t = useTranslation()
 
@@ -1304,6 +1322,11 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [testResult, setTestResult] = useState<ProviderTestResult | null>(null)
   const [isTesting, setIsTesting] = useState(false)
+  const [fetchedModels, setFetchedModels] = useState<ProviderModelInfo[] | null>(null)
+  const [modelsErrorCode, setModelsErrorCode] = useState<ProviderModelsErrorCode | null>(null)
+  const [modelsErrorMessage, setModelsErrorMessage] = useState<string | null>(null)
+  const [isFetchingModels, setIsFetchingModels] = useState(false)
+  const modelsRequestRef = useRef(0)
   const [settingsJson, setSettingsJson] = useState('')
   const [settingsJsonError, setSettingsJsonError] = useState<string | null>(null)
   const jsonPastedRef = useRef(false)
@@ -1354,6 +1377,20 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPreset.id, providerProxyBaseUrl])
+
+  // A fetched list only describes the endpoint and key it came from. cc-switch
+  // shipped this without a guard and kept offering the previous provider's
+  // models after the user pasted a new key, which reads as the picker lying.
+  useEffect(() => {
+    // Bumping the token also disowns a probe that is still in flight: it walks
+    // up to three candidate endpoints at 15s each, so it can easily outlive the
+    // edit and re-fill the picker with the previous credentials' models.
+    modelsRequestRef.current += 1
+    setFetchedModels(null)
+    setModelsErrorCode(null)
+    setModelsErrorMessage(null)
+    setIsFetchingModels(false)
+  }, [baseUrl, apiKey])
 
   const handlePresetChange = (preset: ProviderPreset) => {
     setSelectedPreset(preset)
@@ -1526,6 +1563,58 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
       buildModelContextWindows(models, nextInputs),
     ))
   }
+  const canFetchModels = Boolean(baseUrl.trim() && apiKey.trim())
+  const handleFetchModels = async () => {
+    if (!canFetchModels || isFetchingModels) return
+    const requestId = modelsRequestRef.current + 1
+    modelsRequestRef.current = requestId
+    setIsFetchingModels(true)
+    setModelsErrorCode(null)
+    setModelsErrorMessage(null)
+    try {
+      // Upstream failures arrive as a resolved `ok: false`, so the catch below
+      // only covers our own server being unreachable.
+      const result = await fetchModels({ baseUrl: baseUrl.trim(), apiKey: apiKey.trim() })
+      // The form moved on while we were probing — this answer describes a base
+      // URL or key the user no longer has typed in.
+      if (modelsRequestRef.current !== requestId) return
+      if (result.ok) {
+        setFetchedModels(result.models)
+      } else {
+        setFetchedModels(null)
+        setModelsErrorCode(result.errorCode)
+        setModelsErrorMessage(result.message?.trim() || null)
+      }
+    } catch {
+      if (modelsRequestRef.current !== requestId) return
+      setFetchedModels(null)
+      setModelsErrorCode('unknown')
+      setModelsErrorMessage(null)
+    } finally {
+      // The config-change effect already cleared the flag for a discarded
+      // request; clearing it again here would race a newer fetch.
+      if (modelsRequestRef.current === requestId) setIsFetchingModels(false)
+    }
+  }
+  const modelsErrorText = modelsErrorCode ? t(providerModelsErrorKey(modelsErrorCode)) : null
+  // The server keeps the upstream's own wording, which is the only thing that
+  // separates a 200-cloaked auth failure (智谱 answers `{"msg":"身份验证失败。"}`
+  // with HTTP 200, classified `not-supported`) from a provider that genuinely
+  // publishes no model list. Display-only: nothing branches on this text.
+  const modelsErrorUpstream = modelsErrorMessage && modelsErrorMessage !== modelsErrorText
+    ? modelsErrorMessage
+    : null
+  const modelPickerItems = useMemo(
+    () => groupProviderModels(
+      fetchedModels ?? [],
+      t('settings.providers.fetchModelsGroupOther'),
+    ).flatMap((group) => group.models.map((model) => ({
+      value: model.id,
+      label: model.id,
+      description: group.group,
+    }))),
+    [fetchedModels, t],
+  )
   const renderPresetButton = (preset: ProviderPreset) => (
     <SettingsPill
       key={preset.id}
@@ -1831,7 +1920,37 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
 
         {/* Model Mapping */}
         <div>
-          <label className="text-sm font-medium text-[var(--color-text-primary)] mb-2 block">{t('settings.providers.modelMapping')}</label>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <label className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.providers.modelMapping')}</label>
+            <Button
+              variant="secondary"
+              size="base"
+              onClick={handleFetchModels}
+              disabled={!canFetchModels}
+              loading={isFetchingModels}
+              icon={<span className="material-symbols-outlined text-[15px]">cloud_download</span>}
+            >
+              {t('settings.providers.fetchModels')}
+            </Button>
+          </div>
+          {!canFetchModels ? (
+            <p className="mb-2 text-[11px] text-[var(--color-text-tertiary)]">{t('settings.providers.fetchModelsHint')}</p>
+          ) : modelsErrorCode ? (
+            <div role="alert" className="mb-2 flex flex-col gap-0.5">
+              <p className="text-[11px] text-[var(--color-error)]">{modelsErrorText}</p>
+              {modelsErrorUpstream && (
+                <p className="break-words text-[11px] text-[var(--color-text-tertiary)]">
+                  {t('settings.providers.fetchModelsErrorUpstream')} {modelsErrorUpstream}
+                </p>
+              )}
+            </div>
+          ) : fetchedModels && fetchedModels.length === 0 ? (
+            <p className="mb-2 text-[11px] text-[var(--color-text-tertiary)]">{t('settings.providers.fetchModelsEmpty')}</p>
+          ) : fetchedModels ? (
+            <p className="mb-2 text-[11px] text-[var(--color-text-secondary)]">
+              {t('settings.providers.fetchModelsLoaded', { count: fetchedModels.length })}
+            </p>
+          ) : null}
           <div className="grid grid-cols-2 gap-2">
             {MODEL_SLOTS.map((slot) => {
               const labelKey = slot === 'main'
@@ -1842,15 +1961,31 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
                     ? 'settings.providers.sonnetModel'
                     : 'settings.providers.opusModel'
               const label = t(labelKey)
+              const pickLabel = t('settings.providers.fetchModelsPick', { label })
               return (
                 <div key={slot} className="min-w-0">
-                  <Input
-                    label={label}
-                    required={slot === 'main'}
-                    value={models[slot]}
-                    onChange={(e) => handleModelChange(slot, e.target.value)}
-                    placeholder={slot === 'main' ? t('settings.providers.modelIdPlaceholder') : t('settings.providers.sameAsMain')}
-                  />
+                  <div className="flex items-end gap-1.5">
+                    <Input
+                      containerClassName="min-w-0 flex-1"
+                      label={label}
+                      required={slot === 'main'}
+                      value={models[slot]}
+                      onChange={(e) => handleModelChange(slot, e.target.value)}
+                      placeholder={slot === 'main' ? t('settings.providers.modelIdPlaceholder') : t('settings.providers.sameAsMain')}
+                    />
+                    {/* The picker only supplements the field — the id stays typeable. */}
+                    {modelPickerItems.length > 0 && (
+                      <Dropdown<string>
+                        items={modelPickerItems}
+                        value={models[slot]}
+                        onChange={(value) => handleModelChange(slot, value)}
+                        label={pickLabel}
+                        align="right"
+                        maxHeight={260}
+                        trigger={<IconButton icon="expand_more" label={pickLabel} size="xl" tone="secondary" bordered />}
+                      />
+                    )}
+                  </div>
                   <label className="mt-1 inline-flex h-6 w-fit cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-1 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]">
                     <input
                       type="checkbox"

@@ -7,6 +7,10 @@ import type {
   UpdateProviderInput,
   TestProviderConfigInput,
   ProviderTestResult,
+  CcSwitchScanResult,
+  CcSwitchImportResult,
+  ProviderModelsInput,
+  ProviderModelsResult,
 } from '../types/provider'
 
 type ProvidersResponse = { providers: SavedProvider[]; activeId: string | null }
@@ -67,5 +71,21 @@ export const providersApi = {
 
   testConfig(input: TestProviderConfigInput) {
     return api.post<TestResultResponse>('/api/providers/test', input)
+  },
+
+  scanCcSwitch() {
+    return api.get<CcSwitchScanResult>('/api/providers/cc-switch/scan')
+  },
+
+  importCcSwitch(sourceIds: string[]) {
+    return api.post<CcSwitchImportResult>('/api/providers/cc-switch/import', { sourceIds })
+  },
+
+  /**
+   * Upstream failures are reported as HTTP 200 with `ok: false`, so this only
+   * rejects when our own server is unreachable.
+   */
+  fetchModels(input: ProviderModelsInput) {
+    return api.post<ProviderModelsResult>('/api/providers/models', input)
   },
 }

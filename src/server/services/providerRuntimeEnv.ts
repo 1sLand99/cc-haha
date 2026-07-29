@@ -105,7 +105,7 @@ function isSavedProvider(value: unknown): value is SavedProvider {
   )
 }
 
-function normalizeToolSearchEnabled(value: unknown): boolean {
+export function normalizeToolSearchEnabled(value: unknown): boolean {
   if (typeof value === 'boolean') return value
   if (typeof value === 'number') return value !== 0
   if (typeof value === 'string') {
@@ -118,7 +118,7 @@ function normalizeToolSearchEnabled(value: unknown): boolean {
   return true
 }
 
-function normalizeDisableExperimentalBetas(value: unknown): boolean {
+export function normalizeDisableExperimentalBetas(value: unknown): boolean {
   if (typeof value === 'boolean') return value
   if (typeof value === 'number') return value !== 0
   if (typeof value === 'string') {
