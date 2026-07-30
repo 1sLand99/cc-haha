@@ -140,6 +140,8 @@ export const zh: Record<TranslationKey, string> = {
   'openWith.workspacePreview': '工作臺預覽',
   'openWith.openInTarget': '用 {target} 開啟',
   'openWith.revealInTarget': '在 {target} 中顯示',
+  'openWith.copyPath': '複製路徑',
+  'openWith.copyFileContent': '複製檔案內容',
   'openWith.fileType.document': '文件',
   'openWith.fileType.web': '網頁',
   'openWith.fileType.image': '圖片',

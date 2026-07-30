@@ -140,6 +140,8 @@ export const jp: Record<TranslationKey, string> = {
   'openWith.workspacePreview': 'ワークスペースプレビュー',
   'openWith.openInTarget': '{target} で開く',
   'openWith.revealInTarget': '{target} で表示',
+  'openWith.copyPath': 'パスをコピー',
+  'openWith.copyFileContent': 'ファイル内容をコピー',
   'openWith.fileType.document': 'ドキュメント',
   'openWith.fileType.web': 'Web',
   'openWith.fileType.image': '画像',

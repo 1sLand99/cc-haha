@@ -15,6 +15,7 @@ import {
   useWorkspacePanelStore,
   type WorkspacePreviewCloseScope,
   type WorkspacePreviewKind,
+  type WorkspacePreviewReveal,
   type WorkspacePreviewTab,
 } from '../../stores/workspacePanelStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -509,11 +510,13 @@ function workspaceCodeTokenStyle(token: WorkspaceDiffHighlightToken): CSSPropert
 function CodeSurface({
   value,
   language,
+  reveal,
   onAddLineComment,
   onAddSelection,
 }: {
   value: string
   language: string
+  reveal?: WorkspacePreviewReveal
   onAddLineComment: (lineStart: number, lineEnd: number, note: string, quote: string) => void
   onAddSelection: (selection: WorkspaceTextSelection) => void
 }) {
@@ -541,6 +544,34 @@ function CodeSurface({
     setCommentDraft('')
     setSelectionMenu(null)
   }, [language, value])
+
+  const revealLine = reveal?.line
+  const revealNonce = reveal?.nonce
+
+  // A reference past the fold (`foo.ts:900`) is unreachable while the preview is
+  // truncated, so expand first. Declared AFTER the reset effect above on purpose:
+  // effects run in declaration order, so when a reload changes `value` the reset
+  // collapses and this re-expands, rather than the other way round.
+  useEffect(() => {
+    if (revealLine && revealLine > WORKSPACE_PREVIEW_LINE_LIMIT) setShowAllLines(true)
+  }, [revealLine, revealNonce, value])
+
+  // Scroll the marked line into view. `shikiTokensByLine` and `showAllLines` are
+  // dependencies because both rebuild the line rows underneath us — highlighting
+  // resolves asynchronously, so the row may not exist on the first pass.
+  useEffect(() => {
+    if (!revealLine) return
+    const surface = surfaceRef.current
+    const row = surface?.querySelector<HTMLElement>(`[data-workspace-line-number="${revealLine}"]`)
+    if (!surface || !row) return
+
+    // Deliberately not scrollIntoView: that also scrolls every ancestor, which
+    // drags the whole chat column when the workbench is a side panel.
+    const rowRect = row.getBoundingClientRect()
+    const surfaceRect = surface.getBoundingClientRect()
+    const delta = rowRect.top - surfaceRect.top - surface.clientHeight / 2 + rowRect.height / 2
+    surface.scrollTop = Math.max(0, surface.scrollTop + delta)
+  }, [revealLine, revealNonce, value, shikiTokensByLine, showAllLines])
 
   useEffect(() => {
     if (usePlainLargePreview) {
@@ -660,13 +691,17 @@ function CodeSurface({
     && lineNumber <= commentLineEnd
   )
 
-  const lineRowClassName = (lineNumber: number) => (
-    `group grid grid-cols-[48px_minmax(0,1fr)] gap-3 px-3 ${
-      isCommentLineSelected(lineNumber)
-        ? 'bg-[var(--color-info-container)]'
-        : 'hover:bg-[var(--color-surface-hover)]'
-    }`
-  )
+  const lineRowClassName = (lineNumber: number) => {
+    // A comment selection is something the user just did by hand, so it outranks
+    // the reveal mark left over from the reference they clicked to get here.
+    if (isCommentLineSelected(lineNumber)) {
+      return 'group grid grid-cols-[48px_minmax(0,1fr)] gap-3 px-3 bg-[var(--color-info-container)]'
+    }
+    if (revealLine === lineNumber) {
+      return 'group grid grid-cols-[48px_minmax(0,1fr)] gap-3 px-3 bg-[var(--color-brand-soft)] shadow-[inset_2px_0_0_var(--color-brand)]'
+    }
+    return 'group grid grid-cols-[48px_minmax(0,1fr)] gap-3 px-3 hover:bg-[var(--color-surface-hover)]'
+  }
 
   const renderLineNumberButton = (lineNumber: number) => {
     const selected = isCommentLineSelected(lineNumber)
@@ -1837,6 +1872,7 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
           <CodeSurface
             value={activePreviewTab.content ?? ''}
             language={activePreviewTab.language ?? 'text'}
+            reveal={activePreviewTab.reveal}
             onAddLineComment={(lineStart, lineEnd, note, quote) => (
               addLineCommentToChat(activePreviewTab.path, lineStart, lineEnd, note, quote)
             )}

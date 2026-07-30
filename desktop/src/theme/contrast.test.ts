@@ -219,6 +219,43 @@ describe('primary action contrast', () => {
  * which measures 1.49–1.76:1 against the page — invisible, and no structural
  * test would have caught it.
  */
+describe('revealed-line highlight', () => {
+  // #1146 marks the line a `foo.ts:42` reference points at. That mark IS the
+  // feedback that the jump landed, so an invisible one means the feature appears
+  // to do nothing — the #1145 trap, and equally invisible to structural tests.
+  //
+  // Measured across all six themes, EVERY soft/container fill lands between 1.02
+  // and 1.11 against `--color-code-bg` (warm-classic, the default, gives
+  // `--color-brand-soft` just 1.05). That is a property of a soft palette, not a
+  // bad token choice: no fill in it can carry this on its own. So the inset
+  // left rule in `--color-brand` is the load-bearing part and the tint is only
+  // support — which is what these two assertions pin down.
+  for (const [theme, selectors] of Object.entries(THEME_BLOCKS)) {
+    it(`keeps the reveal rule visible against the code background in ${theme}`, () => {
+      const surface = parseColor(resolve('--color-surface', selectors))
+      const codeBg = flatten(parseColor(resolve('--color-code-bg', selectors)), surface)
+      const rule = flatten(parseColor(resolve('--color-brand', selectors)), codeBg)
+
+      expect(
+        Number(contrast(rule, codeBg).toFixed(2)),
+        `${theme}: --color-brand inset rule on --color-code-bg`,
+      ).toBeGreaterThanOrEqual(AA_CONTROL_BOUNDARY)
+    })
+
+    it(`keeps code text readable on the reveal fill in ${theme}`, () => {
+      const surface = parseColor(resolve('--color-surface', selectors))
+      const codeBg = flatten(parseColor(resolve('--color-code-bg', selectors)), surface)
+      const revealFill = flatten(parseColor(resolve('--color-brand-soft', selectors)), codeBg)
+      const codeText = flatten(parseColor(resolve('--color-code-fg', selectors)), revealFill)
+
+      expect(
+        Number(contrast(codeText, revealFill).toFixed(2)),
+        `${theme}: --color-code-fg on the revealed line`,
+      ).toBeGreaterThanOrEqual(AA_SMALL_TEXT)
+    })
+  }
+})
+
 describe('link affordance contrast', () => {
   const LINK_SURFACES = ['--color-surface', '--color-surface-user-msg'] as const
 

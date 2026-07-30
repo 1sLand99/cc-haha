@@ -1,6 +1,10 @@
-import { memo, useCallback, useMemo } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
+import { OpenWithMenu } from '@/components/composite/OpenWithMenu'
+import { buildOpenWithMenuItemsForHref } from '../../lib/openWithMenuItems'
+import { fileRefFromElement } from '../../lib/markdownAutolink'
+import type { OpenWithItem } from '../../lib/openWithItems'
 import { MessageActionBar, type MessageBranchAction } from './MessageActionBar'
 import { TurnCompletionStamp } from './TurnCompletionStamp'
 import type { TurnCompletion } from '../../lib/turnCompletion'
@@ -10,7 +14,7 @@ import { AssistantOutputTargetCard } from './AssistantOutputTargetCard'
 import { openPreviewLink } from '../../lib/openPreviewLink'
 import { extractAssistantOutputTargets } from '../../lib/assistantOutputTargets'
 import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
-import { useTranslation } from '../../i18n'
+import { useTranslation, type TranslationKey } from '../../i18n'
 
 type Props = {
   content: string
@@ -31,6 +35,8 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
   const t = useTranslation()
   const workDir = useWorkspacePanelStore((s) => (sessionId ? s.statusBySession[sessionId]?.workDir : undefined))
 
+  const [openWith, setOpenWith] = useState<{ items: OpenWithItem[]; anchor: DOMRect } | null>(null)
+
   const handleLinkClick = useCallback(
     (href: string, event: ReactMouseEvent<HTMLDivElement>): boolean => {
       if (!sessionId) return false
@@ -39,6 +45,33 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
       return handled
     },
     [sessionId],
+  )
+
+  // Right-clicking a reference in the prose opens the same menu the output cards
+  // and the file tree use, so "open in VS Code" / "reveal in Finder" / "copy
+  // path" are reachable from the place the model actually names the file.
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!sessionId) return
+      const target = event.target as HTMLElement | null
+      const link = target?.closest<HTMLAnchorElement>('a[data-file-path], a[href]')
+      const href = fileRefFromElement(link) ?? link?.getAttribute('href')
+      if (!href) return
+
+      event.preventDefault()
+      const anchor = link!.getBoundingClientRect()
+      void (async () => {
+        const items = await buildOpenWithMenuItemsForHref(href, {
+          sessionId,
+          workDir,
+          // Cast t: useTranslation takes TranslationKey, the builder takes string.
+          // Every key it looks up is a valid TranslationKey, so this is safe.
+          t: (key, vars) => t(key as TranslationKey, vars),
+        })
+        if (items.length > 0) setOpenWith({ items, anchor })
+      })()
+    },
+    [sessionId, t, workDir],
   )
 
   const outputTargets = useMemo(
@@ -68,9 +101,12 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
             : 'max-w-[88%] sm:max-w-[80%] lg:max-w-[720px]'
         }`}
       >
-        <div className={`rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4 text-[14.5px] text-[var(--color-text-primary)] shadow-[var(--shadow-card)] ${
-          documentLayout ? 'w-full' : 'max-w-full'
-        }`}>
+        <div
+          onContextMenu={sessionId ? handleContextMenu : undefined}
+          className={`rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4 text-[14.5px] text-[var(--color-text-primary)] shadow-[var(--shadow-card)] ${
+            documentLayout ? 'w-full' : 'max-w-full'
+          }`}
+        >
           <MarkdownRenderer
             content={content}
             variant={documentLayout ? 'document' : 'default'}
@@ -95,6 +131,14 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
               </div>
             )}
           </div>
+        )}
+
+        {openWith && (
+          <OpenWithMenu
+            items={openWith.items}
+            anchor={openWith.anchor}
+            onClose={() => setOpenWith(null)}
+          />
         )}
 
         {showTurnCompletion ? <TurnCompletionStamp completion={turnCompletion!} /> : null}

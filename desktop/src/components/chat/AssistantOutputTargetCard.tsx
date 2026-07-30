@@ -7,14 +7,9 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { OpenWithMenu } from '@/components/composite/OpenWithMenu'
-import { buildOpenWithItems, describeFileType, type OpenWithItem } from '../../lib/openWithItems'
-import { openWithContextForHref } from '../../lib/openWithContextForHref'
+import { describeFileType, type OpenWithItem } from '../../lib/openWithItems'
+import { buildOpenWithMenuItemsForHref } from '../../lib/openWithMenuItems'
 import { openPreviewLink } from '../../lib/openPreviewLink'
-import { getServerBaseUrl } from '../../lib/desktopRuntime'
-import { getDesktopHost } from '../../lib/desktopHost'
-import { useOpenTargetStore } from '../../stores/openTargetStore'
-import { useBrowserPanelStore } from '../../stores/browserPanelStore'
-import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
 
 type Props = {
   target: AssistantOutputTarget
@@ -56,21 +51,12 @@ export function AssistantOutputTargetCard({ target, sessionId, workDir }: Props)
     const triggerEl = event.currentTarget
     const rect = triggerEl.getBoundingClientRect()
     void (async () => {
-      await useOpenTargetStore.getState().ensureTargets()
-      const targets = useOpenTargetStore.getState().targets
-      const ctx = openWithContextForHref(target.href, {
+      const items = await buildOpenWithMenuItemsForHref(target.href, {
         sessionId,
-        serverBaseUrl: getServerBaseUrl(),
         workDir,
-      })
-      if (!ctx) return
-      const items = buildOpenWithItems(ctx, targets, {
-        openInAppBrowser: (url) => useBrowserPanelStore.getState().open(sessionId, url),
-        openSystem: (p) => { void getDesktopHost().shell.openPath(p).catch(() => window.open(p, '_blank')) },
-        openWorkspacePreview: (relPath) => { void useWorkspacePanelStore.getState().openPreview(sessionId, relPath, 'file') },
-        openTarget: (id, abs) => { void useOpenTargetStore.getState().openTarget(id, abs) },
         t: (k, v) => t(k as TranslationKey, v),
       })
+      if (items.length === 0) return
       setOpenWith({ items, anchor: rect, triggerEl })
     })()
   }, [openWith, sessionId, t, target.href, workDir])

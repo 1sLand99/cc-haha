@@ -138,6 +138,8 @@ export const en = {
   'openWith.workspacePreview': 'Workspace preview',
   'openWith.openInTarget': 'Open in {target}',
   'openWith.revealInTarget': 'Reveal in {target}',
+  'openWith.copyPath': 'Copy path',
+  'openWith.copyFileContent': 'Copy file contents',
   'openWith.fileType.document': 'Document',
   'openWith.fileType.web': 'Web',
   'openWith.fileType.image': 'Image',

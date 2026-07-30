@@ -20,8 +20,8 @@ export function openPreviewLink(href: string, sessionId: string): boolean {
     sessionId,
     serverBaseUrl: getServerBaseUrl(),
     openBrowser: (id, url) => useBrowserPanelStore.getState().open(id, url),
-    openFilePreview: (id, path) => {
-      void useWorkspacePanelStore.getState().openPreview(id, path, 'file')
+    openFilePreview: (id, path, reveal) => {
+      void useWorkspacePanelStore.getState().openPreview(id, path, 'file', undefined, reveal)
     },
     openExternal: (url) => {
       void getDesktopHost().shell.open(url)

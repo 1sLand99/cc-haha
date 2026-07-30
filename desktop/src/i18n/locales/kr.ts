@@ -140,6 +140,8 @@ export const kr: Record<TranslationKey, string> = {
   'openWith.workspacePreview': '작업 공간 미리 보기',
   'openWith.openInTarget': '{target}에서 열기',
   'openWith.revealInTarget': '{target}에서 표시',
+  'openWith.copyPath': '경로 복사',
+  'openWith.copyFileContent': '파일 내용 복사',
   'openWith.fileType.document': '문서',
   'openWith.fileType.web': '웹',
   'openWith.fileType.image': '이미지',
