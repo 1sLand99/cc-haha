@@ -44,14 +44,14 @@ v0.5.0 做了一次全量 UI 重设计（「纸·墨·印」），六套配色�
 
 <table>
   <tr>
-    <td align="center" width="33%"><img src="docs/images/app/session-main.webp" alt="桌面端会话主界面"><br><b>说一句话，看它做完</b><br><sub>工具调用和每处改动都留在对话里</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/workspace-diff.webp" alt="工作区 Diff 评审"><br><b>改了什么，逐个文件看</b><br><sub>带语法高亮的 Diff，你点头才落地</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/workspace-preview.webp" alt="内置浏览器预览刚改完的页面"><br><b>改完当场验证</b><br><sub>内置浏览器打开本地服务看效果</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/zh-CN/session-main.webp" alt="桌面端会话主界面"><br><b>说一句话，看它做完</b><br><sub>工具调用和每处改动都留在对话里</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/zh-CN/workspace-diff.webp" alt="工作区 Diff 评审"><br><b>改了什么，逐个文件看</b><br><sub>带语法高亮的 Diff，你点头才落地</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/zh-CN/workspace-preview.webp" alt="内置浏览器预览刚改完的页面"><br><b>改完当场验证</b><br><sub>内置浏览器打开本地服务看效果</sub></td>
   </tr>
   <tr>
-    <td align="center" width="33%"><img src="docs/images/app/session-dark.webp" alt="墨夜主题下的会话界面"><br><b>六套配色可跟随系统</b><br><sub>纯白 · 纸墨 · 经典暖色 · 青瓷 · 墨夜 · 墨夜蓝</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/skill-market.webp" alt="技能市场"><br><b>缺什么手艺装什么</b><br><sub>来源和安全状态摆在明处</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/pet-desktop.webp" alt="桌面宠物设置与悬浮宠物"><br><b>桌面上有个伴</b><br><sub>搭搭、弧弧、补补、回回随任务换动作</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/zh-CN/session-dark.webp" alt="墨夜主题下的会话界面"><br><b>六套配色可跟随系统</b><br><sub>纯白 · 纸墨 · 经典暖色 · 青瓷 · 墨夜 · 墨夜蓝</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/zh-CN/skill-market.webp" alt="技能市场"><br><b>缺什么手艺装什么</b><br><sub>来源和安全状态摆在明处</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/zh-CN/pet-desktop.webp" alt="桌面宠物设置与悬浮宠物"><br><b>桌面上有个伴</b><br><sub>搭搭、弧弧、补补、回回随任务换动作</sub></td>
   </tr>
 </table>
 
@@ -138,16 +138,6 @@ cp .env.example .env
 
 ---
 
-## 用户交流群
-
-使用过程中有问题、想反馈 Bug，或者想看看别人怎么用，欢迎扫码加入 cc-haha 飞书用户群。也可以直接来 [Issues](https://github.com/NanmiCoder/cc-haha/issues) 提问。
-
-<p align="center">
-  <img src="docs/images/community/feishu-group-qr.png" width="300" alt="cc-haha 飞书用户群二维码">
-</p>
-
----
-
 ## ☕ 请作者喝杯咖啡
 
 如果这个项目对您有帮助，欢迎打赏支持，您的每一份支持都是我持续更新的动力 ❤️
@@ -170,6 +160,16 @@ cp .env.example .env
 </td>
 </tr>
 </table>
+
+---
+
+## 用户交流群
+
+使用过程中有问题、想反馈 Bug，或者想看看别人怎么用，欢迎扫码加入 cc-haha 飞书用户群。也可以直接来 [Issues](https://github.com/NanmiCoder/cc-haha/issues) 提问。
+
+<p align="center">
+  <img src="docs/images/community/feishu-group-qr.png" width="300" alt="cc-haha 飞书用户群二维码">
+</p>
 
 ---
 

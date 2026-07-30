@@ -44,14 +44,14 @@ v0.5.0 shipped a full UI redesign — six colour themes that can follow your sys
 
 <table>
   <tr>
-    <td align="center" width="33%"><img src="docs/images/app/session-main.webp" alt="Desktop session view"><br><b>Say it once, watch it finish</b><br><sub>Tool calls and every edit stay in the thread</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/workspace-diff.webp" alt="Workspace diff review"><br><b>See exactly what changed</b><br><sub>Syntax-highlighted diffs; you decide what lands</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/workspace-preview.webp" alt="Built-in browser previewing the page that was just changed"><br><b>Verify on the spot</b><br><sub>Open your dev server inside the app</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/en/session-main.webp" alt="Desktop session view"><br><b>Say it once, watch it finish</b><br><sub>Tool calls and every edit stay in the thread</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/en/workspace-diff.webp" alt="Workspace diff review"><br><b>See exactly what changed</b><br><sub>Syntax-highlighted diffs; you decide what lands</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/en/workspace-preview.webp" alt="Built-in browser previewing the page that was just changed"><br><b>Verify on the spot</b><br><sub>Open your dev server inside the app</sub></td>
   </tr>
   <tr>
-    <td align="center" width="33%"><img src="docs/images/app/session-dark.webp" alt="Session view in the dark theme"><br><b>Six themes, follows the system</b><br><sub>Light and dark, six palettes in all</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/skill-market.webp" alt="Skill marketplace"><br><b>Missing a trick? Install it</b><br><sub>Source and safety status shown up front</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/pet-desktop.webp" alt="Desktop pet settings with the floating pet"><br><b>Company while it works</b><br><sub>Dada, Huhu, Bubu and Huihui follow the task</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/en/session-dark.webp" alt="Session view in the dark theme"><br><b>Six themes, follows the system</b><br><sub>Light and dark, six palettes in all</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/en/skill-market.webp" alt="Skill marketplace"><br><b>Missing a trick? Install it</b><br><sub>Source and safety status shown up front</sub></td>
+    <td align="center" width="33%"><img src="docs/images/app/en/pet-desktop.webp" alt="Desktop pet settings with the floating pet"><br><b>Company while it works</b><br><sub>Dada, Huhu, Bubu and Huihui follow the task</sub></td>
   </tr>
 </table>
 
@@ -138,16 +138,6 @@ This project is maintained in the author's spare time. Corporate or individual s
 
 ---
 
-## User Group
-
-Scan the QR code below to join the cc-haha user group on Feishu (Lark) — the conversation there is mostly in Chinese. For questions and bug reports in English, [Issues](https://github.com/NanmiCoder/cc-haha/issues) is the better place.
-
-<p align="center">
-  <img src="docs/images/community/feishu-group-qr.png" width="300" alt="cc-haha Feishu user group QR code">
-</p>
-
----
-
 ## ☕ Buy Me a Coffee
 
 If this project helps you, consider buying me a coffee — every bit of support keeps this project going ❤️
@@ -170,6 +160,16 @@ If this project helps you, consider buying me a coffee — every bit of support 
 </td>
 </tr>
 </table>
+
+---
+
+## User Group
+
+Scan the QR code below to join the cc-haha user group on Feishu (Lark) — the conversation there is mostly in Chinese. For questions and bug reports in English, [Issues](https://github.com/NanmiCoder/cc-haha/issues) is the better place.
+
+<p align="center">
+  <img src="docs/images/community/feishu-group-qr.png" width="300" alt="cc-haha Feishu user group QR code">
+</p>
 
 ---
 

@@ -1,11 +1,19 @@
-import sessionMain from '../../../../docs/images/app/session-main.webp'
-import workspaceDiff from '../../../../docs/images/app/workspace-diff.webp'
-import workspacePreview from '../../../../docs/images/app/workspace-preview.webp'
-import providerAdd from '../../../../docs/images/app/settings-provider-add.webp'
-import skillMarket from '../../../../docs/images/app/skill-market.webp'
-import scheduleCreate from '../../../../docs/images/app/schedule-create.webp'
-import h5Session from '../../../../docs/images/app/h5-session.webp'
-import petDesktop from '../../../../docs/images/app/pet-desktop.webp'
+import sessionMainZh from '../../../../docs/images/app/zh-CN/session-main.webp'
+import workspaceDiffZh from '../../../../docs/images/app/zh-CN/workspace-diff.webp'
+import workspacePreviewZh from '../../../../docs/images/app/zh-CN/workspace-preview.webp'
+import providerAddZh from '../../../../docs/images/app/zh-CN/settings-provider-add.webp'
+import skillMarketZh from '../../../../docs/images/app/zh-CN/skill-market.webp'
+import scheduleCreateZh from '../../../../docs/images/app/zh-CN/schedule-create.webp'
+import h5SessionZh from '../../../../docs/images/app/zh-CN/h5-session.webp'
+import petDesktopZh from '../../../../docs/images/app/zh-CN/pet-desktop.webp'
+import sessionMainEn from '../../../../docs/images/app/en/session-main.webp'
+import workspaceDiffEn from '../../../../docs/images/app/en/workspace-diff.webp'
+import workspacePreviewEn from '../../../../docs/images/app/en/workspace-preview.webp'
+import providerAddEn from '../../../../docs/images/app/en/settings-provider-add.webp'
+import skillMarketEn from '../../../../docs/images/app/en/skill-market.webp'
+import scheduleCreateEn from '../../../../docs/images/app/en/schedule-create.webp'
+import h5SessionEn from '../../../../docs/images/app/en/h5-session.webp'
+import petDesktopEn from '../../../../docs/images/app/en/pet-desktop.webp'
 
 // 吉祥物与截图一样从 docs/ 取 —— docs/ 是站点唯一的媒体源。
 // 原图是桌面端的 agent-mascots，改动那边时记得同步这四张。
@@ -14,16 +22,30 @@ import huhu from '../../../../docs/images/mascots/huhu.png'
 import bubu from '../../../../docs/images/mascots/bubu.png'
 import huihui from '../../../../docs/images/mascots/huihui.png'
 
-export const images = {
-  h5Session,
-  petDesktop,
-  providerAdd,
-  scheduleCreate,
-  sessionMain,
-  skillMarket,
-  workspaceDiff,
-  workspacePreview
+const localizedImages = {
+  zh: {
+    h5Session: h5SessionZh,
+    petDesktop: petDesktopZh,
+    providerAdd: providerAddZh,
+    scheduleCreate: scheduleCreateZh,
+    sessionMain: sessionMainZh,
+    skillMarket: skillMarketZh,
+    workspaceDiff: workspaceDiffZh,
+    workspacePreview: workspacePreviewZh
+  },
+  en: {
+    h5Session: h5SessionEn,
+    petDesktop: petDesktopEn,
+    providerAdd: providerAddEn,
+    scheduleCreate: scheduleCreateEn,
+    sessionMain: sessionMainEn,
+    skillMarket: skillMarketEn,
+    workspaceDiff: workspaceDiffEn,
+    workspacePreview: workspacePreviewEn
+  }
 }
+
+export const images = localizedImages.zh
 
 export const content = {
   zh: {
@@ -58,49 +80,49 @@ export const content = {
           label: '会话',
           title: '说一句话，看它一步步做完',
           body: '选好项目、权限模式和模型就能开工。它读了哪些文件、执行了什么命令、改了哪一行，全都留在对话里。',
-          image: sessionMain
+          image: localizedImages.zh.sessionMain
         },
         {
           id: 'review',
           label: '审阅',
           title: '改了什么，逐个文件看清楚',
           body: '右侧工作区列出本轮改动，点开就是带语法高亮的 Diff。看不顺眼可以撤销整轮。',
-          image: workspaceDiff
+          image: localizedImages.zh.workspaceDiff
         },
         {
           id: 'preview',
           label: '预览',
           title: '页面效果，会话里直接验证',
           body: '内置浏览器打开本地服务，改完当场看效果；截图和元素选择都能带回对话继续说。',
-          image: workspacePreview
+          image: localizedImages.zh.workspacePreview
         },
         {
           id: 'models',
           label: '模型',
           title: '接哪个模型，你自己定',
           body: 'Claude / ChatGPT / Grok 官方账号直接登录，也可以接 DeepSeek、Kimi、智谱、MiniMax，或者本地跑的 LM Studio 与 Ollama。',
-          image: providerAdd
+          image: localizedImages.zh.providerAdd
         },
         {
           id: 'skills',
           label: '技能',
           title: '缺什么手艺，装什么手艺',
           body: '技能市场聚合 ClawHub 与 SkillHub，每个技能都标了来源和安全状态，装之前先看清楚。',
-          image: skillMarket
+          image: localizedImages.zh.skillMarket
         },
         {
           id: 'schedule',
           label: '定时',
           title: '设好时间，它按时回来交活',
           body: '定好频率、模型、目录和通知方式；任务在独立会话里执行，每跑一次都有记录可查。',
-          image: scheduleCreate
+          image: localizedImages.zh.scheduleCreate
         },
         {
           id: 'remote',
           label: '手机',
           title: '离开电脑，会话不断',
           body: '扫码用手机浏览器接着聊。锁屏切后台也不会打断正在跑的任务，回来就能看结果。',
-          image: h5Session
+          image: localizedImages.zh.h5Session
         }
       ]
     },
@@ -188,13 +210,13 @@ export const content = {
       title: 'Every screenshot is v0.5.0. No concept art.',
       lede: 'What you see is what opens after install.',
       tabs: [
-        { id: 'session', label: 'Session', title: 'Say it once. Watch it get done.', body: 'Pick a project, a permission mode and a model. Every file it read, every command it ran and every line it changed stays in the thread.', image: sessionMain },
-        { id: 'review', label: 'Review', title: 'Know exactly what changed', body: 'The workspace lists this turn’s edits; open any file for a syntax-highlighted diff. Don’t like it? Undo the whole turn.', image: workspaceDiff },
-        { id: 'preview', label: 'Preview', title: 'Check the page without leaving', body: 'Open your dev server in the built-in browser, see the result immediately, and bring screenshots or picked elements back into the thread.', image: workspacePreview },
-        { id: 'models', label: 'Models', title: 'Bring your own model', body: 'Sign in to Claude, ChatGPT or Grok, or point it at DeepSeek, Kimi, Zhipu, MiniMax — or LM Studio and Ollama running on your own machine.', image: providerAdd },
-        { id: 'skills', label: 'Skills', title: 'Missing a trick? Install it.', body: 'The marketplace aggregates ClawHub and SkillHub, and labels every skill with its source and safety status before you install.', image: skillMarket },
-        { id: 'schedule', label: 'Schedule', title: 'Set the time. It comes back with results.', body: 'Choose a cadence, model, directory and notification. Jobs run in their own sessions and every run leaves a record.', image: scheduleCreate },
-        { id: 'remote', label: 'Mobile', title: 'Step away, keep the session', body: 'Scan the QR code and continue in your phone browser. Locking the screen won’t kill a running task.', image: h5Session }
+        { id: 'session', label: 'Session', title: 'Say it once. Watch it get done.', body: 'Pick a project, a permission mode and a model. Every file it read, every command it ran and every line it changed stays in the thread.', image: localizedImages.en.sessionMain },
+        { id: 'review', label: 'Review', title: 'Know exactly what changed', body: 'The workspace lists this turn’s edits; open any file for a syntax-highlighted diff. Don’t like it? Undo the whole turn.', image: localizedImages.en.workspaceDiff },
+        { id: 'preview', label: 'Preview', title: 'Check the page without leaving', body: 'Open your dev server in the built-in browser, see the result immediately, and bring screenshots or picked elements back into the thread.', image: localizedImages.en.workspacePreview },
+        { id: 'models', label: 'Models', title: 'Bring your own model', body: 'Sign in to Claude, ChatGPT or Grok, or point it at DeepSeek, Kimi, Zhipu, MiniMax — or LM Studio and Ollama running on your own machine.', image: localizedImages.en.providerAdd },
+        { id: 'skills', label: 'Skills', title: 'Missing a trick? Install it.', body: 'The marketplace aggregates ClawHub and SkillHub, and labels every skill with its source and safety status before you install.', image: localizedImages.en.skillMarket },
+        { id: 'schedule', label: 'Schedule', title: 'Set the time. It comes back with results.', body: 'Choose a cadence, model, directory and notification. Jobs run in their own sessions and every run leaves a record.', image: localizedImages.en.scheduleCreate },
+        { id: 'remote', label: 'Mobile', title: 'Step away, keep the session', body: 'Scan the QR code and continue in your phone browser. Locking the screen won’t kill a running task.', image: localizedImages.en.h5Session }
       ]
     },
     crew: {
