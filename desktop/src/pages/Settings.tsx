@@ -231,8 +231,17 @@ export function Settings() {
         {/* Tab navigation */}
         {/* Narrow enough that the rail is not a gutter of dead space, wide
             enough that the longest label in any locale — the Japanese
-            "コンピューター操作" — still clears the truncation on TabButton. */}
-        <div className="w-[220px] flex-shrink-0 flex flex-col overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-4">
+            "コンピューター操作" — still clears the truncation on TabButton.
+
+            Paper, separated by the rule, the way every other secondary panel
+            in the app is (the workbench, the diff split). It used to be
+            `--color-surface-container-low`, which is the same value the tab
+            strip's trough resolves to — so the Settings tab, the one tab whose
+            content this rail *is*, was the only selected tab in the app whose
+            paper fill met a different colour at its bottom edge. It read as a
+            white card stranded on a grey panel. Nothing else changed to fix
+            it: the tab is right, this was the odd one out. */}
+        <div className="w-[220px] flex-shrink-0 flex flex-col overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-4">
           <div className="flex-1 flex flex-col gap-0.5">
             <TabButton icon="dns" label={t('settings.tab.providers')} active={activeTab === 'providers'} onClick={() => setActiveTab('providers')} />
             <TabButton icon="tune" label={t('settings.tab.general')} active={activeTab === 'general'} onClick={() => setActiveTab('general')} />
@@ -296,7 +305,9 @@ function TabButton({ icon, label, active, onClick }: { icon: string; label: stri
       ref={ref}
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
-      className={`w-full flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-[13.5px] text-left transition-[background-color,color] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-container-low)] ${
+      // `ring-offset` has to name the rail's own fill — it is painted, not
+      // transparent, so it tracks whatever the rail is.
+      className={`w-full flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-[13.5px] text-left transition-[background-color,color] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] ${
         active
           ? 'bg-[var(--color-surface-hover)] text-[var(--color-text-primary)] font-medium'
           : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]'
