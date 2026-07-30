@@ -7,6 +7,8 @@ const viewportMocks = vi.hoisted(() => ({
   isMobile: false,
 }))
 
+const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')
+
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   delete: vi.fn(),
@@ -70,7 +72,14 @@ vi.mock('../../hooks/useMobileViewport', () => ({
 }))
 
 vi.mock('../controls/PermissionModeSelector', () => ({
-  PermissionModeSelector: () => <button type="button">Permissions</button>,
+  // Surfaces `compact` because that prop is the difference between the labelled
+  // pill and the bare icon the real selector renders, and the composer decides
+  // it from the column width.
+  PermissionModeSelector: ({ compact }: { compact?: boolean }) => (
+    <button type="button" data-testid="permission-mode-selector" data-compact={compact ? 'true' : 'false'}>
+      Permissions
+    </button>
+  ),
 }))
 
 vi.mock('../controls/ModelSelector', async () => {
@@ -245,7 +254,44 @@ describe('ChatInput file mentions', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    if (originalOffsetWidth) {
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', originalOffsetWidth)
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, 'offsetWidth')
+    }
   })
+
+  // jsdom lays nothing out, so the composer column's width has to be stated.
+  // Only the shell answers: that is the single node the composer measures, and
+  // a blanket stub would let an unrelated element satisfy the assertion.
+  function stubComposerColumnWidth(initialWidth: number) {
+    let width = initialWidth
+    const subscribers = new Set<() => void>()
+
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.dataset.testid === 'chat-input-shell' ? width : 0
+      },
+    })
+
+    class StubResizeObserver {
+      constructor(private readonly callback: () => void) {}
+      observe() { subscribers.add(this.callback) }
+      unobserve() { subscribers.delete(this.callback) }
+      disconnect() { subscribers.delete(this.callback) }
+    }
+    vi.stubGlobal('ResizeObserver', StubResizeObserver)
+
+    return {
+      resizeTo(nextWidth: number) {
+        width = nextWidth
+        act(() => {
+          subscribers.forEach((notify) => notify())
+        })
+      },
+    }
+  }
 
   it('explains a cleaned worktree without calling the source project missing', () => {
     useSessionStore.setState({
@@ -825,13 +871,84 @@ describe('ChatInput file mentions', () => {
   // The narrow layouts never adopted the in-toolbar pill: there is no room for
   // it beside the model selector, so they keep the location on its own line
   // below the panel.
-  it('keeps the run location below the panel on the composer beside a workspace panel', async () => {
+  it('keeps the run location below the panel when the composer column is narrow', async () => {
+    stubComposerColumnWidth(360)
+
     render(<ChatInput compact />)
 
     const chip = await screen.findByTestId('run-location-outside')
     expect(chip).toHaveTextContent('repo')
     expect(screen.getByTestId('chat-input-panel')).not.toContainElement(chip)
     expect(screen.queryByTestId('run-location-readonly')).not.toBeInTheDocument()
+  })
+
+  // The bug this replaces: `compact` is wired to "is the workspace panel open",
+  // so opening the panel dropped the location to a second line and shrank the
+  // permission mode to a bare icon even on a column with room to spare — the
+  // panel is resizable and the window is not fixed, so its open state says
+  // nothing about the width the composer actually got.
+  it('keeps the run location in the toolbar when a workspace panel leaves the column wide', async () => {
+    stubComposerColumnWidth(580)
+
+    render(<ChatInput compact />)
+
+    const chip = await screen.findByTestId('run-location-readonly')
+    expect(screen.getByTestId('chat-input-toolbar')).toContainElement(chip)
+    expect(screen.queryByTestId('run-location-outside')).not.toBeInTheDocument()
+
+    // The same width buys back the labelled permission pill.
+    expect(screen.getByTestId('permission-mode-selector')).toHaveAttribute('data-compact', 'false')
+  })
+
+  // The run button's word is the cheaper thing to drop — the icon keeps its
+  // `aria-label` and tooltip, while dropping the location costs a whole line
+  // and the directory the turn runs in. So the label goes first, at a width
+  // where keeping both would squeeze the location down to its ellipsis.
+  it('drops the run button label before the run location as the column narrows', async () => {
+    const column = stubComposerColumnWidth(700)
+
+    render(<ChatInput compact />)
+
+    expect(await screen.findByTestId('run-location-readonly')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run' })).toHaveTextContent('Run')
+
+    column.resizeTo(580)
+
+    expect(screen.getByTestId('run-location-readonly')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run' })).not.toHaveTextContent('Run')
+  })
+
+  it('moves the run location out of the toolbar as the column is dragged narrow', async () => {
+    const column = stubComposerColumnWidth(580)
+
+    render(<ChatInput compact />)
+
+    expect(await screen.findByTestId('run-location-readonly')).toBeInTheDocument()
+
+    column.resizeTo(360)
+
+    expect(await screen.findByTestId('run-location-outside')).toBeInTheDocument()
+    expect(screen.queryByTestId('run-location-readonly')).not.toBeInTheDocument()
+    expect(screen.getByTestId('permission-mode-selector')).toHaveAttribute('data-compact', 'true')
+
+    column.resizeTo(580)
+
+    expect(await screen.findByTestId('run-location-readonly')).toBeInTheDocument()
+    expect(screen.queryByTestId('run-location-outside')).not.toBeInTheDocument()
+  })
+
+  // The band cancels the panel's `p-3`, so it has to follow the panel's padding
+  // rather than the control layout. A wide column beside an open panel renders
+  // the wide toolbar inside a `p-3` panel; keying the band on the controls would
+  // have inset the divider by 12px there.
+  it('keeps the toolbar band matched to the panel padding when a wide column sits beside a panel', async () => {
+    stubComposerColumnWidth(580)
+
+    render(<ChatInput compact />)
+
+    await screen.findByTestId('run-location-readonly')
+    expect(screen.getByTestId('chat-input-panel')).toHaveClass('p-3')
+    expect(screen.getByTestId('chat-input-toolbar')).toHaveClass('-mx-3')
   })
 
   it('uses the persisted message count to keep reopened sessions in context mode while history loads', async () => {

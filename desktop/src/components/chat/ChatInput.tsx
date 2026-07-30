@@ -40,6 +40,7 @@ import {
   resolveSlashUiAction,
 } from './composerUtils'
 import { useMobileViewport } from '../../hooks/useMobileViewport'
+import { useElementWidth } from '../../hooks/useElementWidth'
 import { isDesktopRuntime } from '../../lib/desktopRuntime'
 import {
   filesToComposerAttachments,
@@ -62,6 +63,28 @@ type ChatInputProps = {
 }
 
 const EMPTY_WORKSPACE_REFERENCES: WorkspaceChatReference[] = []
+
+/**
+ * Both thresholds are the composer column's own width, never "is the workspace
+ * panel open". The panel is resizable and the window is not fixed, so its open
+ * state says nothing about the width the composer actually got — a maximised
+ * window with the panel open leaves the composer wider than a small window
+ * with no panel at all, yet the panel-keyed rule sent the wide one to the
+ * narrow layout and kept the narrow one wide.
+ *
+ * The numbers come off the shipped toolbar with the longest mode label
+ * ("Ask permissions" / 询问权限): the leading group measures 193px and the
+ * trailing cluster 361px, so the full row needs a 610px column and the same
+ * row with an icon-only run button — the button is 112px labelled, 32px not —
+ * needs 530px.
+ *
+ * They degrade in that order on purpose. The location is information and the
+ * run button's label is not: the icon keeps its `aria-label` and tooltip, so
+ * dropping the word costs nothing a narrow column can't spare, while dropping
+ * the location costs a line of layout and the directory the turn will run in.
+ */
+const TOOLBAR_LOCATION_MIN_WIDTH = 530
+const TOOLBAR_LABELLED_ACTION_MIN_WIDTH = 610
 
 function workspaceReferenceToAttachment(reference: WorkspaceChatReference): Attachment {
   return {
@@ -97,6 +120,10 @@ function insertComposerTokenAtRange(value: string, start: number, end: number, t
 export function ChatInput({ variant = 'default', compact = false }: ChatInputProps) {
   const t = useTranslation()
   const isMobileComposer = useMobileViewport() && !isDesktopRuntime()
+  // The shell, not the panel inside it: the panel's own `max-w` changes with
+  // the layout this measurement picks, which would make the observer chase
+  // itself across the threshold. The shell just fills the chat column.
+  const [shellRef, shellWidth] = useElementWidth<HTMLDivElement>()
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
@@ -201,8 +228,21 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const isHeroComposer = variant === 'hero' && !isMemberSession && !compact
   const resolvedWorkDir = activeSession?.workDir || gitInfo?.workDir || undefined
   const showLaunchControls = !isMemberSession && messageCount === 0
-  const useCompactControls = compact || isMobileComposer
-  const iconOnlyAction = compact || isMobileComposer
+  // Two different questions, and they used to share one answer.
+  //
+  // `useCompactChrome` is about context: the shell's padding, its top divider
+  // and the toolbar's edge-to-edge band belong to the panel-beside-the-composer
+  // and mobile layouts regardless of how much room those layouts got.
+  //
+  // `useCompactControls` and `iconOnlyAction` are about room, so they ask the
+  // column how wide it is — at two different widths, so the run button's label
+  // goes before the location does. Until a measurement lands (jsdom, first
+  // paint) both defer to the caller's `compact`, which keeps the
+  // pre-measurement frame from flashing the wrong layout.
+  const useCompactChrome = compact || isMobileComposer
+  const fitsAtLeast = (minWidth: number) => shellWidth === null ? !compact : shellWidth >= minWidth
+  const useCompactControls = isMobileComposer || !fitsAtLeast(TOOLBAR_LOCATION_MIN_WIDTH)
+  const iconOnlyAction = isMobileComposer || !fitsAtLeast(TOOLBAR_LABELLED_ACTION_MIN_WIDTH)
   const activeLaunchWorkDir = showLaunchControls ? (launchWorkDir || resolvedWorkDir || '') : (resolvedWorkDir || '')
   // The run location lives in the toolbar on the wide desktop composer, and it
   // stays there for the whole session: editable while the session is still a
@@ -213,7 +253,10 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   // hero variant while the session is empty, so keying on it moved the location
   // out of the toolbar at the exact moment it was supposed to stay put — the
   // first message swaps the variant and the draft state in the same render.
-  // The condition is the composer's width, not its variant.
+  // The condition is the composer's width, not its variant — and now literally
+  // so. It used to read `compact`, which ActiveSession wires to "is the
+  // workspace panel open", so opening the panel dropped the location to a
+  // second line on columns with hundreds of pixels to spare.
   const showLocationInToolbar = !useCompactControls && !isMemberSession
   const embedLaunchControlsInToolbar = showLocationInToolbar && showLaunchControls
   const pendingSlashUiAction = !isMemberSession && input.trim().startsWith('/')
@@ -954,6 +997,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
 
   return (
     <div
+      ref={shellRef}
       data-testid="chat-input-shell"
       data-session-id={activeTabId ?? undefined}
       className={
@@ -1239,7 +1283,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
               // its flex row; this one is a plain block child and was sitting
               // 18px above the divider where the hero sits 12px.
               className={`block w-full resize-none bg-transparent text-sm leading-relaxed text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] disabled:opacity-50 ${
-                useCompactControls ? 'py-1.5' : 'py-2'
+                useCompactChrome ? 'py-1.5' : 'py-2'
               }`}
             />
           )}
@@ -1255,11 +1299,14 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
             live panel does not have, so that one repeats here as `mt-3`.
             The narrow layouts keep the band: `p-3` leaves too little room to
             spend on inset, and they never swap variants mid-session anyway.
+            The band is keyed to the chrome, not to the control layout — its
+            `-mx-3` has to cancel the panel's `p-3` exactly, and the panel is
+            padded by the same chrome rule.
           */}
           <div data-testid="chat-input-toolbar" className={`flex items-center justify-between border-t border-[var(--color-border-separator)] ${
             isHeroComposer
               ? 'pt-3'
-              : useCompactControls
+              : useCompactChrome
                 ? `mt-2 -mx-3 -mb-3 px-2.5 py-2 ${isMobileComposer ? 'gap-1' : 'gap-2'}`
                 : 'mt-3 pt-3'
           }`}>
