@@ -72,19 +72,17 @@ const EMPTY_WORKSPACE_REFERENCES: WorkspaceChatReference[] = []
  * with no panel at all, yet the panel-keyed rule sent the wide one to the
  * narrow layout and kept the narrow one wide.
  *
- * The numbers come off the shipped toolbar with the longest mode label
+ * The number comes off the shipped toolbar with the longest mode label
  * ("Ask permissions" / 询问权限): the leading group measures 193px and the
- * trailing cluster 361px, so the full row needs a 610px column and the same
- * row with an icon-only run button — the button is 112px labelled, 32px not —
- * needs 530px.
+ * trailing cluster 361px, which with the 32px round send button needs a 530px
+ * column.
  *
- * They degrade in that order on purpose. The location is information and the
- * run button's label is not: the icon keeps its `aria-label` and tooltip, so
- * dropping the word costs nothing a narrow column can't spare, while dropping
- * the location costs a line of layout and the directory the turn will run in.
+ * There used to be a second, wider threshold here that dropped the send
+ * button's label before the location went. The send button has no label to
+ * drop any more — it is the same 32px circle at every width — so the location
+ * is the only thing left that degrades.
  */
 const TOOLBAR_LOCATION_MIN_WIDTH = 530
-const TOOLBAR_LABELLED_ACTION_MIN_WIDTH = 610
 
 function workspaceReferenceToAttachment(reference: WorkspaceChatReference): Attachment {
   return {
@@ -234,15 +232,13 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   // and the toolbar's edge-to-edge band belong to the panel-beside-the-composer
   // and mobile layouts regardless of how much room those layouts got.
   //
-  // `useCompactControls` and `iconOnlyAction` are about room, so they ask the
-  // column how wide it is — at two different widths, so the run button's label
-  // goes before the location does. Until a measurement lands (jsdom, first
-  // paint) both defer to the caller's `compact`, which keeps the
-  // pre-measurement frame from flashing the wrong layout.
+  // `useCompactControls` is about room, so it asks the column how wide it is.
+  // Until a measurement lands (jsdom, first paint) it defers to the caller's
+  // `compact`, which keeps the pre-measurement frame from flashing the wrong
+  // layout.
   const useCompactChrome = compact || isMobileComposer
   const fitsAtLeast = (minWidth: number) => shellWidth === null ? !compact : shellWidth >= minWidth
   const useCompactControls = isMobileComposer || !fitsAtLeast(TOOLBAR_LOCATION_MIN_WIDTH)
-  const iconOnlyAction = isMobileComposer || !fitsAtLeast(TOOLBAR_LABELLED_ACTION_MIN_WIDTH)
   const activeLaunchWorkDir = showLaunchControls ? (launchWorkDir || resolvedWorkDir || '') : (resolvedWorkDir || '')
   // The run location lives in the toolbar on the wide desktop composer, and it
   // stays there for the whole session: editable while the session is still a
@@ -1409,37 +1405,42 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                   fluid={isMobileComposer}
                 />
               )}
-              {/* Same component and same icon placement as EmptySession's run
-                  button. The two rendered mirror images of each other until it
-                  was spotted in a walkthrough — the arrow led here and trailed
-                  there, on what is the same button to the user. */}
+              {/* Same component, shape and icon as EmptySession's send button.
+                  The two rendered mirror images of each other until it was
+                  spotted in a walkthrough — the arrow led here and trailed
+                  there, on what is the same button to the user.
+
+                  A round icon-only target rather than a labelled pill: the
+                  label said "run" while every other composer control on the row
+                  is already icon-only, and the width it cost was the widest
+                  fixed block in a toolbar that has to fit a model picker and a
+                  location chip. The arrow points *up* — into the transcript the
+                  message is being sent to — which is also what makes it read as
+                  send without a word next to it. Dropping the label is why the
+                  name now lives only in `aria-label`, on both breakpoints. */}
               <Button
                 variant={!isMemberSession && isActive ? 'danger' : 'primary'}
                 size="base"
+                shape="circle"
                 onClick={!isMemberSession && isActive ? () => stopGeneration(activeTabId!) : handleSubmit}
                 disabled={!isMemberSession && isActive ? false : !canSubmit}
                 aria-label={!isMemberSession && isActive ? t('common.stop') : isMemberSession ? t('common.send') : t('common.run')}
                 title={
                   !isMemberSession && isActive
                     ? t('chat.stopTitle')
-                    : iconOnlyAction
-                      ? isMemberSession
-                        ? t('common.send')
-                        : t('common.run')
-                      : undefined
+                    : isMemberSession
+                      ? t('common.send')
+                      : t('common.run')
                 }
-                className={`shrink-0 ${
-                  iconOnlyAction ? (isMobileComposer ? 'h-11 w-11' : 'w-8') : 'w-[112px]'
-                }`}
+                // 44px on touch is the platform minimum for a primary target;
+                // the desktop circle stays at the size's own 32px.
+                className={`shrink-0 ${isMobileComposer ? 'h-11 w-11' : ''}`}
                 icon={(
-                  <span className="material-symbols-outlined text-[14px]">
-                    {!isMemberSession && isActive ? 'stop' : 'arrow_forward'}
+                  <span className="material-symbols-outlined text-[18px]">
+                    {!isMemberSession && isActive ? 'stop' : 'arrow_upward'}
                   </span>
                 )}
-                iconPosition="end"
-              >
-                {!iconOnlyAction && (!isMemberSession && isActive ? t('common.stop') : isMemberSession ? t('common.send') : t('common.run'))}
-              </Button>
+              />
             </div>
           </div>
 

@@ -904,18 +904,54 @@ describe('ChatInput file mentions', () => {
   // `aria-label` and tooltip, while dropping the location costs a whole line
   // and the directory the turn runs in. So the label goes first, at a width
   // where keeping both would squeeze the location down to its ellipsis.
-  it('drops the run button label before the run location as the column narrows', async () => {
+  it('keeps the same circle when it turns into the stop button mid-turn', async () => {
+    // Send and stop are one control that swaps role, so the shape has to
+    // survive the swap — a round send that becomes a pill on stop would move
+    // the whole toolbar every time a turn starts. Only the fill and the glyph
+    // change.
+    stubComposerColumnWidth(700)
+
+    render(<ChatInput compact />)
+
+    const send = screen.getByRole('button', { name: 'Run' })
+    expect(send).toHaveClass('rounded-full', 'h-8', 'w-8')
+    expect(send).toHaveTextContent('arrow_upward')
+
+    await act(async () => {
+      useChatStore.setState({
+        sessions: {
+          ...useChatStore.getState().sessions,
+          [sessionId]: { ...useChatStore.getState().sessions[sessionId]!, chatState: 'streaming' },
+        },
+      })
+    })
+
+    const stop = screen.getByRole('button', { name: 'Stop' })
+    expect(stop).toHaveClass('rounded-full', 'h-8', 'w-8')
+    expect(stop).toHaveTextContent('stop')
+    expect(stop).not.toBeDisabled()
+  })
+
+  // This used to assert that the run button shed its label before the location
+  // moved. The button has no label to shed any more — it is one round icon at
+  // every width — so what needs pinning is that it does *not* change with the
+  // column, leaving the location as the only thing that degrades (next test).
+  it('keeps the send button a fixed circle as the column narrows', async () => {
     const column = stubComposerColumnWidth(700)
 
     render(<ChatInput compact />)
 
     expect(await screen.findByTestId('run-location-readonly')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Run' })).toHaveTextContent('Run')
+    const wide = screen.getByRole('button', { name: 'Run' })
+    expect(wide).not.toHaveTextContent('Run')
+    expect(wide).toHaveClass('rounded-full', 'h-8', 'w-8')
 
     column.resizeTo(580)
 
     expect(screen.getByTestId('run-location-readonly')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Run' })).not.toHaveTextContent('Run')
+    const narrow = screen.getByRole('button', { name: 'Run' })
+    expect(narrow).not.toHaveTextContent('Run')
+    expect(narrow).toHaveClass('rounded-full', 'h-8', 'w-8')
   })
 
   it('moves the run location out of the toolbar as the column is dragged narrow', async () => {
