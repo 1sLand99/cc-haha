@@ -1933,6 +1933,8 @@ export const jp: Record<TranslationKey, string> = {
   'tool.success': '成功',
   'tool.showLess': '表示を減らす',
   'tool.showMore': 'さらに {count} 文字を表示',
+  'tool.showMoreLines': '残り {count} 行を表示',
+  'tool.noOutput': '出力なし',
 
   // ─── Tool Group Verbs ──────────────────────────────────────
   'toolGroup.readOne': 'ファイルを 1 件読み取り',

@@ -1933,6 +1933,8 @@ export const kr: Record<TranslationKey, string> = {
   'tool.success': '성공',
   'tool.showLess': '적게 보기',
   'tool.showMore': '{count}자 더 보기',
+  'tool.showMoreLines': '{count}줄 더 보기',
+  'tool.noOutput': '출력 없음',
 
   // ─── Tool Group Verbs ──────────────────────────────────────
   'toolGroup.readOne': '파일 1개 읽음',

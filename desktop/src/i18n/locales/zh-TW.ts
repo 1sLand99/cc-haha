@@ -1932,6 +1932,8 @@ export const zh: Record<TranslationKey, string> = {
   'tool.success': '成功',
   'tool.showLess': '收起',
   'tool.showMore': '展開 {count} 個字元',
+  'tool.showMoreLines': '展開其餘 {count} 行',
+  'tool.noOutput': '無輸出',
 
   // ─── Tool Group Verbs ──────────────────────────────────────
   'toolGroup.readOne': '讀取了 1 個檔案',

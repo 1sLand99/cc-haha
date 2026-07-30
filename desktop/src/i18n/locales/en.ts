@@ -1931,6 +1931,8 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'tool.success': 'SUCCESS',
   'tool.showLess': 'Show less',
   'tool.showMore': 'Show {count} more characters',
+  'tool.showMoreLines': 'Show {count} more lines',
+  'tool.noOutput': 'No output',
 
   // ─── Tool Group Verbs ──────────────────────────────────────
   'toolGroup.readOne': 'Read 1 file',

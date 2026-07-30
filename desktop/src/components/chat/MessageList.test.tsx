@@ -750,6 +750,45 @@ describe('MessageList nested tool calls', () => {
     await waitFor(() => expect(scrollTop).toBe(600))
   })
 
+  // #1149 — end-to-end pin for the tool duration badge. Injecting `durationMs`
+  // straight into ToolCallBlock only proves formatDuration reaches the header;
+  // it leaves the whole wiring severable with every test green. This drives it
+  // from real transcript messages, so it fails if any link breaks: the
+  // toolResultByToolUseId projection dropping `timestamp`, or either
+  // ToolCallBlock call site dropping the `durationMs` prop.
+  it('derives the tool duration badge from the tool_use/tool_result timestamps', async () => {
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          messages: [
+            { id: 'user-1', type: 'user_text', content: 'Run it', timestamp: 1 },
+            {
+              id: 'tool-use-1',
+              type: 'tool_use',
+              toolName: 'Bash',
+              toolUseId: 'bash-1',
+              input: { command: 'ls -la', description: 'List files' },
+              timestamp: 10_000,
+            },
+            {
+              id: 'tool-result-1',
+              type: 'tool_result',
+              toolUseId: 'bash-1',
+              content: 'file-a',
+              isError: false,
+              timestamp: 11_598,
+            },
+          ],
+        }),
+      },
+    })
+
+    const { container } = render(<MessageList />)
+
+    // 11_598 - 10_000 = 1598ms -> "1.6s"
+    await waitFor(() => expect(container.textContent).toContain('1.6s'))
+  })
+
   it('does not treat the last text marker as the transcript tail when tool output follows it', () => {
     useChatStore.setState({
       sessions: {

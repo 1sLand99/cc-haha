@@ -2823,6 +2823,11 @@ export const MessageBlock = memo(function MessageBlock({
           />
         )
       }
+      // No durationMs prop here on purpose: buildRenderModel only emits a
+      // standalone tool_use item for AskUserQuestion, and this branch is reached
+      // only while such a call is still pending — so there is never a result to
+      // measure against. The badge is wired in ToolCallGroup, the path every
+      // other tool call takes.
       return (
         <ToolCallBlock
           toolName={message.toolName}
