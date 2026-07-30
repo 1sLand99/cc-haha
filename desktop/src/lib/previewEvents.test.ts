@@ -84,6 +84,19 @@ describe('subscribePreviewEvents', () => {
     )
   })
 
+  it('accepts the selection that arrives before picker-exited on the confirm path', async () => {
+    useBrowserPanelStore.getState().open('s1', 'http://x/a')
+    useBrowserPanelStore.getState().setPicker('s1', true)
+    await subscribePreviewEvents('s1')
+
+    // 确认编辑气泡时页面只发 selection；picker-exited 若抢在前面会解除 picker 态并丢弃选区。
+    previewHandler!(JSON.stringify({ v: 1, type: 'selection', payload: { pageUrl: 'http://x/', element: { selector: '#t', tag: 'h1', classes: [] }, screenshot: { dataUrl: 'data:image/png;base64,AAAA', kind: 'region' } } }))
+    previewHandler!(JSON.stringify({ v: 1, type: 'picker-exited' }))
+
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(useBrowserPanelStore.getState().bySession['s1']!.pickerActive).toBe(false)
+  })
+
   it('ignores selection events when the host picker is not active', async () => {
     useBrowserPanelStore.getState().open('s1', 'http://x/a')
     await subscribePreviewEvents('s1')
