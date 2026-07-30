@@ -2,10 +2,15 @@ import { describe, it, expect } from 'bun:test'
 import { ImageBlockWatcher } from '../image-block-watcher.js'
 
 describe('ImageBlockWatcher', () => {
-  it('rejects a markdown image with an http URL', () => {
+  it('extracts a markdown image with an http URL for policy-checked loading', () => {
     const w = new ImageBlockWatcher()
     const out = w.feed('Here is ![alt](https://example.com/foo.png) an image.')
-    expect(out).toEqual([])
+    expect(out).toHaveLength(1)
+    expect(out[0]).toEqual({
+      id: expect.any(String),
+      source: { kind: 'url', url: 'https://example.com/foo.png' },
+      alt: 'alt',
+    })
   })
 
   it('extracts a markdown image with absolute local path', () => {
@@ -94,9 +99,10 @@ describe('ImageBlockWatcher', () => {
   it('extracts multiple images from a single feed chunk in order', () => {
     const w = new ImageBlockWatcher()
     const out = w.feed('![a](/tmp/a.png) ![b](https://x/b.png) ![c](data:image/png;base64,QQ==)')
-    expect(out.length).toBe(2)
+    expect(out.length).toBe(3)
     expect(out[0]!.source.kind).toBe('path')
-    expect(out[1]!.source.kind).toBe('base64')
+    expect(out[1]!.source.kind).toBe('url')
+    expect(out[2]!.source.kind).toBe('base64')
   })
 
   it('rejects malformed data URI (not base64)', () => {

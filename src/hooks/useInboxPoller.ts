@@ -63,6 +63,7 @@ import {
   isTeamPermissionUpdate,
   isTrustedTeamLeaderMessage,
   markMessagesAsRead,
+  markMessagesAsReadByPredicate,
   readUnreadMessages,
   type TeammateMessage,
   writeToMailbox,
@@ -198,9 +199,19 @@ export function useInboxPoller({
       }
     }
 
+    let deferShutdownApprovals = false
+
     // Helper to mark messages as read in the inbox file.
     // Called after messages are successfully delivered or reliably queued.
     const markRead = () => {
+      if (deferShutdownApprovals) {
+        void markMessagesAsReadByPredicate(
+          agentName,
+          message => !isShutdownApproved(message.text),
+          currentAppState.teamContext?.teamName,
+        )
+        return
+      }
       void markMessagesAsRead(agentName, currentAppState.teamContext?.teamName)
     }
 
@@ -694,6 +705,9 @@ export function useInboxPoller({
 
       const teamName = currentAppState.teamContext?.teamName
       const trustedTeamFile = teamName ? await readTeamFileAsync(teamName) : null
+      if (!trustedTeamFile) {
+        deferShutdownApprovals = true
+      }
 
       for (const m of shutdownApprovals) {
         const parsed = getTrustedShutdownApproval(

@@ -27,6 +27,7 @@ import {
   configureLocalServerRequestAuth,
   configurePreviewSessionPermissions,
   createPreviewSessionPartition,
+  isAllowlistedMainRendererMediaRequest,
   type PreviewLocalAccess,
 } from './services/previewSession'
 import {
@@ -242,6 +243,14 @@ function resolvePetServerAccess(): PreviewLocalAccess | null {
   const serverUrl = runtime.getActiveServerUrl()
   return serverUrl
     ? { serverUrl, token: runtime.getPetAccessToken() }
+    : null
+}
+
+function resolveMainRendererServerAccess(): PreviewLocalAccess | null {
+  const runtime = getServerRuntime()
+  const serverUrl = runtime.getActiveServerUrl()
+  return serverUrl
+    ? { serverUrl, token: runtime.getLocalAccessToken() }
     : null
 }
 
@@ -694,6 +703,14 @@ async function createMainWindow() {
       sandbox: true,
     },
   })
+  configureLocalServerRequestAuth(
+    mainWindow.webContents.session.webRequest,
+    resolveMainRendererServerAccess,
+    details => isAllowlistedMainRendererMediaRequest(
+      details,
+      mainWindow!.webContents.id,
+    ),
+  )
   installMainWindowNavigationGuards(mainWindow.webContents, { openExternal: openExternalUrl })
   installPreviewCleanupOnRendererNavigation(mainWindow.webContents, () => {
     previewService?.close()
