@@ -69,6 +69,7 @@ describe('provider presets API', () => {
     const minimax = PROVIDER_PRESETS.find((preset) => preset.id === 'minimax')
     const shengsuanyun = PROVIDER_PRESETS.find((preset) => preset.id === 'shengsuanyun')
     const teamorouter = PROVIDER_PRESETS.find((preset) => preset.id === 'teamorouter')
+    const atlascloud = PROVIDER_PRESETS.find((preset) => preset.id === 'atlascloud')
 
     expect(lmstudio?.baseUrl).toBe('http://localhost:1234')
     expect(lmstudio?.apiFormat).toBe('anthropic')
@@ -118,6 +119,15 @@ describe('provider presets API', () => {
     expect(teamorouter?.defaultModels.sonnet).toBe('claude-sonnet-5')
     expect(teamorouter?.defaultModels.opus).toBe('claude-opus-4-8')
     expect(teamorouter?.modelContextWindows?.['claude-opus-4-8']).toBe(1000000)
+    expect(atlascloud?.baseUrl).toBe('https://api.atlascloud.ai')
+    expect(atlascloud?.apiFormat).toBe('openai_chat')
+    expect(atlascloud?.authStrategy).toBe('api_key')
+    expect(atlascloud?.defaultModels).toEqual({
+      main: 'deepseek-ai/deepseek-v4-pro',
+      haiku: 'deepseek-ai/deepseek-v4-pro',
+      sonnet: 'deepseek-ai/deepseek-v4-pro',
+      opus: 'deepseek-ai/deepseek-v4-pro',
+    })
   })
 
   test('configured presets can expose optional API key and promo metadata', () => {
