@@ -2,6 +2,8 @@ import { memo, useCallback, useMemo } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 import { MessageActionBar, type MessageBranchAction } from './MessageActionBar'
+import { TurnCompletionStamp } from './TurnCompletionStamp'
+import type { TurnCompletion } from '../../lib/turnCompletion'
 import { InlineImageGallery } from './InlineImageGallery'
 import { InlineVideoGallery } from './InlineVideoGallery'
 import { AssistantOutputTargetCard } from './AssistantOutputTargetCard'
@@ -22,11 +24,13 @@ type Props = {
   /** This turn's real changed files (absolute), used to anchor output chips onto
    *  files that were actually written instead of guessing from the prose. */
   turnChangedFiles?: string[]
+  /** Set only on the last reply of a finished turn: when it ended and how long it took. */
+  turnCompletion?: TurnCompletion
 }
 
 const MAX_CARDS = 3
 
-export const AssistantMessage = memo(function AssistantMessage({ content, isStreaming, branchAction, sessionId, timestamp, turnChangedFiles }: Props) {
+export const AssistantMessage = memo(function AssistantMessage({ content, isStreaming, branchAction, sessionId, timestamp, turnChangedFiles, turnCompletion }: Props) {
   const t = useTranslation()
   const workDir = useWorkspacePanelStore((s) => (sessionId ? s.statusBySession[sessionId]?.workDir : undefined))
 
@@ -65,6 +69,7 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
   if (!content.trim()) return null
 
   const documentLayout = shouldUseDocumentLayout(content)
+  const showTurnCompletion = !isStreaming && Boolean(turnCompletion)
 
   return (
     <div className="mb-5 flex justify-start">
@@ -106,12 +111,16 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
           </div>
         )}
 
+        {showTurnCompletion ? <TurnCompletionStamp completion={turnCompletion!} /> : null}
+
         <MessageActionBar
           copyText={isStreaming ? undefined : content}
           copyLabel={t('chat.copyReply')}
           branchAction={branchAction}
           align="start"
-          timestamp={timestamp}
+          // The stamp above already carries this turn's end time; a hover chip
+          // repeating it a line below reads as two different times.
+          timestamp={showTurnCompletion ? undefined : timestamp}
         />
       </div>
     </div>

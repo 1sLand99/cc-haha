@@ -32,6 +32,7 @@ import {
 import type { AgentTaskNotification, UIMessage } from '../../types/chat'
 import { formatTokenCount } from '../../lib/formatTokenCount'
 import { formatDurationMs, hasRunningBackgroundTasks as hasAnyRunningBackgroundTasks } from '../../lib/backgroundTasks'
+import { buildTurnCompletionByMessageId, type TurnCompletion } from '../../lib/turnCompletion'
 import { isTouchH5Document } from '../../lib/touchH5'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -2001,6 +2002,10 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     () => getCompletedTurnTargets(deferredMessages),
     [deferredMessages],
   )
+  const turnCompletionByMessageId = useMemo(
+    () => buildTurnCompletionByMessageId(deferredMessages, { turnActive: chatState !== 'idle' }),
+    [deferredMessages, chatState],
+  )
   const latestCompletedTurnId =
     completedTurnTargets.length > 0
       ? completedTurnTargets[completedTurnTargets.length - 1]?.messageId ?? null
@@ -2594,6 +2599,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
             }
             branchAction={branchActionByMessageId.get(item.message.id)}
             turnChangedFiles={changedFilesByRenderIndex.get(index)}
+            turnCompletion={turnCompletionByMessageId.get(item.message.id)}
           />
         )}
 
@@ -2751,6 +2757,7 @@ export const MessageBlock = memo(function MessageBlock({
   toolResult,
   branchAction,
   turnChangedFiles,
+  turnCompletion,
 }: {
   sessionId?: string | null
   message: UIMessage
@@ -2763,6 +2770,7 @@ export const MessageBlock = memo(function MessageBlock({
     onBranch: () => void
   }
   turnChangedFiles?: string[]
+  turnCompletion?: TurnCompletion
 }) {
   const t = useTranslation()
 
@@ -2797,6 +2805,7 @@ export const MessageBlock = memo(function MessageBlock({
             sessionId={sessionId ?? undefined}
             timestamp={message.timestamp}
             turnChangedFiles={turnChangedFiles}
+            turnCompletion={turnCompletion}
           />
         </SelectableChatMessage>
       )
