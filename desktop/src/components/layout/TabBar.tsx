@@ -41,11 +41,12 @@ const DRAG_START_THRESHOLD = 4
 // undershoot a row of long ones; leaving a quarter behind keeps the tab you
 // were looking at on screen as an anchor.
 const SCROLL_STEP_RATIO = 0.75
-// One glyph per tab kind, so the icon slot is never empty and every title
-// starts at the same x. `trace` and `traces` share the Settings rail's glyph
-// on purpose — a trace tab should read as that section, not as another chat.
+// One glyph per *non-chat* tab kind: the glyph says "this tab is not a
+// conversation". Chat tabs deliberately have none — a bubble on every tab in a
+// strip that is mostly chats is pure noise, and the slot it occupied is worth
+// more as title. `trace` and `traces` share the Settings rail's glyph on
+// purpose — a trace tab should read as that section, not as another chat.
 const TAB_TYPE_ICON: Partial<Record<TabType, string>> = {
-  session: 'chat_bubble',
   settings: 'settings',
   scheduled: 'schedule',
   market: 'storefront',
@@ -55,6 +56,7 @@ const TAB_TYPE_ICON: Partial<Record<TabType, string>> = {
   workbench: 'view_sidebar',
   subagent: 'smart_toy',
 }
+const TAB_TYPE_ICON_FALLBACK = 'tab'
 const desktopHost = getDesktopHost()
 const isDesktopRuntime = desktopHost.isDesktop
 const EMPTY_DISMISSED_BACKGROUND_TASK_KEYS: readonly string[] = []
@@ -431,8 +433,17 @@ export function TabBar() {
         lifted off the desk, continuous with the content below it. Painting the
         strip `--color-surface` instead collapses strip, active tab and content
         into one flat plane, which is what #1123 reported as "粗犷".
+
+        Deliberately *not* darkened into a Chrome-style trough: keeping it on
+        the sidebar's exact ground is what stops the titlebar reading as a
+        separate band across the top of the window. The cost is that the
+        selected tab's fill is only 1.05–1.10:1 against it, so the shape has to
+        be carried by `--color-tab-edge` on the tab itself (see TabItem).
+
+        No `border-b`: the selected tab's bottom edge has to run straight into
+        the content below it, and a rule across the whole strip cuts through it.
       */
-      className="flex min-h-[52px] items-stretch bg-[var(--color-surface-sidebar)] select-none border-b border-[var(--color-border)]"
+      className="flex min-h-[52px] items-stretch bg-[var(--color-surface-sidebar)] select-none"
     >
 
       {canScrollLeft && (
@@ -445,7 +456,13 @@ export function TabBar() {
         ref={scrollRef}
         data-testid="tab-bar-scroll-region"
         data-desktop-drag-region={isDesktopRuntime ? true : undefined}
-        className="flex-1 flex items-stretch overflow-x-hidden"
+        /*
+          `pt-[6px]` is the shoulder: 52px strip minus 6px leaves the 46px tab,
+          and those 6px are what makes the rounded top read as rounded rather
+          than as a corner clipped by the window frame. The strip, not the tab,
+          owns the giveback, so it stays inside the window drag region.
+        */
+        className="flex-1 flex items-stretch gap-[2px] overflow-x-hidden pt-[6px]"
         onDragOver={(e) => e.preventDefault()}
       >
         {tabs.map((tab, index) => {
@@ -474,7 +491,15 @@ export function TabBar() {
         })}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1 border-l border-[var(--color-border)] px-2">
+      {/*
+        Same hairline as the one between two idle tabs, drawn the same way: a
+        16px rule rather than a full-height `border-l`, because a 52px line
+        standing next to a row of 16px ones reads as a different kind of
+        divider. `--color-border` is not an option for either — calibrated
+        against paper, it all but disappears on the trough (1.12:1 on 素白),
+        which left the toolbar looking welded to the last tab.
+      */}
+      <div className="relative flex shrink-0 items-center gap-1 px-2 before:absolute before:left-0 before:top-1/2 before:h-4 before:w-px before:-translate-y-1/2 before:bg-[var(--color-tab-separator)]">
         {showActivityButton && activeTabId && (
           <SessionActivityButton sessionId={activeTabId} />
         )}
@@ -630,35 +655,59 @@ const TabItem = forwardRef<HTMLDivElement, {
   onContextMenu: (e: React.MouseEvent) => void
   onMouseDown: (event: React.MouseEvent) => void
 }>(({ tab, displayTitle, closeLabel, isRunning, isActive, isDragOver, isDragging, dragOffsetX, runningLabel, onClick, onClose, onContextMenu, onMouseDown }, ref) => {
+  // Chat tabs carry no glyph at all; the dot only appears when there is
+  // something to say. Everything else identifies its section with one.
+  const leadingGlyph = isSessionTab(tab)
+    ? (isRunning
+      ? <StatusDot tone="brand" pulse label={runningLabel} />
+      : tab.status === 'error'
+        ? <StatusDot tone="danger" />
+        : null)
+    : (
+      <span className="material-symbols-outlined text-[14px] leading-none text-[var(--color-text-tertiary)]">
+        {TAB_TYPE_ICON[tab.type] ?? TAB_TYPE_ICON_FALLBACK}
+      </span>
+    )
+
   return (
     <div
       ref={ref}
       data-dragging={isDragging ? 'true' : 'false'}
+      data-active={isActive ? 'true' : 'false'}
       onClick={onClick}
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
       className={`
-        tab-bar-interactive group relative flex min-h-[52px] min-w-[140px] max-w-[200px] flex-shrink-0 items-center gap-1.5 px-3
+        tab-bar-interactive tab-strip-item group relative flex min-h-[46px] min-w-[140px] max-w-[200px] flex-shrink-0 items-center rounded-t-[8px] border border-b-0 px-3
         ${isDragging ? 'z-[var(--z-sticky)] cursor-grabbing' : 'cursor-grab'}
-        transition-[background-color,box-shadow,opacity,transform] duration-150 ease-out
-        ${isActive
-          // A filled document tab, still not a pill. The distinction that
-          // matters is the shape, not the fill: this is a square, full-height
-          // block flush with the content it opens onto, so paper runs unbroken
-          // from the tab into the view below. A pill is a rounded block that
-          // floats clear of both, which is what stays banned here — no radius,
-          // no drop shadow, no gap between neighbours.
-          ? 'bg-[var(--color-surface)] shadow-[inset_0_-3px_0_var(--color-brand)]'
+        transition-[background-color,border-color,box-shadow,opacity,transform] duration-150 ease-out
+        ${isActive || isDragging
+          // A document tab, still not a pill: the bottom edge stays square and
+          // borderless so paper runs unbroken from the tab into the view below.
+          // What a pill would add — a full radius, a drop shadow, and clearance
+          // from the content — stays banned; only the top two corners round.
+          //
+          // The border is load-bearing, not decoration. The strip is the
+          // sidebar's own ground, which puts this fill at 1.05–1.10:1 against
+          // it in all six themes: without an outline the corners are invisible
+          // and there is nothing to see. `--color-border` cannot stand in — it
+          // is calibrated against paper and lands at 1.12:1 on the trough.
+          ? 'border-[var(--color-tab-edge)] bg-[var(--color-surface)]'
           // Hover rises toward paper, it does not fall away from it. The
           // obvious `--color-surface-hover` is wrong here: it is tuned for
           // hovering *on* paper, so on the two ink themes it lands brighter
           // than paper itself (dark #2B271F vs #201D17) and a hovered tab
           // outshines the selected one. Sharing paper with the active tab and
-          // letting the terracotta rule plus the label weight carry selection
-          // makes the active state strictly stronger in all six themes.
-          : 'bg-transparent hover:bg-[var(--color-surface)]'
+          // letting the outline plus the label weight carry selection makes
+          // the active state strictly stronger in all six themes.
+          //
+          // It gets the weaker of the two outlines rather than none: the same
+          // 1.05–1.10:1 that hides the selected tab's corners hides a hovered
+          // tab's too, so without it hover is a fill with no discernible
+          // shape. Three legible tiers — no outline, hairline, full edge.
+          : 'border-transparent bg-transparent hover:border-[var(--color-tab-separator)] hover:bg-[var(--color-surface)]'
         }
-        ${isDragging ? 'opacity-95 shadow-[var(--shadow-overlay)] ring-1 ring-[var(--color-border)]' : ''}
+        ${isDragging ? 'opacity-95 shadow-[var(--shadow-overlay)]' : ''}
         ${isDragOver ? 'before:absolute before:left-0 before:top-[4px] before:bottom-[4px] before:w-[3px] before:bg-[var(--color-brand)] before:rounded-full' : ''}
       `}
       style={{
@@ -666,21 +715,19 @@ const TabItem = forwardRef<HTMLDivElement, {
       }}
     >
       {/*
-        One fixed slot, not a run of conditional siblings. The status dot used
-        to be *inserted* ahead of the label, so a session shoved its own title
-        sideways the moment it started running and pulled it back when it
-        finished. Swapping the slot's contents keeps the title still.
+        One slot, not a run of conditional siblings, and it animates its own
+        width rather than appearing. The status dot used to be *inserted* ahead
+        of the label, so a session shoved its own title sideways the moment it
+        started running and pulled it back when it finished. Now that idle chat
+        tabs have no glyph the slot has to collapse, so the jump is spread over
+        150ms instead. That is also why the gap is per-child margin: flex `gap`
+        is charged between children whatever their width, so a zero-width slot
+        would still cost 6px.
       */}
-      <span className="flex h-[14px] w-[14px] flex-shrink-0 items-center justify-center">
-        {tab.type === 'session' && isRunning ? (
-          <StatusDot tone="brand" pulse label={runningLabel} />
-        ) : tab.type === 'session' && tab.status === 'error' ? (
-          <StatusDot tone="danger" />
-        ) : (
-          <span className="material-symbols-outlined text-[14px] leading-none text-[var(--color-text-tertiary)]">
-            {TAB_TYPE_ICON[tab.type] ?? TAB_TYPE_ICON.session}
-          </span>
-        )}
+      <span
+        className={`flex h-[14px] flex-shrink-0 items-center justify-center overflow-hidden transition-[width,margin-right] duration-150 ease-out ${leadingGlyph ? 'mr-1.5 w-[14px]' : 'mr-0 w-0'}`}
+      >
+        {leadingGlyph}
       </span>
 
       <span className={`min-w-0 flex-1 truncate text-xs ${isActive ? 'text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-secondary)]'}`}>
@@ -692,7 +739,7 @@ const TabItem = forwardRef<HTMLDivElement, {
         `transition-colors`, which does not cover opacity, and a competing
         `transition-[…]` in `className` would resolve by stylesheet order.
       */}
-      <span className="-mr-1 flex-shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+      <span className="-mr-1 ml-1.5 flex-shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
         <IconButton
           icon="close"
           label={closeLabel}

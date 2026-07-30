@@ -286,3 +286,65 @@ describe('link affordance contrast', () => {
     })
   }
 })
+
+describe('tab strip outlines', () => {
+  /**
+   * The tab strip's trough is deliberately the sidebar's own ground rather
+   * than a darkened Chrome-style band — that is what keeps the titlebar from
+   * reading as a separate stripe across the top of the window. The price is
+   * that the selected tab's paper fill sits at only 1.05–1.10:1 against it in
+   * every one of the six themes, so these two tokens are the entire reason the
+   * rounded shape is visible at all. A corner nobody can see is not a corner,
+   * and what is left when they fail is exactly the flat smear #1123 reported.
+   *
+   * Neither can be replaced by `--color-border` or `--color-outline`: both are
+   * calibrated against paper, and on the trough they land at 1.12:1
+   * (invisible) and 1.36–2.01:1 (a drawn box), in opposite directions between
+   * the light and ink families.
+   */
+  const TROUGH = '--color-surface-sidebar'
+  /** Enough to trace a 1px curve; below this the corner stops resolving. */
+  const EDGE_MIN = 1.3
+  /**
+   * The hairline between two idle tabs is bounded on both sides: too faint and
+   * a row of same-length titles smears back together, too strong and the strip
+   * turns into a table of cells.
+   */
+  const SEPARATOR_MIN = 1.18
+  const SEPARATOR_MAX = 1.35
+
+  for (const [theme, selectors] of Object.entries(THEME_BLOCKS)) {
+    it(`draws the selected tab's outline on the trough in ${theme}`, () => {
+      const trough = parseColor(resolve(TROUGH, selectors))
+      const edge = flatten(parseColor(resolve('--color-tab-edge', selectors)), trough)
+
+      expect(
+        Number(contrast(edge, trough).toFixed(2)),
+        `${theme}: --color-tab-edge on ${TROUGH}`,
+      ).toBeGreaterThanOrEqual(EDGE_MIN)
+    })
+
+    it(`carries that outline across the tab's own fill in ${theme}`, () => {
+      // The 1px border straddles the boundary: half of it lies over the tab's
+      // paper. If it vanishes there, the curve is drawn on its outer half only.
+      const paper = parseColor(resolve('--color-surface', selectors))
+      const edge = flatten(parseColor(resolve('--color-tab-edge', selectors)), paper)
+
+      expect(
+        Number(contrast(edge, paper).toFixed(2)),
+        `${theme}: --color-tab-edge on --color-surface`,
+      ).toBeGreaterThanOrEqual(1.2)
+    })
+
+    it(`keeps the hairline between idle tabs present but quiet in ${theme}`, () => {
+      const trough = parseColor(resolve(TROUGH, selectors))
+      const separator = flatten(parseColor(resolve('--color-tab-separator', selectors)), trough)
+      const ratio = Number(contrast(separator, trough).toFixed(2))
+
+      expect(ratio, `${theme}: --color-tab-separator on ${TROUGH} is too faint`)
+        .toBeGreaterThanOrEqual(SEPARATOR_MIN)
+      expect(ratio, `${theme}: --color-tab-separator on ${TROUGH} shouts`)
+        .toBeLessThanOrEqual(SEPARATOR_MAX)
+    })
+  }
+})
