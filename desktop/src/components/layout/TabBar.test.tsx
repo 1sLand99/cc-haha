@@ -23,6 +23,36 @@ const sessionsApiMock = vi.hoisted(() => ({
   delete: vi.fn(() => Promise.resolve()),
 }))
 
+// The strip re-reveals a clipped active tab from its ResizeObserver, so the
+// tests have to be able to fire one. jsdom lays nothing out, so the geometry
+// the guard reads has to be stubbed alongside it.
+const resizeObserverCallbacks = new Set<ResizeObserverCallback>()
+
+function stubRect(element: Element, left: number, right: number) {
+  Object.defineProperty(element, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({
+      left,
+      right,
+      width: right - left,
+      top: 0,
+      bottom: 46,
+      height: 46,
+      x: left,
+      y: 0,
+      toJSON: () => ({}),
+    }),
+  })
+}
+
+function fireStripResize() {
+  act(() => {
+    for (const callback of [...resizeObserverCallbacks]) {
+      callback([], {} as ResizeObserver)
+    }
+  })
+}
+
 function makeChatSession(chatState: ChatState): PerSessionState {
   return {
     messages: [],
@@ -158,12 +188,19 @@ describe('TabBar', () => {
   }
 
   beforeEach(() => {
+    resizeObserverCallbacks.clear()
+
     class ResizeObserverMock {
-      constructor(_callback: ResizeObserverCallback) {}
+      constructor(private readonly callback: ResizeObserverCallback) {
+        resizeObserverCallbacks.add(callback)
+      }
 
       observe(_target: Element) {}
 
-      disconnect() {}
+      disconnect() {
+        resizeObserverCallbacks.delete(this.callback)
+      }
+
       unobserve() {}
     }
 
@@ -877,6 +914,131 @@ describe('TabBar', () => {
       block: 'nearest',
       inline: 'nearest',
       behavior: 'smooth',
+    })
+  })
+
+  describe('keeping the active tab whole while the strip resizes', () => {
+    // The chevrons are `w-7` siblings of the scroll region, so the moment the
+    // strip is found to overflow they take 28px each out of it — after the
+    // activation scroll has already landed on a scrollLeft computed without
+    // them. Measured on a 1280px window with seven tabs: the scroll stopped at
+    // 108 when the reachable end had moved to 164, and the last tab lost
+    // exactly those 56px, taking the close button past the strip edge, where
+    // elementFromPoint returned the toolbar's terminal button instead. So the
+    // tab could not be closed at all, not merely not seen.
+    async function renderOverflowingStrip() {
+      const { TabBar } = await import('./TabBar')
+      const { useTabStore } = await import('../../stores/tabStore')
+      const { useChatStore } = await import('../../stores/chatStore')
+
+      useTabStore.setState({
+        tabs: [
+          { sessionId: 'tab-1', title: 'First Session', type: 'session', status: 'idle' },
+          { sessionId: 'tab-2', title: 'Second Session', type: 'session', status: 'idle' },
+          { sessionId: 'tab-3', title: 'Third Session', type: 'session', status: 'idle' },
+          { sessionId: 'tab-4', title: 'Fourth Session', type: 'session', status: 'idle' },
+          { sessionId: 'tab-5', title: 'Last Session', type: 'session', status: 'idle' },
+        ],
+        activeTabId: 'tab-5',
+      })
+      useChatStore.setState({
+        sessions: {},
+        disconnectSession: vi.fn(),
+      } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+      await act(async () => {
+        render(<TabBar />)
+      })
+
+      const strip = screen.getByTestId('tab-bar-scroll-region')
+      const activeTab = strip.querySelector('[data-active="true"]') as HTMLElement
+      expect(activeTab).toBeInTheDocument()
+
+      // The strip runs 0–840 once both chevrons are in. Everything below moves
+      // only the active tab's own rect against that.
+      stubRect(strip, 0, 840)
+      Object.defineProperty(strip, 'clientWidth', { configurable: true, get: () => 840 })
+      Object.defineProperty(strip, 'scrollWidth', { configurable: true, get: () => 1004 })
+      Object.defineProperty(strip, 'scrollLeft', { configurable: true, get: () => 108 })
+      Object.defineProperty(strip, 'scrollBy', { configurable: true, value: vi.fn() })
+
+      return { strip, activeTab, useTabStore }
+    }
+
+    it('re-reveals the active tab when a resize clips it', async () => {
+      const { activeTab } = await renderOverflowingStrip()
+      // 56px past the strip's right edge — the close button's slot.
+      stubRect(activeTab, 640, 896)
+      scrollIntoViewMock.mockClear()
+
+      fireStripResize()
+
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({
+        block: 'nearest',
+        inline: 'nearest',
+        behavior: 'smooth',
+      })
+    })
+
+    it('leaves an already whole active tab where it is', async () => {
+      const { activeTab } = await renderOverflowingStrip()
+      stubRect(activeTab, 640, 840)
+      scrollIntoViewMock.mockClear()
+
+      fireStripResize()
+
+      // Nothing is clipped, so a resize must not scroll. Without the tolerance
+      // in the visibility test, subpixel edges would land here and re-scroll on
+      // every single resize.
+      expect(scrollIntoViewMock).not.toHaveBeenCalled()
+    })
+
+    it('leaves the strip alone once the user has driven it with a chevron', async () => {
+      const { activeTab } = await renderOverflowingStrip()
+      stubRect(activeTab, 640, 896)
+
+      const leftChevron = await waitFor(() => {
+        const button = screen.getByText('chevron_left').closest('button')
+        expect(button).toBeInTheDocument()
+        return button as HTMLButtonElement
+      })
+      fireEvent.click(leftChevron)
+      scrollIntoViewMock.mockClear()
+
+      // A chevron press is itself a resize source: reaching an end retires one
+      // chevron and leaving an end brings the other back, so a plain user
+      // scroll fires this observer mid-flight. Realigning there snapped the
+      // view straight back and made the left end unreachable.
+      fireStripResize()
+
+      expect(scrollIntoViewMock).not.toHaveBeenCalled()
+    })
+
+    it('takes the strip back over when the user switches tabs', async () => {
+      const { activeTab, strip, useTabStore } = await renderOverflowingStrip()
+      stubRect(activeTab, 640, 896)
+
+      const leftChevron = await waitFor(() => {
+        const button = screen.getByText('chevron_left').closest('button')
+        expect(button).toBeInTheDocument()
+        return button as HTMLButtonElement
+      })
+      fireEvent.click(leftChevron)
+
+      await act(async () => {
+        useTabStore.getState().setActiveTab('tab-4')
+      })
+      const nextActiveTab = strip.querySelector('[data-active="true"]') as HTMLElement
+      stubRect(nextActiveTab, 640, 896)
+      scrollIntoViewMock.mockClear()
+
+      fireStripResize()
+
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({
+        block: 'nearest',
+        inline: 'nearest',
+        behavior: 'smooth',
+      })
     })
   })
 

@@ -41,6 +41,17 @@ const DRAG_START_THRESHOLD = 4
 // undershoot a row of long ones; leaving a quarter behind keeps the tab you
 // were looking at on screen as an anchor.
 const SCROLL_STEP_RATIO = 0.75
+// `nearest` on both axes: bring the tab fully on screen with the smallest
+// possible move, and leave a tab that is already whole exactly where it is.
+const REVEAL_ACTIVE_TAB: ScrollIntoViewOptions = {
+  block: 'nearest',
+  inline: 'nearest',
+  behavior: 'smooth',
+}
+// Subpixel slack for the "is the active tab whole?" test. Without it a strip
+// whose edges land on fractional pixels reports the tab as clipped on every
+// single resize and re-scrolls forever.
+const TAB_VISIBILITY_TOLERANCE = 1
 // One glyph per *non-chat* tab kind: the glyph says "this tab is not a
 // conversation". Chat tabs deliberately have none — a bubble on every tab in a
 // strip that is mostly chats is pure noise, and the slot it occupied is worth
@@ -170,6 +181,9 @@ export function TabBar() {
 
   const moveTab = useTabStore((s) => s.moveTab)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Set the moment the user drives the strip themselves, cleared when they
+  // switch tabs. See `realignActiveTab`.
+  const userScrolledRef = useRef(false)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null)
@@ -201,29 +215,76 @@ export function TabBar() {
     setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1)
   }, [])
 
+  // Keeping the active tab whole is an invariant the strip has to re-establish
+  // after its own width changes, not something a single scroll on activation
+  // can settle. The chevrons are why: they are `w-7` siblings of this region,
+  // so the moment `updateScrollState` decides the strip overflows they take
+  // 28px each out of it — *after* the activation scroll has already landed on
+  // a scrollLeft computed without them. Measured on a 1280px window with seven
+  // tabs: the scroll stopped at 108 when the reachable end had moved to 164,
+  // and the last tab lost exactly those 56px off its right edge, taking the
+  // close button with it. Not merely hidden — the button's centre sat past the
+  // strip, so `elementFromPoint` there returned the toolbar's terminal button
+  // and the tab could not be closed at all. Window resizes, sidebar drags and
+  // the toolbar's own conditional buttons narrow the region the same way.
+  const realignActiveTab = useCallback(() => {
+    // Once the user has driven the strip with a chevron, where it sits is what
+    // they asked for, and the active tab being half off the edge is an
+    // ordinary consequence of scrolling a row. Only reinstate the invariant
+    // when the position is still ours to choose. Width alone cannot stand in
+    // for this: a chevron retires when its end is reached and rejoins when it
+    // is left, so a plain user scroll narrows the strip mid-flight and looks
+    // exactly like the layout event this guards against — measured, the view
+    // snapped straight back and the left end became unreachable.
+    if (userScrolledRef.current) return
+
+    const el = scrollRef.current
+    if (!el) return
+    const currentActiveTabId = useTabStore.getState().activeTabId
+    if (!currentActiveTabId) return
+    const activeTabEl = tabRefs.current.get(currentActiveTabId)
+    if (!activeTabEl) return
+
+    const strip = el.getBoundingClientRect()
+    const tab = activeTabEl.getBoundingClientRect()
+
+    // Already whole. The tolerance is for subpixel layout, which would
+    // otherwise report a clip on every resize and scroll forever.
+    if (
+      tab.left >= strip.left - TAB_VISIBILITY_TOLERANCE &&
+      tab.right <= strip.right + TAB_VISIBILITY_TOLERANCE
+    ) return
+
+    activeTabEl.scrollIntoView(REVEAL_ACTIVE_TAB)
+  }, [])
+
   useEffect(() => {
     updateScrollState()
     const el = scrollRef.current
     if (!el) return
     el.addEventListener('scroll', updateScrollState)
-    const ro = new ResizeObserver(updateScrollState)
+    const ro = new ResizeObserver(() => {
+      updateScrollState()
+      realignActiveTab()
+    })
     ro.observe(el)
     return () => {
       el.removeEventListener('scroll', updateScrollState)
       ro.disconnect()
     }
-  }, [updateScrollState, tabs.length])
+  }, [realignActiveTab, updateScrollState, tabs.length])
 
   useEffect(() => {
     if (!activeTabId) return
     const activeTabEl = tabRefs.current.get(activeTabId)
     if (!activeTabEl) return
 
-    activeTabEl.scrollIntoView({
-      block: 'nearest',
-      inline: 'nearest',
-      behavior: 'smooth',
-    })
+    // Switching tabs hands the position back to the strip: wherever the user
+    // had scrolled to, they have now named a tab they want to see.
+    userScrolledRef.current = false
+    // Unconditional, unlike the resize path: a tab that has just been activated
+    // has to come on screen even from completely outside the strip.
+    activeTabEl.scrollIntoView(REVEAL_ACTIVE_TAB)
 
     const frame = window.requestAnimationFrame(updateScrollState)
     return () => window.cancelAnimationFrame(frame)
@@ -244,6 +305,10 @@ export function TabBar() {
     const el = scrollRef.current
     if (!el) return
     const step = el.clientWidth * SCROLL_STEP_RATIO
+    // The chevrons are the only way to drive the strip by hand — it is
+    // `overflow-x-hidden`, so wheel and trackpad do not reach it — which makes
+    // this the one place that has to hand the position over to the user.
+    userScrolledRef.current = true
     el.scrollBy({ left: direction === 'left' ? -step : step, behavior: 'smooth' })
   }
 
