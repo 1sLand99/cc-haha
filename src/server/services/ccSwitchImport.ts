@@ -670,6 +670,8 @@ function matchPresetId(baseUrl: string): string {
   const normalized = normalizeBaseUrl(baseUrl)
   if (!normalized) return 'custom'
   // Presets without a base URL (official, custom) can never be matched by URL.
+  // Retired (`deprecated`) presets are matched on purpose: an import maps a config the
+  // user already has elsewhere, so inheriting that preset's env beats landing on custom.
   const preset = PROVIDER_PRESETS.find(
     (candidate) => candidate.baseUrl && normalizeBaseUrl(candidate.baseUrl) === normalized,
   )

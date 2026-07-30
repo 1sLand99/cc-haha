@@ -158,9 +158,10 @@ describe('provider presets API', () => {
     expect(kimi?.modelContextWindows?.['kimi-for-coding']).toBe(262144)
     expect(kimi?.modelContextWindows?.['kimi-for-coding-highspeed']).toBe(262144)
     expect(minimax?.apiKeyUrl).toBe('https://platform.minimaxi.com/subscribe/token-plan?code=1TG2Cseab2&source=link')
-    expect(shengsuanyun?.apiKeyUrl).toBe('https://www.shengsuanyun.com/?from=CH_LEJ88KWR')
-    expect(shengsuanyun?.promoText).toContain('首充 10%')
-    expect(shengsuanyun?.featured).toBe(true)
+    // Retired: no referral link, no promo copy, no featured slot.
+    expect(shengsuanyun?.apiKeyUrl).toBeUndefined()
+    expect(shengsuanyun?.promoText).toBeUndefined()
+    expect(shengsuanyun?.featured).toBeUndefined()
     expect(shengsuanyun?.defaultEnv).toEqual({
       API_TIMEOUT_MS: '3000000',
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
@@ -213,6 +214,43 @@ describe('provider presets API', () => {
 
     const updatedRaw = await fs.readFile(path.join(tmpDir, 'cc-haha', 'settings.json'), 'utf-8')
     expect(JSON.parse(updatedRaw)).toEqual(updateBody)
+  })
+
+  test('retired presets keep the runtime config saved providers resolve from them', () => {
+    for (const id of ['shengsuanyun', 'jiekouai']) {
+      const preset = PROVIDER_PRESETS.find((candidate) => candidate.id === id)
+
+      expect(preset?.deprecated).toBe(true)
+      // defaultEnv is never persisted per provider, so it can only come from here.
+      expect(preset?.defaultEnv).toBeDefined()
+      // Records saved before these fields existed fall back to the preset for them.
+      expect(preset?.authStrategy).toBe('auth_token')
+      expect(preset?.modelContextWindows).toBeDefined()
+    }
+  })
+
+  test('retired 接口AI preset keeps the third-party Sonnet guards it was retired with', () => {
+    const jiekouai = PROVIDER_PRESETS.find((preset) => preset.id === 'jiekouai')
+
+    // Dropping this flips modelSupportsThinking('claude-sonnet-4-6') to true, which makes
+    // the CLI send thinking on a provider that was configured not to accept it.
+    expect(jiekouai?.defaultEnv?.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES).toBe('none')
+    // Dropping this silently collapses the context window 1M -> 200k.
+    expect(jiekouai?.modelContextWindows?.['claude-sonnet-4-6']).toBe(1000000)
+    expect(jiekouai?.modelContextWindows?.['claude-opus-4-7']).toBe(1000000)
+  })
+
+  test('retired presets stop promoting themselves', () => {
+    const retired = PROVIDER_PRESETS.filter((preset) => preset.deprecated)
+    expect(retired.length).toBeGreaterThan(0)
+
+    for (const preset of retired) {
+      // The edit form renders apiKeyUrl/promoText from the resolved preset with no mode
+      // guard, so a retired preset must not keep advertising itself to existing users.
+      expect(preset.apiKeyUrl).toBeUndefined()
+      expect(preset.promoText).toBeUndefined()
+      expect(preset.featured).toBeUndefined()
+    }
   })
 
   test('provider presets carry docs-backed context windows for current coding models', () => {

@@ -43,6 +43,7 @@ import type { Locale } from '../i18n'
 import type { SavedProvider, UpdateProviderInput, ProviderTestResult, ModelMapping, Model1mSupport, ApiFormat, ProviderAuthStrategy, ProviderModelInfo, ProviderModelsErrorCode } from '../types/provider'
 import { groupProviderModels, providerModelsErrorKey } from '../lib/providerModels'
 import type { ProviderPreset } from '../types/providerPreset'
+import { selectableProviderPresets } from '../config/providerPresets'
 import { AdapterSettings } from './AdapterSettings'
 import { useSessionStore } from '../stores/sessionStore'
 import { MarkdownRenderer } from '../components/markdown/MarkdownRenderer'
@@ -1280,16 +1281,20 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
 
   const fallbackPreset = buildFallbackPreset(provider)
   const loadedPresets = presets.filter((p) => p.id !== 'official')
+  // Keeps retired presets, so editing a provider already saved against one still
+  // resolves the preset behind its presetId instead of falling back.
   const availablePresets = loadedPresets.length > 0 ? loadedPresets : [fallbackPreset]
-  const regularPresets = availablePresets.filter((p) => !p.featured)
-  const featuredPresets = availablePresets.filter((p) => p.featured)
+  // Retired presets must never be offered when adding a provider.
+  const selectablePresets = selectableProviderPresets(availablePresets)
+  const regularPresets = selectablePresets.filter((p) => !p.featured)
+  const featuredPresets = selectablePresets.filter((p) => p.featured)
   const presetDefaultEnvKeys = useMemo(
     () => presets.flatMap((preset) => Object.keys(preset.defaultEnv ?? {})),
     [presets],
   )
   const initialPreset = provider
     ? availablePresets.find((p) => p.id === provider.presetId) ?? fallbackPreset
-    : availablePresets[0] ?? fallbackPreset
+    : selectablePresets[0] ?? fallbackPreset
   const initialModels = stripModel1mMarkers(provider?.models ?? initialPreset.defaultModels)
   const initialModel1mSupport = getInitialModel1mSupport(
     provider?.models ?? initialPreset.defaultModels,
@@ -2133,9 +2138,9 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
                     setBaseUrl(env.ANTHROPIC_BASE_URL)
                     // Auto-switch to matching preset or Custom
                     if (mode === 'create') {
-                      const matchedPreset = availablePresets.find((p) => p.id !== 'custom' && p.baseUrl === env.ANTHROPIC_BASE_URL)
+                      const matchedPreset = selectablePresets.find((p) => p.id !== 'custom' && p.baseUrl === env.ANTHROPIC_BASE_URL)
                       const targetPreset = requirePreset(
-                        matchedPreset ?? availablePresets.find((p) => p.id === 'custom'),
+                        matchedPreset ?? selectablePresets.find((p) => p.id === 'custom'),
                       )
                       if (targetPreset.id !== selectedPreset.id) {
                         jsonPastedRef.current = true

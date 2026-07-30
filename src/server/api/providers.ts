@@ -85,6 +85,8 @@ export async function handleProvidersApi(
     }
 
     // GET /api/providers/presets
+    // Carries retired presets too (flagged `deprecated`), so a consumer resolving a saved
+    // provider's presetId still finds it. Filter on `deprecated` to build add-provider choices.
     if (id === 'presets' && req.method === 'GET') {
       return Response.json({ presets: PROVIDER_PRESETS })
     }
