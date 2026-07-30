@@ -7,11 +7,8 @@ import type { TurnCompletion } from '../../lib/turnCompletion'
 import { InlineImageGallery } from './InlineImageGallery'
 import { InlineVideoGallery } from './InlineVideoGallery'
 import { AssistantOutputTargetCard } from './AssistantOutputTargetCard'
-import { handlePreviewLink } from '../../lib/handlePreviewLink'
-import { getServerBaseUrl } from '../../lib/desktopRuntime'
-import { getDesktopHost } from '../../lib/desktopHost'
+import { openPreviewLink } from '../../lib/openPreviewLink'
 import { extractAssistantOutputTargets } from '../../lib/assistantOutputTargets'
-import { useBrowserPanelStore } from '../../stores/browserPanelStore'
 import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
 import { useTranslation } from '../../i18n'
 
@@ -37,18 +34,7 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
   const handleLinkClick = useCallback(
     (href: string, event: ReactMouseEvent<HTMLDivElement>): boolean => {
       if (!sessionId) return false
-      const handled = handlePreviewLink(href, {
-        sessionId,
-        serverBaseUrl: getServerBaseUrl(),
-        openBrowser: (id, url) => useBrowserPanelStore.getState().open(id, url),
-        openFilePreview: (id, path) => {
-          void useWorkspacePanelStore.getState().openPreview(id, path, 'file')
-        },
-        openExternal: (url) => {
-          void getDesktopHost().shell.open(url)
-            .catch(() => window.open(url, '_blank'))
-        },
-      })
+      const handled = openPreviewLink(href, sessionId)
       if (handled) event.preventDefault()
       return handled
     },

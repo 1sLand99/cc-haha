@@ -204,3 +204,48 @@ describe('primary action contrast', () => {
     })
   }
 })
+
+/**
+ * Link affordance contrast.
+ *
+ * #1145 was reported as "the URL looks the same color as the body text and
+ * can't be clicked". Measuring the palette confirmed the first half exactly:
+ * `--color-text-accent` against `--color-text-primary` is only 1.95–2.55:1
+ * across the six themes, so in dense Chinese text a link with
+ * `prose-a:no-underline` is genuinely indistinguishable from prose.
+ *
+ * The underline therefore carries the whole affordance, and it has to be
+ * visible on its own. The first attempt used `--color-primary-fixed-dim`,
+ * which measures 1.49–1.76:1 against the page — invisible, and no structural
+ * test would have caught it.
+ */
+describe('link affordance contrast', () => {
+  const LINK_SURFACES = ['--color-surface', '--color-surface-user-msg'] as const
+
+  for (const [theme, selectors] of Object.entries(THEME_BLOCKS)) {
+    it(`keeps the link underline visible in ${theme}`, () => {
+      const surface = parseColor(resolve('--color-surface', selectors))
+
+      for (const surfaceToken of LINK_SURFACES) {
+        const fill = flatten(parseColor(resolve(surfaceToken, selectors)), surface)
+        const underline = flatten(parseColor(resolve('--color-text-accent', selectors)), fill)
+        expect(
+          Number(contrast(underline, fill).toFixed(2)),
+          `${theme}: --color-text-accent underline on ${surfaceToken}`,
+        ).toBeGreaterThanOrEqual(AA_CONTROL_BOUNDARY)
+      }
+    })
+
+    it(`keeps link text itself readable in ${theme}`, () => {
+      const surface = parseColor(resolve('--color-surface', selectors))
+      for (const surfaceToken of LINK_SURFACES) {
+        const fill = flatten(parseColor(resolve(surfaceToken, selectors)), surface)
+        const text = flatten(parseColor(resolve('--color-text-accent', selectors)), fill)
+        expect(
+          Number(contrast(text, fill).toFixed(2)),
+          `${theme}: --color-text-accent text on ${surfaceToken}`,
+        ).toBeGreaterThanOrEqual(AA_SMALL_TEXT)
+      }
+    })
+  }
+})

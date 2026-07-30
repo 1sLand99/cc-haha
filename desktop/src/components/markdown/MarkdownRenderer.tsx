@@ -4,6 +4,9 @@ import DOMPurify from 'dompurify'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { marked, type Tokens } from 'marked'
+// The `md-code-link` variant below is spelled out literally so Tailwind can see
+// it; MarkdownRenderer.test.tsx asserts it against CODE_LINK_CLASS.
+import { cjkAwareAutolink, renderCodespan } from '@/lib/markdownAutolink'
 import { CodeViewer } from '../chat/CodeViewer'
 import { MermaidRenderer } from '../chat/MermaidRenderer'
 import { copyTextToClipboard } from '@/lib/clipboard'
@@ -112,11 +115,16 @@ renderer.code = function ({ text, lang }: Tokens.Code) {
   return `<div data-codeblock-id="${id}"></div>`
 }
 
+renderer.codespan = renderCodespan
+
 marked.setOptions({
   breaks: true,
   gfm: true,
 })
 marked.use({ renderer })
+// gfm autolink is already on; this only corrects where a bare URL ends when the
+// surrounding text is Chinese. See lib/urlBoundary.ts.
+marked.use(cjkAwareAutolink)
 
 function findUnescapedDelimiter(text: string, delimiter: string, fromIndex: number): number {
   let index = text.indexOf(delimiter, fromIndex)
@@ -432,7 +440,9 @@ const BASE_PROSE_CLASSES = `markdown-prose prose prose-sm min-w-0 max-w-none bre
   prose-p:break-words prose-p:[overflow-wrap:anywhere]
   prose-code:text-[13px] prose-code:text-[var(--color-code-fg)] prose-code:font-mono prose-code:bg-[var(--color-code-bg)] prose-code:border prose-code:border-[var(--color-border)] prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-[var(--radius-sm)] prose-code:before:hidden prose-code:after:hidden
   prose-pre:!bg-transparent prose-pre:!p-0 prose-pre:!shadow-none
-  prose-a:text-[var(--color-text-accent)] prose-a:no-underline prose-a:[overflow-wrap:anywhere] hover:prose-a:underline
+  prose-a:text-[var(--color-text-accent)] prose-a:[overflow-wrap:anywhere]
+  prose-a:underline prose-a:decoration-[1px] prose-a:underline-offset-[3px] prose-a:decoration-[var(--color-text-accent)] prose-a:hover:decoration-[2px]
+  [&_a.md-code-link]:no-underline [&_a.md-code-link_code]:text-[var(--color-text-accent)] [&_a.md-code-link:hover_code]:underline
   prose-strong:text-[var(--color-text-primary)]
   prose-ul:my-2 prose-ol:my-2 prose-ul:pl-5 prose-ol:pl-5 prose-ul:list-outside prose-ol:list-outside
   prose-li:my-0.5

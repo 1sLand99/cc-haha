@@ -2788,6 +2788,7 @@ export const MessageBlock = memo(function MessageBlock({
             attachments={message.attachments}
             branchAction={branchAction}
             timestamp={message.timestamp}
+            sessionId={sessionId ?? undefined}
           />
         </SelectableChatMessage>
       )

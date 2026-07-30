@@ -9,7 +9,7 @@ import { IconButton } from '@/components/ui/IconButton'
 import { OpenWithMenu } from '@/components/composite/OpenWithMenu'
 import { buildOpenWithItems, describeFileType, type OpenWithItem } from '../../lib/openWithItems'
 import { openWithContextForHref } from '../../lib/openWithContextForHref'
-import { handlePreviewLink } from '../../lib/handlePreviewLink'
+import { openPreviewLink } from '../../lib/openPreviewLink'
 import { getServerBaseUrl } from '../../lib/desktopRuntime'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
@@ -41,18 +41,7 @@ export function AssistantOutputTargetCard({ target, sessionId, workDir }: Props)
 
   const handleOpen = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    handlePreviewLink(target.href, {
-      sessionId,
-      serverBaseUrl: getServerBaseUrl(),
-      openBrowser: (id, url) => useBrowserPanelStore.getState().open(id, url),
-      openFilePreview: (id, path) => {
-        void useWorkspacePanelStore.getState().openPreview(id, path, 'file')
-      },
-      openExternal: (url) => {
-        void getDesktopHost().shell.open(url)
-          .catch(() => window.open(url, '_blank'))
-      },
-    })
+    openPreviewLink(target.href, sessionId)
   }, [sessionId, target.href])
 
   const handleOpenWith = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
