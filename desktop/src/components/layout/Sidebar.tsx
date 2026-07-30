@@ -672,7 +672,7 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
       <div
         data-testid="sidebar-title-region"
         data-desktop-drag-region
-        className={`sidebar-title-region px-3 pb-2 ${isDesktopRuntime && !isWindows ? 'pt-[44px]' : 'pt-3'}`}
+        className={`px-3 pb-2 ${isDesktopRuntime && !isWindows ? 'pt-[44px]' : 'pt-3'}`}
       >
         <div className={`flex ${expanded ? 'items-center justify-between gap-3' : 'flex-col items-center gap-2'}`}>
           {/* The mark only stands in for the wordmark on the rail. Expanded,
@@ -686,21 +686,15 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
               Collapsed, the mark is centered on the rail instead. */}
           <div className={`flex min-w-0 items-center ${expanded ? 'gap-2.5 pl-3' : 'justify-center'}`}>
             {!expanded ? <BrandSeal size="sm" /> : null}
-            {/* Two forms of one wordmark. Drag the sidebar under ~256px and
-                "Claude Code Haha" stops fitting; rather than clip it mid-letter
-                the header falls back to the short form the repo already goes
-                by. The swap is a container query on the title region — see
-                `.sidebar-wordmark-*` in globals.css. */}
+            {/* One form, at every width. The header used to carry "Claude Code
+                Haha" and swap to this below ~230px of title region, which meant
+                the app answered to two names depending on how the sidebar was
+                dragged. It goes by the short one. */}
             <span
               className={`sidebar-copy ${expanded ? 'sidebar-copy--visible' : 'sidebar-copy--hidden'} text-base font-bold tracking-tight text-[var(--color-text-primary)]`}
               style={{ fontFamily: 'var(--font-headline)' }}
             >
-              <span className="sidebar-wordmark-long">
-                Claude Code <span className="text-[var(--color-brand)]">Haha</span>
-              </span>
-              <span className="sidebar-wordmark-short">
-                cc-<span className="text-[var(--color-brand)]">haha</span>
-              </span>
+              cc-<span className="text-[var(--color-brand)]">haha</span>
             </span>
           </div>
           <div className={`flex items-center ${expanded ? 'gap-1.5' : 'flex-col gap-2'}`}>
