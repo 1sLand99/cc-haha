@@ -3677,7 +3677,7 @@ describe('MessageList nested tool calls', () => {
     expect(scrollTop).toBe(200)
   })
 
-  it('ignores one-pixel content resize jitter while pinned to active thinking output', async () => {
+  it('ignores stepwise two-pixel content resize oscillation while pinned to active thinking output', async () => {
     let resizeCallback: ResizeObserverCallback | null = null
     class TestResizeObserver {
       observe = vi.fn()
@@ -3747,12 +3747,14 @@ describe('MessageList nested tool calls', () => {
     expect(scrollTop).toBe(600)
 
     scrollTopWriteCount = 0
-    act(() => {
-      resizeCallback?.(makeResizeEntry(401), {} as ResizeObserver)
-    })
-    act(() => {
-      resizeCallback?.(makeResizeEntry(400), {} as ResizeObserver)
-    })
+    // WebView2 can reach the opposite edge of a 2px oscillation through
+    // adjacent 1px observations. The sticky follow baseline must not turn
+    // either edge into a bottom-scroll correction.
+    for (const height of [401, 402, 401, 400, 401, 402, 401, 400]) {
+      act(() => {
+        resizeCallback?.(makeResizeEntry(height), {} as ResizeObserver)
+      })
+    }
 
     expect(scrollTopWriteCount).toBe(0)
     expect(scrollTop).toBe(600)

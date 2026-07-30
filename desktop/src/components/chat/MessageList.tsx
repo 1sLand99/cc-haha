@@ -955,9 +955,9 @@ const VIRTUAL_OVERSCAN_PX = 1200
 const VIRTUAL_DEFAULT_VIEWPORT_HEIGHT = 720
 const VIRTUAL_MIN_ITEM_HEIGHT = 48
 const VIRTUAL_MAX_ITEM_HEIGHT = 24_000
-// Windows WebView2 can report 1px oscillations for live chat content; don't
-// convert those into bottom-scroll corrections.
-const CONTENT_RESIZE_FOLLOW_MIN_DELTA_PX = 2
+// Windows WebView2 can report up to 2px oscillations for live chat content;
+// don't convert those into bottom-scroll corrections.
+const CONTENT_RESIZE_FOLLOW_JITTER_MAX_DELTA_PX = 2
 const USER_SCROLL_INTENT_WINDOW_MS = 500
 const CONVERSATION_NAVIGATION_MIN_ITEMS = 4
 const CONVERSATION_NAVIGATION_FULL_MIN_WIDTH_PX = 960
@@ -1949,7 +1949,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         const previousFollowHeight = lastContentResizeFollowHeightRef.current
         if (
           previousFollowHeight !== null &&
-          Math.abs(nextHeight - previousFollowHeight) < CONTENT_RESIZE_FOLLOW_MIN_DELTA_PX
+          Math.abs(nextHeight - previousFollowHeight) <= CONTENT_RESIZE_FOLLOW_JITTER_MAX_DELTA_PX
         ) {
           return
         }
