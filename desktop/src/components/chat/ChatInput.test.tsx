@@ -515,8 +515,9 @@ describe('ChatInput file mentions', () => {
 
     await openLocationMenu()
     fireEvent.click(screen.getAllByTitle('/repo')[0]!)
-    await screen.findByTestId('directory-picker-menu')
-    fireEvent.click(screen.getByRole('button', { name: /Choose a different folder/ }))
+    // The directory list is a view of the location menu now, not a second
+    // dropdown portalled outside it.
+    fireEvent.click(await screen.findByRole('button', { name: /Choose a different folder/ }))
 
     await waitFor(() => {
       expect(mocks.create).toHaveBeenCalledWith({ workDir: '/other' })
