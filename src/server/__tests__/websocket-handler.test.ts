@@ -330,6 +330,179 @@ describe('WebSocket handler session isolation', () => {
     })
   })
 
+  it('does not revive a stopped turn when reconnect sync follows a queued stop', () => {
+    const sessionId = `stopped-turn-sync-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+    handleWebSocket.open(ws)
+    __markActiveTurnForTests(sessionId)
+    ws.sent.length = 0
+
+    // A stop clicked while the renderer socket is reconnecting is queued first;
+    // WebSocketManager then sends sync_state immediately after the queue drains.
+    handleWebSocket.message(ws, JSON.stringify({ type: 'stop_generation' }))
+    handleWebSocket.message(ws, JSON.stringify({ type: 'sync_state' }))
+
+    expect(ws.sent.map((payload) => JSON.parse(payload))).toEqual([
+      { type: 'status', state: 'idle' },
+      { type: 'session_state', turnState: 'idle' },
+    ])
+  })
+
+  it('does not forward late foreground stream output after stop', () => {
+    const sessionId = `stopped-turn-late-stream-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+    let outputCallback: ((cliMsg: any) => void) | null = null
+    spyOn(globalThis, 'setTimeout').mockImplementation(() => 1 as any)
+    spyOn(conversationService, 'hasSession').mockReturnValue(true)
+    spyOn(conversationService, 'sendInterrupt').mockImplementation(() => true)
+    spyOn(conversationService, 'onOutput').mockImplementation((_sessionId, callback) => {
+      outputCallback = callback
+    })
+
+    handleWebSocket.open(ws)
+    __markActiveTurnForTests(sessionId)
+    ws.sent.length = 0
+
+    handleWebSocket.message(ws, JSON.stringify({ type: 'stop_generation' }))
+    outputCallback?.({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'thinking', thinking: 'late whole thinking block' },
+          { type: 'text', text: 'late whole answer' },
+        ],
+      },
+    })
+    outputCallback?.({
+      type: 'stream_event',
+      event: { type: 'message_start' },
+    })
+    outputCallback?.({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'thinking_delta', thinking: 'late unique thinking text' },
+      },
+    })
+    outputCallback?.({
+      type: 'system',
+      subtype: 'status',
+      status: null,
+    })
+    outputCallback?.({
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: 'background-task-1',
+      tool_use_id: 'background-tool-1',
+      status: 'running',
+      summary: 'Background work continues independently',
+    })
+    outputCallback?.({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      usage: { input_tokens: 12, output_tokens: 3 },
+      result: 'Request interrupted by user',
+    })
+    handleWebSocket.message(ws, JSON.stringify({ type: 'sync_state' }))
+
+    expect(ws.sent.map((payload) => JSON.parse(payload))).toEqual([
+      { type: 'status', state: 'idle' },
+      {
+        type: 'system_notification',
+        subtype: 'task_notification',
+        data: {
+          type: 'system',
+          subtype: 'task_notification',
+          task_id: 'background-task-1',
+          tool_use_id: 'background-tool-1',
+          status: 'running',
+          summary: 'Background work continues independently',
+        },
+      },
+      {
+        type: 'message_complete',
+        usage: { input_tokens: 12, output_tokens: 3 },
+      },
+      { type: 'session_state', turnState: 'idle' },
+    ])
+  })
+
+  it('suppresses an interrupted result for every client bound to the stopped session', () => {
+    const sessionId = `stopped-turn-multi-client-${crypto.randomUUID()}`
+    const first = makeClientSocket(sessionId)
+    const second = makeClientSocket(sessionId)
+    const outputCallbacks: Array<(cliMsg: any) => void> = []
+    spyOn(globalThis, 'setTimeout').mockImplementation(() => 1 as any)
+    spyOn(conversationService, 'hasSession').mockReturnValue(true)
+    spyOn(conversationService, 'sendInterrupt').mockImplementation(() => true)
+    spyOn(conversationService, 'onOutput').mockImplementation((_sessionId, callback) => {
+      outputCallbacks.push(callback)
+    })
+
+    handleWebSocket.open(first)
+    handleWebSocket.open(second)
+    __markActiveTurnForTests(sessionId)
+    first.sent.length = 0
+    second.sent.length = 0
+
+    handleWebSocket.message(first, JSON.stringify({ type: 'stop_generation' }))
+    for (const callback of outputCallbacks) {
+      callback({
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        result: 'Request interrupted by user',
+      })
+    }
+
+    expect(first.sent.map((payload) => JSON.parse(payload))).toEqual([
+      { type: 'status', state: 'idle' },
+      { type: 'message_complete', usage: { input_tokens: 0, output_tokens: 0 } },
+    ])
+    expect(second.sent.map((payload) => JSON.parse(payload))).toEqual([
+      { type: 'status', state: 'idle' },
+      { type: 'message_complete', usage: { input_tokens: 0, output_tokens: 0 } },
+    ])
+  })
+
+  it('keeps late stopped-turn output fenced after rejecting /clear arguments', () => {
+    const sessionId = `stopped-turn-invalid-clear-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+    let outputCallback: ((cliMsg: any) => void) | null = null
+    spyOn(globalThis, 'setTimeout').mockImplementation(() => 1 as any)
+    spyOn(conversationService, 'hasSession').mockReturnValue(true)
+    spyOn(conversationService, 'sendInterrupt').mockImplementation(() => true)
+    spyOn(conversationService, 'onOutput').mockImplementation((_sessionId, callback) => {
+      outputCallback = callback
+    })
+
+    handleWebSocket.open(ws)
+    __markActiveTurnForTests(sessionId)
+    ws.sent.length = 0
+
+    handleWebSocket.message(ws, JSON.stringify({ type: 'stop_generation' }))
+    handleWebSocket.message(ws, JSON.stringify({
+      type: 'user_message',
+      content: '/clear unexpected',
+    }))
+    outputCallback?.({
+      type: 'assistant',
+      message: { content: [{ type: 'thinking', thinking: 'late stopped-turn output' }] },
+    })
+
+    expect(ws.sent.map((payload) => JSON.parse(payload))).toEqual([
+      { type: 'status', state: 'idle' },
+      {
+        type: 'error',
+        message: 'The /clear command does not accept arguments.',
+        code: 'INVALID_SLASH_COMMAND_ARGS',
+      },
+      { type: 'status', state: 'idle' },
+    ])
+  })
+
   it('does not let a stopped turn fallback kill a replacement turn', () => {
     const sessionId = `stopped-turn-replaced-${crypto.randomUUID()}`
     const ws = makeClientSocket(sessionId)

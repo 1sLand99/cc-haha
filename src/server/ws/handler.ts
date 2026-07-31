@@ -101,10 +101,34 @@ const sessionCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const sessionDisconnectWatchers = new Map<string, () => void>()
 
 /**
- * Track sessions where user requested stop — suppress the CLI_ERROR that
- * follows an interrupt so the frontend doesn't show "处理过程中发生错误".
+ * Track sessions where user requested stop. Until a replacement turn begins
+ * or the runtime is cleaned up, this keeps late foreground output from
+ * reviving the renderer and suppresses the CLI_ERROR produced by the interrupt.
  */
 const sessionStopRequested = new Set<string>()
+
+function isStoppedTurnForegroundMessage(message: ServerMessage): boolean {
+  switch (message.type) {
+    case 'content_start':
+    case 'content_delta':
+    case 'tool_use_complete':
+    case 'tool_result':
+    case 'permission_request':
+    case 'computer_use_permission_request':
+    case 'user_message_replay':
+    case 'thinking':
+    case 'api_retry':
+    case 'streaming_fallback':
+    case 'error':
+      return true
+    case 'status':
+      return message.state !== 'idle'
+    case 'session_state':
+      return message.turnState === 'running'
+    default:
+      return false
+  }
+}
 
 /**
  * Track user message count and title state per session for auto-title generation.
@@ -487,7 +511,9 @@ export const handleWebSocket = {
         case 'sync_state':
           sendMessage(ws, {
             type: 'session_state',
-            turnState: hasPendingOrActiveUserTurn(ws.data.sessionId)
+            turnState:
+              hasPendingOrActiveUserTurn(ws.data.sessionId) &&
+              !sessionStopRequested.has(ws.data.sessionId)
               ? 'running'
               : 'idle',
           })
@@ -571,11 +597,6 @@ async function handleUserMessage(
 ) {
   const { sessionId } = ws.data
 
-  // Clear any stale stop flag from a previous turn
-  sessionStopRequested.delete(sessionId)
-  beginSessionChatActivity(sessionId)
-  clearPrewarmState(sessionId)
-
   const desktopSlashCommand = getDesktopSlashCommand(message.content)
   if (desktopSlashCommand?.commandName === 'clear' && desktopSlashCommand.args.trim()) {
     sendMessage(ws, {
@@ -591,6 +612,11 @@ async function handleUserMessage(
     await handleDesktopClearCommand(ws)
     return
   }
+
+  // A validated replacement turn supersedes any stopped-turn output fence.
+  sessionStopRequested.delete(sessionId)
+  beginSessionChatActivity(sessionId)
+  clearPrewarmState(sessionId)
 
   // Send thinking status
   sendMessage(ws, { type: 'status', state: 'thinking', verb: 'Thinking' })
@@ -1267,7 +1293,7 @@ function handleStopGeneration(ws: ServerWebSocket<WebSocketData>) {
     }, 3_000)
   }
 
-  sendMessage(ws, { type: 'status', state: 'idle' })
+  sendToSession(sessionId, { type: 'status', state: 'idle' })
 }
 
 async function handleStopBackgroundTask(
@@ -2119,7 +2145,6 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
         // If the user requested stop, this "error" is just the interrupt
         // result — don't show it as an error in the chat UI.
         if (sessionStopRequested.has(sessionId)) {
-          sessionStopRequested.delete(sessionId)
           return [{ type: 'message_complete', usage }]
         }
 
@@ -2143,8 +2168,6 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
         ]
       }
 
-      // Clear stop flag on successful completion too
-      sessionStopRequested.delete(sessionId)
       streamState.lastApiError = undefined
       return [{ type: 'message_complete', usage }]
     }
@@ -2996,8 +3019,10 @@ function bindClientSessionOutput(
 
     const forward = () => {
       handleCliPermissionModeBroadcast(sessionId, cliMsg)
+      const stopRequested = sessionStopRequested.has(sessionId)
       const serverMsgs = translateCliMessage(cliMsg, sessionId)
       for (const msg of serverMsgs) {
+        if (stopRequested && isStoppedTurnForegroundMessage(msg)) continue
         sendMessage(ws, msg)
       }
     }
