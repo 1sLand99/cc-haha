@@ -103,7 +103,17 @@
   {
     "id": "minimax",
     "name": "MiniMax",
-    "baseUrl": "https://api.minimaxi.com/anthropic",
+    "baseUrl": "https://api.minimax.io/anthropic",
+    "regionalEndpoints": [
+      {
+        "region": "global_en",
+        "baseUrl": "https://api.minimax.io/anthropic"
+      },
+      {
+        "region": "cn_zh",
+        "baseUrl": "https://api.minimaxi.com/anthropic"
+      }
+    ],
     "apiFormat": "anthropic",
     "defaultModels": {
       "main": "MiniMax-M3[1m]",

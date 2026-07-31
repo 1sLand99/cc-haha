@@ -37,6 +37,16 @@ describe('selectableProviderPresets', () => {
 })
 
 describe('bundled provider presets', () => {
+  it('includes both MiniMax regional Anthropic endpoints', () => {
+    const minimax = BUNDLED_PROVIDER_PRESETS.find((preset) => preset.id === 'minimax')
+
+    expect(minimax?.baseUrl).toBe('https://api.minimax.io/anthropic')
+    expect(minimax?.regionalEndpoints).toEqual([
+      { region: 'global_en', baseUrl: 'https://api.minimax.io/anthropic' },
+      { region: 'cn_zh', baseUrl: 'https://api.minimaxi.com/anthropic' },
+    ])
+  })
+
   // Retiring a preset must not break providers already configured against it: the
   // bundle keeps the entry so the edit form can still resolve its presetId, while
   // the "add provider" chips are built from selectableProviderPresets.
