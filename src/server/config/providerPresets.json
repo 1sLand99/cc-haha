@@ -29,7 +29,6 @@
     "apiKeyUrl": "https://platform.deepseek.com/api_keys",
     "authStrategy": "auth_token",
     "defaultEnv": {
-      "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",
       "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES": "thinking,effort,adaptive_thinking,max_effort",
       "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "thinking,effort,adaptive_thinking,max_effort",
       "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES": "thinking,effort,adaptive_thinking,max_effort"
@@ -58,9 +57,7 @@
     "apiKeyUrl": "https://www.bigmodel.cn/invite?icode=d41B2qi8Z5xNwTGLNPPF3OZLO2QH3C0EBTSr%2BArzMw4%3D",
     "promoText": "智谱 GLM 为 cc-haha 用户准备了专属邀请福利，使用此链接注册后可领取新用户权益。",
     "authStrategy": "auth_token",
-    "defaultEnv": {
-      "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000"
-    },
+    "defaultEnv": {},
     "modelContextWindows": {
       "glm-5.2[1m]": 1000000,
       "glm-5.2": 1000000,
@@ -126,7 +123,6 @@
     "apiKeyUrl": "https://platform.minimaxi.com/subscribe/token-plan?code=1TG2Cseab2&source=link",
     "authStrategy": "auth_token",
     "defaultEnv": {
-      "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",
       "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES": "thinking,adaptive_thinking",
       "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "thinking,adaptive_thinking",
       "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES": "thinking,adaptive_thinking"

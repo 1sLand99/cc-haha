@@ -398,8 +398,10 @@ describe('providerRuntimeEnv', () => {
     expect(zhipuEnv).toMatchObject({
       ANTHROPIC_MODEL: 'glm-5.2[1m]',
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.7',
-      CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000',
     })
+    // No provider-wide auto-compact window: it is model-agnostic and pinned
+    // small-context models at 1M so auto-compact never fired (#1162).
+    expect(zhipuEnv!.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined()
     expect(JSON.parse(zhipuEnv!.CLAUDE_CODE_MODEL_CONTEXT_WINDOWS)).toMatchObject({
       'glm-5.2[1m]': 1000000,
       'glm-4.7': 200000,

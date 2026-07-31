@@ -36,12 +36,24 @@ import {
 } from '@/components/settings/SettingsSection'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Switch } from '@/components/ui/Switch'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { PermissionModeSelector } from '../components/controls/PermissionModeSelector'
 import { isDarkThemeMode, isLightThemeMode } from '../types/settings'
 import type { ThemeMode, UpdateProxyMode, NetworkProxyMode, WebSearchMode, AppMode, ChatSendBehavior, OutputStyleSource } from '../types/settings'
 import type { Locale } from '../i18n'
 import type { SavedProvider, UpdateProviderInput, ProviderTestResult, ModelMapping, Model1mSupport, ApiFormat, ProviderAuthStrategy, ProviderModelInfo, ProviderModelsErrorCode } from '../types/provider'
 import { groupProviderModels, providerModelsErrorKey } from '../lib/providerModels'
+import {
+  apply1mSupportToContextInput,
+  apply1mSupportToContextInputs,
+  getAutoCompactWindowErrorKey,
+  getModelContextWindowErrorKey,
+  MODEL_SLOTS,
+  parseAutoCompactWindowInput,
+  parseModelContextWindowsInput,
+  type ModelContextInputs,
+  type ModelSlot,
+} from '../lib/providerModelContext'
 import type { ProviderPreset } from '../types/providerPreset'
 import { presetMatchesBaseUrl, selectableProviderPresets } from '../config/providerPresets'
 import { AdapterSettings } from './AdapterSettings'
@@ -815,10 +827,6 @@ function requirePreset(preset: ProviderPreset | undefined): ProviderPreset {
 const AUTO_COMPACT_WINDOW_ENV_KEY = 'CLAUDE_CODE_AUTO_COMPACT_WINDOW'
 const MODEL_CONTEXT_WINDOWS_ENV_KEY = 'CLAUDE_CODE_MODEL_CONTEXT_WINDOWS'
 const DISABLE_EXPERIMENTAL_BETAS_ENV_KEY = 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'
-const MODEL_CONTEXT_WINDOW_MIN = 16000
-const MODEL_CONTEXT_WINDOW_MAX = 10000000
-const MODEL_1M_CONTEXT_WINDOW = 1000000
-const MODEL_SLOTS = ['main', 'haiku', 'sonnet', 'opus'] as const
 const DEFAULT_MODEL_1M_SUPPORT: Model1mSupport = {
   main: false,
   haiku: false,
@@ -827,8 +835,6 @@ const DEFAULT_MODEL_1M_SUPPORT: Model1mSupport = {
 }
 const DEFAULT_PROVIDER_AUTH_STRATEGY: ProviderAuthStrategy = 'auth_token'
 const AUTH_ENV_KEYS = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])
-type ModelSlot = typeof MODEL_SLOTS[number]
-type ModelContextInputs = Record<ModelSlot, string>
 
 function formatContextWindow(value: number): string {
   return value.toLocaleString('en-US')
@@ -890,30 +896,11 @@ function inferAuthStrategyFromEnv(env: Record<string, string>): ProviderAuthStra
   return null
 }
 
-function parseAutoCompactWindowInput(value: string): number | undefined {
-  const trimmed = value.trim()
-  if (!trimmed) return undefined
-  const parsed = Number(trimmed)
-  if (!Number.isInteger(parsed)) return undefined
-  if (parsed < MODEL_CONTEXT_WINDOW_MIN || parsed > MODEL_CONTEXT_WINDOW_MAX) return undefined
-  return parsed
-}
-
-function getAutoCompactWindowErrorKey(value: string): 'number' | 'range' | null {
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const parsed = Number(trimmed)
-  if (!Number.isInteger(parsed)) return 'number'
-  if (parsed < MODEL_CONTEXT_WINDOW_MIN || parsed > MODEL_CONTEXT_WINDOW_MAX) return 'range'
-  return null
-}
-
-function parseModelContextWindowsInput(value: string): number | undefined {
-  return parseAutoCompactWindowInput(value)
-}
-
-function getModelContextWindowErrorKey(value: string): 'number' | 'range' | null {
-  return getAutoCompactWindowErrorKey(value)
+function getPresetContextInputValue(model: string | undefined, preset: ProviderPreset): string {
+  const trimmedModel = model?.trim()
+  if (!trimmedModel) return ''
+  const value = preset.modelContextWindows?.[trimmedModel]
+  return value !== undefined ? String(value) : ''
 }
 
 function getModelContextInputValue(
@@ -923,8 +910,9 @@ function getModelContextInputValue(
 ): string {
   const trimmedModel = model?.trim()
   if (!trimmedModel) return ''
-  const value = provider?.modelContextWindows?.[trimmedModel] ?? preset.modelContextWindows?.[trimmedModel]
-  return value !== undefined ? String(value) : ''
+  const saved = provider?.modelContextWindows?.[trimmedModel]
+  if (saved !== undefined) return String(saved)
+  return getPresetContextInputValue(trimmedModel, preset)
 }
 
 function getModelContextInputs(
@@ -1004,31 +992,6 @@ function applyModel1mSupportMapping(
 
 function hasAnyModel1mSupport(model1mSupport: Model1mSupport): boolean {
   return MODEL_SLOTS.some((slot) => model1mSupport[slot])
-}
-
-function shouldFill1mContextWindow(value: string): boolean {
-  const parsed = parseModelContextWindowsInput(value)
-  return parsed === undefined || parsed < MODEL_1M_CONTEXT_WINDOW
-}
-
-function apply1mSupportToContextInput(
-  inputs: ModelContextInputs,
-  slot: ModelSlot,
-  enabled: boolean,
-): ModelContextInputs {
-  if (!enabled || !shouldFill1mContextWindow(inputs[slot])) return inputs
-  return { ...inputs, [slot]: String(MODEL_1M_CONTEXT_WINDOW) }
-}
-
-function apply1mSupportToContextInputs(
-  inputs: ModelContextInputs,
-  model1mSupport: Model1mSupport,
-): ModelContextInputs {
-  let nextInputs = inputs
-  for (const slot of MODEL_SLOTS) {
-    nextInputs = apply1mSupportToContextInput(nextInputs, slot, model1mSupport[slot])
-  }
-  return nextInputs
 }
 
 function normalizeModelMapping(models: ModelMapping): ModelMapping {
@@ -1552,6 +1515,9 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
       nextInputs,
       slot,
       nextModel1mSupport[slot],
+      // The field was just re-derived for the new model id, so there is nothing
+      // left over from a previous 1M tick to revert.
+      nextInputs[slot],
     )
     setModels(nextModels)
     setModel1mSupport(nextModel1mSupport)
@@ -1563,7 +1529,15 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   }
   const handleModel1mSupportChange = (slot: ModelSlot, enabled: boolean) => {
     const nextModel1mSupport = { ...model1mSupport, [slot]: enabled }
-    const nextInputs = apply1mSupportToContextInput(modelContextInputs, slot, enabled)
+    // Rolls back to the preset window rather than the saved provider one: a
+    // provider saved while the box was ticked already holds the 1,000,000 the
+    // user is now taking back.
+    const nextInputs = apply1mSupportToContextInput(
+      modelContextInputs,
+      slot,
+      enabled,
+      getPresetContextInputValue(models[slot], selectedPreset),
+    )
     setModel1mSupport(nextModel1mSupport)
     setModelContextInputs(nextInputs)
     setSettingsJson((current) => updateSettingsJsonModelContextWindows(
@@ -2002,20 +1976,25 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
                       />
                     )}
                   </div>
-                  <label className="mt-1 inline-flex h-6 w-fit cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-1 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]">
-                    <input
-                      type="checkbox"
-                      checked={model1mSupport[slot]}
-                      onChange={(e) => handleModel1mSupportChange(slot, e.target.checked)}
-                      aria-label={`1M support: ${slot}`}
-                      className="h-3.5 w-3.5 rounded border-[var(--color-border)] text-[var(--color-brand)] accent-[var(--color-brand)] focus:ring-[var(--color-brand)]"
-                    />
-                    <span>{t('settings.providers.model1mSupportShort')}</span>
-                  </label>
+                  <Tooltip content={t('settings.providers.model1mSupportTooltip')} placement="bottom-start">
+                    <label className="mt-1 inline-flex h-6 w-fit cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-1 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]">
+                      <input
+                        type="checkbox"
+                        checked={model1mSupport[slot]}
+                        onChange={(e) => handleModel1mSupportChange(slot, e.target.checked)}
+                        aria-label={`1M support: ${slot}`}
+                        className="h-3.5 w-3.5 rounded border-[var(--color-border)] text-[var(--color-brand)] accent-[var(--color-brand)] focus:ring-[var(--color-brand)]"
+                      />
+                      <span>{t('settings.providers.model1mSupportShort')}</span>
+                    </label>
+                  </Tooltip>
                 </div>
               )
             })}
           </div>
+          <p className="mt-2 text-[11px] leading-5 text-[var(--color-text-tertiary)]">
+            {t('settings.providers.model1mSupportHint')}
+          </p>
         </div>
 
         <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)]">

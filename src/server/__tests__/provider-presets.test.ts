@@ -92,7 +92,11 @@ describe('provider presets API', () => {
     expect(zhipu?.defaultModels.haiku).toBe('glm-4.7')
     expect(zhipu?.defaultModels.sonnet).toBe('glm-5.2[1m]')
     expect(zhipu?.defaultModels.opus).toBe('glm-5.2[1m]')
-    expect(zhipu?.defaultEnv?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('1000000')
+    // Presets must not pin a provider-wide auto-compact window: the env is
+    // model-agnostic, so it pinned small-context models at 1M and auto-compact
+    // never fired (#1162). Real windows come from modelContextWindows instead.
+    expect(deepseek?.defaultEnv?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined()
+    expect(zhipu?.defaultEnv?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined()
     expect(kimi?.baseUrl).toBe('https://api.kimi.com/coding/')
     expect(kimi?.authStrategy).toBe('api_key')
     expect(kimi?.defaultModels.main).toBe('k3')
@@ -107,7 +111,7 @@ describe('provider presets API', () => {
     ])
     expect(minimax?.authStrategy).toBe('auth_token')
     expect(minimax?.defaultModels.main).toBe('MiniMax-M3[1m]')
-    expect(minimax?.defaultEnv?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('1000000')
+    expect(minimax?.defaultEnv?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined()
     expect(minimax?.defaultEnv?.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES).toBe('thinking,adaptive_thinking')
     expect(minimax?.modelContextWindows?.['MiniMax-M3']).toBe(1000000)
     expect(shengsuanyun?.baseUrl).toBe('https://router.shengsuanyun.com/api')
