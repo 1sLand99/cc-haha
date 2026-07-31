@@ -68,6 +68,7 @@ import type {
 } from './localIndex/sessionIndex.js'
 import type { LocalIndexStatus } from './localIndex/types.js'
 import { diagnosticsService } from './diagnosticsService.js'
+import { isForkInheritedUsageRecord } from '../../utils/usageAccounting.js'
 
 // ============================================================================
 // Types
@@ -286,6 +287,7 @@ type RawEntry = {
   parent_tool_use_id?: string | null
   isSidechain?: boolean
   isMeta?: boolean
+  forkedFrom?: unknown
   cwd?: string
   message?: {
     role?: string
@@ -1481,7 +1483,9 @@ export class SessionService {
       type = 'system'
     }
 
-    const usage = normalizeMessageUsage(msg.usage)
+    const usage = isForkInheritedUsageRecord(entry)
+      ? undefined
+      : normalizeMessageUsage(msg.usage)
 
     return {
       id: entry.uuid || crypto.randomUUID(),
@@ -2546,6 +2550,7 @@ export class SessionService {
 
     for (const entry of entries) {
       currentRuntimeHint = this.applyRuntimeContextMetadata(currentRuntimeHint, entry)
+      if (isForkInheritedUsageRecord(entry)) continue
       const usage = entry.message?.usage
       const model = entry.message?.model
       if (!usage || typeof model !== 'string') continue
@@ -2782,6 +2787,10 @@ export class SessionService {
         cacheReadInputTokens,
         cacheCreationInputTokens,
       }
+
+      // Inherited fork history still describes the current context, but its API usage belongs to
+      // the source session and must not be included in this fork's cumulative usage or cost.
+      if (isForkInheritedUsageRecord(entry)) return
 
       if (
         inputTokens === 0 &&
