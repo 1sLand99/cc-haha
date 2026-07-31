@@ -34,7 +34,7 @@ Claude Code Haha 是一个**桌面端 Claude Code 工作台**：把会话、多�
 
 Claude Code Haha 的桌面端把会话、多项目、分支 / Worktree、代码改动、Diff 评审、权限确认、模型配置和远程入口收进一个图形化工作台，适合不想长期停留在终端里的日常开发。
 
-v0.5.0 做了一次全量 UI 重设计（「纸·墨·印」），六套配色可跟随系统深浅色切换。下面六张都拍自 v0.5.0 真机。
+下面所有截图都来自真实桌面 App，统一使用纯白主题和 100% 界面缩放。任务在真实 `launch-board` 测试项目中执行，服务商为 ChatGPT 官方，模型为 GPT-5.6-Luna。
 
 <p align="center">
   <a href="https://github.com/NanmiCoder/cc-haha/releases"><img src="https://img.shields.io/badge/⬇_下载桌面端-macOS_%7C_Windows_%7C_Linux-FF7A00?style=for-the-badge" alt="下载桌面端"></a>
@@ -44,14 +44,16 @@ v0.5.0 做了一次全量 UI 重设计（「纸·墨·印」），六套配色�
 
 <table>
   <tr>
-    <td align="center" width="33%"><img src="docs/images/app/zh-CN/session-main.webp" alt="桌面端会话主界面"><br><b>说一句话，看它做完</b><br><sub>工具调用和每处改动都留在对话里</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/zh-CN/workspace-diff.webp" alt="工作区 Diff 评审"><br><b>改了什么，逐个文件看</b><br><sub>带语法高亮的 Diff，你点头才落地</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/zh-CN/workspace-preview.webp" alt="内置浏览器预览刚改完的页面"><br><b>改完当场验证</b><br><sub>内置浏览器打开本地服务看效果</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/zh-CN/session-new.webp" alt="第一次任务前的空会话"><br><b>从清爽的空会话开始</b><br><sub>项目、权限和 GPT-5.6-Luna 都在首屏</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/zh-CN/session-main.webp" alt="打开活动面板的真实执行中任务"><br><b>跟着任务一步步往前</b><br><sub>工具调用与阶段进度都留在眼前</sub></td>
   </tr>
   <tr>
-    <td align="center" width="33%"><img src="docs/images/app/zh-CN/session-dark.webp" alt="墨夜主题下的会话界面"><br><b>六套配色可跟随系统</b><br><sub>纯白 · 纸墨 · 经典暖色 · 青瓷 · 墨夜 · 墨夜蓝</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/zh-CN/skill-market.webp" alt="技能市场"><br><b>缺什么手艺装什么</b><br><sub>来源和安全状态摆在明处</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/zh-CN/pet-desktop.webp" alt="桌面宠物设置与悬浮宠物"><br><b>桌面上有个伴</b><br><sub>搭搭、弧弧、补补、回回随任务换动作</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/zh-CN/workspace-diff.webp" alt="工作区 Diff 评审"><br><b>改了什么，逐行看清楚</b><br><sub>放大的高亮 Diff，文字和代码更清楚</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/zh-CN/workspace-preview.webp" alt="内置浏览器预览刚改完的页面"><br><b>改完当场验证</b><br><sub>内置浏览器打开真实本地页面</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><img src="docs/images/app/zh-CN/model-picker.webp" alt="显示 ChatGPT 官方和 GPT-5.6-Luna 的模型选择器"><br><b>每条会话自选模型</b><br><sub>ChatGPT 官方服务商与 GPT-5.6-Luna</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/zh-CN/skill-market.webp" alt="技能市场"><br><b>缺什么手艺装什么</b><br><sub>来源和安全状态摆在明处</sub></td>
   </tr>
 </table>
 

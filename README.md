@@ -34,7 +34,7 @@ Claude Code Haha is a **desktop Claude Code workspace** for macOS, Windows, and 
 
 The Claude Code Haha desktop app brings sessions, multi-project navigation, branch / Worktree controls, file changes, diff review, permission approval, model setup, and remote access into one graphical workspace for daily development beyond the terminal.
 
-v0.5.0 shipped a full UI redesign — six colour themes that can follow your system's light/dark setting. All six shots below are from a real v0.5.0 build.
+Every screenshot below comes from the real desktop app in Pure White at 100% UI zoom. The task flow ran in a real `launch-board` test project through ChatGPT Official and GPT-5.6-Luna.
 
 <p align="center">
   <a href="https://github.com/NanmiCoder/cc-haha/releases"><img src="https://img.shields.io/badge/⬇_Download_Desktop-macOS_%7C_Windows_%7C_Linux-FF7A00?style=for-the-badge" alt="Download Desktop"></a>
@@ -44,14 +44,16 @@ v0.5.0 shipped a full UI redesign — six colour themes that can follow your sys
 
 <table>
   <tr>
-    <td align="center" width="33%"><img src="docs/images/app/en/session-main.webp" alt="Desktop session view"><br><b>Say it once, watch it finish</b><br><sub>Tool calls and every edit stay in the thread</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/en/workspace-diff.webp" alt="Workspace diff review"><br><b>See exactly what changed</b><br><sub>Syntax-highlighted diffs; you decide what lands</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/en/workspace-preview.webp" alt="Built-in browser previewing the page that was just changed"><br><b>Verify on the spot</b><br><sub>Open your dev server inside the app</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/en/session-new.webp" alt="Empty desktop session before the first task"><br><b>Start with a clear, empty session</b><br><sub>Project, permissions and GPT-5.6-Luna stay visible</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/en/session-main.webp" alt="Real task running with the Activity panel open"><br><b>Follow the task as it runs</b><br><sub>Tool calls and stage-by-stage progress stay in view</sub></td>
   </tr>
   <tr>
-    <td align="center" width="33%"><img src="docs/images/app/en/session-dark.webp" alt="Session view in the dark theme"><br><b>Six themes, follows the system</b><br><sub>Light and dark, six palettes in all</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/en/skill-market.webp" alt="Skill marketplace"><br><b>Missing a trick? Install it</b><br><sub>Source and safety status shown up front</sub></td>
-    <td align="center" width="33%"><img src="docs/images/app/en/pet-desktop.webp" alt="Desktop pet settings with the floating pet"><br><b>Company while it works</b><br><sub>Dada, Huhu, Bubu and Huihui follow the task</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/en/workspace-diff.webp" alt="Workspace diff review"><br><b>See exactly what changed</b><br><sub>A focused, full-width syntax-highlighted diff</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/en/workspace-preview.webp" alt="Built-in browser previewing the page that was just changed"><br><b>Verify on the spot</b><br><sub>The real edited page in the built-in browser</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><img src="docs/images/app/en/model-picker.webp" alt="Model picker showing ChatGPT Official and GPT-5.6-Luna"><br><b>Choose the exact model</b><br><sub>ChatGPT Official with GPT-5.6-Luna in a real session</sub></td>
+    <td align="center" width="50%"><img src="docs/images/app/en/skill-market.webp" alt="Skill marketplace"><br><b>Missing a trick? Install it</b><br><sub>Source and safety status shown up front</sub></td>
   </tr>
 </table>
 
