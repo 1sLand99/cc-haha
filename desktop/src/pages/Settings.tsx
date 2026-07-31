@@ -43,7 +43,7 @@ import type { Locale } from '../i18n'
 import type { SavedProvider, UpdateProviderInput, ProviderTestResult, ModelMapping, Model1mSupport, ApiFormat, ProviderAuthStrategy, ProviderModelInfo, ProviderModelsErrorCode } from '../types/provider'
 import { groupProviderModels, providerModelsErrorKey } from '../lib/providerModels'
 import type { ProviderPreset } from '../types/providerPreset'
-import { selectableProviderPresets } from '../config/providerPresets'
+import { presetMatchesBaseUrl, selectableProviderPresets } from '../config/providerPresets'
 import { AdapterSettings } from './AdapterSettings'
 import { useSessionStore } from '../stores/sessionStore'
 import { MarkdownRenderer } from '../components/markdown/MarkdownRenderer'
@@ -2145,11 +2145,14 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
                 // Auto-fill form fields from parsed JSON env
                 const env = parsed.env as Record<string, string> | undefined
                 if (env) {
-                  if (env.ANTHROPIC_BASE_URL) {
-                    setBaseUrl(env.ANTHROPIC_BASE_URL)
+                  const baseUrl = env.ANTHROPIC_BASE_URL
+                  if (baseUrl) {
+                    setBaseUrl(baseUrl)
                     // Auto-switch to matching preset or Custom
                     if (mode === 'create') {
-                      const matchedPreset = selectablePresets.find((p) => p.id !== 'custom' && p.baseUrl === env.ANTHROPIC_BASE_URL)
+                      const matchedPreset = selectablePresets.find(
+                        (preset) => preset.id !== 'custom' && presetMatchesBaseUrl(preset, baseUrl),
+                      )
                       const targetPreset = requirePreset(
                         matchedPreset ?? selectablePresets.find((p) => p.id === 'custom'),
                       )

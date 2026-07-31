@@ -1293,13 +1293,15 @@ describe('cc-switch candidate mapping', () => {
     await writeFixtureDb([
       { id: 'kimi', sortIndex: 1, env: claudeEnv({ ANTHROPIC_BASE_URL: 'HTTPS://API.KIMI.COM/CODING/' }) },
       { id: 'glm', sortIndex: 2, env: claudeEnv({ ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic' }) },
-      { id: 'unknown', sortIndex: 3, env: claudeEnv({ ANTHROPIC_BASE_URL: 'https://gateway.internal/anthropic' }) },
+      { id: 'minimax-cn', sortIndex: 3, env: claudeEnv({ ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic/' }) },
+      { id: 'unknown', sortIndex: 4, env: claudeEnv({ ANTHROPIC_BASE_URL: 'https://gateway.internal/anthropic' }) },
     ])
 
     const candidates = await scanCandidates()
 
     expect(candidateById(candidates, 'claude:kimi').presetId).toBe('kimi')
     expect(candidateById(candidates, 'claude:glm').presetId).toBe('zhipuglm')
+    expect(candidateById(candidates, 'claude:minimax-cn').presetId).toBe('minimax')
     expect(candidateById(candidates, 'claude:unknown').presetId).toBe('custom')
   })
 

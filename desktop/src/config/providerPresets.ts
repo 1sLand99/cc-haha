@@ -15,3 +15,9 @@ export const BUNDLED_PROVIDER_PRESETS = providerPresetsJson as ProviderPreset[]
 export function selectableProviderPresets(presets: ProviderPreset[]): ProviderPreset[] {
   return presets.filter((preset) => !preset.deprecated)
 }
+
+/** Match a preset's primary or region-specific endpoint to an imported configuration. */
+export function presetMatchesBaseUrl(preset: ProviderPreset, baseUrl: string): boolean {
+  return preset.baseUrl === baseUrl ||
+    preset.regionalEndpoints?.some((endpoint) => endpoint.baseUrl === baseUrl) === true
+}

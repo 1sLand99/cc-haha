@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { BUNDLED_PROVIDER_PRESETS, selectableProviderPresets } from './providerPresets'
+import { BUNDLED_PROVIDER_PRESETS, presetMatchesBaseUrl, selectableProviderPresets } from './providerPresets'
 import type { ProviderPreset } from '../types/providerPreset'
 
 function makePreset(overrides: Partial<ProviderPreset> & { id: string }): ProviderPreset {
@@ -45,6 +45,13 @@ describe('bundled provider presets', () => {
       { region: 'global_en', baseUrl: 'https://api.minimax.io/anthropic' },
       { region: 'cn_zh', baseUrl: 'https://api.minimaxi.com/anthropic' },
     ])
+  })
+
+  it('matches the MiniMax preset for either regional endpoint', () => {
+    const minimax = BUNDLED_PROVIDER_PRESETS.find((preset) => preset.id === 'minimax')
+
+    expect(minimax && presetMatchesBaseUrl(minimax, 'https://api.minimax.io/anthropic')).toBe(true)
+    expect(minimax && presetMatchesBaseUrl(minimax, 'https://api.minimaxi.com/anthropic')).toBe(true)
   })
 
   // Retiring a preset must not break providers already configured against it: the
