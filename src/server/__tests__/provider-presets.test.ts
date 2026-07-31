@@ -100,6 +100,11 @@ describe('provider presets API', () => {
     expect(kimi?.defaultEnv?.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES).toBe(
       'thinking,required_thinking,effort,max_effort',
     )
+    expect(minimax?.baseUrl).toBe('https://api.minimax.io/anthropic')
+    expect(minimax?.regionalEndpoints).toEqual([
+      { region: 'global_en', baseUrl: 'https://api.minimax.io/anthropic' },
+      { region: 'cn_zh', baseUrl: 'https://api.minimaxi.com/anthropic' },
+    ])
     expect(minimax?.authStrategy).toBe('auth_token')
     expect(minimax?.defaultModels.main).toBe('MiniMax-M3[1m]')
     expect(minimax?.defaultEnv?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('1000000')
