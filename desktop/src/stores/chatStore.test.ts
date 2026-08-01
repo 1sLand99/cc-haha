@@ -7946,3 +7946,168 @@ describe('chatStore wake replay of a finished thinking turn', () => {
     expect(assistantTextOf()).toEqual(before)
   })
 })
+
+// Regression coverage for the activity panel losing its rows: visibility is
+// derived from volatile client caches, so the reset/reload/abort paths below
+// must not drain background task state.
+describe('chatStore activity state survival across reload paths', () => {
+  const runningTask = {
+    taskId: 'agent-task-1',
+    taskType: 'agent',
+    status: 'running' as const,
+    startedAt: 10,
+    updatedAt: 10,
+  }
+
+  beforeEach(() => {
+    sendMock.mockReset()
+    getMemberBySessionIdMock.mockReset()
+    getMemberBySessionIdMock.mockReturnValue(null)
+    fetchSessionTasksMock.mockReset()
+    setTasksFromTodosMock.mockReset()
+    markCompletedAndDismissedMock.mockReset()
+    updateTabStatusMock.mockReset()
+    connectionStateHandlers.clear()
+    vi.mocked(sessionsApi.getMessages).mockReset()
+    vi.mocked(sessionsApi.getMessages).mockResolvedValue({ messages: [] })
+    vi.mocked(sessionsApi.getSlashCommands).mockReset()
+    vi.mocked(sessionsApi.getSlashCommands).mockResolvedValue({ commands: [] })
+    sessionStoreSnapshot.sessions = []
+    cliTaskStoreSnapshot.tasks = []
+    cliTaskStoreSnapshot.sessionId = null
+    localStorage.clear()
+    useSettingsStore.setState({ locale: 'en' })
+    useChatStore.setState({
+      ...initialState,
+      sessions: {},
+    })
+  })
+
+  it('reloadHistory keeps running background tasks that are not in the transcript yet', async () => {
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          messages: [{ id: 'm1', type: 'assistant_text', content: 'old', timestamp: 1 }],
+          backgroundAgentTasks: { 'agent-task-1': runningTask },
+        }),
+      },
+    })
+
+    await useChatStore.getState().reloadHistory(TEST_SESSION_ID)
+
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]?.backgroundAgentTasks?.['agent-task-1'],
+    ).toMatchObject({ status: 'running' })
+  })
+
+  it('reloadHistory still lets transcript terminal state reconcile a stopped task', async () => {
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [],
+      taskNotifications: [
+        {
+          taskId: 'agent-task-1',
+          toolUseId: 'tool-use-1',
+          status: 'stopped',
+          summary: 'Stopped',
+          timestamp: '2026-08-02T00:00:10.000Z',
+        },
+      ],
+    } as never)
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          messages: [{ id: 'm1', type: 'assistant_text', content: 'old', timestamp: 1 }],
+          backgroundAgentTasks: { 'agent-task-1': runningTask },
+        }),
+      },
+    })
+
+    await useChatStore.getState().reloadHistory(TEST_SESSION_ID)
+
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]?.backgroundAgentTasks?.['agent-task-1']?.status,
+    ).toBe('stopped')
+  })
+
+  it('connectToSession reset branch preserves background activity of a disconnected session', () => {
+    const notifications = {
+      'agent-task-1': {
+        taskId: 'agent-task-1',
+        toolUseId: 'tool-use-1',
+        status: 'running' as const,
+        summary: 'Working',
+        timestamp: 10,
+      },
+    }
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          connectionState: 'disconnected',
+          messages: [{ id: 'm1', type: 'assistant_text', content: 'old', timestamp: 1 }],
+          backgroundAgentTasks: { 'agent-task-1': runningTask },
+          agentTaskNotifications: notifications as never,
+        }),
+      },
+    })
+
+    useChatStore.getState().connectToSession(TEST_SESSION_ID)
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.backgroundAgentTasks?.['agent-task-1']).toMatchObject({ status: 'running' })
+    expect(session?.agentTaskNotifications).toEqual(notifications)
+  })
+
+  it('retries a history load aborted by a concurrent task mutation when messages are empty', async () => {
+    vi.useFakeTimers()
+    try {
+      let resolveFirstFetch!: (value: { messages: MessageEntry[] }) => void
+      vi.mocked(sessionsApi.getMessages)
+        .mockImplementationOnce(
+          () => new Promise((resolve) => { resolveFirstFetch = resolve }),
+        )
+        .mockResolvedValueOnce({
+          messages: [
+            {
+              id: 'assistant-1',
+              type: 'assistant',
+              timestamp: '2026-04-06T00:00:00.000Z',
+              content: [{ type: 'text', text: '恢复的历史' }],
+            } as never,
+          ],
+        })
+      useChatStore.setState({
+        sessions: {
+          [TEST_SESSION_ID]: makeSession({ chatState: 'idle', messages: [] }),
+        },
+      })
+
+      const loadPromise = useChatStore.getState().loadHistory(TEST_SESSION_ID)
+      useChatStore.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [TEST_SESSION_ID]: {
+            ...state.sessions[TEST_SESSION_ID],
+            historyMutationEpoch: 1,
+          } as never,
+        },
+      }))
+      resolveFirstFetch({ messages: [] })
+      await loadPromise
+
+      // The stale fetch was discarded; the retry must repopulate on its own.
+      expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toHaveLength(0)
+
+      await vi.advanceTimersByTimeAsync(200)
+      await vi.runAllTimersAsync()
+
+      const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+      expect(session?.historyStatus).toBe('ready')
+      expect(session?.messages.some((message) => message.type === 'assistant_text')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

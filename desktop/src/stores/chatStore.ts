@@ -319,7 +319,6 @@ type ChatStore = {
     guard?: {
       messages: UIMessage[]
       backgroundAgentTasks?: Record<string, BackgroundAgentTask>
-      preserveUnresolvedBackgroundTasks?: boolean
     },
   ) => Promise<void>
   queueComposerPrefill: (
@@ -1148,6 +1147,27 @@ async function fetchAndMapSessionHistory(sessionId: string) {
 const historyLoadsInFlight = new Map<string, Promise<void>>()
 const historyReloadGenerations = new Map<string, number>()
 
+const HISTORY_LOAD_ABORT_RETRY_DELAY_MS = 150
+const HISTORY_LOAD_ABORT_MAX_RETRIES = 5
+const historyLoadAbortRetries = new Map<string, number>()
+
+// A history load aborted by a concurrent task mutation (epoch bump) used to be
+// silently dropped, leaving the session empty until the next mount/connect.
+// Retry while the session still has no messages, bounded so a stream of task
+// events cannot spin the fetch loop forever.
+function scheduleAbortedHistoryLoadRetry(get: () => ChatStore, sessionId: string): void {
+  const session = get().sessions[sessionId]
+  if (!session || session.messages.length > 0) return
+  const attempts = (historyLoadAbortRetries.get(sessionId) ?? 0) + 1
+  if (attempts > HISTORY_LOAD_ABORT_MAX_RETRIES) return
+  historyLoadAbortRetries.set(sessionId, attempts)
+  setTimeout(() => {
+    const current = get().sessions[sessionId]
+    if (!current || current.messages.length > 0 || current.historyStatus === 'loading') return
+    void get().loadHistory(sessionId)
+  }, HISTORY_LOAD_ABORT_RETRY_DELAY_MS)
+}
+
 function shouldPrewarmSession(sessionId: string): boolean {
   const knownSession = useSessionStore.getState().sessions.find((session) => session.id === sessionId)
   return knownSession?.messageCount === 0
@@ -1186,6 +1206,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           activeGoal: existing?.activeGoal ?? null,
           composerDraft: existing?.composerDraft ?? null,
           queuedUserMessages: existing?.queuedUserMessages ?? [],
+          backgroundAgentTasks: existing?.backgroundAgentTasks ?? {},
+          agentTaskNotifications: existing?.agentTaskNotifications ?? {},
         },
       },
     }))
@@ -1612,7 +1634,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             }
           }) }
         })
-        if (!historyApplied) return
+        if (!historyApplied) {
+          scheduleAbortedHistoryLoadRetry(get, sessionId)
+          return
+        }
+        historyLoadAbortRetries.delete(sessionId)
         if (lastTodos && lastTodos.length > 0) {
           const taskStore = useCLITaskStore.getState()
           if (taskStore.sessionId === sessionId && taskStore.tasks.length === 0) taskStore.setTasksFromTodos(lastTodos, sessionId)
@@ -1624,10 +1650,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
       } catch (error) {
         // Session may not have messages yet
+        let loadAborted = false
         set((state) => {
           const session = state.sessions[sessionId]
           if (!session) return state
           if ((session.historyMutationEpoch ?? 0) !== requestedMutationEpoch) {
+            loadAborted = true
             const abortedLoadUpdate = buildAbortedHistoryLoadUpdate(session)
             return Object.keys(abortedLoadUpdate).length > 0
               ? {
@@ -1652,6 +1680,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             })),
           }
         })
+        if (loadAborted) scheduleAbortedHistoryLoadRetry(get, sessionId)
       } finally {
         if (historyLoadsInFlight.get(sessionId) === load) {
           historyLoadsInFlight.delete(sessionId)
@@ -1698,12 +1727,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const session = state.sessions[sessionId]
         if (!session) return state
         if (session.elapsedTimer) clearInterval(session.elapsedTimer)
-        const backgroundAgentTasks = guard?.preserveUnresolvedBackgroundTasks
-          ? mergeBackgroundAgentTaskRecords(
-              session.backgroundAgentTasks ?? {},
-              restoredBackgroundTasks,
-            )
-          : restoredBackgroundTasks
+        const backgroundAgentTasks = mergeBackgroundAgentTaskRecords(
+          session.backgroundAgentTasks ?? {},
+          restoredBackgroundTasks,
+        )
         const messages = mergeBackgroundTaskMessages(uiMessages, backgroundAgentTasks)
         historyApplied = true
         return {
@@ -1711,9 +1738,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             historyStatus: 'ready',
             historyError: null,
             activeGoal,
-            agentTaskNotifications: guard?.preserveUnresolvedBackgroundTasks
-              ? { ...restoredNotifications, ...session.agentTaskNotifications }
-              : restoredNotifications,
+            agentTaskNotifications: { ...restoredNotifications, ...session.agentTaskNotifications },
             backgroundAgentTasks,
             tokenUsage: tokenUsage ?? session.tokenUsage,
             chatState: 'idle',
@@ -2043,7 +2068,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             void get().reloadHistory(sessionId, {
               messages: session.messages,
               backgroundAgentTasks: session.backgroundAgentTasks,
-              preserveUnresolvedBackgroundTasks: true,
             })
           }
           break

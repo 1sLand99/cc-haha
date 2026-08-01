@@ -46,6 +46,7 @@ import { useActivityPanelStore } from '../stores/activityPanelStore'
 import { getSessionBrowsablePath, getSessionWorkspaceState } from '../lib/sessionWorkspace'
 
 const TASK_POLL_INTERVAL_MS = 1000
+const ACTIVITY_AUTOCLOSE_GRACE_MS = 2000
 const WORKSPACE_RESIZE_STEP = 32
 const TERMINAL_RESIZE_STEP = 24
 const CHAT_COLUMN_WITH_WORKSPACE_CLASS =
@@ -476,8 +477,19 @@ export function ActiveSession() {
 
   useEffect(() => {
     if (!activeTabId || !isActivityPanelOpen || hasVisibleActivity) return
-    closeActivityPanel(activeTabId)
-  }, [activeTabId, closeActivityPanel, hasVisibleActivity, isActivityPanelOpen])
+    // Activity rows derive from volatile caches that are briefly empty during
+    // history loads, cli-task refetches and reconnect reloads. Closing the
+    // panel on the first empty beat made that flicker permanent (auto-open
+    // does not re-fire after a remount), so only close once the empty state
+    // survives a full history-ready grace period.
+    if (sessionState?.historyStatus === 'loading') return
+    const timer = setTimeout(() => {
+      const current = useChatStore.getState().sessions[activeTabId]
+      if (current?.historyStatus === 'loading') return
+      closeActivityPanel(activeTabId)
+    }, ACTIVITY_AUTOCLOSE_GRACE_MS)
+    return () => clearTimeout(timer)
+  }, [activeTabId, closeActivityPanel, hasVisibleActivity, isActivityPanelOpen, sessionState?.historyStatus])
 
   useEffect(() => {
     if (!activeTabId || !showWorkbench || !isActivityPanelOpen) return
