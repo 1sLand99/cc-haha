@@ -69,6 +69,7 @@ describe('provider presets API', () => {
     const minimax = PROVIDER_PRESETS.find((preset) => preset.id === 'minimax')
     const shengsuanyun = PROVIDER_PRESETS.find((preset) => preset.id === 'shengsuanyun')
     const teamorouter = PROVIDER_PRESETS.find((preset) => preset.id === 'teamorouter')
+    const xuanshuapi = PROVIDER_PRESETS.find((preset) => preset.id === 'xuanshuapi')
 
     expect(lmstudio?.baseUrl).toBe('http://localhost:1234')
     expect(lmstudio?.apiFormat).toBe('anthropic')
@@ -127,6 +128,14 @@ describe('provider presets API', () => {
     expect(teamorouter?.defaultModels.sonnet).toBe('claude-sonnet-5')
     expect(teamorouter?.defaultModels.opus).toBe('claude-opus-4-8')
     expect(teamorouter?.modelContextWindows?.['claude-opus-4-8']).toBe(1000000)
+    expect(xuanshuapi?.baseUrl).toBe('https://www.xuanshuapi.com')
+    expect(xuanshuapi?.apiFormat).toBe('anthropic')
+    expect(xuanshuapi?.authStrategy).toBe('auth_token')
+    expect(xuanshuapi?.defaultModels.main).toBe('claude-opus-5')
+    expect(xuanshuapi?.defaultModels.haiku).toBe('claude-haiku-4-5')
+    expect(xuanshuapi?.defaultModels.sonnet).toBe('claude-sonnet-5')
+    expect(xuanshuapi?.defaultModels.opus).toBe('claude-opus-5')
+    expect(xuanshuapi?.modelContextWindows?.['claude-opus-5']).toBe(1000000)
   })
 
   test('configured presets can expose optional API key and promo metadata', () => {
@@ -138,6 +147,7 @@ describe('provider presets API', () => {
     const minimax = PROVIDER_PRESETS.find((preset) => preset.id === 'minimax')
     const shengsuanyun = PROVIDER_PRESETS.find((preset) => preset.id === 'shengsuanyun')
     const teamorouter = PROVIDER_PRESETS.find((preset) => preset.id === 'teamorouter')
+    const xuanshuapi = PROVIDER_PRESETS.find((preset) => preset.id === 'xuanshuapi')
     const custom = PROVIDER_PRESETS.find((preset) => preset.id === 'custom')
 
     expect(lmstudio?.needsApiKey).toBe(false)
@@ -187,6 +197,14 @@ describe('provider presets API', () => {
       ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'none',
     })
     expect(teamorouter?.modelContextWindows?.['claude-sonnet-5']).toBe(1000000)
+    expect(xuanshuapi?.apiKeyUrl).toBe('https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA')
+    expect(xuanshuapi?.promoText).toContain('5 美元')
+    expect(xuanshuapi?.featured).toBe(true)
+    expect(xuanshuapi?.defaultEnv).toEqual({
+      CLAUDE_CODE_SUBAGENT_MODEL: 'claude-sonnet-5',
+      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'none',
+    })
+    expect(xuanshuapi?.modelContextWindows?.['claude-sonnet-5']).toBe(1000000)
     expect(custom?.promoText).toBeUndefined()
     expect(custom?.authStrategy).toBe('auth_token')
     expect(custom?.defaultEnv).toBeUndefined()

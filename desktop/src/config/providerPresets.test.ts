@@ -71,6 +71,7 @@ describe('bundled provider presets', () => {
     const selectableIds = selectableProviderPresets(BUNDLED_PROVIDER_PRESETS).map((p) => p.id)
     expect(selectableIds).not.toContain('shengsuanyun')
     expect(selectableIds).toContain('teamorouter')
+    expect(selectableIds).toContain('xuanshuapi')
     expect(selectableIds).toContain('custom')
   })
 
