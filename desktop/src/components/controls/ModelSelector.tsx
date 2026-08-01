@@ -557,16 +557,20 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
 
   const dropdownContent = (
     <>
-      <div className={`overflow-y-auto ${isMobileBrowser ? 'p-1' : 'p-1.5'}`} style={{ maxHeight: isMobileBrowser ? undefined : dropdownPosition?.maxHeight }}>
-        {!isMobileBrowser && (
-          <div className="sticky top-0 z-[var(--z-sticky)] mb-1 border-b border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] px-2 pb-2 pt-1.5">
-            <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-tertiary)]">
-              {t('model.configuration')}
-            </div>
-            {searchField}
+      {/* The header stays OUTSIDE the scroll region: a sticky header inside
+          `overflow-y-auto` depends on the engine compositing it above the
+          scrolling layer, and on the desktop shell scrolled items paint
+          through it (and above the panel edge). As a sibling above the
+          scrollport, the list is hard-clipped below the header instead. */}
+      {!isMobileBrowser && (
+        <div className="flex-none border-b border-[var(--color-border)] px-3.5 pb-2 pt-3">
+          <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-tertiary)]">
+            {t('model.configuration')}
           </div>
-        )}
-
+          {searchField}
+        </div>
+      )}
+      <div className={`overflow-y-auto ${isMobileBrowser ? 'p-1' : 'min-h-0 flex-1 p-1.5'}`}>
         {!hasMatchingModels && (
           <div
             role="status"
@@ -728,12 +732,13 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
       <div
         ref={dropdownRef}
         data-testid="model-selector-dropdown"
-        className="fixed z-[var(--z-dropdown)] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-overlay)]"
+        className="fixed z-[var(--z-dropdown)] flex flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-overlay)]"
         style={{
           top: dropdownPosition.top,
           bottom: dropdownPosition.bottom,
           left: dropdownPosition.left,
           width: dropdownPosition.width,
+          maxHeight: dropdownPosition.maxHeight,
         }}
       >
         {dropdownContent}

@@ -395,7 +395,11 @@ describe('ModelSelector', () => {
     const search = within(dropdown).getByRole('searchbox', { name: 'Search models' })
 
     expect(search).toHaveFocus()
-    expect(search.closest('.sticky')).toHaveClass('top-0')
+    // The header lives outside the scroll region: a sticky header inside
+    // `overflow-y-auto` lets scrolled items paint through it on the desktop
+    // shell, so the contract is a hard clip below the header instead.
+    expect(search.closest('.overflow-y-auto')).toBeNull()
+    expect(dropdown).toHaveClass('overflow-hidden')
 
     fireEvent.change(search, { target: { value: 'careful' } })
     expect(within(dropdown).queryByRole('button', { name: /Alpha/ })).not.toBeInTheDocument()
