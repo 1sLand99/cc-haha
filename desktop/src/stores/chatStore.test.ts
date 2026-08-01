@@ -695,6 +695,42 @@ describe('chatStore history mapping', () => {
     ])
   })
 
+  it('keeps transcript block ids stable across repeated history mapping', () => {
+    const messages: MessageEntry[] = [
+      {
+        id: 'assistant-tools-1',
+        type: 'tool_use',
+        timestamp: '2026-04-06T00:00:00.000Z',
+        content: [
+          { type: 'thinking', thinking: 'Inspecting the workspace' },
+          { type: 'tool_use', name: 'Bash', id: 'bash-1', input: { command: 'pwd' } },
+          { type: 'tool_use', name: 'Glob', id: 'glob-1', input: { pattern: '*' } },
+        ],
+      },
+      {
+        id: 'user-tool-results-1',
+        type: 'tool_result',
+        timestamp: '2026-04-06T00:00:01.000Z',
+        content: [
+          { type: 'tool_result', tool_use_id: 'bash-1', content: '/workspace', is_error: false },
+          { type: 'tool_result', tool_use_id: 'glob-1', content: 'src', is_error: false },
+        ],
+      },
+    ]
+
+    const firstIds = mapHistoryMessagesToUiMessages(messages).map((message) => message.id)
+    const secondIds = mapHistoryMessagesToUiMessages(messages).map((message) => message.id)
+
+    expect(secondIds).toEqual(firstIds)
+    expect(firstIds).toEqual([
+      'assistant-tools-1-block-0',
+      'assistant-tools-1-block-1',
+      'assistant-tools-1-block-2',
+      'user-tool-results-1-block-0',
+      'user-tool-results-1-block-1',
+    ])
+  })
+
   it('restores slash-command metadata as readable history while skipping malformed breadcrumbs', () => {
     const messages: MessageEntry[] = [
       {

@@ -4535,12 +4535,12 @@ export function mapHistoryMessagesToUiMessages(
       continue
     }
     if ((msg.type === 'assistant' || msg.type === 'tool_use') && Array.isArray(msg.content)) {
-      for (const block of msg.content as AssistantHistoryBlock[]) {
-        if (block.type === 'thinking' && block.thinking) uiMessages.push({ id: nextId(), type: 'thinking', content: block.thinking, timestamp })
+      for (const [blockIndex, block] of (msg.content as AssistantHistoryBlock[]).entries()) {
+        if (block.type === 'thinking' && block.thinking) uiMessages.push({ id: `${msg.id}-block-${blockIndex}`, type: 'thinking', content: block.thinking, timestamp })
         else if (block.type === 'text' && block.text) {
           pushAssistantHistoryText(uiMessages, block.text, timestamp, msg.model, msg.id || undefined)
         }
-        else if (block.type === 'tool_use') uiMessages.push({ id: nextId(), type: 'tool_use', toolName: block.name ?? 'unknown', toolUseId: block.id ?? '', input: block.input, timestamp, parentToolUseId: msg.parentToolUseId })
+        else if (block.type === 'tool_use') uiMessages.push({ id: `${msg.id}-block-${blockIndex}`, type: 'tool_use', toolName: block.name ?? 'unknown', toolUseId: block.id ?? '', input: block.input, timestamp, parentToolUseId: msg.parentToolUseId })
       }
       continue
     }
@@ -4550,7 +4550,7 @@ export function mapHistoryMessagesToUiMessages(
       const attachments: UIAttachment[] = []
       const imageSourcePaths: string[] = []
       const hasImageBlock = (msg.content as UserHistoryBlock[]).some((block) => block.type === 'image')
-      for (const block of msg.content as UserHistoryBlock[]) {
+      for (const [blockIndex, block] of (msg.content as UserHistoryBlock[]).entries()) {
         if (block.type === 'text' && block.text && isTeammateMessage(block.text)) {
           modelTextParts.push(block.text)
           if (!includeTeammateMessages) continue
@@ -4568,7 +4568,7 @@ export function mapHistoryMessagesToUiMessages(
         else if (block.type === 'image') attachments.push(normalizeHistoryImageAttachment(block))
         else if (block.type === 'file') attachments.push({ type: 'file', name: block.name || 'file' })
         else if (block.type === 'tool_result') uiMessages.push({
-          id: nextId(),
+          id: `${msg.id}-block-${blockIndex}`,
           type: 'tool_result',
           toolUseId: block.tool_use_id ?? '',
           content: normalizeHistoryToolResultContent(block.content, msg.toolUseResult),
