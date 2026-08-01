@@ -2192,6 +2192,7 @@ export const jp: Record<TranslationKey, string> = {
   'session.activity.status.inProgress': '進行中',
   'session.activity.status.completed': '完了',
   'session.activity.status.running': '実行中',
+  'session.activity.status.stopping': '停止中',
   'session.activity.status.failed': '失敗',
   'session.activity.status.stopped': '停止済み',
   'session.activity.status.idle': 'アイドル',

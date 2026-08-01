@@ -152,6 +152,16 @@ type AttachmentRef = {
 
 type UserContentBlock = Record<string, unknown>
 
+type SendMessageOptions = {
+  canSend?: () => boolean
+  messageUuid?: string
+  onCommitted?: () => void
+}
+
+type HandleSdkPayloadOptions = {
+  canAcceptPermissionRequest?: (message: any) => boolean
+}
+
 type MaterializedAttachments = {
   pathPrefix: string
   imageBlocks: UserContentBlock[]
@@ -584,6 +594,7 @@ export class ConversationService {
     sessionId: string,
     content: string,
     attachments?: AttachmentRef[],
+    options?: SendMessageOptions,
   ): Promise<boolean> {
     const userContent = await this.buildUserContent(content, sessionId, attachments)
     let session = this.sessions.get(sessionId)
@@ -594,8 +605,14 @@ export class ConversationService {
     if (session) {
       await this.refreshOfficialOAuthTokenBeforeTurn(sessionId, session)
     }
-    return this.sendSdkMessage(sessionId, {
+    // Building attachments, refreshing network settings, and refreshing OAuth
+    // can all suspend this call. Stop may revoke the owning desktop turn while
+    // one of those awaits is pending, so check ownership at the last possible
+    // point before writing the user message to the SDK socket.
+    if (options?.canSend && !options.canSend()) return false
+    const sent = this.sendSdkMessage(sessionId, {
       type: 'user',
+      ...(options?.messageUuid ? { uuid: options.messageUuid } : {}),
       message: {
         role: 'user',
         content: userContent,
@@ -603,6 +620,8 @@ export class ConversationService {
       parent_tool_use_id: null,
       session_id: '',
     })
+    if (sent) options?.onCommitted?.()
+    return sent
   }
 
   private async refreshNetworkEnvironmentBeforeTurn(
@@ -997,7 +1016,11 @@ export class ConversationService {
     return false
   }
 
-  handleSdkPayload(sessionId: string, rawPayload: string): void {
+  handleSdkPayload(
+    sessionId: string,
+    rawPayload: string,
+    options?: HandleSdkPayloadOptions,
+  ): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
 
@@ -1010,6 +1033,18 @@ export class ConversationService {
       try {
         const msg = JSON.parse(line)
         if (this.isReplayedSdkMessage(session, msg)) continue
+        if (
+          msg?.type === 'control_request' &&
+          msg.request?.subtype === 'can_use_tool' &&
+          typeof msg.request_id === 'string' &&
+          options?.canAcceptPermissionRequest?.(msg) === false
+        ) {
+          // Stop may win while a permission request is already queued on the
+          // SDK transport. Reject it at the service boundary so it is neither
+          // persisted as pending nor replayed to a reconnecting renderer.
+          this.respondToPermission(sessionId, msg.request_id, false)
+          continue
+        }
         this.retainSdkMessage(session, msg, Buffer.byteLength(line, 'utf-8'))
         const sdkError = this.extractSdkErrorEvent(msg)
         if (sdkError) {

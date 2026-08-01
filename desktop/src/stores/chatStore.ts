@@ -9,7 +9,7 @@ import { useTabStore } from './tabStore'
 import { randomSpinnerVerb } from '../config/spinnerVerbs'
 import { notifyDesktop } from '../lib/desktopNotifications'
 import { deriveSessionTitle, isPlaceholderSessionTitle } from '../lib/sessionTitle'
-import { hasRunningBackgroundTasks } from '../lib/backgroundTasks'
+import { hasRunningBackgroundTasks, hasRunningSubagentTasks } from '../lib/backgroundTasks'
 import { AGENT_LIFECYCLE_TYPES } from '../types/team'
 import type { ComposerAttachment } from '../lib/composerAttachments'
 import type { MessageEntry } from '../types/session'
@@ -135,6 +135,9 @@ export type PerSessionState = {
   agentTaskNotifications: Record<string, AgentTaskNotification>
   backgroundAgentTasks?: Record<string, BackgroundAgentTask>
   stoppingBackgroundTaskIds?: Record<string, boolean>
+  pendingBackgroundTaskStopFailures?: Record<string, string>
+  stopAllSubagentsRequested?: boolean
+  historyMutationEpoch?: number
   suppressNextTaskNotificationResponse?: boolean
   replaceHistoryOnCompletion?: boolean
   activeGoal?: ActiveGoalState | null
@@ -177,6 +180,9 @@ const DEFAULT_SESSION_STATE: PerSessionState = {
   agentTaskNotifications: {},
   backgroundAgentTasks: {},
   stoppingBackgroundTaskIds: {},
+  pendingBackgroundTaskStopFailures: {},
+  stopAllSubagentsRequested: false,
+  historyMutationEpoch: 0,
   suppressNextTaskNotificationResponse: false,
   replaceHistoryOnCompletion: false,
   activeGoal: null,
@@ -308,6 +314,7 @@ type ChatStore = {
     guard?: {
       messages: UIMessage[]
       backgroundAgentTasks?: Record<string, BackgroundAgentTask>
+      preserveUnresolvedBackgroundTasks?: boolean
     },
   ) => Promise<void>
   queueComposerPrefill: (
@@ -800,6 +807,12 @@ function isAgentBackgroundTask(task: Pick<BackgroundAgentTask, 'taskType' | 'sum
   )
 }
 
+function isCancellableSubagentTask(task: BackgroundAgentTask): boolean {
+  return task.status === 'running' && (
+    task.taskType === 'local_agent' || task.taskType === 'remote_agent'
+  )
+}
+
 function shouldSuppressTaskNotificationResponse(session: PerSessionState): boolean {
   if (session.chatState !== 'idle') return false
   const lastMessage = session.messages[session.messages.length - 1]
@@ -1128,6 +1141,7 @@ async function fetchAndMapSessionHistory(sessionId: string) {
 }
 
 const historyLoadsInFlight = new Map<string, Promise<void>>()
+const historyReloadGenerations = new Map<string, number>()
 
 function shouldPrewarmSession(sessionId: string): boolean {
   const knownSession = useSessionStore.getState().sessions.find((session) => session.id === sessionId)
@@ -1176,9 +1190,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     wsManager.onConnectionState(sessionId, (connectionState) => {
       if (!get().sessions[sessionId]) return
       set((s) => ({
-        sessions: updateSessionIn(s.sessions, sessionId, () => ({
+        sessions: updateSessionIn(s.sessions, sessionId, (session) => ({
           connectionState,
           connectionSnapshotReady: false,
+          stoppingBackgroundTaskIds:
+            connectionState === 'connected' || session.stopAllSubagentsRequested
+              ? session.stoppingBackgroundTaskIds
+              : {},
         })),
       }))
     })
@@ -1321,6 +1339,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             ...session,
             messages: newMessages,
             chatState: 'thinking',
+            historyMutationEpoch: (session.historyMutationEpoch ?? 0) + 1,
             elapsedSeconds: 0,
             suppressNextTaskNotificationResponse: false,
             replaceHistoryOnCompletion: false,
@@ -1441,6 +1460,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (!session) return s
       hasRunningBackgroundAgents = hasRunningBackgroundTasks(session.backgroundAgentTasks)
       if (session.elapsedTimer) clearInterval(session.elapsedTimer)
+      const stoppingBackgroundTaskIds = { ...session.stoppingBackgroundTaskIds }
+      for (const task of Object.values(session.backgroundAgentTasks ?? {})) {
+        if (isCancellableSubagentTask(task)) {
+          stoppingBackgroundTaskIds[task.taskId] = true
+        }
+      }
       const pendingAssistantText = `${session.streamingText}${bufferedText}`
       const messagesWithFlushedText = pendingAssistantText.trim()
         ? appendAssistantTextMessage(session.messages, pendingAssistantText, Date.now())
@@ -1465,6 +1490,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             apiRetry: null,
             streamingFallback: null,
             suppressNextTaskNotificationResponse: false,
+            stoppingBackgroundTaskIds,
+            stopAllSubagentsRequested: true,
             elapsedTimer: null,
           },
         },
@@ -1493,6 +1520,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const existingLoad = historyLoadsInFlight.get(sessionId)
     if (existingLoad) return existingLoad
 
+    const requestedMutationEpoch = get().sessions[sessionId]?.historyMutationEpoch ?? 0
     let load!: Promise<void>
     load = (async () => {
       try {
@@ -1515,39 +1543,70 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           hasMessagesAfterTaskCompletion,
           tokenUsage,
         } = await fetchAndMapSessionHistory(sessionId)
+        let historyApplied = false
         set((state) => {
           const session = state.sessions[sessionId]
           if (!session) return state
+          if ((session.historyMutationEpoch ?? 0) !== requestedMutationEpoch) {
+            const abortedLoadUpdate = buildAbortedHistoryLoadUpdate(session)
+            return Object.keys(abortedLoadUpdate).length > 0
+              ? {
+                  sessions: updateSessionIn(
+                    state.sessions,
+                    sessionId,
+                    () => abortedLoadUpdate,
+                  ),
+                }
+              : state
+          }
+          historyApplied = true
           if (session.messages.length > 0) {
-            return { sessions: updateSessionIn(state.sessions, sessionId, (s) => ({
-              historyStatus: 'ready',
-              historyError: null,
-              activeGoal: activeGoal ?? s.activeGoal ?? null,
-              agentTaskNotifications: { ...s.agentTaskNotifications, ...restoredNotifications },
-              backgroundAgentTasks: mergeBackgroundAgentTaskRecords(
+            return { sessions: updateSessionIn(state.sessions, sessionId, (s) => {
+              const backgroundAgentTasks = mergeBackgroundAgentTaskRecords(
                 s.backgroundAgentTasks ?? {},
                 restoredBackgroundTasks,
-              ),
-              tokenUsage: tokenUsage ?? s.tokenUsage,
-              messages: mergeRestoredHistoryIntoLiveMessages(
-                mergeBackgroundTaskMessages(s.messages, restoredBackgroundTasks),
+              )
+              const messages = mergeRestoredHistoryIntoLiveMessages(
+                mergeBackgroundTaskMessages(s.messages, backgroundAgentTasks),
                 uiMessages,
-              ),
-            })) }
+              )
+              return {
+                historyStatus: 'ready',
+                historyError: null,
+                activeGoal: activeGoal ?? s.activeGoal ?? null,
+                agentTaskNotifications: { ...restoredNotifications, ...s.agentTaskNotifications },
+                backgroundAgentTasks,
+                tokenUsage: tokenUsage ?? s.tokenUsage,
+                ...reconcilePendingBackgroundTaskStopFailures(
+                  s,
+                  backgroundAgentTasks,
+                  messages,
+                ),
+              }
+            }) }
           }
-          return { sessions: updateSessionIn(state.sessions, sessionId, (s) => ({
-            historyStatus: 'ready',
-            historyError: null,
-            messages: mergeBackgroundTaskMessages(uiMessages, restoredBackgroundTasks),
-            activeGoal,
-            agentTaskNotifications: { ...s.agentTaskNotifications, ...restoredNotifications },
-            backgroundAgentTasks: mergeBackgroundAgentTaskRecords(
+          return { sessions: updateSessionIn(state.sessions, sessionId, (s) => {
+            const backgroundAgentTasks = mergeBackgroundAgentTaskRecords(
               s.backgroundAgentTasks ?? {},
               restoredBackgroundTasks,
-            ),
-            tokenUsage: tokenUsage ?? s.tokenUsage,
-          })) }
+            )
+            const messages = mergeBackgroundTaskMessages(uiMessages, backgroundAgentTasks)
+            return {
+              historyStatus: 'ready',
+              historyError: null,
+              activeGoal,
+              agentTaskNotifications: { ...restoredNotifications, ...s.agentTaskNotifications },
+              backgroundAgentTasks,
+              tokenUsage: tokenUsage ?? s.tokenUsage,
+              ...reconcilePendingBackgroundTaskStopFailures(
+                s,
+                backgroundAgentTasks,
+                messages,
+              ),
+            }
+          }) }
         })
+        if (!historyApplied) return
         if (lastTodos && lastTodos.length > 0) {
           const taskStore = useCLITaskStore.getState()
           if (taskStore.sessionId === sessionId && taskStore.tasks.length === 0) taskStore.setTasksFromTodos(lastTodos, sessionId)
@@ -1562,10 +1621,28 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         set((state) => {
           const session = state.sessions[sessionId]
           if (!session) return state
+          if ((session.historyMutationEpoch ?? 0) !== requestedMutationEpoch) {
+            const abortedLoadUpdate = buildAbortedHistoryLoadUpdate(session)
+            return Object.keys(abortedLoadUpdate).length > 0
+              ? {
+                  sessions: updateSessionIn(
+                    state.sessions,
+                    sessionId,
+                    () => abortedLoadUpdate,
+                  ),
+                }
+              : state
+          }
+          const pendingFailureUpdate = reconcilePendingBackgroundTaskStopFailures(
+            session,
+            session.backgroundAgentTasks ?? {},
+            session.messages,
+          )
           return {
             sessions: updateSessionIn(state.sessions, sessionId, () => ({
               historyStatus: 'error',
               historyError: error instanceof Error ? error.message : String(error),
+              ...pendingFailureUpdate,
             })),
           }
         })
@@ -1581,7 +1658,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   reloadHistory: async (sessionId, guard) => {
+    const reloadGeneration = (historyReloadGenerations.get(sessionId) ?? 0) + 1
+    historyReloadGenerations.set(sessionId, reloadGeneration)
     try {
+      const requestedMutationEpoch = get().sessions[sessionId]?.historyMutationEpoch ?? 0
+      const pendingLoad = historyLoadsInFlight.get(sessionId)
+      if (pendingLoad) await pendingLoad
       const {
         uiMessages,
         activeGoal,
@@ -1592,30 +1674,41 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         tokenUsage,
       } = await fetchAndMapSessionHistory(sessionId)
 
+      if (historyReloadGenerations.get(sessionId) !== reloadGeneration) return
+
       if (guard) {
         const current = get().sessions[sessionId]
         if (
           !current ||
           current.chatState !== 'idle' ||
-          current.messages !== guard.messages ||
-          current.backgroundAgentTasks !== guard.backgroundAgentTasks
+          (current.historyMutationEpoch ?? 0) !== requestedMutationEpoch
         ) {
           return
         }
       }
 
+      let historyApplied = false
       set((state) => {
         const session = state.sessions[sessionId]
         if (!session) return state
         if (session.elapsedTimer) clearInterval(session.elapsedTimer)
+        const backgroundAgentTasks = guard?.preserveUnresolvedBackgroundTasks
+          ? mergeBackgroundAgentTaskRecords(
+              session.backgroundAgentTasks ?? {},
+              restoredBackgroundTasks,
+            )
+          : restoredBackgroundTasks
+        const messages = mergeBackgroundTaskMessages(uiMessages, backgroundAgentTasks)
+        historyApplied = true
         return {
           sessions: updateSessionIn(state.sessions, sessionId, () => ({
             historyStatus: 'ready',
             historyError: null,
-            messages: mergeBackgroundTaskMessages(uiMessages, restoredBackgroundTasks),
             activeGoal,
-            agentTaskNotifications: restoredNotifications,
-            backgroundAgentTasks: restoredBackgroundTasks,
+            agentTaskNotifications: guard?.preserveUnresolvedBackgroundTasks
+              ? { ...restoredNotifications, ...session.agentTaskNotifications }
+              : restoredNotifications,
+            backgroundAgentTasks,
             tokenUsage: tokenUsage ?? session.tokenUsage,
             chatState: 'idle',
             activeThinkingId: null,
@@ -1631,9 +1724,26 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             statusVerb: '',
             apiRetry: null,
             streamingFallback: null,
+            ...reconcilePendingBackgroundTaskStopFailures(
+              session,
+              backgroundAgentTasks,
+              messages,
+            ),
           })),
         }
       })
+
+      if (historyApplied) {
+        const reloadedSession = get().sessions[sessionId]
+        if (reloadedSession) {
+          const isRunning = reloadedSession.chatState !== 'idle' ||
+            hasRunningBackgroundTasks(reloadedSession.backgroundAgentTasks)
+          useTabStore.getState().updateTabStatus(
+            sessionId,
+            isRunning ? 'running' : 'idle',
+          )
+        }
+      }
 
       if (lastTodos && lastTodos.length > 0) {
         useCLITaskStore.getState().setTasksFromTodos(lastTodos, sessionId)
@@ -1644,7 +1754,23 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         useCLITaskStore.getState().markCompletedAndDismissed(sessionId)
       }
     } catch {
-      // Session may not have messages yet
+      // A stop failure can arrive before the task history that identifies it.
+      // If that history request fails, surface the failure instead of leaving it
+      // cached forever waiting for a reconciliation that may never happen.
+      set((state) => {
+        const session = state.sessions[sessionId]
+        if (!session || Object.keys(session.pendingBackgroundTaskStopFailures ?? {}).length === 0) {
+          return state
+        }
+        return {
+          sessions: updateSessionIn(state.sessions, sessionId, (current) =>
+            reconcilePendingBackgroundTaskStopFailures(
+              current,
+              current.backgroundAgentTasks ?? {},
+              current.messages,
+            )),
+        }
+      })
     }
   },
 
@@ -1901,7 +2027,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           break
         }
 
-        if (session.chatState === 'idle') break
+        if (session.chatState === 'idle') {
+          if (
+            hasRunningSubagentTasks(session.backgroundAgentTasks) ||
+            session.stopAllSubagentsRequested
+          ) {
+            // A terminal task event may have been persisted while this renderer
+            // was offline. Reconcile it without overwriting a newly started turn.
+            void get().reloadHistory(sessionId, {
+              messages: session.messages,
+              backgroundAgentTasks: session.backgroundAgentTasks,
+              preserveUnresolvedBackgroundTasks: true,
+            })
+          }
+          break
+        }
 
         const text = `${session.streamingText}${consumePendingDelta(sessionId)}`
         clearPendingToolInputDelta(sessionId)
@@ -2030,6 +2170,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
         if (session.suppressNextTaskNotificationResponse) {
           update(() => ({ suppressNextTaskNotificationResponse: false }))
+        }
+        // The server keeps a stopped-turn fence until it attributes a replay
+        // (or a pure local command's first output) to the replacement turn.
+        // Mirror that boundary instead of clearing the SubAgent stop latch on
+        // the optimistic send, which may still be rejected or remain pending.
+        if (session.stopAllSubagentsRequested) {
+          update(() => ({ stopAllSubagentsRequested: false }))
         }
         const pendingText = `${session.streamingText}${consumePendingDelta(sessionId)}`
         if (msg.blockType !== 'text' && pendingText.trim()) {
@@ -2539,7 +2686,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           clearPendingToolInputDelta(sessionId)
           if (session.elapsedTimer) clearInterval(session.elapsedTimer)
           const hasRunningBackgroundAgents = hasRunningBackgroundTasks(session.backgroundAgentTasks)
-          update(() => ({
+          update((current) => ({
             tokenUsage: msg.usage,
             chatState: 'idle',
             activeThinkingId: null,
@@ -2554,6 +2701,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             streamingToolInput: '',
             suppressNextTaskNotificationResponse: false,
             replaceHistoryOnCompletion: false,
+            historyMutationEpoch: (current.historyMutationEpoch ?? 0) + 1,
           }))
           useTabStore.getState().updateTabStatus(sessionId, hasRunningBackgroundAgents ? 'running' : 'idle')
           reconcileCompletedTranscriptHistory(
@@ -2583,7 +2731,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const finalMessages = markPendingToolUseMessagesStopped(completionMessages)
         const hasRunningBackgroundAgents = hasRunningBackgroundTasks(session.backgroundAgentTasks)
         if (session.elapsedTimer) clearInterval(session.elapsedTimer)
-        update(() => ({
+        update((current) => ({
           messages: finalMessages,
           tokenUsage: msg.usage,
           chatState: 'idle',
@@ -2596,6 +2744,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           apiRetry: null,
           streamingFallback: null,
           replaceHistoryOnCompletion: false,
+          historyMutationEpoch: (current.historyMutationEpoch ?? 0) + 1,
         }))
         useTabStore.getState().updateTabStatus(sessionId, hasRunningBackgroundAgents ? 'running' : 'idle')
         const notification = wasAgentRunning && appendedCompletionMessage
@@ -2633,6 +2782,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             activeThinkingId: null,
             suppressNextTaskNotificationResponse: false,
             replaceHistoryOnCompletion: false,
+            stopAllSubagentsRequested: false,
+            historyMutationEpoch: (session.historyMutationEpoch ?? 0) + 1,
           }
         })
         break
@@ -2670,6 +2821,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             apiRetry: null,
             streamingFallback: null,
             suppressNextTaskNotificationResponse: false,
+            historyMutationEpoch: (s.historyMutationEpoch ?? 0) + 1,
           }
         })
         useTabStore.getState().updateTabStatus(sessionId, 'error')
@@ -2686,7 +2838,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         update((session) => {
           const stoppingBackgroundTaskIds = { ...session.stoppingBackgroundTaskIds }
           delete stoppingBackgroundTaskIds[msg.taskId]
-          const taskAlreadyFinished = session.backgroundAgentTasks?.[msg.taskId]?.status !== 'running'
+          const task = session.backgroundAgentTasks?.[msg.taskId]
+          if (!task && session.historyStatus === 'loading') {
+            return {
+              stoppingBackgroundTaskIds,
+              pendingBackgroundTaskStopFailures: {
+                ...session.pendingBackgroundTaskStopFailures,
+                [msg.taskId]: msg.message,
+              },
+            }
+          }
+          const taskAlreadyFinished = task !== undefined && task.status !== 'running'
           return {
             stoppingBackgroundTaskIds,
             ...(taskAlreadyFinished ? {} : {
@@ -2700,6 +2862,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                   timestamp: Date.now(),
                 },
               ],
+              historyMutationEpoch: (session.historyMutationEpoch ?? 0) + 1,
             }),
           }
         })
@@ -2766,6 +2929,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             backgroundAgentTasks: {},
             stoppingBackgroundTaskIds: {},
             agentTaskNotifications: {},
+            pendingBackgroundTaskStopFailures: {},
+            stopAllSubagentsRequested: false,
+            queuedUserMessages: [],
+            historyMutationEpoch: (session?.historyMutationEpoch ?? 0) + 1,
+            historyStatus: 'ready',
+            historyError: null,
           }))
           clearPendingDelta(sessionId)
           clearPendingTaskToolUseIds(sessionId)
@@ -2836,6 +3005,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           if (goalEvent) {
             update((session) => ({
               activeGoal: applyGoalEventToActiveGoal(session.activeGoal ?? null, goalEvent, Date.now()),
+              stopAllSubagentsRequested: false,
               messages: [
                 ...session.messages,
                 {
@@ -2863,7 +3033,20 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               shouldUpdateIdleTabStatus = session.chatState === 'idle'
               hasRunningBackgroundAgentsAfterUpdate = hasRunningBackgroundTasks(backgroundAgentTasks)
               const task = backgroundAgentTasks[taskEvent.taskId]
-              return buildBackgroundTaskSessionUpdate(session, backgroundAgentTasks, task, now)
+              const stoppingBackgroundTaskIds = { ...session.stoppingBackgroundTaskIds }
+              if (
+                msg.subtype === 'task_started' &&
+                session.stopAllSubagentsRequested &&
+                task &&
+                isCancellableSubagentTask(task)
+              ) {
+                stoppingBackgroundTaskIds[task.taskId] = true
+              }
+              return {
+                ...buildBackgroundTaskSessionUpdate(session, backgroundAgentTasks, task, now),
+                stoppingBackgroundTaskIds,
+                historyMutationEpoch: (session.historyMutationEpoch ?? 0) + 1,
+              }
             })
             if (shouldUpdateIdleTabStatus) {
               useTabStore.getState().updateTabStatus(
@@ -2925,6 +3108,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                       }
                     : {}),
                 },
+                historyMutationEpoch: (session.historyMutationEpoch ?? 0) + 1,
               }
             })
             if (shouldUpdateIdleTabStatus) {
@@ -3575,9 +3759,80 @@ function mergeBackgroundAgentTaskRecords(
   restored: Record<string, BackgroundAgentTask>,
 ): Record<string, BackgroundAgentTask> {
   return Object.values(restored).reduce(
-    (tasks, task) => upsertBackgroundAgentTask(tasks, task, task.updatedAt),
+    (tasks, task) => {
+      const existing = tasks[task.taskId] ?? (task.toolUseId
+        ? Object.values(tasks).find((candidate) => candidate.toolUseId === task.toolUseId)
+        : undefined)
+      if (
+        existing?.status === 'running' &&
+        task.status !== 'running' &&
+        task.updatedAt < existing.startedAt
+      ) {
+        return tasks
+      }
+      return upsertBackgroundAgentTask(tasks, task, task.updatedAt)
+    },
     current,
   )
+}
+
+function reconcilePendingBackgroundTaskStopFailures(
+  session: PerSessionState,
+  backgroundAgentTasks: Record<string, BackgroundAgentTask>,
+  messages: UIMessage[],
+): Pick<
+  PerSessionState,
+  | 'messages'
+  | 'pendingBackgroundTaskStopFailures'
+  | 'stoppingBackgroundTaskIds'
+  | 'historyMutationEpoch'
+> {
+  const pendingFailures = { ...session.pendingBackgroundTaskStopFailures }
+  const hasPendingFailures = Object.keys(pendingFailures).length > 0
+  const stoppingBackgroundTaskIds = { ...session.stoppingBackgroundTaskIds }
+  let nextMessages = messages
+
+  for (const [taskId, message] of Object.entries(pendingFailures)) {
+    const task = backgroundAgentTasks[taskId]
+    if (!task || task.status === 'running') {
+      nextMessages = [
+        ...nextMessages,
+        {
+          id: nextId(),
+          type: 'error',
+          message,
+          code: 'STOP_BACKGROUND_TASK_FAILED',
+          timestamp: Date.now(),
+        },
+      ]
+    }
+    delete pendingFailures[taskId]
+    delete stoppingBackgroundTaskIds[taskId]
+  }
+
+  return {
+    messages: nextMessages,
+    pendingBackgroundTaskStopFailures: pendingFailures,
+    stoppingBackgroundTaskIds,
+    historyMutationEpoch: (session.historyMutationEpoch ?? 0) + (hasPendingFailures ? 1 : 0),
+  }
+}
+
+function buildAbortedHistoryLoadUpdate(
+  session: PerSessionState,
+): Partial<PerSessionState> {
+  const hasPendingStopFailures =
+    Object.keys(session.pendingBackgroundTaskStopFailures ?? {}).length > 0
+  return {
+    ...(session.historyStatus === 'loading' ? { historyStatus: 'idle' as const } : {}),
+    ...(hasPendingStopFailures
+      ? reconcilePendingBackgroundTaskStopFailures(
+          session,
+          session.backgroundAgentTasks ?? {},
+          session.messages,
+        )
+      : {}),
+  }
 }
 
 const TEAMMATE_CONTENT_REGEX = /<teammate-message\s+teammate_id="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/teammate-message>/g

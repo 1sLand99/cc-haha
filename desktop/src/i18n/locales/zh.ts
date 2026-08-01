@@ -2191,6 +2191,7 @@ export const zh: Record<TranslationKey, string> = {
   'session.activity.status.inProgress': '进行中',
   'session.activity.status.completed': '已完成',
   'session.activity.status.running': '运行中',
+  'session.activity.status.stopping': '停止中',
   'session.activity.status.failed': '失败',
   'session.activity.status.stopped': '已停止',
   'session.activity.status.idle': '空闲',

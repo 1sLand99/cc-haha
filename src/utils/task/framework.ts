@@ -108,6 +108,8 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
     tool_use_id: task.toolUseId,
     description: task.description,
     task_type: task.type,
+    remote_session_id:
+      task.type === 'remote_agent' ? task.sessionId : undefined,
     workflow_name:
       'workflowName' in task
         ? (task.workflowName as string | undefined)

@@ -933,6 +933,75 @@ describe('ChatInput file mentions', () => {
     expect(stop).not.toBeDisabled()
   })
 
+  it.each(['local_agent', 'remote_agent'])('keeps Run available alongside Stop for an idle session with a running %s', (taskType) => {
+    useChatStore.setState({
+      sessions: {
+        ...useChatStore.getState().sessions,
+        [sessionId]: {
+          ...useChatStore.getState().sessions[sessionId]!,
+          chatState: 'idle',
+          backgroundAgentTasks: {
+            agent: {
+              taskId: 'agent',
+              taskType,
+              status: 'running',
+              startedAt: 1,
+              updatedAt: 1,
+            },
+          },
+        },
+      },
+    })
+
+    render(<ChatInput compact />)
+
+    const input = screen.getByRole('textbox')
+    fireEvent.change(input, {
+      target: { value: 'continue while the agent runs', selectionStart: 29 },
+    })
+
+    const run = screen.getByRole('button', { name: 'Run' })
+    const stop = screen.getByRole('button', { name: 'Stop' })
+    expect(run).not.toBeDisabled()
+    expect(stop).not.toBeDisabled()
+
+    fireEvent.click(stop)
+    fireEvent.click(run)
+
+    expect(mocks.wsSend).toHaveBeenCalledWith(sessionId, { type: 'stop_generation' })
+    expect(mocks.wsSend).toHaveBeenCalledWith(sessionId, {
+      type: 'user_message',
+      content: 'continue while the agent runs',
+      attachments: [],
+    })
+  })
+
+  it.each(['local_bash', 'dream'])('does not turn Run into Stop for a running %s task', (taskType) => {
+    useChatStore.setState({
+      sessions: {
+        ...useChatStore.getState().sessions,
+        [sessionId]: {
+          ...useChatStore.getState().sessions[sessionId]!,
+          chatState: 'idle',
+          backgroundAgentTasks: {
+            task: {
+              taskId: 'task',
+              taskType,
+              status: 'running',
+              startedAt: 1,
+              updatedAt: 1,
+            },
+          },
+        },
+      },
+    })
+
+    render(<ChatInput compact />)
+
+    expect(screen.getByRole('button', { name: 'Run' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+  })
+
   // This used to assert that the run button shed its label before the location
   // moved. The button has no label to shed any more — it is one round icon at
   // every width — so what needs pinning is that it does *not* change with the

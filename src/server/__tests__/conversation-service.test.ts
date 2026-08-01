@@ -544,6 +544,57 @@ describe('ConversationService', () => {
     expect(JSON.parse(sent[1]!).type).toBe('user')
   })
 
+  test('sendMessage does not enqueue a user turn after its owner is cancelled', async () => {
+    const service = new ConversationService() as any
+    const sent: string[] = []
+    installNetworkTestSession(service, 'cancelled-user-turn', sent)
+    let canSend = true
+    let committed = false
+
+    const pendingSend = service.sendMessage(
+      'cancelled-user-turn',
+      'Do not enqueue this after Stop',
+      undefined,
+      {
+        canSend: () => canSend,
+        messageUuid: 'cancelled-turn-uuid',
+        onCommitted: () => {
+          committed = true
+        },
+      },
+    )
+    canSend = false
+
+    expect(await pendingSend).toBe(false)
+    expect(committed).toBe(false)
+    expect(sent.map((line) => JSON.parse(line).type)).not.toContain('user')
+  })
+
+  test('sendMessage commits the caller UUID with the SDK user payload', async () => {
+    const service = new ConversationService() as any
+    const sent: string[] = []
+    installNetworkTestSession(service, 'identified-user-turn', sent)
+    let committed = false
+
+    expect(await service.sendMessage(
+      'identified-user-turn',
+      'Identify this turn',
+      undefined,
+      {
+        messageUuid: 'identified-turn-uuid',
+        onCommitted: () => {
+          committed = true
+        },
+      },
+    )).toBe(true)
+
+    expect(committed).toBe(true)
+    expect(sent.map((line) => JSON.parse(line))).toContainEqual(expect.objectContaining({
+      type: 'user',
+      uuid: 'identified-turn-uuid',
+    }))
+  })
+
   test('sendMessage hot-applies direct to system routing before the next user turn', async () => {
     const originalBridgeUrl = process.env.CC_HAHA_SYSTEM_PROXY_URL
     process.env.CC_HAHA_SYSTEM_PROXY_URL = 'http://127.0.0.1:17890'
@@ -1264,6 +1315,44 @@ describe('ConversationService', () => {
     }))
 
     expect(completionObserved).toBe(true)
+  })
+
+  test('rejects a permission request that arrives behind a stopped turn boundary', () => {
+    const service = new ConversationService() as any
+    const outbound: string[] = []
+    const forwarded: any[] = []
+    service.sessions.set('stopped-permission-boundary', {
+      outputCallbacks: [(message: any) => forwarded.push(message)],
+      seenSdkMessageUuids: new Set<string>(),
+      sdkMessages: [],
+      sdkSocket: { send: (message: string) => outbound.push(message) },
+      pendingOutbound: [],
+      initMessage: null,
+      pendingPermissionRequests: new Map(),
+    })
+
+    service.handleSdkPayload('stopped-permission-boundary', JSON.stringify({
+      type: 'control_request',
+      request_id: 'late-permission',
+      request: {
+        subtype: 'can_use_tool',
+        tool_name: 'Bash',
+        input: { command: 'echo stale' },
+      },
+    }), {
+      canAcceptPermissionRequest: () => false,
+    })
+
+    expect(service.getPendingPermissionRequests('stopped-permission-boundary')).toEqual([])
+    expect(forwarded).toEqual([])
+    expect(outbound).toHaveLength(1)
+    expect(JSON.parse(outbound[0]!)).toEqual(expect.objectContaining({
+      type: 'control_response',
+      response: expect.objectContaining({
+        request_id: 'late-permission',
+        response: expect.objectContaining({ behavior: 'deny' }),
+      }),
+    }))
   })
 
   // CLI 的 WebSocketTransport 每次重连成功都会把整个发送缓冲区重放一遍，并假定

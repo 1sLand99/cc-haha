@@ -2190,6 +2190,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'session.activity.status.inProgress': 'In progress',
   'session.activity.status.completed': 'Completed',
   'session.activity.status.running': 'Running',
+  'session.activity.status.stopping': 'Stopping',
   'session.activity.status.failed': 'Failed',
   'session.activity.status.stopped': 'Stopped',
   'session.activity.status.idle': 'Idle',

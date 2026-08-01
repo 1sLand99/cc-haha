@@ -2192,6 +2192,7 @@ export const kr: Record<TranslationKey, string> = {
   'session.activity.status.inProgress': '진행 중',
   'session.activity.status.completed': '완료됨',
   'session.activity.status.running': '실행 중',
+  'session.activity.status.stopping': '중지 중',
   'session.activity.status.failed': '실패',
   'session.activity.status.stopped': '중지됨',
   'session.activity.status.idle': '유휴',

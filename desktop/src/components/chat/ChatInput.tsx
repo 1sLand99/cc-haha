@@ -52,6 +52,7 @@ import { useComposerFileDrop } from './useComposerFileDrop'
 import { shouldSubmitOnEnter } from './sendShortcut'
 import type { PermissionMode } from '../../types/settings'
 import { getSessionWorkspaceState } from '../../lib/sessionWorkspace'
+import { hasRunningSubagentTasks } from '../../lib/backgroundTasks'
 
 type GitInfo = SessionGitInfo
 
@@ -220,6 +221,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
 
   const isMemberSession = !!memberInfo
   const isActive = chatState !== 'idle'
+  const hasRunningSubagents = hasRunningSubagentTasks(sessionState?.backgroundAgentTasks)
   const workspaceState = getSessionWorkspaceState(activeSession)
   const isWorkspaceMissing = workspaceState !== 'available'
   const hasWorkspaceReferences = !isMemberSession && workspaceReferences.length > 0
@@ -1405,6 +1407,22 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                   fluid={isMobileComposer}
                 />
               )}
+              {!isMemberSession && !isActive && hasRunningSubagents ? (
+                <Button
+                  variant="danger"
+                  size="base"
+                  shape="circle"
+                  onClick={() => stopGeneration(activeTabId!)}
+                  aria-label={t('common.stop')}
+                  title={t('chat.stopTitle')}
+                  className={`shrink-0 ${isMobileComposer ? 'h-11 w-11' : ''}`}
+                  icon={(
+                    <span className="material-symbols-outlined text-[18px]">
+                      stop
+                    </span>
+                  )}
+                />
+              ) : null}
               {/* Same component, shape and icon as EmptySession's send button.
                   The two rendered mirror images of each other until it was
                   spotted in a walkthrough — the arrow led here and trailed

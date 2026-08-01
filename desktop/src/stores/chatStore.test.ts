@@ -2406,6 +2406,235 @@ describe('chatStore history mapping', () => {
     vi.useRealTimers()
   })
 
+  it('marks every running SubAgent as stopping when generation is stopped', () => {
+    const backgroundAgentTasks = Object.fromEntries(
+      Array.from({ length: 4 }, (_, index) => {
+        const number = index + 1
+        return [`agent-task-${number}`, {
+          taskId: `agent-task-${number}`,
+          toolUseId: `agent-tool-${number}`,
+          taskType: number === 3 ? 'remote_agent' : 'local_agent',
+          description: `Review area ${number}`,
+          status: 'running' as const,
+          startedAt: number,
+          updatedAt: number,
+        }]
+      }),
+    )
+
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'tool_executing',
+          backgroundAgentTasks,
+        }),
+      },
+    })
+
+    useChatStore.getState().stopGeneration(TEST_SESSION_ID)
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(sendMock).toHaveBeenCalledWith(TEST_SESSION_ID, { type: 'stop_generation' })
+    expect(session?.stoppingBackgroundTaskIds).toEqual({
+      'agent-task-1': true,
+      'agent-task-2': true,
+      'agent-task-3': true,
+      'agent-task-4': true,
+    })
+    expect(Object.values(session?.backgroundAgentTasks ?? {}).map((task) => task.status)).toEqual([
+      'running',
+      'running',
+      'running',
+      'running',
+    ])
+  })
+
+  it('keeps a SubAgent that starts after the global stop in the stopping state', () => {
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'tool_executing' }),
+      },
+    })
+
+    useChatStore.getState().stopGeneration(TEST_SESSION_ID)
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'task_started',
+      data: {
+        task_id: 'late-agent-task',
+        tool_use_id: 'late-agent-tool',
+        task_type: 'local_agent',
+        description: 'Started while the turn was stopping',
+      },
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'task_started',
+      data: {
+        task_id: 'late-bash-task',
+        tool_use_id: 'late-bash-tool',
+        task_type: 'local_bash',
+        description: 'Detached shell task',
+      },
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.stopAllSubagentsRequested).toBe(true)
+    expect(session?.stoppingBackgroundTaskIds).toEqual({ 'late-agent-task': true })
+
+    useChatStore.getState().sendMessage(TEST_SESSION_ID, 'Start the next turn')
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'task_started',
+      data: {
+        task_id: 'next-turn-agent-task',
+        tool_use_id: 'next-turn-agent-tool',
+        task_type: 'local_agent',
+        description: 'Belongs to the next turn',
+      },
+    })
+
+    const pendingSession = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(pendingSession?.stopAllSubagentsRequested).toBe(true)
+    expect(pendingSession?.stoppingBackgroundTaskIds?.['next-turn-agent-task']).toBe(true)
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'user_message_replay',
+      content: 'Start the next turn',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'task_started',
+      data: {
+        task_id: 'replayed-turn-agent-task',
+        tool_use_id: 'replayed-turn-agent-tool',
+        task_type: 'local_agent',
+        description: 'Belongs to the replayed next turn',
+      },
+    })
+
+    const resumedSession = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(resumedSession?.stopAllSubagentsRequested).toBe(false)
+    expect(resumedSession?.stoppingBackgroundTaskIds?.['replayed-turn-agent-task']).toBeUndefined()
+    if (resumedSession?.elapsedTimer) clearInterval(resumedSession.elapsedTimer)
+  })
+
+  it('keeps the global SubAgent stop latch when a replacement fails before replay', () => {
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          stopAllSubagentsRequested: true,
+        }),
+      },
+    })
+
+    useChatStore.getState().sendMessage(TEST_SESSION_ID, 'Replacement that will fail')
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'error',
+      message: 'Replacement rejected',
+      code: 'CLI_START_FAILED',
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.stopAllSubagentsRequested).toBe(true)
+    if (session?.elapsedTimer) clearInterval(session.elapsedTimer)
+  })
+
+  it('ends the global SubAgent stop latch on authoritative local-command output', () => {
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'thinking',
+          stopAllSubagentsRequested: true,
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_start',
+      blockType: 'text',
+    })
+
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]?.stopAllSubagentsRequested,
+    ).toBe(false)
+  })
+
+  it('ends the global SubAgent stop latch on authoritative /goal output', () => {
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'thinking',
+          stopAllSubagentsRequested: true,
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'goal_event',
+      message: 'Goal set: verify the replacement turn',
+      data: {
+        action: 'created',
+        status: 'active',
+        objective: 'verify the replacement turn',
+      },
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'message_complete',
+      usage: { input_tokens: 0, output_tokens: 0 },
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.stopAllSubagentsRequested).toBe(false)
+    expect(session?.chatState).toBe('idle')
+    expect(session?.activeGoal).toMatchObject({
+      action: 'created',
+      status: 'active',
+      objective: 'verify the replacement turn',
+    })
+    expect(session?.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'goal_event',
+        action: 'created',
+        objective: 'verify the replacement turn',
+      }),
+    ]))
+  })
+
+  it('ends the global stop latch when an authoritative replay starts the next turn', () => {
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          stopAllSubagentsRequested: true,
+          stoppingBackgroundTaskIds: { 'previous-turn-agent': true },
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'user_message_replay',
+      content: 'Start a turn from another renderer',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'task_started',
+      data: {
+        task_id: 'next-turn-agent',
+        tool_use_id: 'next-turn-agent-tool',
+        task_type: 'local_agent',
+        description: 'Belongs to the authoritative replayed turn',
+      },
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.stopAllSubagentsRequested).toBe(false)
+    expect(session?.stoppingBackgroundTaskIds).toEqual({ 'previous-turn-agent': true })
+    expect(session?.backgroundAgentTasks?.['next-turn-agent']?.status).toBe('running')
+  })
+
   it('refreshes merged slash commands when a live CLI update omits project commands', async () => {
     const cliCommand = { name: 'builtin-help', description: 'Built-in command' }
     const projectCommand = { name: 'project-probe', description: 'Project custom command' }
@@ -2630,15 +2859,52 @@ describe('chatStore history mapping', () => {
     })
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.connectionSnapshotReady).toBe(true)
 
+    useChatStore.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [TEST_SESSION_ID]: {
+          ...state.sessions[TEST_SESSION_ID]!,
+          stoppingBackgroundTaskIds: { 'agent-task-before-reconnect': true },
+        },
+      },
+    }))
+
     onConnectionState?.('reconnecting')
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]).toMatchObject({
       connectionState: 'reconnecting',
       connectionSnapshotReady: false,
+      stoppingBackgroundTaskIds: {},
     })
     onConnectionState?.('connected')
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]).toMatchObject({
       connectionState: 'connected',
       connectionSnapshotReady: false,
+    })
+  })
+
+  it('keeps global SubAgent stop markers visible while the socket reconnects', () => {
+    useChatStore.getState().connectToSession(TEST_SESSION_ID, {
+      prewarm: false,
+      applyRuntimeSelection: false,
+    })
+    const onConnectionState = connectionStateHandlers.get(TEST_SESSION_ID)
+    useChatStore.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [TEST_SESSION_ID]: {
+          ...state.sessions[TEST_SESSION_ID]!,
+          stopAllSubagentsRequested: true,
+          stoppingBackgroundTaskIds: { 'agent-task-stop-reconnect': true },
+        },
+      },
+    }))
+
+    onConnectionState?.('reconnecting')
+
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]).toMatchObject({
+      connectionState: 'reconnecting',
+      stopAllSubagentsRequested: true,
+      stoppingBackgroundTaskIds: { 'agent-task-stop-reconnect': true },
     })
   })
 
@@ -3808,6 +4074,199 @@ describe('chatStore history mapping', () => {
     expect(session?.messages).toHaveLength(1)
   })
 
+  it('replays a cold reconnect stop failure after task history hydrates', async () => {
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [],
+      taskNotifications: [],
+    })
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          historyStatus: 'loading',
+          backgroundAgentTasks: {},
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'background_task_stop_failed',
+      taskId: 'agent-task-cold-reconnect',
+      message: 'Remote archive could not be confirmed',
+    })
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]?.pendingBackgroundTaskStopFailures,
+    ).toEqual({
+      'agent-task-cold-reconnect': 'Remote archive could not be confirmed',
+    })
+
+    useChatStore.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [TEST_SESSION_ID]: {
+          ...state.sessions[TEST_SESSION_ID]!,
+          backgroundAgentTasks: {
+            'agent-task-cold-reconnect': {
+              taskId: 'agent-task-cold-reconnect',
+              toolUseId: 'agent-tool-cold-reconnect',
+              taskType: 'remote_agent',
+              status: 'running',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        },
+      },
+    }))
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.pendingBackgroundTaskStopFailures).toEqual({})
+    expect(session?.backgroundAgentTasks?.['agent-task-cold-reconnect']?.status).toBe('running')
+    expect(session?.messages.at(-1)).toMatchObject({
+      type: 'error',
+      code: 'STOP_BACKGROUND_TASK_FAILED',
+      message: 'Remote archive could not be confirmed',
+    })
+  })
+
+  it('surfaces a cold reconnect stop failure when task history fails to load', async () => {
+    let rejectHistory!: (error: Error) => void
+    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((_resolve, reject) => {
+      rejectHistory = reject
+    }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          backgroundAgentTasks: {},
+        }),
+      },
+    })
+
+    const historyLoad = useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('loading')
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'background_task_stop_failed',
+      taskId: 'agent-task-missing-history',
+      message: 'Agent could not be stopped',
+    })
+    rejectHistory(new Error('History unavailable'))
+    await historyLoad
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.historyStatus).toBe('error')
+    expect(session?.historyError).toBe('History unavailable')
+    expect(session?.pendingBackgroundTaskStopFailures).toEqual({})
+    expect(session?.messages.at(-1)).toMatchObject({
+      type: 'error',
+      code: 'STOP_BACKGROUND_TASK_FAILED',
+      message: 'Agent could not be stopped',
+    })
+  })
+
+  it('does not leave history loading after a failed stale request', async () => {
+    let rejectHistory!: (error: Error) => void
+    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((_resolve, reject) => {
+      rejectHistory = reject
+    }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'idle' }),
+      },
+    })
+
+    const historyLoad = useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('loading')
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'user_message_replay',
+      content: 'A newer externally started turn',
+    })
+
+    rejectHistory(new Error('Stale history failed'))
+    await historyLoad
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.historyStatus).toBe('idle')
+    expect(session?.historyError).toBeNull()
+    expect(session?.messages).toContainEqual(expect.objectContaining({
+      type: 'user_text',
+      content: 'A newer externally started turn',
+    }))
+  })
+
+  it('flushes a cached stop failure when a task start makes history stale', async () => {
+    let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
+    let resolveReload!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
+    vi.mocked(sessionsApi.getMessages)
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveHistory = resolve
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveReload = resolve
+      }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'idle' }),
+      },
+    })
+
+    const historyLoad = useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'background_task_stop_failed',
+      taskId: 'agent-task-cold-order',
+      message: 'Agent was still starting',
+    })
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]?.pendingBackgroundTaskStopFailures,
+    ).toEqual({ 'agent-task-cold-order': 'Agent was still starting' })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'task_started',
+      data: {
+        task_id: 'agent-task-cold-order',
+        tool_use_id: 'agent-tool-cold-order',
+        task_type: 'local_agent',
+        description: 'Late task start',
+      },
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+    resolveHistory({ messages: [], taskNotifications: [] })
+    await historyLoad
+
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+    })
+    resolveReload({
+      messages: [{
+        id: 'stale-reload-answer',
+        type: 'assistant',
+        timestamp: '2026-07-10T00:00:00.000Z',
+        content: [{ type: 'text', text: 'stale reload answer' }],
+      }],
+      taskNotifications: [],
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.historyStatus).toBe('idle')
+    expect(session?.pendingBackgroundTaskStopFailures).toEqual({})
+    expect(session?.backgroundAgentTasks?.['agent-task-cold-order']?.status).toBe('running')
+    expect(session?.messages.at(-1)).toMatchObject({
+      type: 'error',
+      code: 'STOP_BACKGROUND_TASK_FAILED',
+      message: 'Agent was still starting',
+    })
+    expect(session?.messages).not.toContainEqual(expect.objectContaining({
+      type: 'assistant_text',
+      content: 'stale reload answer',
+    }))
+  })
+
   it('clears local desktop chat state when the server confirms /clear', () => {
     vi.useFakeTimers()
 
@@ -3833,6 +4292,13 @@ describe('chatStore history mapping', () => {
           statusVerb: 'Thinking',
           slashCommands: [],
           agentTaskNotifications: {},
+          queuedUserMessages: [{
+            id: 'queued-before-clear',
+            content: 'do not replay after clear',
+            displayContent: 'do not replay after clear',
+            attachments: [],
+            createdAt: Date.now(),
+          }],
           elapsedTimer: null,
         },
       },
@@ -3847,9 +4313,19 @@ describe('chatStore history mapping', () => {
       subtype: 'session_cleared',
       message: 'Conversation cleared',
     })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'message_complete',
+      usage: { input_tokens: 0, output_tokens: 0 },
+    })
 
     const session = useChatStore.getState().sessions[TEST_SESSION_ID]
     expect(session?.messages).toEqual([])
+    expect(session?.queuedUserMessages).toEqual([])
+    expect(sendMock).not.toHaveBeenCalledWith(TEST_SESSION_ID, {
+      type: 'user_message',
+      content: 'do not replay after clear',
+      attachments: [],
+    })
     expect(session?.streamingText).toBe('')
     expect(session?.chatState).toBe('idle')
     expect(session?.tokenUsage).toEqual({ input_tokens: 0, output_tokens: 0 })
@@ -3862,6 +4338,79 @@ describe('chatStore history mapping', () => {
     vi.advanceTimersByTime(60)
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.streamingText).toBe('')
     vi.useRealTimers()
+  })
+
+  it('does not restore cleared messages or tasks from an in-flight history load', async () => {
+    let resolveHistory!: (value: {
+      messages: MessageEntry[]
+      taskNotifications: Array<{
+        taskId: string
+        toolUseId: string
+        status: 'completed'
+        summary: string
+        timestamp: string
+      }>
+    }) => void
+    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+      resolveHistory = resolve
+    }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          messages: [{ id: 'old-user', type: 'user_text', content: 'old turn', timestamp: 1 }],
+          backgroundAgentTasks: {
+            'old-agent': {
+              taskId: 'old-agent',
+              toolUseId: 'old-agent-tool',
+              taskType: 'local_agent',
+              status: 'running',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        }),
+      },
+    })
+
+    const historyLoad = useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('loading')
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'session_cleared',
+      message: 'Conversation cleared',
+    })
+
+    resolveHistory({
+      messages: [
+        {
+          id: 'stale-user',
+          type: 'user',
+          timestamp: '2026-07-10T00:00:00.000Z',
+          content: 'stale prompt',
+        },
+        {
+          id: 'stale-assistant',
+          type: 'assistant',
+          timestamp: '2026-07-10T00:00:01.000Z',
+          content: [{ type: 'text', text: 'stale answer' }],
+        },
+      ],
+      taskNotifications: [{
+        taskId: 'old-agent',
+        toolUseId: 'old-agent-tool',
+        status: 'completed',
+        summary: 'Stale task completion',
+        timestamp: '2026-07-10T00:00:02.000Z',
+      }],
+    })
+    await historyLoad
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.messages).toEqual([])
+    expect(session?.backgroundAgentTasks).toEqual({})
+    expect(session?.agentTaskNotifications).toEqual({})
+    expect(session?.historyStatus).toBe('ready')
   })
 
   it('clears local message state for only the requested session', () => {
@@ -4259,6 +4808,716 @@ describe('chatStore history mapping', () => {
       type: 'assistant_text',
       content: 'Finished while the socket was offline.',
     }))
+  })
+
+  it('reconciles a persisted stopped SubAgent after its terminal event was missed offline', async () => {
+    vi.mocked(sessionsApi.getMessages).mockClear()
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [],
+      taskNotifications: [
+        {
+          taskId: 'agent-task-1',
+          toolUseId: 'agent-tool-1',
+          status: 'stopped',
+          summary: 'Agent was stopped while the renderer was offline',
+          timestamp: '2026-07-10T00:00:00.000Z',
+        },
+      ],
+    })
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          stopAllSubagentsRequested: true,
+          backgroundAgentTasks: {
+            'agent-task-1': {
+              taskId: 'agent-task-1',
+              toolUseId: 'agent-tool-1',
+              status: 'running',
+              taskType: 'local_agent',
+              description: 'Review screenshots',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().sessions[TEST_SESSION_ID]
+          ?.backgroundAgentTasks?.['agent-task-1']?.status,
+      ).toBe('stopped')
+    })
+    expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+    expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'idle')
+  })
+
+  it('keeps a genuinely running SubAgent when idle reconnect history has no terminal event', async () => {
+    vi.mocked(sessionsApi.getMessages).mockClear()
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [],
+      taskNotifications: [],
+    })
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          backgroundAgentTasks: {
+            'agent-task-1': {
+              taskId: 'agent-task-1',
+              toolUseId: 'agent-tool-1',
+              status: 'running',
+              taskType: 'local_agent',
+              description: 'Still reviewing screenshots',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'running')
+    })
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]
+        ?.backgroundAgentTasks?.['agent-task-1']?.status,
+    ).toBe('running')
+  })
+
+  it('does not let an older persisted terminal overwrite a new lifecycle with the same Agent id', async () => {
+    vi.mocked(sessionsApi.getMessages).mockClear()
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [],
+      taskNotifications: [
+        {
+          taskId: 'agent-task-reused',
+          toolUseId: 'agent-tool-reused',
+          status: 'stopped',
+          summary: 'Previous lifecycle stopped',
+          timestamp: '2026-07-10T00:00:00.000Z',
+        },
+      ],
+    })
+    const newLifecycleStartedAt = new Date('2026-07-11T00:00:00.000Z').getTime()
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          backgroundAgentTasks: {
+            'agent-task-reused': {
+              taskId: 'agent-task-reused',
+              toolUseId: 'agent-tool-reused',
+              status: 'running',
+              taskType: 'local_agent',
+              description: 'New lifecycle is still reviewing',
+              startedAt: newLifecycleStartedAt,
+              updatedAt: newLifecycleStartedAt,
+            },
+          },
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'running')
+    })
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]
+        ?.backgroundAgentTasks?.['agent-task-reused']?.status,
+    ).toBe('running')
+  })
+
+  it('lets fresh reconnect reconciliation follow an older in-flight history load', async () => {
+    let resolveOlderHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
+    vi.mocked(sessionsApi.getMessages).mockClear()
+    vi.mocked(sessionsApi.getMessages)
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveOlderHistory = resolve
+      }))
+      .mockResolvedValueOnce({
+        messages: [],
+        taskNotifications: [
+          {
+            taskId: 'agent-task-history-order',
+            toolUseId: 'agent-tool-history-order',
+            status: 'stopped',
+            summary: 'Fresh history observed the stopped Agent',
+            timestamp: '2026-07-12T00:00:00.000Z',
+          },
+        ],
+      })
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          backgroundAgentTasks: {
+            'agent-task-history-order': {
+              taskId: 'agent-task-history-order',
+              toolUseId: 'agent-tool-history-order',
+              status: 'running',
+              taskType: 'local_agent',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        }),
+      },
+    })
+
+    const olderLoad = useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+    resolveOlderHistory({ messages: [], taskNotifications: [] })
+    await olderLoad
+
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(
+        useChatStore.getState().sessions[TEST_SESSION_ID]
+          ?.backgroundAgentTasks?.['agent-task-history-order']?.status,
+      ).toBe('stopped')
+    })
+  })
+
+  it('does not let an older concurrent reload overwrite the latest history snapshot', async () => {
+    let resolveOlderReload!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
+    let resolveLatestReload!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
+    vi.mocked(sessionsApi.getMessages)
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveOlderReload = resolve
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveLatestReload = resolve
+      }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          backgroundAgentTasks: {
+            'agent-task-concurrent-reload': {
+              taskId: 'agent-task-concurrent-reload',
+              toolUseId: 'agent-tool-concurrent-reload',
+              taskType: 'local_agent',
+              status: 'running',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+    })
+
+    resolveLatestReload({
+      messages: [{
+        id: 'latest-history-answer',
+        type: 'assistant',
+        timestamp: '2026-07-12T00:00:01.000Z',
+        content: [{ type: 'text', text: 'latest history answer' }],
+      }],
+      taskNotifications: [],
+    })
+    await vi.waitFor(() => {
+      expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toContainEqual(
+        expect.objectContaining({
+          type: 'assistant_text',
+          content: 'latest history answer',
+        }),
+      )
+    })
+
+    resolveOlderReload({
+      messages: [{
+        id: 'older-history-answer',
+        type: 'assistant',
+        timestamp: '2026-07-12T00:00:00.000Z',
+        content: [{ type: 'text', text: 'older history answer' }],
+      }],
+      taskNotifications: [],
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const messages = useChatStore.getState().sessions[TEST_SESSION_ID]?.messages ?? []
+    expect(messages).toContainEqual(expect.objectContaining({
+      type: 'assistant_text',
+      content: 'latest history answer',
+    }))
+    expect(messages).not.toContainEqual(expect.objectContaining({
+      type: 'assistant_text',
+      content: 'older history answer',
+    }))
+  })
+
+  it('does not let delayed idle task reconciliation overwrite a newly sent turn', async () => {
+    let resolveHistory!: (value: {
+      messages: MessageEntry[]
+      taskNotifications: Array<{
+        taskId: string
+        toolUseId: string
+        status: 'stopped'
+        summary: string
+        timestamp: string
+      }>
+    }) => void
+    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+      resolveHistory = resolve
+    }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          stopAllSubagentsRequested: true,
+          messages: [{ id: 'old-user', type: 'user_text', content: 'old turn', timestamp: 1 }],
+          backgroundAgentTasks: {
+            'agent-task-1': {
+              taskId: 'agent-task-1',
+              toolUseId: 'agent-tool-1',
+              status: 'running',
+              taskType: 'local_agent',
+              description: 'Review screenshots',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+    })
+    useChatStore.getState().sendMessage(TEST_SESSION_ID, 'new turn')
+
+    resolveHistory({
+      messages: [],
+      taskNotifications: [
+        {
+          taskId: 'agent-task-1',
+          toolUseId: 'agent-tool-1',
+          status: 'stopped',
+          summary: 'Agent was stopped while the renderer was offline',
+          timestamp: '2026-07-10T00:00:00.000Z',
+        },
+      ],
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.chatState).toBe('thinking')
+    expect(session?.messages).toContainEqual(expect.objectContaining({
+      type: 'user_text',
+      content: 'new turn',
+    }))
+    expect(session?.backgroundAgentTasks?.['agent-task-1']?.status).toBe('running')
+    expect(session?.agentTaskNotifications?.['agent-tool-1']).toBeUndefined()
+    if (session?.elapsedTimer) clearInterval(session.elapsedTimer)
+  })
+
+  it('does not let delayed idle reconciliation overwrite an externally completed turn', async () => {
+    let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
+    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+      resolveHistory = resolve
+    }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          stopAllSubagentsRequested: true,
+          messages: [{ id: 'old-user', type: 'user_text', content: 'old turn', timestamp: 1 }],
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'user_message_replay',
+      content: 'externally started turn',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_start',
+      blockType: 'text',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_delta',
+      text: 'external answer',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'message_complete',
+      usage: { input_tokens: 3, output_tokens: 2 },
+    })
+
+    resolveHistory({
+      messages: [{
+        id: 'stale-assistant',
+        type: 'assistant',
+        timestamp: '2026-07-10T00:00:00.000Z',
+        content: [{ type: 'text', text: 'stale completed answer' }],
+      }],
+      taskNotifications: [],
+    })
+
+    await vi.waitFor(() => {
+      const messages = useChatStore.getState().sessions[TEST_SESSION_ID]?.messages ?? []
+      expect(messages).toContainEqual(expect.objectContaining({
+        type: 'assistant_text',
+        content: 'external answer',
+      }))
+    })
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.chatState).toBe('idle')
+    expect(session?.messages).toContainEqual(expect.objectContaining({
+      type: 'user_text',
+      content: 'externally started turn',
+    }))
+    expect(session?.messages).not.toContainEqual(expect.objectContaining({
+      type: 'assistant_text',
+      content: 'stale completed answer',
+    }))
+    if (session?.elapsedTimer) clearInterval(session.elapsedTimer)
+  })
+
+  it('protects a live completion from reconciliation started after its user replay', async () => {
+    let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
+    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+      resolveHistory = resolve
+    }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          backgroundAgentTasks: {
+            'agent-task-existing': {
+              taskId: 'agent-task-existing',
+              toolUseId: 'agent-tool-existing',
+              taskType: 'local_agent',
+              status: 'running',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'user_message_replay',
+      content: 'external turn already replayed',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_start',
+      blockType: 'text',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_delta',
+      text: 'live completion after replay',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'message_complete',
+      usage: { input_tokens: 4, output_tokens: 4 },
+    })
+    resolveHistory({
+      messages: [{
+        id: 'stale-after-replay',
+        type: 'assistant',
+        timestamp: '2026-07-10T00:00:00.000Z',
+        content: [{ type: 'text', text: 'stale answer fetched after replay' }],
+      }],
+      taskNotifications: [],
+    })
+
+    await vi.waitFor(() => {
+      expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toContainEqual(
+        expect.objectContaining({
+          type: 'assistant_text',
+          content: 'live completion after replay',
+        }),
+      )
+    })
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).not.toContainEqual(
+      expect.objectContaining({
+        type: 'assistant_text',
+        content: 'stale answer fetched after replay',
+      }),
+    )
+  })
+
+  it('does not let delayed idle reconciliation overwrite a live API error', async () => {
+    let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
+    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+      resolveHistory = resolve
+    }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          stopAllSubagentsRequested: true,
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'error',
+      message: 'Model API request failed',
+      code: 'API_ERROR',
+    })
+
+    resolveHistory({
+      messages: [{
+        id: 'stale-before-error',
+        type: 'assistant',
+        timestamp: '2026-07-10T00:00:00.000Z',
+        content: [{ type: 'text', text: 'stale answer before error' }],
+      }],
+      taskNotifications: [],
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.chatState).toBe('idle')
+    expect(session?.messages).toContainEqual(expect.objectContaining({
+      type: 'error',
+      code: 'API_ERROR',
+      message: 'Model API request failed',
+    }))
+    expect(session?.messages).not.toContainEqual(expect.objectContaining({
+      type: 'assistant_text',
+      content: 'stale answer before error',
+    }))
+  })
+
+  it('does not let delayed idle reconciliation overwrite a known stop failure', async () => {
+    let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
+    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+      resolveHistory = resolve
+    }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          stopAllSubagentsRequested: true,
+          stoppingBackgroundTaskIds: { 'agent-task-stop-failed': true },
+          backgroundAgentTasks: {
+            'agent-task-stop-failed': {
+              taskId: 'agent-task-stop-failed',
+              toolUseId: 'agent-tool-stop-failed',
+              taskType: 'local_agent',
+              status: 'running',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'background_task_stop_failed',
+      taskId: 'agent-task-stop-failed',
+      message: 'The server could not stop this Agent',
+    })
+
+    resolveHistory({
+      messages: [{
+        id: 'stale-assistant',
+        type: 'assistant',
+        timestamp: '2026-07-10T00:00:00.000Z',
+        content: [{ type: 'text', text: 'stale history' }],
+      }],
+      taskNotifications: [],
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.stoppingBackgroundTaskIds).toEqual({})
+    expect(session?.messages).toContainEqual(expect.objectContaining({
+      type: 'error',
+      code: 'STOP_BACKGROUND_TASK_FAILED',
+      message: 'The server could not stop this Agent',
+    }))
+    expect(session?.messages).not.toContainEqual(expect.objectContaining({
+      type: 'assistant_text',
+      content: 'stale history',
+    }))
+  })
+
+  it('does not let delayed idle reconciliation discard a newly started Agent', async () => {
+    let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
+    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+      resolveHistory = resolve
+    }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          stopAllSubagentsRequested: true,
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'task_started',
+      data: {
+        task_id: 'agent-task-started-during-reload',
+        tool_use_id: 'agent-tool-started-during-reload',
+        task_type: 'local_agent',
+        description: 'New Agent lifecycle',
+      },
+    })
+
+    resolveHistory({ messages: [], taskNotifications: [] })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.backgroundAgentTasks?.['agent-task-started-during-reload']).toMatchObject({
+      status: 'running',
+      taskType: 'local_agent',
+      description: 'New Agent lifecycle',
+    })
+    expect(session?.stoppingBackgroundTaskIds).toEqual({
+      'agent-task-started-during-reload': true,
+    })
+    expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'running')
+  })
+
+  it('does not let delayed idle reconciliation discard a terminal Agent notification', async () => {
+    let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
+    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+      resolveHistory = resolve
+    }))
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          stopAllSubagentsRequested: true,
+          stoppingBackgroundTaskIds: { 'agent-task-terminal-during-reload': true },
+          backgroundAgentTasks: {
+            'agent-task-terminal-during-reload': {
+              taskId: 'agent-task-terminal-during-reload',
+              toolUseId: 'agent-tool-terminal-during-reload',
+              taskType: 'local_agent',
+              status: 'running',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+    })
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'task_notification',
+      data: {
+        task_id: 'agent-task-terminal-during-reload',
+        tool_use_id: 'agent-tool-terminal-during-reload',
+        task_type: 'local_agent',
+        status: 'stopped',
+        summary: 'Agent stopped while history was loading',
+        result: 'Stopped by user',
+      },
+    })
+
+    resolveHistory({ messages: [], taskNotifications: [] })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.backgroundAgentTasks?.['agent-task-terminal-during-reload']).toMatchObject({
+      status: 'stopped',
+      summary: 'Agent stopped while history was loading',
+      result: 'Stopped by user',
+    })
+    expect(session?.agentTaskNotifications?.['agent-tool-terminal-during-reload']).toMatchObject({
+      status: 'stopped',
+      summary: 'Agent stopped while history was loading',
+      result: 'Stopped by user',
+    })
+    expect(session?.stoppingBackgroundTaskIds).toEqual({})
+    expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'idle')
   })
 
   it('does not let delayed reconnect history overwrite a newly sent turn', async () => {

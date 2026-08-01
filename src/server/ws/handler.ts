@@ -47,6 +47,7 @@ import {
   type TitleConversationTurn,
 } from '../services/titleService.js'
 import { parseSlashCommand } from '../../utils/slashCommandParsing.js'
+import { archiveRemoteSession } from '../../utils/teleport/api.js'
 import {
   COMMAND_NAME_TAG,
   LOCAL_COMMAND_STDERR_TAG,
@@ -107,29 +108,6 @@ const sessionDisconnectWatchers = new Map<string, () => void>()
  */
 const sessionStopRequested = new Set<string>()
 
-function isStoppedTurnForegroundMessage(message: ServerMessage): boolean {
-  switch (message.type) {
-    case 'content_start':
-    case 'content_delta':
-    case 'tool_use_complete':
-    case 'tool_result':
-    case 'permission_request':
-    case 'computer_use_permission_request':
-    case 'user_message_replay':
-    case 'thinking':
-    case 'api_retry':
-    case 'streaming_fallback':
-    case 'error':
-      return true
-    case 'status':
-      return message.state !== 'idle'
-    case 'session_state':
-      return message.turnState === 'running'
-    default:
-      return false
-  }
-}
-
 /**
  * Track user message count and title state per session for auto-title generation.
  */
@@ -151,11 +129,52 @@ type RuntimeOverride = {
 
 type ActiveUserTurnState = {
   messageSent: boolean
+  sendStarted?: boolean
+  interruptBoundaryPending?: boolean
+  replacementAfterStop?: boolean
+  expectedReplayUuid?: string
+  expectedLocalCommand?: NonNullable<ReturnType<typeof parseSlashCommand>>
+  cancelled?: boolean
+}
+
+type AgentTaskType = 'local_agent' | 'remote_agent'
+
+type ActiveNonAgentTaskState = {
+  taskId: string
+  taskType?: string
+  toolUseId: string
+  description?: string
+}
+
+type ActiveAgentTaskState = {
+  taskId: string
+  taskType: AgentTaskType
+  toolUseId: string
+  remoteSessionId?: string
+  description?: string
+  stopIntent: boolean
+  stopRequested: boolean
+  localStopConfirmed: boolean
+  bookendPending: boolean
+  finalizationRetryCount: number
+  finalizationRetryTimer?: ReturnType<typeof setTimeout>
+  finalization?: Promise<boolean>
+  remoteArchive?: Promise<boolean>
+  remoteArchiveError?: string
+  stopFailureMessage?: string
 }
 
 const runtimeOverrides = new Map<string, RuntimeOverride>()
 const activeUserTurns = new Map<string, ActiveUserTurnState>()
 const activeBackgroundTaskIds = new Map<string, Set<string>>()
+const activeAgentTasks = new Map<string, Map<string, ActiveAgentTaskState>>()
+const activeNonAgentTasks = new Map<string, Map<string, ActiveNonAgentTaskState>>()
+const authoritativeStoppedTaskIds = new Map<string, Set<string>>()
+const agentStopRequestedSessions = new Set<string>()
+const runtimeExitStoppedSessions = new Set<string>()
+const pendingInterruptedTurnResults = new Map<string, number>()
+const interruptedTurnResultMessages = new WeakMap<object, string>()
+const sessionClearInProgress = new Set<string>()
 const deferredRuntimeRestarts = new Map<string, RuntimeOverride>()
 const deferredPermissionModes = new Map<string, PermissionMode>()
 
@@ -208,19 +227,35 @@ function settleSessionChatActivity(sessionId: string, cliMsg: any): void {
 type CliBackgroundTaskLifecycle = {
   taskId: string
   running: boolean
+  taskType?: string
+  toolUseId?: string
+  remoteSessionId?: string
+  description?: string
+  status?: string
+  suppressForward?: boolean
 }
 
 function getCliBackgroundTaskLifecycle(cliMsg: any): CliBackgroundTaskLifecycle | null {
   if (cliMsg?.type !== 'system') return null
   const taskId = typeof cliMsg.task_id === 'string' ? cliMsg.task_id.trim() : ''
   if (!taskId) return null
+  const optionalString = (value: unknown) =>
+    typeof value === 'string' && value.trim() ? value.trim() : undefined
+  const taskType = typeof cliMsg.task_type === 'string' && cliMsg.task_type.trim()
+    ? cliMsg.task_type.trim()
+    : undefined
+  const toolUseId = optionalString(cliMsg.tool_use_id)
+  const remoteSessionId = optionalString(cliMsg.remote_session_id)
+  const description = optionalString(cliMsg.description) ??
+    optionalString(cliMsg.message) ??
+    optionalString(cliMsg.title)
 
   if (cliMsg.subtype === 'task_started') {
-    return { taskId, running: true }
+    return { taskId, running: true, taskType, toolUseId, remoteSessionId, description }
   }
 
   if (cliMsg.subtype === 'task_notification' && cliMsg.status === 'running') {
-    return { taskId, running: true }
+    return { taskId, running: true, taskType, toolUseId, remoteSessionId, description }
   }
 
   if (
@@ -230,18 +265,110 @@ function getCliBackgroundTaskLifecycle(cliMsg: any): CliBackgroundTaskLifecycle 
       cliMsg.status === 'stopped' ||
       cliMsg.status === 'killed')
   ) {
-    return { taskId, running: false }
+    return { taskId, running: false, status: cliMsg.status }
   }
 
   return null
+}
+
+function isAgentTaskType(taskType: string | undefined): taskType is AgentTaskType {
+  return taskType === 'local_agent' || taskType === 'remote_agent'
+}
+
+function untrackCliBackgroundTask(sessionId: string, taskId: string): void {
+  const taskIds = activeBackgroundTaskIds.get(sessionId)
+  taskIds?.delete(taskId)
+  if (taskIds?.size === 0) activeBackgroundTaskIds.delete(sessionId)
+
+  const sessionAgentTasks = activeAgentTasks.get(sessionId)
+  const agentTask = sessionAgentTasks?.get(taskId)
+  if (agentTask?.finalizationRetryTimer !== undefined) {
+    clearTimeout(agentTask.finalizationRetryTimer)
+  }
+  sessionAgentTasks?.delete(taskId)
+  if (sessionAgentTasks?.size === 0) activeAgentTasks.delete(sessionId)
+
+  const sessionNonAgentTasks = activeNonAgentTasks.get(sessionId)
+  sessionNonAgentTasks?.delete(taskId)
+  if (sessionNonAgentTasks?.size === 0) activeNonAgentTasks.delete(sessionId)
+}
+
+function clearAgentRuntimeState(
+  sessionId: string,
+  options?: { preserveRetryableStops?: boolean },
+): void {
+  const retryableStops = options?.preserveRetryableStops
+    ? new Map(
+        [...(activeAgentTasks.get(sessionId)?.entries() ?? [])].filter(([, task]) =>
+          task.stopIntent && task.localStopConfirmed && Boolean(task.stopFailureMessage),
+        ),
+      )
+    : new Map<string, ActiveAgentTaskState>()
+
+  for (const task of activeAgentTasks.get(sessionId)?.values() ?? []) {
+    clearAgentStopFinalizationRetry(task)
+  }
+  activeBackgroundTaskIds.delete(sessionId)
+  activeAgentTasks.delete(sessionId)
+  activeNonAgentTasks.delete(sessionId)
+  authoritativeStoppedTaskIds.delete(sessionId)
+  agentStopRequestedSessions.delete(sessionId)
+  runtimeExitStoppedSessions.delete(sessionId)
+
+  if (retryableStops.size > 0) {
+    activeAgentTasks.set(sessionId, retryableStops)
+    activeBackgroundTaskIds.set(sessionId, new Set(retryableStops.keys()))
+    agentStopRequestedSessions.add(sessionId)
+  }
+}
+
+function markTaskAuthoritativelyStopped(sessionId: string, taskId: string): void {
+  let taskIds = authoritativeStoppedTaskIds.get(sessionId)
+  if (!taskIds) {
+    taskIds = new Set()
+    authoritativeStoppedTaskIds.set(sessionId, taskIds)
+  }
+  taskIds.add(taskId)
 }
 
 function trackCliBackgroundTaskLifecycle(
   sessionId: string,
   cliMsg: any,
 ): CliBackgroundTaskLifecycle | null {
+  const rawTaskId = cliMsg?.type === 'system' && typeof cliMsg.task_id === 'string'
+    ? cliMsg.task_id.trim()
+    : ''
+  if (rawTaskId && authoritativeStoppedTaskIds.get(sessionId)?.has(rawTaskId)) {
+    // The lifecycle parser intentionally ignores progress and tool-activity
+    // messages. Check the raw task id first so no late task-scoped event can
+    // revive an Agent after its durable stopped bookend has been published.
+    return {
+      taskId: rawTaskId,
+      running: false,
+      status: 'stopped',
+      suppressForward: true,
+    }
+  }
+
   const lifecycle = getCliBackgroundTaskLifecycle(cliMsg)
   if (!lifecycle) return null
+
+  const existingAgentTask = activeAgentTasks.get(sessionId)?.get(lifecycle.taskId)
+  if (
+    lifecycle.running &&
+    existingAgentTask?.stopIntent &&
+    existingAgentTask.localStopConfirmed
+  ) {
+    // Once the local task has acknowledged Stop, any queued start/progress
+    // event is stale. Do not let it revive Activity or cancel idle cleanup
+    // while strict archive/bookend finalization is being retried.
+    return {
+      ...lifecycle,
+      running: false,
+      status: 'stopped',
+      suppressForward: true,
+    }
+  }
 
   if (lifecycle.running) {
     let taskIds = activeBackgroundTaskIds.get(sessionId)
@@ -250,17 +377,73 @@ function trackCliBackgroundTaskLifecycle(
       activeBackgroundTaskIds.set(sessionId, taskIds)
     }
     taskIds.add(lifecycle.taskId)
+    if (isAgentTaskType(lifecycle.taskType)) {
+      let sessionAgentTasks = activeAgentTasks.get(sessionId)
+      if (!sessionAgentTasks) {
+        sessionAgentTasks = new Map()
+        activeAgentTasks.set(sessionId, sessionAgentTasks)
+      }
+      const existing = sessionAgentTasks.get(lifecycle.taskId)
+      if (existing) {
+        existing.toolUseId = lifecycle.toolUseId ?? existing.toolUseId
+        if (lifecycle.remoteSessionId) existing.remoteSessionId = lifecycle.remoteSessionId
+        if (lifecycle.description) existing.description = lifecycle.description
+      } else {
+        sessionAgentTasks.set(lifecycle.taskId, {
+          taskId: lifecycle.taskId,
+          taskType: lifecycle.taskType,
+          toolUseId: lifecycle.toolUseId ?? lifecycle.taskId,
+          ...(lifecycle.remoteSessionId
+            ? { remoteSessionId: lifecycle.remoteSessionId }
+            : {}),
+          ...(lifecycle.description ? { description: lifecycle.description } : {}),
+          stopIntent: false,
+          stopRequested: false,
+          localStopConfirmed: false,
+          bookendPending: false,
+          finalizationRetryCount: 0,
+        })
+      }
+    } else {
+      let sessionNonAgentTasks = activeNonAgentTasks.get(sessionId)
+      if (!sessionNonAgentTasks) {
+        sessionNonAgentTasks = new Map()
+        activeNonAgentTasks.set(sessionId, sessionNonAgentTasks)
+      }
+      sessionNonAgentTasks.set(lifecycle.taskId, {
+        taskId: lifecycle.taskId,
+        ...(lifecycle.taskType ? { taskType: lifecycle.taskType } : {}),
+        toolUseId: lifecycle.toolUseId ?? lifecycle.taskId,
+        ...(lifecycle.description ? { description: lifecycle.description } : {}),
+      })
+    }
     return lifecycle
   }
 
-  const taskIds = activeBackgroundTaskIds.get(sessionId)
-  taskIds?.delete(lifecycle.taskId)
-  if (taskIds?.size === 0) activeBackgroundTaskIds.delete(sessionId)
+  const sessionAgentTasks = activeAgentTasks.get(sessionId)
+  const agentTask = sessionAgentTasks?.get(lifecycle.taskId)
+  if (agentTask?.stopIntent) {
+    // A terminal event proves the local Agent process/poller has stopped. Turn
+    // it into the same durable synthetic bookend used by the control response
+    // so a renderer that disconnected during Stop can reconcile from history.
+    // Remote Agents additionally remain gated on strict archive confirmation.
+    agentTask.localStopConfirmed = true
+    void emitAuthoritativeAgentStopped(sessionId, agentTask)
+    return { ...lifecycle, suppressForward: true }
+  }
+
+  untrackCliBackgroundTask(sessionId, lifecycle.taskId)
   return lifecycle
 }
 
 function hasActiveBackgroundTasks(sessionId: string): boolean {
-  return (activeBackgroundTaskIds.get(sessionId)?.size ?? 0) > 0
+  const taskIds = activeBackgroundTaskIds.get(sessionId)
+  if (!taskIds || taskIds.size === 0) return false
+  const sessionAgentTasks = activeAgentTasks.get(sessionId)
+  return [...taskIds].some((taskId) => {
+    const agentTask = sessionAgentTasks?.get(taskId)
+    return !agentTask || !agentTask.localStopConfirmed || agentTask.bookendPending
+  })
 }
 
 export function getSessionChatActivityState(sessionId: string): SessionChatActivityState {
@@ -377,6 +560,7 @@ const clientOutputCallbacks = new Map<
   }
 >()
 const taskNotificationPersistence = new Map<string, Map<string, Promise<void>>>()
+const sessionTranscriptEpochs = new Map<string, number>()
 
 export const handleWebSocket = {
   open(ws: ServerWebSocket<WebSocketData>) {
@@ -429,15 +613,24 @@ export const handleWebSocket = {
       type: 'permission_requests_snapshot',
       toolRequestIds,
       computerUseRequestIds,
-      turnActive:
-        hasPendingOrActiveUserTurn(sessionId) && !sessionStopRequested.has(sessionId),
+      turnActive: hasLiveUserTurnForClient(sessionId),
     })
+    replayAgentStopFailures(ws, sessionId)
   },
 
   message(ws: ServerWebSocket<WebSocketData>, rawMessage: string | Buffer) {
     if (ws.data.channel === 'sdk') {
+      const { sessionId, sdkToken } = ws.data
+      if (!conversationService.authorizeSdkConnection(sessionId, sdkToken)) {
+        console.warn(`[WS] Rejected stale SDK message for session: ${sessionId}`)
+        ws.close(1008, 'Stale SDK token')
+        return
+      }
       const payload = typeof rawMessage === 'string' ? rawMessage : rawMessage.toString()
-      conversationService.handleSdkPayload(ws.data.sessionId, payload)
+      conversationService.handleSdkPayload(sessionId, payload, {
+        canAcceptPermissionRequest: (message) =>
+          canAcceptPermissionRequestDuringStop(sessionId, message),
+      })
       return
     }
 
@@ -471,7 +664,10 @@ export const handleWebSocket = {
             // A queued/newer turn may have replaced this handler while an
             // earlier await was pending. Only the handler that still owns the
             // active-turn token may terminate the desktop state.
-            if (activeUserTurns.get(sessionId) === activeTurn) {
+            if (
+              activeUserTurns.get(sessionId) === activeTurn &&
+              !activeTurn.cancelled
+            ) {
               failSessionChatActivity(sessionId)
               clearActiveUserTurn(sessionId, activeTurn)
               const titleState = sessionTitleState.get(sessionId)
@@ -511,9 +707,7 @@ export const handleWebSocket = {
         case 'sync_state':
           sendMessage(ws, {
             type: 'session_state',
-            turnState:
-              hasPendingOrActiveUserTurn(ws.data.sessionId) &&
-              !sessionStopRequested.has(ws.data.sessionId)
+            turnState: hasLiveUserTurnForClient(ws.data.sessionId)
               ? 'running'
               : 'idle',
           })
@@ -613,18 +807,27 @@ async function handleUserMessage(
     return
   }
 
-  // A validated replacement turn supersedes any stopped-turn output fence.
-  sessionStopRequested.delete(sessionId)
+  // Keep a stopped-turn fence until the replacement replay proves that later
+  // output belongs to this turn, while allowing validated input to start its
+  // own activity lifecycle.
   beginSessionChatActivity(sessionId)
   clearPrewarmState(sessionId)
 
   // Send thinking status
   sendMessage(ws, { type: 'status', state: 'thinking', verb: 'Thinking' })
 
+  activeTurn.expectedReplayUuid = crypto.randomUUID()
+  activeTurn.expectedLocalCommand = desktopSlashCommand ?? undefined
+  activeTurn.replacementAfterStop =
+    sessionStopRequested.has(sessionId) || agentStopRequestedSessions.has(sessionId)
   activeUserTurns.set(sessionId, activeTurn)
 
   const initialRuntimeTransition = await waitForRuntimeTransitionBeforeUserTurn(ws, sessionId)
-  if (!initialRuntimeTransition.ok) {
+  if (
+    !initialRuntimeTransition.ok ||
+    activeUserTurns.get(sessionId) !== activeTurn ||
+    activeTurn.cancelled
+  ) {
     clearActiveUserTurn(sessionId, activeTurn)
     return
   }
@@ -635,9 +838,11 @@ async function handleUserMessage(
   // Track and emit the first placeholder title before CLI startup/streaming.
   let titleState = sessionTitleState.get(sessionId)
   if (!titleState) {
+    const hasCustomTitle = !!(await sessionService.getCustomTitle(sessionId))
+    if (activeUserTurns.get(sessionId) !== activeTurn || activeTurn.cancelled) return
     titleState = {
       userMessageCount: 0,
-      hasCustomTitle: !!(await sessionService.getCustomTitle(sessionId)),
+      hasCustomTitle,
       firstUserMessage: '',
       completedTurns: [],
       startedGenerationKeys: new Set<string>(),
@@ -665,13 +870,16 @@ async function handleUserMessage(
   try {
     await ensureCliSessionStarted(ws, sessionId, 'user_message')
   } catch (err) {
+    if (activeUserTurns.get(sessionId) !== activeTurn || activeTurn.cancelled) return
     const errMsg = err instanceof Error ? err.message : String(err)
     const code =
       err instanceof ConversationStartupError ? err.code : 'CLI_START_FAILED'
     console.error(`[WS] CLI start failed for ${sessionId}: ${errMsg}`)
+    const diagnosticMessage = await buildSessionStartupDiagnosticMessage(sessionId, errMsg)
+    if (activeUserTurns.get(sessionId) !== activeTurn || activeTurn.cancelled) return
     sendMessage(ws, {
       type: 'error',
-      message: await buildSessionStartupDiagnosticMessage(sessionId, errMsg),
+      message: diagnosticMessage,
       code,
       retryable:
         err instanceof ConversationStartupError ? err.retryable : false,
@@ -682,8 +890,17 @@ async function handleUserMessage(
     return
   }
 
+  if (activeUserTurns.get(sessionId) !== activeTurn || activeTurn.cancelled) {
+    stopRuntimeStartedByCancelledAdmission(sessionId, activeTurn)
+    return
+  }
+
   const startupRuntimeTransition = await waitForRuntimeTransitionBeforeUserTurn(ws, sessionId)
-  if (startupRuntimeTransition.ok) {
+  if (
+    startupRuntimeTransition.ok &&
+    activeUserTurns.get(sessionId) === activeTurn &&
+    !activeTurn.cancelled
+  ) {
     if (startupRuntimeTransition.waited) {
       sendMessage(ws, { type: 'status', state: 'thinking', verb: 'Thinking' })
     }
@@ -700,7 +917,7 @@ async function handleUserMessage(
     createCurrentTurnLocalCommandForwarder(desktopSlashCommand)
   const removeTitleOutputCallback = titleTurnNumber === null
     ? null
-    : bindTitleSessionOutput(ws, sessionId, () => userMessageSent)
+    : bindTitleSessionOutput(ws, sessionId, activeTurn, () => userMessageSent)
 
   bindAllClientSessionOutputs(sessionId, {
     shouldForward: (cliMsg) => {
@@ -719,11 +936,33 @@ async function handleUserMessage(
   // permission request that arrives after the disconnect.
   refreshDisconnectedTurnCleanupWatcher(sessionId)
 
+  activeTurn.sendStarted = true
   const sent = await conversationService.sendMessage(
     sessionId,
     message.content,
-    message.attachments
+    message.attachments,
+    {
+      canSend: () =>
+        activeUserTurns.get(sessionId) === activeTurn && !activeTurn.cancelled,
+      messageUuid: activeTurn.expectedReplayUuid,
+      onCommitted: () => {
+        activeTurn.messageSent = true
+      },
+    },
   )
+  if (activeUserTurns.get(sessionId) !== activeTurn || activeTurn.cancelled) {
+    // Once onCommitted has run the SDK owns this turn and will still emit its
+    // terminal result. Keep the completion callback long enough to consume
+    // that boundary; only an admission revoked before the socket write is safe
+    // to detach immediately.
+    if (!activeTurn.messageSent) removeActiveTurnOutputCallback()
+    removeTitleOutputCallback?.()
+    discardActiveTitleTurn(sessionId, titleTurnNumber)
+    if (!activeTurn.messageSent) {
+      stopRuntimeStartedByCancelledAdmission(sessionId, activeTurn)
+    }
+    return
+  }
   if (!sent) {
     removeActiveTurnOutputCallback()
     clearActiveUserTurn(sessionId, activeTurn)
@@ -749,12 +988,137 @@ function clearActiveUserTurn(sessionId: string, activeTurn: ActiveUserTurnState)
   }
 }
 
+function matchesActiveTurnReplay(activeTurn: ActiveUserTurnState, cliMsg: any): boolean {
+  return cliMsg?.type === 'user' &&
+    cliMsg.isReplay === true &&
+    typeof cliMsg.uuid === 'string' &&
+    cliMsg.uuid === activeTurn.expectedReplayUuid
+}
+
+function matchesActiveTurnLocalCommand(
+  activeTurn: ActiveUserTurnState,
+  cliMsg: any,
+): boolean {
+  return Boolean(
+    activeTurn.expectedLocalCommand &&
+    isMatchingCurrentTurnLocalCommand(cliMsg, activeTurn.expectedLocalCommand),
+  )
+}
+
+function addPendingInterruptedTurnResult(sessionId: string): void {
+  pendingInterruptedTurnResults.set(
+    sessionId,
+    (pendingInterruptedTurnResults.get(sessionId) ?? 0) + 1,
+  )
+}
+
+function removePendingInterruptedTurnResult(sessionId: string): void {
+  const count = pendingInterruptedTurnResults.get(sessionId) ?? 0
+  if (count <= 1) {
+    pendingInterruptedTurnResults.delete(sessionId)
+    return
+  }
+  pendingInterruptedTurnResults.set(sessionId, count - 1)
+}
+
+function forceStopSharedRuntimeForAgentCancellation(sessionId: string): void {
+  // A killed runtime cannot emit the foreground turn's interrupted result.
+  // Remove that boundary before admitting a replacement (including a local
+  // slash command), otherwise its result can be consumed as the dead turn's.
+  pendingInterruptedTurnResults.delete(sessionId)
+  runtimeExitStoppedSessions.add(sessionId)
+  conversationService.stopSession(sessionId)
+  const stoppedTurn = activeUserTurns.get(sessionId)
+  if (
+    stoppedTurn?.cancelled &&
+    stoppedTurn.replacementAfterStop !== true
+  ) {
+    clearActiveUserTurn(sessionId, stoppedTurn)
+  }
+  void emitStoppedForNonAgentTasksAfterRuntimeExit(sessionId)
+}
+
+function consumeInterruptedTurnResult(sessionId: string, cliMsg: any): boolean {
+  if (!cliMsg || typeof cliMsg !== 'object' || cliMsg.type !== 'result') return false
+  if (interruptedTurnResultMessages.get(cliMsg) === sessionId) return true
+  if (!pendingInterruptedTurnResults.has(sessionId)) return false
+  removePendingInterruptedTurnResult(sessionId)
+  interruptedTurnResultMessages.set(cliMsg, sessionId)
+  return true
+}
+
+function acknowledgeActiveTurnReplay(sessionId: string, cliMsg: any): boolean {
+  const activeTurn = activeUserTurns.get(sessionId)
+  const replayMatches = activeTurn
+    ? matchesActiveTurnReplay(activeTurn, cliMsg)
+    : false
+  const localCommandMatches = activeTurn && !pendingInterruptedTurnResults.has(sessionId)
+    ? matchesActiveTurnLocalCommand(activeTurn, cliMsg)
+    : false
+  if (
+    !activeTurn ||
+    activeTurn.cancelled ||
+    activeTurn.replacementAfterStop !== true ||
+    activeTurn.sendStarted !== true ||
+    (!replayMatches && !localCommandMatches)
+  ) {
+    return false
+  }
+
+  // The SDK preserves the outbound user-message UUID on normal replays. Pure
+  // local slash commands instead expose their parsed command marker after the
+  // interrupted result boundary. Either signal proves output now belongs to
+  // this replacement turn.
+  activeTurn.replacementAfterStop = false
+  activeTurn.messageSent = true
+  pendingInterruptedTurnResults.delete(sessionId)
+  sessionStopRequested.delete(sessionId)
+  agentStopRequestedSessions.delete(sessionId)
+  runtimeExitStoppedSessions.delete(sessionId)
+  return true
+}
+
+function stopRuntimeStartedByCancelledAdmission(
+  sessionId: string,
+  activeTurn: ActiveUserTurnState,
+): void {
+  if (
+    activeTurn.cancelled &&
+    !activeUserTurns.has(sessionId) &&
+    conversationService.hasSession(sessionId)
+  ) {
+    conversationService.stopSession(sessionId)
+  }
+}
+
 function bindActiveUserTurnCompletion(
   ws: ServerWebSocket<WebSocketData>,
   sessionId: string,
   activeTurn: ActiveUserTurnState,
 ): () => void {
   const callback = (cliMsg: any) => {
+    const interruptedResult = consumeInterruptedTurnResult(sessionId, cliMsg)
+    if (activeTurn.cancelled) {
+      if (cliMsg?.type === 'result') {
+        const stillOwnsTurn = activeUserTurns.get(sessionId) === activeTurn
+        if (
+          stillOwnsTurn &&
+          interruptedResult &&
+          pendingInterruptedTurnResults.has(sessionId)
+        ) {
+          return
+        }
+        conversationService.removeOutputCallback(sessionId, callback)
+        if (stillOwnsTurn) {
+          settleSessionChatActivity(sessionId, cliMsg)
+          clearActiveUserTurn(sessionId, activeTurn)
+        }
+      }
+      return
+    }
+
+    acknowledgeActiveTurnReplay(sessionId, cliMsg)
+    if (activeTurn.replacementAfterStop || interruptedResult) return
     if (
       cliMsg?.type !== 'result' ||
       (!activeTurn.messageSent && !cliMsg.is_error)
@@ -820,39 +1184,97 @@ function applyDeferredRuntimeRestartAfterActiveTurn(
 async function handleDesktopClearCommand(
   ws: ServerWebSocket<WebSocketData>,
 ) {
+  const turnToCancel = activeUserTurns.get(ws.data.sessionId)
+  if (turnToCancel) turnToCancel.cancelled = true
+  await enqueueRuntimeTransition(ws.data.sessionId, () =>
+    performDesktopClearCommand(ws, turnToCancel),
+  )
+}
+
+async function performDesktopClearCommand(
+  ws: ServerWebSocket<WebSocketData>,
+  turnToCancel: ActiveUserTurnState | undefined,
+) {
   const { sessionId } = ws.data
 
   const workDir = conversationService.getSessionWorkDir(sessionId)
   const permissionMode = conversationService.hasSession(sessionId)
     ? conversationService.getSessionPermissionMode(sessionId)
     : undefined
+  const agentTasks = [...(activeAgentTasks.get(sessionId)?.values() ?? [])]
+  markActiveAgentsStopping(sessionId)
+  sessionClearInProgress.add(sessionId)
+  if (turnToCancel) clearActiveUserTurn(sessionId, turnToCancel)
+  const activeTitleState = sessionTitleState.get(sessionId)
+  if (activeTitleState) activeTitleState.activeTurn = undefined
+  const pendingStartup = sessionStartupPromises.get(sessionId)
   conversationService.stopSession(sessionId)
+  pendingInterruptedTurnResults.delete(sessionId)
+  // Clearing replaces the transcript, so do not enqueue terminal bookends that
+  // could finish after the replacement write and repopulate the cleared file.
+  // Detach callbacks before clearing, then archive the captured remote handles
+  // on an independent bounded retry path after the transcript replacement.
   conversationService.clearOutputCallbacks(sessionId)
-  sessionSlashCommands.delete(sessionId)
-  sessionTitleState.delete(sessionId)
-  cleanupStreamState(sessionId)
+  clearPrewarmState(sessionId)
+
+  if (pendingStartup) {
+    await pendingStartup.catch(() => undefined)
+    // The startup may have created a runtime after the first stopSession call.
+    // Keep the clear transition locked until that stale admission is drained.
+    conversationService.stopSession(sessionId)
+    conversationService.clearOutputCallbacks(sessionId)
+    clearPrewarmState(sessionId)
+  }
 
   try {
     await sessionService.clearSessionTranscript(sessionId, workDir || undefined, permissionMode)
   } catch (err) {
+    sessionClearInProgress.delete(sessionId)
+    resumeAgentFinalizationAfterFailedClear(sessionId, agentTasks)
+    runtimeExitStoppedSessions.add(sessionId)
+    await emitStoppedForNonAgentTasksAfterRuntimeExit(sessionId)
     const errMsg = err instanceof Error ? err.message : String(err)
-    sendMessage(ws, {
+    sendToSession(sessionId, {
       type: 'error',
       message: errMsg,
       code: 'SESSION_CLEAR_FAILED',
     })
-    sendMessage(ws, { type: 'status', state: 'idle' })
+    sendToSession(sessionId, { type: 'status', state: 'idle' })
     return
   }
 
-  sendMessage(ws, {
+  sessionTranscriptEpochs.set(
+    sessionId,
+    (sessionTranscriptEpochs.get(sessionId) ?? 0) + 1,
+  )
+
+  clearAgentRuntimeState(sessionId)
+  taskNotificationPersistence.delete(sessionId)
+  sessionSlashCommands.delete(sessionId)
+  sessionTitleState.delete(sessionId)
+  cleanupStreamState(sessionId)
+  sessionClearInProgress.delete(sessionId)
+
+  sendToSession(sessionId, {
     type: 'system_notification',
     subtype: 'session_cleared',
     message: 'Conversation cleared',
   })
-  sendMessage(ws, {
+  sendToSession(sessionId, {
     type: 'message_complete',
     usage: { input_tokens: 0, output_tokens: 0 },
+  })
+  void stopAgentsForSessionClear(sessionId, agentTasks).then((agentStopResults) => {
+    agentStopResults.forEach((stopped, index) => {
+      if (stopped) return
+      const task = agentTasks[index]
+      if (!task) return
+      sendToSession(sessionId, {
+        type: 'background_task_stop_failed',
+        taskId: task.taskId,
+        message: 'Conversation cleared, but one or more background Agents could not be fully stopped.',
+      })
+    })
   })
 }
 
@@ -1144,7 +1566,11 @@ async function restartSessionWithPermissionMode(
 ): Promise<void> {
   try {
     const workDir = conversationService.getSessionWorkDir(sessionId)
+    markActiveAgentsStopping(sessionId)
+    runtimeExitStoppedSessions.add(sessionId)
     conversationService.stopSession(sessionId)
+    await emitAuthoritativeStoppedForActiveAgents(sessionId)
+    await emitStoppedForNonAgentTasksAfterRuntimeExit(sessionId)
 
     // Launch with the requested mode in-memory. Persist it only after startup
     // succeeds so a failed bypass restart cannot leave dangerous metadata.
@@ -1154,6 +1580,9 @@ async function restartSessionWithPermissionMode(
     }
     const sdkUrl = buildSdkWebSocketUrl(ws, sessionId)
     await conversationService.startSession(sessionId, workDir, sdkUrl, runtimeSettings)
+    if (!agentStopRequestedSessions.has(sessionId)) {
+      runtimeExitStoppedSessions.delete(sessionId)
+    }
 
     await commitConfirmedPermissionMode(sessionId, mode, workDir)
     sendToSession(sessionId, { type: 'status', state: 'idle' })
@@ -1236,11 +1665,16 @@ async function restartSessionWithRuntimeConfig(
 ): Promise<void> {
   try {
     const workDir = conversationService.getSessionWorkDir(sessionId)
+    markActiveAgentsStopping(sessionId)
+    runtimeExitStoppedSessions.add(sessionId)
     conversationService.stopSession(sessionId)
+    await emitAuthoritativeStoppedForActiveAgents(sessionId)
+    await emitStoppedForNonAgentTasksAfterRuntimeExit(sessionId)
 
     const runtimeSettings = await getRuntimeSettings(sessionId)
     const sdkUrl = buildSdkWebSocketUrl(ws, sessionId)
     await conversationService.startSession(sessionId, workDir, sdkUrl, runtimeSettings)
+    runtimeExitStoppedSessions.delete(sessionId)
 
     sendMessage(ws, { type: 'status', state: 'idle' })
     console.log(`[WS] Restarted CLI for ${sessionId} with runtime override`)
@@ -1269,26 +1703,93 @@ async function restartSessionWithRuntimeConfig(
 function handleStopGeneration(ws: ServerWebSocket<WebSocketData>) {
   const { sessionId } = ws.data
   const stoppedTurn = activeUserTurns.get(sessionId)
+  const agentTasks = [...(activeAgentTasks.get(sessionId)?.values() ?? [])]
   console.log(`[WS] Stop generation requested for session: ${sessionId}`)
 
-  sessionStopRequested.add(sessionId)
+  if (stoppedTurn) {
+    sessionStopRequested.add(sessionId)
+  }
+  if (stoppedTurn || agentTasks.length > 0) {
+    const computerUseRequestIds = computerUseApprovalService
+      .getPendingRequests(sessionId)
+      .map((request) => request.requestId)
+    computerUseApprovalService.cancelSession(sessionId)
+    for (const requestId of computerUseRequestIds) {
+      sendToSession(sessionId, {
+        type: 'permission_resolved',
+        requestId,
+        permissionType: 'computer_use',
+        allowed: false,
+      })
+    }
+  }
+  agentStopRequestedSessions.add(sessionId)
   legacyQueuedSessionChats.delete(sessionId)
   terminalSessionChatStates.delete(sessionId)
   interruptedSessionChats.add(sessionId)
 
-  if (stoppedTurn && conversationService.hasSession(sessionId)) {
-    // First try graceful interrupt via SDK control message
-    conversationService.sendInterrupt(sessionId)
+  // A turn can be registered while title metadata, CLI startup, or the send
+  // acknowledgement is still pending. Revoke that admission token so the
+  // suspended handler cannot resume after Stop and enqueue work (or clear the
+  // Agent stop latch) behind the user's explicit cancellation.
+  if (stoppedTurn && !stoppedTurn.messageSent) {
+    stoppedTurn.cancelled = true
+    stoppedTurn.replacementAfterStop = false
+    clearActiveUserTurn(sessionId, stoppedTurn)
+  } else if (stoppedTurn) {
+    stoppedTurn.cancelled = true
+    stoppedTurn.replacementAfterStop = false
+  }
 
+  void Promise.allSettled(
+    agentTasks.map((task) => requestStopTrackedAgentTask(sessionId, task, ws)),
+  )
+
+  if (
+    stoppedTurn &&
+    conversationService.hasSession(sessionId) &&
+    (!stoppedTurn.messageSent || !stoppedTurn.interruptBoundaryPending)
+  ) {
+    // First try graceful interrupt via SDK control message
+    if (stoppedTurn.messageSent) addPendingInterruptedTurnResult(sessionId)
+    const interruptSent = conversationService.sendInterrupt(sessionId)
+    if (stoppedTurn.messageSent) {
+      if (interruptSent) {
+        stoppedTurn.interruptBoundaryPending = true
+      } else {
+        removePendingInterruptedTurnResult(sessionId)
+      }
+    }
+  }
+
+  if ((stoppedTurn || agentTasks.length > 0) && conversationService.hasSession(sessionId)) {
     // Force-kill if still running after 3 seconds
     setTimeout(() => {
+      const stoppedForegroundStillCurrent = Boolean(
+        stoppedTurn &&
+        stoppedTurn.cancelled &&
+        (
+          activeUserTurns.get(sessionId) === stoppedTurn ||
+          (
+            stoppedTurn.sendStarted === true &&
+            !stoppedTurn.messageSent &&
+            !activeUserTurns.has(sessionId)
+          )
+        ),
+      )
+      const stoppedAgentsStillActive =
+        agentStopRequestedSessions.has(sessionId) &&
+        activeUserTurns.get(sessionId)?.replacementAfterStop !== true &&
+        [...(activeAgentTasks.get(sessionId)?.values() ?? [])].some(
+          (task) => !task.localStopConfirmed,
+        )
       if (
-        sessionStopRequested.has(sessionId) &&
-        activeUserTurns.get(sessionId) === stoppedTurn &&
+        (stoppedForegroundStillCurrent || stoppedAgentsStillActive) &&
         conversationService.hasSession(sessionId)
       ) {
         console.log(`[WS] Force-killing CLI subprocess for session: ${sessionId}`)
-        conversationService.stopSession(sessionId)
+        forceStopSharedRuntimeForAgentCancellation(sessionId)
+        void emitAuthoritativeStoppedForActiveAgents(sessionId)
       }
     }, 3_000)
   }
@@ -1312,17 +1813,497 @@ async function handleStopBackgroundTask(
     return
   }
 
+  await requestStopBackgroundTask(ws, taskId)
+}
+
+async function requestStopBackgroundTask(
+  ws: ServerWebSocket<WebSocketData>,
+  taskId: string,
+): Promise<void> {
+  const { sessionId } = ws.data
+  const trackedAgent = activeAgentTasks.get(sessionId)?.get(taskId)
+  if (trackedAgent) {
+    await requestStopTrackedAgentTask(sessionId, trackedAgent, ws)
+    return
+  }
+
   try {
     await conversationService.requestControl(sessionId, {
       subtype: 'stop_task',
       task_id: taskId,
     })
   } catch (error) {
+    reportBackgroundTaskStopFailure(sessionId, ws, taskId, error)
+  }
+}
+
+const AGENT_STOP_CONTROL_TIMEOUT_MS = 3_000
+const AUTHORITATIVE_STOP_PERSIST_ATTEMPTS = 3
+const AUTHORITATIVE_STOP_PERSIST_TIMEOUT_MS = 1_000
+const AGENT_STOP_FINALIZATION_RETRY_DELAYS_MS = [250, 500] as const
+
+async function requestStopTrackedAgentTask(
+  sessionId: string,
+  task: ActiveAgentTaskState,
+  ws?: ServerWebSocket<WebSocketData>,
+): Promise<void> {
+  const current = activeAgentTasks.get(sessionId)?.get(task.taskId)
+  if (!current) return
+  current.stopIntent = true
+  if (current.stopRequested) {
+    if (!conversationService.hasSession(sessionId)) {
+      current.localStopConfirmed = true
+      await emitAuthoritativeAgentStopped(sessionId, current, ws)
+    }
+    return
+  }
+
+  clearAgentStopFinalizationRetry(current)
+  current.finalizationRetryCount = 0
+  current.stopFailureMessage = undefined
+  current.stopRequested = true
+  if (current.localStopConfirmed) {
+    await emitAuthoritativeAgentStopped(sessionId, current, ws)
+    return
+  }
+
+  // Start strict remote cancellation immediately instead of waiting for the
+  // CLI control channel. The CLI stop closes the local poller; the archive
+  // result remains the authority for whether a remote Agent is terminal.
+  const remoteArchiveAttempt = current.taskType === 'remote_agent'
+    ? ensureRemoteAgentArchive(sessionId, current)
+    : undefined
+
+  if (!conversationService.hasSession(sessionId)) {
+    current.localStopConfirmed = true
+    await emitAuthoritativeAgentStopped(sessionId, current, ws)
+    return
+  }
+
+  let controlError: unknown
+  try {
+    await conversationService.requestControl(sessionId, {
+      subtype: 'stop_task',
+      task_id: current.taskId,
+    }, AGENT_STOP_CONTROL_TIMEOUT_MS)
+  } catch (error) {
+    controlError = error
+  }
+
+  const latest = activeAgentTasks.get(sessionId)?.get(current.taskId)
+  if (latest !== current) return
+  if (controlError === undefined || !conversationService.hasSession(sessionId)) {
+    current.localStopConfirmed = true
+  }
+
+  if (current.taskType === 'remote_agent') {
+    // A force-kill or a newer retry may have replaced this archive attempt.
+    if (current.remoteArchive !== remoteArchiveAttempt) return
+    const finalized = await emitAuthoritativeAgentStopped(sessionId, current, ws)
+    if (
+      !finalized &&
+      !current.localStopConfirmed &&
+      shouldForceStopLatchedAgent(sessionId) &&
+      activeAgentTasks.get(sessionId)?.get(current.taskId) === current &&
+      conversationService.hasSession(sessionId)
+    ) {
+      forceStopSharedRuntimeForAgentCancellation(sessionId)
+      current.localStopConfirmed = true
+    }
+    return
+  }
+
+  if (current.localStopConfirmed) {
+    await emitAuthoritativeAgentStopped(sessionId, current, ws)
+    return
+  }
+
+  if (
+    shouldForceStopLatchedAgent(sessionId) &&
+    conversationService.hasSession(sessionId)
+  ) {
+    forceStopSharedRuntimeForAgentCancellation(sessionId)
+    current.localStopConfirmed = true
+    await emitAuthoritativeAgentStopped(sessionId, current, ws)
+    return
+  }
+
+  current.stopRequested = false
+  reportAgentStopFailure(sessionId, ws, current, controlError)
+}
+
+function shouldForceStopLatchedAgent(sessionId: string): boolean {
+  return agentStopRequestedSessions.has(sessionId) &&
+    activeUserTurns.get(sessionId)?.replacementAfterStop !== true
+}
+
+function ensureRemoteAgentArchive(
+  sessionId: string,
+  task: ActiveAgentTaskState,
+): Promise<boolean> {
+  if (task.taskType !== 'remote_agent') return Promise.resolve(true)
+  if (task.remoteArchive) return task.remoteArchive
+  if (!task.remoteSessionId) {
+    task.remoteArchiveError = 'Remote session id is missing'
+    console.warn(`[WS] Cannot archive remote Agent ${task.taskId} for ${sessionId}: ${task.remoteArchiveError}`)
+    task.remoteArchive = Promise.resolve(false)
+    return task.remoteArchive
+  }
+
+  task.remoteArchiveError = undefined
+  task.remoteArchive = archiveRemoteSession(task.remoteSessionId, { timeoutMs: 1_500 })
+    .then(() => true)
+    .catch((error) => {
+      task.remoteArchiveError = error instanceof Error ? error.message : String(error)
+      console.warn(
+        `[WS] Failed to archive remote Agent ${task.taskId} for ${sessionId}: ${task.remoteArchiveError}`,
+      )
+      return false
+    })
+  return task.remoteArchive
+}
+
+function reportBackgroundTaskStopFailure(
+  sessionId: string,
+  ws: ServerWebSocket<WebSocketData> | undefined,
+  taskId: string,
+  error: unknown,
+): void {
+  const message = error instanceof Error ? error.message : String(error)
+  console.warn(
+    `[WS] Failed to stop background task ${taskId} for ${sessionId}: ${message}`,
+  )
+  const payload: ServerMessage = {
+    type: 'background_task_stop_failed',
+    taskId,
+    message,
+  }
+  if (ws && activeSessions.get(sessionId)?.has(ws)) {
+    sendMessage(ws, payload)
+    return
+  }
+  for (const client of activeSessions.get(sessionId) ?? []) {
+    sendMessage(client, payload)
+  }
+}
+
+function reportAgentStopFailure(
+  sessionId: string,
+  _ws: ServerWebSocket<WebSocketData> | undefined,
+  task: ActiveAgentTaskState,
+  error: unknown,
+): void {
+  task.stopFailureMessage = error instanceof Error ? error.message : String(error)
+  // Every renderer that issued a concurrent Stop has optimistic local state.
+  // Broadcast Agent failures session-wide so no secondary view remains stuck
+  // in Stopping while the first request owns the shared finalization attempt.
+  reportBackgroundTaskStopFailure(sessionId, undefined, task.taskId, error)
+}
+
+function replayAgentStopFailures(
+  ws: ServerWebSocket<WebSocketData>,
+  sessionId: string,
+): void {
+  for (const task of activeAgentTasks.get(sessionId)?.values() ?? []) {
+    if (!task.stopFailureMessage) continue
     sendMessage(ws, {
       type: 'background_task_stop_failed',
-      taskId,
-      message: error instanceof Error ? error.message : String(error),
+      taskId: task.taskId,
+      message: task.stopFailureMessage,
     })
+  }
+}
+
+function clearAgentStopFinalizationRetry(task: ActiveAgentTaskState): void {
+  if (task.finalizationRetryTimer === undefined) return
+  clearTimeout(task.finalizationRetryTimer)
+  task.finalizationRetryTimer = undefined
+}
+
+function scheduleAgentStopFinalizationRetry(
+  sessionId: string,
+  task: ActiveAgentTaskState,
+): void {
+  if (!task.localStopConfirmed || task.finalizationRetryTimer !== undefined) return
+  const delayMs = AGENT_STOP_FINALIZATION_RETRY_DELAYS_MS[task.finalizationRetryCount]
+  if (delayMs !== undefined) {
+    task.finalizationRetryCount += 1
+    task.finalizationRetryTimer = setTimeout(() => {
+      task.finalizationRetryTimer = undefined
+      const current = activeAgentTasks.get(sessionId)?.get(task.taskId)
+      if (
+        current !== task ||
+        !current.stopIntent ||
+        !current.localStopConfirmed ||
+        current.bookendPending
+      ) {
+        return
+      }
+      current.stopFailureMessage = undefined
+      void emitAuthoritativeAgentStopped(sessionId, current)
+    }, delayMs)
+    if (typeof task.finalizationRetryTimer === 'object') {
+      task.finalizationRetryTimer.unref?.()
+    }
+  }
+  scheduleDisconnectedSessionCleanupIfIdle(sessionId)
+}
+
+function stopLateAgentTaskIfRequested(
+  sessionId: string,
+  lifecycle: CliBackgroundTaskLifecycle | null,
+): void {
+  if (
+    !lifecycle?.running ||
+    !isAgentTaskType(lifecycle.taskType) ||
+    !agentStopRequestedSessions.has(sessionId)
+  ) {
+    return
+  }
+  const task = activeAgentTasks.get(sessionId)?.get(lifecycle.taskId)
+  // The output callback that observes a late task is not necessarily the
+  // client that clicked Stop. Omit a socket so failures broadcast to every
+  // connected view and each renderer can clear its optimistic Stopping state.
+  if (task) void requestStopTrackedAgentTask(sessionId, task)
+}
+
+function closeLateNonAgentTaskAfterRuntimeExit(
+  sessionId: string,
+  lifecycle: CliBackgroundTaskLifecycle | null,
+): void {
+  if (
+    !lifecycle?.running ||
+    isAgentTaskType(lifecycle.taskType) ||
+    !runtimeExitStoppedSessions.has(sessionId)
+  ) {
+    return
+  }
+  void emitStoppedForNonAgentTasksAfterRuntimeExit(sessionId)
+}
+
+function emitAuthoritativeAgentStopped(
+  sessionId: string,
+  task: ActiveAgentTaskState,
+  ws?: ServerWebSocket<WebSocketData>,
+): Promise<boolean> {
+  const current = activeAgentTasks.get(sessionId)?.get(task.taskId)
+  if (!current) return Promise.resolve(false)
+  if (sessionClearInProgress.has(sessionId)) return Promise.resolve(false)
+  if (current.finalization) return current.finalization
+  if (current.bookendPending) return Promise.resolve(false)
+  current.bookendPending = true
+
+  const finalization = (async (): Promise<boolean> => {
+    const remoteArchiveAttempt = current.taskType === 'remote_agent'
+      ? ensureRemoteAgentArchive(sessionId, current)
+      : undefined
+    const stopConfirmed = remoteArchiveAttempt
+      ? await remoteArchiveAttempt
+      : true
+
+    if (activeAgentTasks.get(sessionId)?.get(current.taskId) !== current) return false
+    if (
+      remoteArchiveAttempt &&
+      current.remoteArchive !== remoteArchiveAttempt
+    ) {
+      current.bookendPending = false
+      return false
+    }
+
+    if (!stopConfirmed) {
+      current.bookendPending = false
+      current.stopRequested = false
+      current.remoteArchive = undefined
+      reportAgentStopFailure(
+        sessionId,
+        ws,
+        current,
+        new Error(current.remoteArchiveError ?? 'Remote Agent stop could not be confirmed'),
+      )
+      scheduleAgentStopFinalizationRetry(sessionId, current)
+      return false
+    }
+
+    if (current.taskType === 'remote_agent') {
+      current.localStopConfirmed = true
+    }
+
+    const cliMsg = {
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: current.taskId,
+      tool_use_id: current.toolUseId,
+      task_type: current.taskType,
+      ...(current.description ? { description: current.description } : {}),
+      status: 'stopped',
+      summary: current.description
+        ? `${current.description} stopped`
+        : 'Background Agent stopped',
+      timestamp: new Date().toISOString(),
+    }
+
+    let persisted = false
+    for (let attempt = 0; attempt < AUTHORITATIVE_STOP_PERSIST_ATTEMPTS; attempt++) {
+      if (
+        sessionClearInProgress.has(sessionId) ||
+        activeAgentTasks.get(sessionId)?.get(current.taskId) !== current
+      ) {
+        current.bookendPending = false
+        return false
+      }
+      const persistence = persistCliTaskNotification(sessionId, cliMsg, {
+        propagateFailure: true,
+        timeoutMs: AUTHORITATIVE_STOP_PERSIST_TIMEOUT_MS,
+      })
+      if (!persistence) {
+        persisted = true
+        break
+      }
+      try {
+        await persistence
+        persisted = true
+        break
+      } catch {
+        // The persistence cache drops rejected writes, so the next bounded
+        // attempt performs a real retry rather than awaiting the same promise.
+      }
+    }
+
+    if (activeAgentTasks.get(sessionId)?.get(current.taskId) !== current) return false
+    if (!persisted) {
+      current.bookendPending = false
+      current.stopRequested = false
+      reportAgentStopFailure(
+        sessionId,
+        ws,
+        current,
+        new Error('Agent stopped, but its terminal state could not be saved'),
+      )
+      scheduleAgentStopFinalizationRetry(sessionId, current)
+      return false
+    }
+
+    current.stopFailureMessage = undefined
+    markTaskAuthoritativelyStopped(sessionId, current.taskId)
+    untrackCliBackgroundTask(sessionId, current.taskId)
+    forwardCliMessageToSessionClients(sessionId, cliMsg)
+    scheduleDisconnectedSessionCleanupIfIdle(sessionId)
+    return true
+  })().catch((error): boolean => {
+    if (activeAgentTasks.get(sessionId)?.get(current.taskId) !== current) return false
+    current.bookendPending = false
+    current.stopRequested = false
+    reportAgentStopFailure(sessionId, ws, current, error)
+    scheduleAgentStopFinalizationRetry(sessionId, current)
+    return false
+  })
+
+  current.finalization = finalization
+  void finalization.then(() => {
+    if (current.finalization === finalization) current.finalization = undefined
+  })
+  return finalization
+}
+
+function resumeAgentFinalizationAfterFailedClear(
+  sessionId: string,
+  tasks: ActiveAgentTaskState[],
+): void {
+  const pendingFinalizations = tasks.flatMap((task) =>
+    task.finalization ? [task.finalization] : [])
+  void Promise.allSettled(pendingFinalizations).then(() => {
+    for (const task of tasks) {
+      const current = activeAgentTasks.get(sessionId)?.get(task.taskId)
+      if (current !== task) continue
+      clearAgentStopFinalizationRetry(current)
+      current.stopIntent = true
+      current.stopRequested = true
+      current.localStopConfirmed = true
+      current.bookendPending = false
+      current.stopFailureMessage = undefined
+      void emitAuthoritativeAgentStopped(sessionId, current)
+    }
+  })
+}
+
+function emitAuthoritativeStoppedForActiveAgents(sessionId: string): Promise<boolean[]> {
+  const tasks = [...(activeAgentTasks.get(sessionId)?.values() ?? [])]
+  return Promise.all(tasks.map((task) => {
+    task.stopIntent = true
+    task.stopRequested = true
+    task.localStopConfirmed = true
+    return emitAuthoritativeAgentStopped(sessionId, task)
+  }))
+}
+
+function emitStoppedForNonAgentTasksAfterRuntimeExit(sessionId: string): Promise<void[]> {
+  const tasks = [...(activeNonAgentTasks.get(sessionId)?.values() ?? [])]
+  return Promise.all(tasks.map(async (task) => {
+    if (activeNonAgentTasks.get(sessionId)?.get(task.taskId) !== task) return
+    // Killing the shared CLI also terminates Bash/Dream/workflow work. Claim
+    // each task before awaiting persistence so concurrent force-stop paths
+    // cannot publish duplicate terminal bookends.
+    markTaskAuthoritativelyStopped(sessionId, task.taskId)
+    untrackCliBackgroundTask(sessionId, task.taskId)
+    const cliMsg = {
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: task.taskId,
+      tool_use_id: task.toolUseId,
+      ...(task.taskType ? { task_type: task.taskType } : {}),
+      ...(task.description ? { description: task.description } : {}),
+      status: 'stopped',
+      summary: `${task.description ?? task.taskId} stopped because the runtime exited`,
+      timestamp: new Date().toISOString(),
+    }
+    await (persistCliTaskNotification(sessionId, cliMsg) ?? Promise.resolve())
+    forwardCliMessageToSessionClients(sessionId, cliMsg)
+  }))
+}
+
+async function stopAgentsForSessionClear(
+  sessionId: string,
+  tasks: ActiveAgentTaskState[],
+): Promise<boolean[]> {
+  return Promise.all(tasks.map(async (task) => {
+    if (task.taskType === 'local_agent') return true
+    if (!task.remoteSessionId) {
+      console.warn(
+        `[WS] Cannot archive remote Agent ${task.taskId} for ${sessionId}: Remote session id is missing`,
+      )
+      return false
+    }
+
+    for (let attempt = 0; attempt <= AGENT_STOP_FINALIZATION_RETRY_DELAYS_MS.length; attempt++) {
+      const archived = await ensureRemoteAgentArchive(sessionId, task)
+      if (archived) return true
+
+      task.remoteArchive = undefined
+      const retryDelayMs = AGENT_STOP_FINALIZATION_RETRY_DELAYS_MS[attempt]
+      if (retryDelayMs === undefined) break
+      await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs))
+    }
+    return false
+  }))
+}
+
+function markActiveAgentsStopping(sessionId: string): void {
+  for (const task of activeAgentTasks.get(sessionId)?.values() ?? []) {
+    task.stopIntent = true
+    task.stopRequested = true
+  }
+}
+
+function closeStoppedAgentsAfterRuntimeExit(sessionId: string, cliMsg: any): void {
+  if (
+    cliMsg?.type === 'result' &&
+    cliMsg.is_error &&
+    agentStopRequestedSessions.has(sessionId) &&
+    !conversationService.hasSession(sessionId)
+  ) {
+    runtimeExitStoppedSessions.add(sessionId)
+    void emitAuthoritativeStoppedForActiveAgents(sessionId)
+    void emitStoppedForNonAgentTasksAfterRuntimeExit(sessionId)
   }
 }
 
@@ -1433,9 +2414,29 @@ function sendSessionTitleUpdated(
 function bindTitleSessionOutput(
   ws: ServerWebSocket<WebSocketData>,
   sessionId: string,
+  activeTurn: ActiveUserTurnState,
   shouldProcess: () => boolean,
 ): () => void {
   const callback = (cliMsg: any) => {
+    const interruptedResult = consumeInterruptedTurnResult(sessionId, cliMsg)
+    acknowledgeActiveTurnReplay(sessionId, cliMsg)
+    if (
+      activeUserTurns.get(sessionId) !== activeTurn ||
+      activeTurn.cancelled
+    ) {
+      if (cliMsg?.type === 'result') {
+        const stillOwnsTurn = activeUserTurns.get(sessionId) === activeTurn
+        if (
+          !stillOwnsTurn ||
+          !interruptedResult ||
+          !pendingInterruptedTurnResults.has(sessionId)
+        ) {
+          conversationService.removeOutputCallback(sessionId, callback)
+        }
+      }
+      return
+    }
+    if (activeTurn.replacementAfterStop || interruptedResult) return
     if (!shouldProcess() && !(cliMsg?.type === 'result' && cliMsg?.is_error)) {
       return
     }
@@ -1614,15 +2615,21 @@ function cleanupStreamState(sessionId: string) {
   sessionStreamStates.delete(sessionId)
 }
 
-function cleanupSessionRuntimeState(sessionId: string) {
+function cleanupSessionRuntimeState(
+  sessionId: string,
+  options?: { preserveRetryableAgentStops?: boolean },
+) {
   cancelSessionDisconnectWatcher(sessionId)
+  clearAgentRuntimeState(sessionId, {
+    preserveRetryableStops: options?.preserveRetryableAgentStops,
+  })
   cleanupStreamState(sessionId)
   sessionSlashCommands.delete(sessionId)
   sessionTitleState.delete(sessionId)
   runtimeOverrides.delete(sessionId)
   activeUserTurns.delete(sessionId)
   sessionStopRequested.delete(sessionId)
-  activeBackgroundTaskIds.delete(sessionId)
+  pendingInterruptedTurnResults.delete(sessionId)
   terminalSessionChatStates.delete(sessionId)
   legacyQueuedSessionChats.delete(sessionId)
   interruptedSessionChats.delete(sessionId)
@@ -1811,6 +2818,7 @@ async function ensureCliSessionStarted(
     await sendRepositoryStartupStatus(ws, sessionId, reason)
     console.log(`[WS] Starting CLI for ${sessionId} due to ${reason}`)
     await conversationService.startSession(sessionId, workDir, sdkUrl, startupSettings)
+    runtimeExitStoppedSessions.delete(sessionId)
   })()
 
   sessionStartupPromises.set(sessionId, startup)
@@ -2144,7 +3152,10 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
       if (cliMsg.is_error) {
         // If the user requested stop, this "error" is just the interrupt
         // result — don't show it as an error in the chat UI.
-        if (sessionStopRequested.has(sessionId)) {
+        if (
+          interruptedTurnResultMessages.get(cliMsg) === sessionId ||
+          sessionStopRequested.has(sessionId)
+        ) {
           return [{ type: 'message_complete', usage }]
         }
 
@@ -2290,8 +3301,17 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
           data: cliMsg,
         }
         // AutoDream is detached maintenance work. Keep it visible in Activity,
-        // but do not revive the already-completed foreground turn.
-        if (cliMsg.task_type === 'dream') return [notification]
+        // but do not revive the already-completed foreground turn. A late Agent
+        // spawned after Stop is also visible until its stop bookend arrives.
+        // The same applies to independent non-Agent task lifecycle after Stop:
+        // Activity still needs the event, but chat must remain idle.
+        if (
+          cliMsg.task_type === 'dream' ||
+          sessionStopRequested.has(sessionId) ||
+          agentStopRequestedSessions.has(sessionId)
+        ) {
+          return [notification]
+        }
         return [
           notification,
           {
@@ -2479,6 +3499,11 @@ function hasPendingOrActiveUserTurn(sessionId: string): boolean {
   return activeUserTurns.has(sessionId)
 }
 
+function hasLiveUserTurnForClient(sessionId: string): boolean {
+  const activeTurn = activeUserTurns.get(sessionId)
+  return Boolean(activeTurn && !activeTurn.cancelled)
+}
+
 /**
  * Start the idle grace timer for a disconnected, idle session. If no client
  * reconnects before it fires, the CLI subprocess is stopped.
@@ -2507,9 +3532,23 @@ function scheduleDisconnectCleanup(sessionId: string): void {
 
     console.log(`[WS] Session ${sessionId} not reconnected after ${cleanupDelayMs}ms, stopping CLI subprocess`)
     conversationService.stopSession(sessionId)
-    cleanupSessionRuntimeState(sessionId)
+    cleanupSessionRuntimeState(sessionId, { preserveRetryableAgentStops: true })
   }, cleanupDelayMs)
   sessionCleanupTimers.set(sessionId, cleanupTimer)
+}
+
+function scheduleDisconnectedSessionCleanupIfIdle(sessionId: string): void {
+  if (
+    hasActiveClients(sessionId) ||
+    hasPendingOrActiveUserTurn(sessionId) ||
+    hasActiveBackgroundTasks(sessionId)
+  ) {
+    return
+  }
+
+  cancelSessionDisconnectWatcher(sessionId)
+  scheduleDisconnectCleanup(sessionId)
+  watchTurnCompletionForCleanup(sessionId)
 }
 
 /**
@@ -2522,6 +3561,9 @@ function watchTurnCompletionForCleanup(sessionId: string): void {
 
   const onComplete = (cliMsg: any) => {
     const taskLifecycle = trackCliBackgroundTaskLifecycle(sessionId, cliMsg)
+    stopLateAgentTaskIfRequested(sessionId, taskLifecycle)
+    closeLateNonAgentTaskAfterRuntimeExit(sessionId, taskLifecycle)
+    closeStoppedAgentsAfterRuntimeExit(sessionId, cliMsg)
     if (taskLifecycle?.running && !hasActiveClients(sessionId)) {
       // A pending permission uses a hard 30-minute disconnect bound. A late
       // background task may outlive (or never emit) its terminal notification,
@@ -2946,9 +3988,33 @@ function normalizeCliTaskNotification(cliMsg: any): SessionTaskNotification | nu
   }
 }
 
+function boundTaskNotificationPersistence(
+  persistence: Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timed out saving task notification after ${timeoutMs}ms`))
+    }, timeoutMs)
+    if (typeof timer === 'object') timer.unref?.()
+
+    persistence.then(
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
 function persistCliTaskNotification(
   sessionId: string,
   cliMsg: any,
+  options?: { propagateFailure?: boolean; timeoutMs?: number },
 ): Promise<void> | null {
   const notification = normalizeCliTaskNotification(cliMsg)
   if (!notification) return null
@@ -2964,7 +4030,11 @@ function persistCliTaskNotification(
   const existing = sessionWrites.get(eventKey)
   if (existing) return existing
 
-  const write = sessionService.appendSessionTaskNotification(sessionId, notification)
+  const persistence = sessionService.appendSessionTaskNotification(sessionId, notification)
+  const boundedPersistence = options?.timeoutMs === undefined
+    ? persistence
+    : boundTaskNotificationPersistence(persistence, options.timeoutMs)
+  const write = boundedPersistence
     .catch((error) => {
       sessionWrites?.delete(eventKey)
       console.warn(
@@ -2972,12 +4042,55 @@ function persistCliTaskNotification(
           error instanceof Error ? error.message : String(error)
         }`,
       )
+      if (options?.propagateFailure) throw error
     })
   sessionWrites.set(eventKey, write)
   return write
 }
 
 export const __persistCliTaskNotificationForTests = persistCliTaskNotification
+
+function persistThenForwardCliMessage(
+  sessionId: string,
+  cliMsg: any,
+  forward: () => void,
+): void {
+  const persistence = persistCliTaskNotification(sessionId, cliMsg)
+  if (!persistence) {
+    forward()
+    return
+  }
+
+  void persistence
+    .then(forward)
+    .catch((error) => {
+      console.warn(
+        `[WS] Failed to forward persisted task notification for ${sessionId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    })
+}
+
+function forwardCliMessageToClient(
+  sessionId: string,
+  ws: ServerWebSocket<WebSocketData>,
+  cliMsg: any,
+): void {
+  handleCliPermissionModeBroadcast(sessionId, cliMsg)
+  const serverMsgs = translateCliMessage(cliMsg, sessionId)
+  for (const msg of serverMsgs) sendMessage(ws, msg)
+}
+
+function forwardCliMessageToSessionClients(sessionId: string, cliMsg: any): void {
+  const clients = activeSessions.get(sessionId)
+  if (!clients || clients.size === 0) return
+  handleCliPermissionModeBroadcast(sessionId, cliMsg)
+  const serverMsgs = translateCliMessage(cliMsg, sessionId)
+  for (const ws of clients) {
+    for (const msg of serverMsgs) sendMessage(ws, msg)
+  }
+}
 
 function bindAllClientSessionOutputs(
   sessionId: string,
@@ -3004,7 +4117,32 @@ function bindClientSessionOutput(
   removeClientOutputCallback(ws)
 
   const callback = (cliMsg: any) => {
-    trackCliBackgroundTaskLifecycle(sessionId, cliMsg)
+    consumeInterruptedTurnResult(sessionId, cliMsg)
+    acknowledgeActiveTurnReplay(sessionId, cliMsg)
+    const transcriptEpoch = sessionTranscriptEpochs.get(sessionId) ?? 0
+    const taskLifecycle = trackCliBackgroundTaskLifecycle(sessionId, cliMsg)
+    stopLateAgentTaskIfRequested(sessionId, taskLifecycle)
+    closeLateNonAgentTaskAfterRuntimeExit(sessionId, taskLifecycle)
+    closeStoppedAgentsAfterRuntimeExit(sessionId, cliMsg)
+    if (taskLifecycle?.suppressForward) return
+    const replacementAwaitingBoundary =
+      activeUserTurns.get(sessionId)?.replacementAfterStop === true
+    const stoppedTurnTerminalResult =
+      cliMsg?.type === 'result' &&
+      sessionStopRequested.has(sessionId) &&
+      !replacementAwaitingBoundary &&
+      !pendingInterruptedTurnResults.has(sessionId)
+    if (
+      shouldSuppressCliOutputDuringStop(sessionId, cliMsg, taskLifecycle) &&
+      !stoppedTurnTerminalResult
+    ) {
+      // Until the interrupted result and the replacement's own replay establish
+      // an ordering boundary, unscoped output may still belong to the old
+      // generation. Once that boundary settles, only its terminal result may
+      // pass to every renderer. Task lifecycle must pass so Stop can close
+      // Agents, and permission resolutions must pass so open prompts can close.
+      return
+    }
     if (options?.shouldForward && !options.shouldForward(cliMsg)) {
       return
     }
@@ -3018,35 +4156,56 @@ function bindClientSessionOutput(
     }
 
     const forward = () => {
-      handleCliPermissionModeBroadcast(sessionId, cliMsg)
-      const stopRequested = sessionStopRequested.has(sessionId)
-      const serverMsgs = translateCliMessage(cliMsg, sessionId)
-      for (const msg of serverMsgs) {
-        if (stopRequested && isStoppedTurnForegroundMessage(msg)) continue
-        sendMessage(ws, msg)
-      }
+      if ((sessionTranscriptEpochs.get(sessionId) ?? 0) !== transcriptEpoch) return
+      if (!activeSessions.get(sessionId)?.has(ws)) return
+      forwardCliMessageToClient(sessionId, ws, cliMsg)
     }
 
-    const persistence = persistCliTaskNotification(sessionId, cliMsg)
-    if (persistence) {
-      void persistence
-        .then(() => {
-          if (activeSessions.get(sessionId)?.has(ws)) forward()
-        })
-        .catch((error) => {
-          console.warn(
-            `[WS] Failed to forward persisted task notification for ${sessionId}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          )
-        })
-      return
-    }
-    forward()
+    persistThenForwardCliMessage(sessionId, cliMsg, forward)
   }
 
   clientOutputCallbacks.set(ws, { sessionId, callback })
   conversationService.onOutput(sessionId, callback)
+}
+
+function hasStoppedTurnBoundary(sessionId: string): boolean {
+  return sessionStopRequested.has(sessionId) ||
+    activeUserTurns.get(sessionId)?.replacementAfterStop === true
+}
+
+function isAgentScopedPermissionRequest(cliMsg: any): boolean {
+  return cliMsg?.type === 'control_request' &&
+    cliMsg.request?.subtype === 'can_use_tool' &&
+    typeof cliMsg.request.agent_id === 'string' &&
+    cliMsg.request.agent_id.trim().length > 0
+}
+
+function canAcceptPermissionRequestDuringStop(sessionId: string, cliMsg: any): boolean {
+  if (hasStoppedTurnBoundary(sessionId)) return false
+  if (!agentStopRequestedSessions.has(sessionId)) return true
+  return !isAgentScopedPermissionRequest(cliMsg)
+}
+
+function shouldSuppressCliOutputDuringStop(
+  sessionId: string,
+  cliMsg: any,
+  taskLifecycle: CliBackgroundTaskLifecycle | null,
+): boolean {
+  if (taskLifecycle !== null) return false
+  if (cliMsg?.type === 'control_cancel_request' || cliMsg?.type === 'control_response') {
+    return false
+  }
+  if (hasStoppedTurnBoundary(sessionId)) return true
+  if (!agentStopRequestedSessions.has(sessionId)) return false
+  if (cliMsg?.type === 'control_request') {
+    return isAgentScopedPermissionRequest(cliMsg)
+  }
+  if (cliMsg?.type === 'system' && cliMsg.subtype === 'task_progress') {
+    const taskId = typeof cliMsg.task_id === 'string' ? cliMsg.task_id.trim() : ''
+    return isAgentTaskType(cliMsg.task_type) ||
+      Boolean(taskId && activeAgentTasks.get(sessionId)?.has(taskId))
+  }
+  return true
 }
 
 function getCliPermissionModeBroadcast(cliMsg: any): PermissionMode | null {
@@ -3478,10 +4637,14 @@ export function __resetWebSocketHandlerStateForTests(): void {
   for (const timer of sessionCleanupTimers.values()) clearTimeout(timer)
   for (const timer of prewarmIdleTimers.values()) clearTimeout(timer)
   for (const remove of sessionDisconnectWatchers.values()) remove()
+  for (const tasks of activeAgentTasks.values()) {
+    for (const task of tasks.values()) clearAgentStopFinalizationRetry(task)
+  }
   activeSessions.clear()
   activePetClient = null
   clientOutputCallbacks.clear()
   taskNotificationPersistence.clear()
+  sessionTranscriptEpochs.clear()
   sessionCleanupTimers.clear()
   sessionDisconnectWatchers.clear()
   prewarmPendingSessions.clear()
@@ -3489,10 +4652,19 @@ export function __resetWebSocketHandlerStateForTests(): void {
   prewarmIdleTimers.clear()
   activeUserTurns.clear()
   activeBackgroundTaskIds.clear()
+  activeAgentTasks.clear()
+  activeNonAgentTasks.clear()
+  authoritativeStoppedTaskIds.clear()
+  agentStopRequestedSessions.clear()
+  runtimeExitStoppedSessions.clear()
+  pendingInterruptedTurnResults.clear()
+  sessionClearInProgress.clear()
   sessionStopRequested.clear()
   terminalSessionChatStates.clear()
   legacyQueuedSessionChats.clear()
   interruptedSessionChats.clear()
+  runtimeTransitionPromises.clear()
+  sessionStartupPromises.clear()
 }
 
 export function __markPrewarmPendingForTests(sessionId: string): void {
@@ -3512,6 +4684,28 @@ export function __markActiveTurnForTests(sessionId: string): void {
 export function __registerPendingUserTurnForTests(sessionId: string): void {
   beginSessionChatActivity(sessionId)
   activeUserTurns.set(sessionId, { messageSent: false })
+}
+
+/** Test hook: hold user admission in the shared CLI-startup seam. */
+export function __registerPendingSessionStartupForTests(
+  sessionId: string,
+  startup: Promise<void>,
+): void {
+  sessionStartupPromises.set(sessionId, startup)
+  const clearStartup = () => {
+    if (sessionStartupPromises.get(sessionId) === startup) {
+      sessionStartupPromises.delete(sessionId)
+    }
+  }
+  void startup.then(clearStartup, clearStartup)
+}
+
+/** Test hook: put a deterministic barrier ahead of user/clear admission. */
+export function __enqueueRuntimeTransitionForTests(
+  sessionId: string,
+  transition: Promise<void>,
+): Promise<void> {
+  return enqueueRuntimeTransition(sessionId, () => transition)
 }
 
 /** Test hook: settle a registered turn through the same CLI-result seam. */

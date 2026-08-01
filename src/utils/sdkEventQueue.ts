@@ -10,6 +10,7 @@ type TaskStartedEvent = {
   tool_use_id?: string
   description: string
   task_type?: string
+  remote_session_id?: string
   workflow_name?: string
   prompt?: string
 }
