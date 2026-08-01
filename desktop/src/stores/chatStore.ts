@@ -9,6 +9,11 @@ import { useTabStore } from './tabStore'
 import { randomSpinnerVerb } from '../config/spinnerVerbs'
 import { notifyDesktop } from '../lib/desktopNotifications'
 import { deriveSessionTitle, isPlaceholderSessionTitle } from '../lib/sessionTitle'
+import { t } from '../i18n'
+import {
+  VISUAL_SELECTION_BATCH_PROMPT_HEADER,
+  VISUAL_SELECTION_PROMPT_FOOTER,
+} from '../lib/selectionComposer'
 import { hasRunningBackgroundTasks, hasRunningSubagentTasks } from '../lib/backgroundTasks'
 import { AGENT_LIFECYCLE_TYPES } from '../types/team'
 import type { ComposerAttachment } from '../lib/composerAttachments'
@@ -1279,6 +1284,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             hunkId: a.hunkId,
             note: a.note,
             quote: a.quote,
+            selectionNumber: a.selectionNumber,
           }))
         : undefined
 
@@ -3167,12 +3173,17 @@ const SIMPLE_IMAGE_SOURCE_RE = /^\[Image source: (.+)\]$/
 const DETAILED_IMAGE_SOURCE_RE = /^\[Image: source: (.+?)(?:, original \d+x\d+, displayed at \d+x\d+\. Multiply coordinates by \d+(?:\.\d+)? to map to original image\.)?\]$/
 const IMAGE_RESIZE_METADATA_RE = /^\[Image: original \d+x\d+, displayed at \d+x\d+\. Multiply coordinates by \d+(?:\.\d+)? to map to original image\.\]$/
 const VISUAL_SELECTION_PROMPT_HEADER = '请根据截图中编号 1 的蓝色标注修改本地前端。'
-const VISUAL_SELECTION_PROMPT_FOOTER = '请优先依据截图里的编号标注定位元素，selector 只作为辅助线索。'
 
-type VisualSelectionHistoryDisplay = {
+type VisualSelectionHistoryItem = {
+  number: number
   displayName: string
   selector?: string
   note?: string
+}
+
+type VisualSelectionHistoryDisplay = {
+  batch: boolean
+  items: VisualSelectionHistoryItem[]
 }
 
 function getHistoryImageMediaType(block: UserHistoryBlock): string {
@@ -3220,13 +3231,40 @@ export function stripGeneratedImageMetadataLines(text: string): string {
 
 function parseVisualSelectionHistoryPrompt(text: string): VisualSelectionHistoryDisplay | null {
   const lines = text.replace(/\r\n?/g, '\n').split('\n')
-  if (lines[0]?.trim() !== VISUAL_SELECTION_PROMPT_HEADER) return null
+  const header = lines[0]?.trim()
+  if (header === VISUAL_SELECTION_BATCH_PROMPT_HEADER) {
+    const items: VisualSelectionHistoryDisplay['items'] = []
+    for (let index = 1; index < lines.length; index += 1) {
+      const match = lines[index]?.trim().match(/^\[元素 (\d+)\]$/)
+      if (!match) continue
+      const number = Number(match[1])
+      const endMarker = `[元素 ${number} 结束]`
+      const block: string[] = []
+      index += 1
+      while (index < lines.length && lines[index]?.trim() !== endMarker) {
+        block.push(lines[index] ?? '')
+        index += 1
+      }
+      const parsedItem = parseVisualSelectionItem(block, number)
+      if (parsedItem) items.push(parsedItem)
+    }
+    return items.length ? { batch: true, items } : null
+  }
+  if (header !== VISUAL_SELECTION_PROMPT_HEADER) return null
 
+  const item = parseVisualSelectionItem(lines.slice(1), 1)
+  return item ? { batch: false, items: [item] } : null
+}
+
+function parseVisualSelectionItem(
+  lines: string[],
+  number: number,
+): VisualSelectionHistoryItem | null {
   let displayName: string | undefined
   let selector: string | undefined
   let note: string | undefined
 
-  for (let index = 1; index < lines.length; index += 1) {
+  for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]?.trim() ?? ''
     if (line.startsWith('目标元素：')) {
       displayName = line.slice('目标元素：'.length).trim()
@@ -3245,21 +3283,24 @@ function parseVisualSelectionHistoryPrompt(text: string): VisualSelectionHistory
     }
   }
 
-  return displayName
-    ? {
-        displayName,
-        ...(selector ? { selector } : {}),
-        ...(note ? { note } : {}),
-      }
-    : null
+  return displayName ? {
+    number,
+    displayName,
+    ...(selector ? { selector } : {}),
+    ...(note ? { note } : {}),
+  } : null
 }
 
 function applyVisualSelectionHistoryDisplay(attachments: UIAttachment[], display: VisualSelectionHistoryDisplay): void {
-  const imageAttachment = attachments.find((attachment) => attachment.type === 'image')
-  if (!imageAttachment) return
-  imageAttachment.name = display.displayName
-  if (display.selector) imageAttachment.quote = display.selector
-  if (display.note) imageAttachment.note = display.note
+  const imageAttachments = attachments.filter((attachment) => attachment.type === 'image')
+  display.items.forEach((item, index) => {
+    const imageAttachment = imageAttachments[index]
+    if (!imageAttachment) return
+    imageAttachment.name = item.displayName
+    if (item.selector) imageAttachment.quote = item.selector
+    if (item.note) imageAttachment.note = item.note
+    if (display.batch) imageAttachment.selectionNumber = item.number
+  })
 }
 
 function normalizeHistoryImageAttachment(block: UserHistoryBlock): UIAttachment {
@@ -4233,6 +4274,7 @@ function mapQueuedDisplayAttachments(attachments?: AttachmentRef[]): UIAttachmen
     hunkId: attachment.hunkId,
     note: attachment.note,
     quote: attachment.quote,
+    selectionNumber: attachment.selectionNumber,
   }))
 }
 
@@ -4547,7 +4589,11 @@ export function mapHistoryMessagesToUiMessages(
           applyVisualSelectionHistoryDisplay(attachments, visualSelectionDisplay)
         }
         const parsed = extractRestoredUserDisplay(visibleText)
-        const userContent = visualSelectionDisplay ? '' : parsed.content
+        const userContent = visualSelectionDisplay
+          ? visualSelectionDisplay.batch
+            ? t('browser.selection.batchMessage', { count: visualSelectionDisplay.items.length })
+            : ''
+          : parsed.content
         const modelContent = visualSelectionDisplay || modelText !== visibleText ? modelText : parsed.modelContent
         const allAttachments = [...(parsed.attachments ?? []), ...attachments]
         uiMessages.push({

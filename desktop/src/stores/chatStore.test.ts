@@ -960,6 +960,50 @@ describe('chatStore history mapping', () => {
     ])
   })
 
+  it('restores a batch selection as one numbered screenshot group with a compact summary', () => {
+    const modelPrompt = [
+      '请一次性处理以下批量标注的本地前端修改。每张截图中的蓝色编号与下方元素编号一一对应。',
+      '',
+      '[元素 1]',
+      '目标元素：<h1>',
+      'Selector：#title',
+      '用户注释：',
+      '标题更轻一点',
+      '[元素 1 结束]',
+      '',
+      '[元素 3]',
+      '目标元素：<button>',
+      'Selector：#cta',
+      '用户注释：',
+      '按钮更醒目',
+      '[元素 3 结束]',
+      '',
+      '请优先依据截图里的编号标注定位元素，selector 只作为辅助线索。',
+    ].join('\n')
+
+    const mapped = mapHistoryMessagesToUiMessages([{
+      id: 'selection-batch-user-1',
+      type: 'user',
+      timestamp: '2026-06-10T16:20:00.000Z',
+      content: [
+        { type: 'text', text: modelPrompt },
+        { type: 'image', source: { media_type: 'image/png', data: 'FIRSTPNG' } },
+        { type: 'image', source: { media_type: 'image/png', data: 'THIRDPNG' } },
+      ],
+    } as MessageEntry])
+
+    expect(mapped).toMatchObject([{
+      id: 'selection-batch-user-1',
+      type: 'user_text',
+      content: '2 page changes',
+      modelContent: modelPrompt,
+      attachments: [
+        { type: 'image', name: '<h1>', note: '标题更轻一点', quote: '#title', selectionNumber: 1 },
+        { type: 'image', name: '<button>', note: '按钮更醒目', quote: '#cta', selectionNumber: 3 },
+      ],
+    }])
+  })
+
   it('restores /goal local command output from transcript history', () => {
     const messages: MessageEntry[] = [
       {

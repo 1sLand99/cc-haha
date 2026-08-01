@@ -42,6 +42,7 @@ export type AttachmentRef = {
   hunkId?: string
   note?: string
   quote?: string
+  selectionNumber?: number
 }
 
 export type PermissionUpdate =
@@ -75,6 +76,7 @@ export type UIAttachment = {
   hunkId?: string
   note?: string
   quote?: string
+  selectionNumber?: number
 }
 
 // ─── Server → Client ──────────────────────────────────────────────
