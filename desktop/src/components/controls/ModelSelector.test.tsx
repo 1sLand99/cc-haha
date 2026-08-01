@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
 const { runtimeMocks } = vi.hoisted(() => ({
@@ -40,6 +40,7 @@ async function clickByRole(name: RegExp | string) {
 
 afterEach(() => {
   cleanup()
+  Object.assign(runtimeMocks, { isMobileViewport: false, isDesktopRuntime: false })
   useSettingsStore.setState(useSettingsStore.getInitialState(), true)
   useProviderStore.setState(useProviderStore.getInitialState(), true)
   useSessionRuntimeStore.setState(useSessionRuntimeStore.getInitialState(), true)
@@ -214,6 +215,55 @@ describe('ModelSelector', () => {
     expect(setModel).toHaveBeenCalledWith('beta')
   })
 
+  it('filters models by name or description and shows a clearable empty state', async () => {
+    const onChange = vi.fn()
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: MODELS,
+      currentModel: MODELS[0],
+    })
+
+    render(<ModelSelector value="alpha" onChange={onChange} />)
+
+    await clickByRole(/alpha/i)
+    const dropdown = screen.getByTestId('model-selector-dropdown')
+    const search = within(dropdown).getByRole('searchbox', { name: 'Search models' })
+
+    expect(search).toHaveFocus()
+    expect(search.closest('.sticky')).toHaveClass('top-0')
+
+    fireEvent.change(search, { target: { value: 'careful' } })
+    expect(within(dropdown).queryByRole('button', { name: /Alpha/ })).not.toBeInTheDocument()
+    expect(within(dropdown).getByRole('button', { name: /Beta/ })).toBeInTheDocument()
+
+    fireEvent.change(search, { target: { value: 'missing' } })
+    expect(within(dropdown).getByRole('status')).toHaveTextContent('No matching models')
+
+    fireEvent.click(within(dropdown).getByRole('button', { name: 'Clear model search' }))
+    expect(within(dropdown).getByRole('button', { name: /Alpha/ })).toBeInTheDocument()
+    expect(within(dropdown).getByRole('button', { name: /Beta/ })).toBeInTheDocument()
+  })
+
+  it('keeps the H5 search field in the fixed sheet header with a 44px touch target', async () => {
+    Object.assign(runtimeMocks, { isMobileViewport: true, isDesktopRuntime: false })
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: MODELS,
+      currentModel: MODELS[0],
+    })
+
+    render(<ModelSelector value="alpha" onChange={vi.fn()} />)
+
+    await clickByRole(/alpha/i)
+    const sheet = screen.getByTestId('model-selector-dropdown')
+    const search = within(sheet).getByRole('searchbox', { name: 'Search models' })
+    const scrollRegion = sheet.children[1]
+
+    expect(search).toHaveClass('h-11')
+    expect(sheet.children[0]?.contains(search)).toBe(true)
+    expect(scrollRegion?.contains(search)).toBe(false)
+  })
+
   it('selects provider-scoped runtime models and mirrors session selections', async () => {
     const setSessionRuntime = vi.fn()
     useSettingsStore.setState({
@@ -248,8 +298,18 @@ describe('ModelSelector', () => {
     render(<ModelSelector runtimeKey="session-1" />)
 
     await clickByRole(/provider-main/i)
+    const dropdown = screen.getByTestId('model-selector-dropdown')
+    const search = within(dropdown).getByRole('searchbox', { name: 'Search models' })
+    fireEvent.change(search, { target: { value: 'provider a' } })
+    expect(within(dropdown).getByRole('button', { name: /provider-main/ })).toBeInTheDocument()
+    expect(within(dropdown).getByRole('button', { name: /provider-fast/ })).toBeInTheDocument()
+
+    fireEvent.change(search, {
+      target: { value: 'fast' },
+    })
+    expect(within(dropdown).queryByRole('button', { name: /provider-main/ })).not.toBeInTheDocument()
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /provider-fast/ }))
+      fireEvent.click(within(dropdown).getByRole('button', { name: /provider-fast/ }))
       await Promise.resolve()
     })
 

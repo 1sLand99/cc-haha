@@ -25,6 +25,7 @@ import {
   GROK_OFFICIAL_PROVIDER_ID,
 } from '../../constants/grokOfficialProvider'
 import { MobileBottomSheet } from '@/components/ui/MobileBottomSheet'
+import { SearchField } from '@/components/ui/SearchField'
 import { ReasoningEffortPopover } from './ReasoningEffortPopover'
 
 type ProviderChoice = {
@@ -177,6 +178,11 @@ function buildProviderChoices(
   return choices
 }
 
+function modelMatchesSearch(model: ModelInfo, query: string): boolean {
+  return [model.id, model.name, model.description]
+    .some(value => value.toLocaleLowerCase().includes(query))
+}
+
 export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function ModelSelector({
   value,
   onChange,
@@ -213,6 +219,7 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   )
   const [open, setOpen] = useState(false)
   const [effortOpen, setEffortOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const [dropdownPosition, setDropdownPosition] = useState<DropdownPosition | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const effortButtonRef = useRef<HTMLButtonElement>(null)
@@ -317,6 +324,10 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   }, [open, updateDropdownPosition])
 
   useEffect(() => {
+    if (!open && searchQuery) setSearchQuery('')
+  }, [open, searchQuery])
+
+  useEffect(() => {
     if (!open) return
     window.addEventListener('resize', updateDropdownPosition)
     window.addEventListener('scroll', updateDropdownPosition, true)
@@ -350,6 +361,24 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
       grokOAuthStatus?.loggedIn === true,
     ),
     [activeId, availableModels, providers, roleLabels, t, claudeOAuthStatus, grokOAuthStatus, openAIOAuthStatus],
+  )
+  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase()
+  const filteredProviderChoices = useMemo(() => {
+    if (!normalizedSearchQuery) return providerChoices
+
+    return providerChoices.flatMap((choice) => {
+      const providerMatches = choice.providerName.toLocaleLowerCase().includes(normalizedSearchQuery)
+      const models = providerMatches
+        ? choice.models
+        : choice.models.filter(model => modelMatchesSearch(model, normalizedSearchQuery))
+      return models.length > 0 ? [{ ...choice, models }] : []
+    })
+  }, [normalizedSearchQuery, providerChoices])
+  const filteredAvailableModels = useMemo(
+    () => normalizedSearchQuery
+      ? availableModels.filter(model => modelMatchesSearch(model, normalizedSearchQuery))
+      : availableModels,
+    [availableModels, normalizedSearchQuery],
   )
 
   const selectedModel = isControlled
@@ -414,18 +443,45 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
     })
   }
 
+  const hasMatchingModels = isRuntimeScoped
+    ? filteredProviderChoices.length > 0
+    : filteredAvailableModels.length > 0
+  const searchField = (
+    <SearchField
+      value={searchQuery}
+      onChange={setSearchQuery}
+      label={t('model.searchPlaceholder')}
+      placeholder={t('model.searchPlaceholder')}
+      clearLabel={t('model.clearSearch')}
+      size={isMobileBrowser ? 'xl' : 'md'}
+      autoFocus={!isMobileBrowser}
+    />
+  )
+
   const dropdownContent = (
     <>
       <div className={`overflow-y-auto ${isMobileBrowser ? 'p-1' : 'p-1.5'}`} style={{ maxHeight: isMobileBrowser ? undefined : dropdownPosition?.maxHeight }}>
         {!isMobileBrowser && (
-          <div className="mb-1 px-3 pt-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-tertiary)]">
-            {t('model.configuration')}
+          <div className="sticky top-0 z-[var(--z-sticky)] mb-1 border-b border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] px-2 pb-2 pt-1.5">
+            <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-tertiary)]">
+              {t('model.configuration')}
+            </div>
+            {searchField}
+          </div>
+        )}
+
+        {!hasMatchingModels && (
+          <div
+            role="status"
+            className={`flex items-center justify-center px-4 text-center text-sm text-[var(--color-text-tertiary)] ${isMobileBrowser ? 'min-h-28' : 'min-h-24'}`}
+          >
+            {t('model.noMatches')}
           </div>
         )}
 
         {isRuntimeScoped ? (
           <div className="space-y-3">
-            {providerChoices.map((choice) => (
+            {filteredProviderChoices.map((choice) => (
               <div key={choice.providerId ?? 'official'} className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2 px-3 pt-1">
                   <span className="truncate text-xs font-semibold text-[var(--color-text-tertiary)]">
@@ -498,7 +554,7 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
           </div>
         ) : (
           <div className="space-y-1">
-            {availableModels.map((model) => {
+            {filteredAvailableModels.map((model) => {
               const isSelected = model.id === selectedModel?.id
               return (
                 <button
@@ -552,7 +608,8 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
         title={t('model.configuration')}
         closeLabel={t('tabs.close')}
         ariaLabel={t('model.configuration')}
-        contentClassName="p-3"
+        headerExtra={searchField}
+        contentClassName="p-1"
         panelRef={dropdownRef}
         testId="model-selector-dropdown"
       >

@@ -2115,6 +2115,9 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   // ─── Model Selector ──────────────────────────────────────
   'model.selectModel': 'Select model',
   'model.configuration': 'Model Configuration',
+  'model.searchPlaceholder': 'Search models',
+  'model.clearSearch': 'Clear model search',
+  'model.noMatches': 'No matching models',
   'model.effort': 'Effort',
 
   // ─── Directory Picker ──────────────────────────────────────

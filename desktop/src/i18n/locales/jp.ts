@@ -2117,6 +2117,9 @@ export const jp: Record<TranslationKey, string> = {
   // ─── Model Selector ──────────────────────────────────────
   'model.selectModel': 'モデルを選択',
   'model.configuration': 'モデル設定',
+  'model.searchPlaceholder': 'モデルを検索',
+  'model.clearSearch': 'モデル検索をクリア',
+  'model.noMatches': '一致するモデルはありません',
   'model.effort': '労力',
 
   // ─── Directory Picker ──────────────────────────────────────
