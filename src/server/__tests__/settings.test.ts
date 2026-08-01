@@ -743,6 +743,38 @@ describe('Models API', () => {
     ])
   })
 
+  it('GET /api/models should expose the active provider model effort catalog', async () => {
+    const providerSvc = new ProviderService()
+    const provider = await providerSvc.addProvider({
+      presetId: 'kimi',
+      name: 'Kimi',
+      baseUrl: 'https://api.kimi.com/coding/',
+      apiKey: 'test-key',
+      apiFormat: 'anthropic',
+      models: {
+        main: 'k3',
+        haiku: 'k3',
+        sonnet: 'k3',
+        opus: 'k3',
+      },
+    })
+    await providerSvc.activateProvider(provider.id)
+
+    const { req, url, segments } = makeRequest('GET', '/api/models')
+    const res = await handleModelsApi(req, url, segments)
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.models).toEqual([{
+      id: 'k3',
+      name: 'k3',
+      description: 'Main model',
+      context: '',
+      defaultReasoningEffort: 'high',
+      supportedReasoningEfforts: ['low', 'high', 'max'],
+    }])
+  })
+
   it('GET /api/models should merge env-configured provider models with saved OpenAI OAuth models', async () => {
     process.env.ANTHROPIC_API_KEY = 'deepseek-key'
     process.env.ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'

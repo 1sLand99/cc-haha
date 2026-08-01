@@ -202,7 +202,7 @@ describe('buildOpenAICodexFetch', () => {
       { effort: 'xhigh' },
       { effort: 'max' },
       { effort: 'medium' },
-      { effort: 'high' },
+      { effort: 'xhigh' },
     ])
   })
 

@@ -8,7 +8,6 @@ import {
   mergeActiveProviderManagedEnv,
   readActiveProviderManagedEnv,
 } from '../services/providerRuntimeEnv.js'
-import { resolveAppliedEffort } from '../../utils/effort.js'
 import { get3PModelCapabilityOverride } from '../../utils/model/modelSupportOverrides.js'
 
 let tmpDir: string
@@ -69,7 +68,7 @@ describe('providerRuntimeEnv', () => {
     expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
   })
 
-  test('derives native Anthropic provider env from the active provider index', async () => {
+  test('uses deny-by-default model capabilities for an unknown custom model', async () => {
     await writeJson(path.join(tmpDir, 'cc-haha', 'providers.json'), {
       activeId: 'provider-1',
       providers: [
@@ -101,17 +100,13 @@ describe('providerRuntimeEnv', () => {
       ENABLE_TOOL_SEARCH: 'true',
       ANTHROPIC_MODEL: 'active-main',
       ANTHROPIC_DEFAULT_FABLE_MODEL: 'active-fable',
-      ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES:
-        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
+      ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES: 'none',
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'active-main',
-      ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES:
-        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES: 'none',
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'active-sonnet',
-      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES:
-        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
+      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'none',
       ANTHROPIC_DEFAULT_OPUS_MODEL: 'active-main',
-      ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES:
-        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
+      ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES: 'none',
     })
 
     const runtimeKeys = [
@@ -132,7 +127,7 @@ describe('providerRuntimeEnv', () => {
       delete process.env.CLAUDE_CODE_EFFORT_LEVEL
       clearCapabilityCache()
 
-      expect(resolveAppliedEffort('active-main', 'xhigh')).toBe('xhigh')
+      expect(get3PModelCapabilityOverride('active-main', 'effort')).toBe(false)
     } finally {
       for (const key of runtimeKeys) {
         const value = originalRuntimeEnv[key]
@@ -398,6 +393,8 @@ describe('providerRuntimeEnv', () => {
     expect(zhipuEnv).toMatchObject({
       ANTHROPIC_MODEL: 'glm-5.2[1m]',
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.7',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES: 'thinking',
+      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'thinking,effort,max_effort',
     })
     // No provider-wide auto-compact window: it is model-agnostic and pinned
     // small-context models at 1M so auto-compact never fired (#1162).

@@ -85,9 +85,7 @@ describe('provider presets API', () => {
     expect(deepseek?.defaultModels.sonnet).toBe('deepseek-v4-pro[1m]')
     expect(deepseek?.defaultModels.opus).toBe('deepseek-v4-pro[1m]')
     expect(deepseek?.defaultEnv?.CC_HAHA_SEND_DISABLED_THINKING).toBeUndefined()
-    expect(deepseek?.defaultEnv?.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES).toBe(
-      'thinking,effort,adaptive_thinking,max_effort',
-    )
+    expect(deepseek?.defaultEnv).toEqual({})
     expect(zhipu?.authStrategy).toBe('auth_token')
     expect(zhipu?.defaultModels.main).toBe('glm-5.2[1m]')
     expect(zhipu?.defaultModels.haiku).toBe('glm-4.7')
@@ -102,9 +100,7 @@ describe('provider presets API', () => {
     expect(kimi?.authStrategy).toBe('api_key')
     expect(kimi?.defaultModels.main).toBe('k3')
     expect(kimi?.defaultEnv?.CC_HAHA_SEND_DISABLED_THINKING).toBeUndefined()
-    expect(kimi?.defaultEnv?.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES).toBe(
-      'thinking,required_thinking,effort,max_effort',
-    )
+    expect(kimi?.defaultEnv).toEqual({})
     expect(minimax?.baseUrl).toBe('https://api.minimax.io/anthropic')
     expect(minimax?.regionalEndpoints).toEqual([
       { region: 'global_en', baseUrl: 'https://api.minimax.io/anthropic' },
@@ -113,7 +109,7 @@ describe('provider presets API', () => {
     expect(minimax?.authStrategy).toBe('auth_token')
     expect(minimax?.defaultModels.main).toBe('MiniMax-M3[1m]')
     expect(minimax?.defaultEnv?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined()
-    expect(minimax?.defaultEnv?.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES).toBe('thinking,adaptive_thinking')
+    expect(minimax?.defaultEnv).toEqual({})
     expect(minimax?.modelContextWindows?.['MiniMax-M3']).toBe(1000000)
     expect(shengsuanyun?.baseUrl).toBe('https://router.shengsuanyun.com/api')
     expect(shengsuanyun?.authStrategy).toBe('auth_token')

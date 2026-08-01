@@ -46,10 +46,10 @@ export function buildOpenAICodexFetch(
       ...originalBody,
       model: mappedModel,
     })
-    // The generic Anthropic -> OpenAI transformer intentionally narrows effort
-    // to the common low/medium/high subset. Codex models additionally support
-    // xhigh/max, so preserve a valid native request-scoped value before falling
-    // back to the transformed value, the session env, then the model default.
+    // Keep a valid native request-scoped value ahead of the transformed value,
+    // the session env, and the model default. The generic transformer preserves
+    // the current OpenAI effort enum; the catalog below remains authoritative
+    // about which subset the selected model accepts.
     const nativeRequestEffort = isOpenAIReasoningEffort(
       originalBody.output_config?.effort,
     )

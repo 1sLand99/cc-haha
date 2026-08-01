@@ -209,7 +209,7 @@ describe('anthropicToOpenaiChat', () => {
     expect(result.reasoning_effort).toBe('xhigh')
   })
 
-  test('clamps max output_config effort to high for OpenAI-compatible chat providers', () => {
+  test('preserves max output_config effort for OpenAI-compatible chat providers', () => {
     const req: AnthropicRequest = {
       model: 'longcat',
       max_tokens: 100,
@@ -218,7 +218,7 @@ describe('anthropicToOpenaiChat', () => {
     }
 
     const result = anthropicToOpenaiChat(req)
-    expect(result.reasoning_effort).toBe('high')
+    expect(result.reasoning_effort).toBe('max')
   })
 
   test('assistant message with tool_use', () => {
@@ -737,7 +737,7 @@ describe('anthropicToOpenaiResponses', () => {
     expect(result.reasoning).toEqual({ effort: 'xhigh' })
   })
 
-  test('clamps max output_config effort for Responses API', () => {
+  test('preserves max output_config effort for Responses API', () => {
     const req: AnthropicRequest = {
       model: 'gpt-5.5',
       max_tokens: 100,
@@ -746,7 +746,7 @@ describe('anthropicToOpenaiResponses', () => {
     }
 
     const result = anthropicToOpenaiResponses(req)
-    expect(result.reasoning).toEqual({ effort: 'high' })
+    expect(result.reasoning).toEqual({ effort: 'max' })
   })
 
   test('stop_sequences dropped', () => {

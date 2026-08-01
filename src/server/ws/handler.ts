@@ -37,6 +37,10 @@ import {
 import { GROK_DEFAULT_MAIN_MODEL } from '../../services/grokAuth/models.js'
 import { getGrokModelCatalog } from '../../services/grokAuth/modelCatalog.js'
 import { hahaGrokOAuthService } from '../services/hahaGrokOAuthService.js'
+import {
+  isModelReasoningEffort,
+  normalizeModelReasoningEffort,
+} from '../../shared/modelReasoning.js'
 import { diagnosticsService } from '../services/diagnosticsService.js'
 import {
   buildConversationTitleInput,
@@ -496,7 +500,7 @@ const prewarmPendingSessions = new Set<string>()
 const prewarmedSessions = new Set<string>()
 const prewarmIdleTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const DEFAULT_PREWARM_IDLE_TIMEOUT_MS = 5 * 60_000
-const VALID_CLAUDE_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'max'])
+const VALID_CLAUDE_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 
 async function sendRepositoryStartupStatus(
   ws: ServerWebSocket<WebSocketData>,
@@ -1483,10 +1487,10 @@ async function handleSetRuntimeConfig(
   }
   const effortLevel =
     typeof message.effortLevel === 'string' ? message.effortLevel.trim() : undefined
-  if (
-    effortLevel !== undefined &&
-    !(await isRuntimeEffortSupported(message.providerId, modelId, effortLevel))
-  ) {
+  const effortResolution = effortLevel === undefined
+    ? { valid: true, effort: undefined }
+    : await resolveRuntimeEffort(message.providerId, modelId, effortLevel)
+  if (!effortResolution.valid) {
     sendMessage(ws, {
       type: 'error',
       message: 'Runtime effort selection is invalid.',
@@ -1498,7 +1502,7 @@ async function handleSetRuntimeConfig(
   const nextOverride = {
     providerId: message.providerId ?? null,
     modelId,
-    ...(effortLevel ? { effort: effortLevel } : {}),
+    ...(effortResolution.effort ? { effort: effortResolution.effort } : {}),
   }
   const prevOverride = runtimeOverrides.get(sessionId)
   if (
@@ -4265,25 +4269,46 @@ async function getGrokReasoningEfforts(modelId: string): Promise<{
   }
 }
 
-async function isRuntimeEffortSupported(
+async function resolveRuntimeEffort(
   providerId: string | null | undefined,
   modelId: string,
   effort: string,
-): Promise<boolean> {
+): Promise<{ valid: boolean; effort?: string }> {
   if (isGrokOfficialProviderId(providerId)) {
     const { supportedEfforts } = await getGrokReasoningEfforts(modelId)
     return supportedEfforts.includes(effort)
+      ? { valid: true, effort }
+      : { valid: false }
   }
-  if (!isOpenAIOfficialProviderId(providerId)) {
+  if (providerId === null || providerId === undefined) {
     return VALID_CLAUDE_EFFORT_LEVELS.has(effort)
+      ? { valid: true, effort }
+      : { valid: false }
   }
-  if (!isOpenAIReasoningEffort(effort)) {
-    return false
+  if (isOpenAIOfficialProviderId(providerId)) {
+    if (!isOpenAIReasoningEffort(effort)) {
+      return { valid: false }
+    }
+
+    const catalog = await getOpenAICodexModelCatalog()
+    const model = getOpenAIModelCatalogEntry(modelId, catalog)
+    return !model || model.supportedReasoningEfforts.includes(effort)
+      ? { valid: true, effort }
+      : { valid: false }
   }
 
-  const catalog = await getOpenAICodexModelCatalog()
-  const model = getOpenAIModelCatalogEntry(modelId, catalog)
-  return !model || model.supportedReasoningEfforts.includes(effort)
+  if (!isModelReasoningEffort(effort)) return { valid: false }
+  const provider = await providerService.getProvider(providerId).catch(() => null)
+  if (!provider) return { valid: false }
+  const normalizedEffort = normalizeModelReasoningEffort(
+    modelId,
+    effort,
+    provider.apiFormat ?? 'anthropic',
+  )
+  return {
+    valid: true,
+    ...(normalizedEffort ? { effort: normalizedEffort } : {}),
+  }
 }
 
 function isKnownRuntimeProviderId(

@@ -16,7 +16,10 @@ import type { ModelInfo, ReasoningEffortLevel } from '../../types/settings'
 import { useDismissable } from '@/hooks/useDismissable'
 import { useMobileViewport } from '../../hooks/useMobileViewport'
 import { isDesktopRuntime } from '../../lib/desktopRuntime'
-import { resolveDefaultRuntimeSelection } from '../../lib/runtimeSelection'
+import {
+  normalizeRuntimeSelection,
+  resolveDefaultRuntimeSelection,
+} from '../../lib/runtimeSelection'
 import { useHahaOAuthStore } from '../../stores/hahaOAuthStore'
 import { useHahaOpenAIOAuthStore } from '../../stores/hahaOpenAIOAuthStore'
 import { useHahaGrokOAuthStore } from '../../stores/hahaGrokOAuthStore'
@@ -29,6 +32,11 @@ import { SearchField } from '@/components/ui/SearchField'
 import { ReasoningEffortPopover } from './ReasoningEffortPopover'
 import { useUIStore } from '../../stores/uiStore'
 import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
+import {
+  isModelReasoningEffort,
+  normalizeModelReasoningEffort,
+  resolveModelReasoningProfile,
+} from '../../../../src/shared/modelReasoning'
 
 type ProviderChoice = {
   providerId: string | null
@@ -116,12 +124,19 @@ function buildProviderModels(
     byId.set(entry.id, { id: entry.id, labels: [entry.label] })
   }
 
-  return [...byId.values()].map((entry) => ({
-    id: entry.id,
-    name: entry.id,
-    description: entry.labels.join(' · '),
-    context: '',
-  }))
+  return [...byId.values()].map((entry) => {
+    const reasoningProfile = resolveModelReasoningProfile(entry.id, provider.apiFormat)
+    return {
+      id: entry.id,
+      name: entry.id,
+      description: entry.labels.join(' · '),
+      context: '',
+      supportedReasoningEfforts: [...(reasoningProfile?.supportedReasoningEfforts ?? [])],
+      ...(reasoningProfile?.defaultReasoningEffort
+        ? { defaultReasoningEffort: reasoningProfile.defaultReasoningEffort }
+        : {}),
+    }
+  })
 }
 
 function buildProviderChoices(
@@ -505,11 +520,13 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   }), [openSelector])
 
   const handleRuntimeSelect = (selection: RuntimeSelection) => {
-    onRuntimeSelectionChange?.(selection)
+    const apiFormat = providers.find((provider) => provider.id === selection.providerId)?.apiFormat
+    const normalizedSelection = normalizeRuntimeSelection(selection, apiFormat)
+    onRuntimeSelectionChange?.(normalizedSelection)
     if (runtimeKey) {
-      useSessionRuntimeStore.getState().setSelection(runtimeKey, selection)
+      useSessionRuntimeStore.getState().setSelection(runtimeKey, normalizedSelection)
       if (runtimeKey !== DRAFT_RUNTIME_SELECTION_KEY) {
-        useChatStore.getState().setSessionRuntime(runtimeKey, selection)
+        useChatStore.getState().setSessionRuntime(runtimeKey, normalizedSelection)
       }
     }
     setOpen(false)
@@ -585,12 +602,24 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
                         onClick={() => {
                           const supportedEfforts = model.supportedReasoningEfforts
                           const explicitEffort = activeRuntimeSelection?.effortLevel
+                          const providerApiFormat = providers.find(
+                            (provider) => provider.id === choice.providerId,
+                          )?.apiFormat
+                          const normalizedProviderEffort = explicitEffort &&
+                            isModelReasoningEffort(explicitEffort)
+                            ? normalizeModelReasoningEffort(
+                                model.id,
+                                explicitEffort,
+                                providerApiFormat,
+                              )
+                            : undefined
                           const nextEffort = supportedEfforts === undefined
                             ? explicitEffort ?? effortLevel
                             : supportedEfforts.length
-                              ? explicitEffort && supportedEfforts.includes(explicitEffort)
+                              ? normalizedProviderEffort
+                                ?? (explicitEffort && supportedEfforts.includes(explicitEffort)
                                 ? explicitEffort
-                                : model.defaultReasoningEffort ?? supportedEfforts[0]
+                                : model.defaultReasoningEffort ?? supportedEfforts[0])
                               : undefined
                           handleRuntimeSelect({
                             providerId: choice.providerId,

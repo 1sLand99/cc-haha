@@ -5153,6 +5153,80 @@ describe('WebSocket Chat Integration', () => {
     }
   }, 20_000)
 
+  it('should normalize an inherited xhigh effort to K3 max without a runtime error', async () => {
+    const providerService = new ProviderService()
+    const provider = await providerService.addProvider({
+      presetId: 'kimi',
+      name: `Kimi K3 ${crypto.randomUUID()}`,
+      apiKey: 'test-kimi-key',
+      authStrategy: 'api_key',
+      baseUrl: 'https://api.kimi.com/coding/',
+      apiFormat: 'anthropic',
+      models: {
+        main: 'k3',
+        haiku: 'k3',
+        sonnet: 'k3',
+        opus: 'k3',
+      },
+    })
+    const sessionId = `chat-k3-effort-${crypto.randomUUID()}`
+    const originalStartSession = conversationService.startSession.bind(conversationService)
+    const startCalls: Array<{
+      options?: { model?: string; effort?: string; providerId?: string | null }
+    }> = []
+    conversationService.startSession = (async function patchedStartSession(
+      sid: string,
+      workDir: string,
+      sdkUrl: string,
+      options?: { permissionMode?: string; model?: string; effort?: string; thinking?: 'enabled' | 'adaptive' | 'disabled'; providerId?: string | null },
+    ) {
+      startCalls.push({ options })
+      return originalStartSession(sid, workDir, sdkUrl, options)
+    }) as typeof conversationService.startSession
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(`${wsUrl}/ws/${sessionId}`)
+        const timeout = setTimeout(() => {
+          ws.close()
+          reject(new Error('Timed out waiting for normalized K3 runtime turn'))
+        }, 10_000)
+
+        ws.onmessage = (event) => {
+          const message = JSON.parse(event.data as string)
+          if (message.type === 'connected') {
+            ws.send(JSON.stringify({
+              type: 'set_runtime_config',
+              providerId: provider.id,
+              modelId: 'k3',
+              effortLevel: 'xhigh',
+            }))
+            ws.send(JSON.stringify({ type: 'user_message', content: 'use normalized K3 effort' }))
+          } else if (message.type === 'error') {
+            clearTimeout(timeout)
+            ws.close()
+            reject(new Error(message.message))
+          } else if (message.type === 'message_complete') {
+            clearTimeout(timeout)
+            ws.close()
+            resolve()
+          }
+        }
+        ws.onerror = () => reject(new Error('WebSocket failed for normalized K3 runtime'))
+      })
+
+      expect(startCalls.find((call) => call.options?.providerId === provider.id)?.options).toMatchObject({
+        providerId: provider.id,
+        model: 'k3',
+        effort: 'max',
+      })
+    } finally {
+      conversationService.startSession = originalStartSession
+      conversationService.stopSession(sessionId)
+      await providerService.deleteProvider(provider.id)
+    }
+  }, 20_000)
+
   it('should reject a reasoning effort that the selected ChatGPT model does not support', async () => {
     const sessionId = `chat-openai-invalid-effort-${crypto.randomUUID()}`
     await new Promise<void>((resolve, reject) => {
@@ -5427,10 +5501,10 @@ describe('WebSocket Chat Integration', () => {
       baseUrl: 'http://127.0.0.1:1/anthropic',
       apiFormat: 'anthropic',
       models: {
-        main: 'model-a-main',
-        haiku: 'model-a-haiku',
-        sonnet: 'model-a-sonnet',
-        opus: 'model-a-opus',
+        main: 'deepseek-v4-pro',
+        haiku: 'deepseek-v4-flash',
+        sonnet: 'deepseek-v4-pro',
+        opus: 'deepseek-v4-pro',
       },
     })
     const providerB = await providerService.addProvider({
@@ -5440,10 +5514,10 @@ describe('WebSocket Chat Integration', () => {
       baseUrl: 'http://127.0.0.1:1/anthropic',
       apiFormat: 'anthropic',
       models: {
-        main: 'model-b-main',
-        haiku: 'model-b-haiku',
-        sonnet: 'model-b-sonnet',
-        opus: 'model-b-opus',
+        main: 'k3',
+        haiku: 'k3',
+        sonnet: 'k3',
+        opus: 'k3',
       },
     })
 
@@ -5489,7 +5563,7 @@ describe('WebSocket Chat Integration', () => {
             ws.send(JSON.stringify({
               type: 'set_runtime_config',
               providerId: providerA.id,
-              modelId: 'model-a-sonnet',
+              modelId: 'deepseek-v4-pro',
               effortLevel: 'medium',
             }))
             ws.send(JSON.stringify({ type: 'user_message', content: 'first turn' }))
@@ -5510,7 +5584,7 @@ describe('WebSocket Chat Integration', () => {
             ws.send(JSON.stringify({
               type: 'set_runtime_config',
               providerId: providerB.id,
-              modelId: 'model-b-opus',
+              modelId: 'k3',
               effortLevel: 'max',
             }))
             return
@@ -5550,15 +5624,15 @@ describe('WebSocket Chat Integration', () => {
         sessionId,
         options: {
           providerId: providerA.id,
-          model: 'model-a-sonnet',
-          effort: 'medium',
+          model: 'deepseek-v4-pro',
+          effort: 'high',
         },
       })
       expect(startCalls[1]).toMatchObject({
         sessionId,
         options: {
           providerId: providerB.id,
-          model: 'model-b-opus',
+          model: 'k3',
           effort: 'max',
         },
       })

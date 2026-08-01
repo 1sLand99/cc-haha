@@ -481,12 +481,10 @@ describe('ModelSelector', () => {
     expect(useSessionRuntimeStore.getState().selections['session-1']).toEqual({
       providerId: 'provider-a',
       modelId: 'provider-fast',
-      effortLevel: 'max',
     })
     expect(setSessionRuntime).toHaveBeenCalledWith('session-1', {
       providerId: 'provider-a',
       modelId: 'provider-fast',
-      effortLevel: 'max',
     })
   })
 
@@ -600,31 +598,36 @@ describe('ModelSelector', () => {
       locale: 'en',
       availableModels: MODELS,
       currentModel: MODELS[0],
-      activeProviderName: 'Provider A',
+      activeProviderName: 'Kimi',
       effortLevel: 'max',
     })
     useProviderStore.setState({
       providers: [{
-        id: 'provider-a',
-        presetId: 'custom',
-        name: 'Provider A',
+        id: 'kimi-provider',
+        presetId: 'kimi',
+        name: 'Kimi',
         apiKey: '***',
-        baseUrl: 'https://api.example.com',
+        baseUrl: 'https://api.kimi.com/coding/',
         apiFormat: 'anthropic',
         models: {
-          main: 'provider-main',
-          haiku: 'provider-fast',
-          sonnet: 'provider-main',
-          opus: '',
+          main: 'k3',
+          haiku: 'k3',
+          sonnet: 'k3',
+          opus: 'k3',
         },
       }],
-      activeId: 'provider-a',
+      activeId: 'kimi-provider',
       hasLoadedProviders: true,
       isLoading: true,
     })
+    useSessionRuntimeStore.getState().setSelection('session-1', {
+      providerId: 'kimi-provider',
+      modelId: 'k3',
+      effortLevel: 'max',
+    })
     useSessionRuntimeStore.getState().setSelection('session-2', {
-      providerId: 'provider-a',
-      modelId: 'provider-main',
+      providerId: 'kimi-provider',
+      modelId: 'k3',
       effortLevel: 'max',
     })
     useChatStore.setState({
@@ -637,18 +640,18 @@ describe('ModelSelector', () => {
     fireEvent.keyDown(screen.getByRole('slider', { name: 'Effort' }), { key: 'ArrowLeft' })
 
     expect(useSessionRuntimeStore.getState().selections['session-1']).toEqual({
-      providerId: 'provider-a',
-      modelId: 'provider-main',
+      providerId: 'kimi-provider',
+      modelId: 'k3',
       effortLevel: 'high',
     })
     expect(useSessionRuntimeStore.getState().selections['session-2']).toEqual({
-      providerId: 'provider-a',
-      modelId: 'provider-main',
+      providerId: 'kimi-provider',
+      modelId: 'k3',
       effortLevel: 'max',
     })
     expect(setSessionRuntime).toHaveBeenCalledWith('session-1', {
-      providerId: 'provider-a',
-      modelId: 'provider-main',
+      providerId: 'kimi-provider',
+      modelId: 'k3',
       effortLevel: 'high',
     })
     expect(useSettingsStore.getState().effortLevel).toBe('max')
@@ -789,6 +792,72 @@ describe('ModelSelector', () => {
       modelId: 'gpt-5.5',
       effortLevel: 'xhigh',
     })
+  })
+
+  it('drops xhigh when switching from GPT-5.6-Sol to Kimi K3', async () => {
+    const solModel: ModelInfo = {
+      id: 'gpt-5.6-sol',
+      name: 'GPT-5.6-Sol',
+      description: 'Frontier model',
+      context: '353400',
+      defaultReasoningEffort: 'low',
+      supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    }
+    const setSessionRuntime = vi.fn()
+    useHahaOpenAIOAuthStore.setState({
+      status: { loggedIn: true, expiresAt: null, email: null, accountId: null },
+      fetchStatus: async () => {},
+    })
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: [solModel],
+      currentModel: solModel,
+      activeProviderName: 'ChatGPT Official',
+      effortLevel: 'max',
+    })
+    useProviderStore.setState({
+      providers: [{
+        id: 'kimi-provider',
+        presetId: 'kimi',
+        name: 'Kimi',
+        apiKey: '***',
+        baseUrl: 'https://api.kimi.com/coding/',
+        apiFormat: 'anthropic',
+        models: {
+          main: 'k3',
+          haiku: 'k3',
+          sonnet: 'k3',
+          opus: 'k3',
+        },
+      }],
+      activeId: OPENAI_OFFICIAL_PROVIDER_ID,
+      hasLoadedProviders: true,
+      isLoading: true,
+    })
+    useSessionRuntimeStore.getState().setSelection('session-kimi-switch', {
+      providerId: OPENAI_OFFICIAL_PROVIDER_ID,
+      modelId: 'gpt-5.6-sol',
+      effortLevel: 'xhigh',
+    })
+    useChatStore.setState({
+      setSessionRuntime,
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    render(<ModelSelector runtimeKey="session-kimi-switch" />)
+
+    await clickByRole(/GPT-5\.6-Sol/i)
+    await clickByRole(/^k3/i)
+
+    const expectedSelection = {
+      providerId: 'kimi-provider',
+      modelId: 'k3',
+      effortLevel: 'max',
+    }
+    expect(useSessionRuntimeStore.getState().selections['session-kimi-switch']).toEqual(
+      expectedSelection,
+    )
+    expect(setSessionRuntime).toHaveBeenCalledWith('session-kimi-switch', expectedSelection)
+    expect(screen.getByRole('button', { name: 'Effort: Max' })).toBeInTheDocument()
   })
 
   it('selects Grok Official models for a logged-in runtime', async () => {
