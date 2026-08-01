@@ -1631,6 +1631,7 @@ export const zh: Record<TranslationKey, string> = {
   'chat.userMessageReference': '使用者訊息',
   'chat.assistantMessageReference': 'AI 回覆',
   'chat.conversationNavigator.label': '對話導覽',
+  'chat.conversationNavigator.turn': '第 {current} / {total} 輪',
   'chat.conversationNavigator.attachments': '{count} 個附件',
   'chat.slashCommands': '斜槓命令',
   'chat.slashSkillPersonal': '個人',

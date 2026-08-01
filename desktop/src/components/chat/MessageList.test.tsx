@@ -61,6 +61,19 @@ function makeSessionState(overrides: Partial<PerSessionState> = {}): PerSessionS
   }
 }
 
+function makeConversationNavigationMessages(): UIMessage[] {
+  return [
+    { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
+    { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
+    { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
+    { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
+    { id: 'user-3', type: 'user_text', content: 'Third prompt', timestamp: 5 },
+    { id: 'assistant-3', type: 'assistant_text', content: 'Third answer', timestamp: 6 },
+    { id: 'user-4', type: 'user_text', content: 'Fourth prompt', timestamp: 7 },
+    { id: 'assistant-4', type: 'assistant_text', content: 'Fourth answer', timestamp: 8 },
+  ]
+}
+
 function findTextNodeContaining(container: Element, text: string) {
   const walker = document.createTreeWalker(container, 4)
   let current = walker.nextNode()
@@ -549,18 +562,15 @@ describe('MessageList nested tool calls', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
-          messages: [
-            { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-            { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
-            { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-            { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
-          ],
+          messages: makeConversationNavigationMessages(),
         }),
       },
     })
 
     const { rerender } = render(<MessageList />)
     expect(screen.getByRole('navigation', { name: 'Conversation navigation' })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: /Turn \d of 4/ })).toHaveLength(4)
+    expect(screen.queryByRole('button', { name: /Assistant message/ })).toBeNull()
 
     rerender(<MessageList compact />)
     expect(screen.getByRole('navigation', { name: 'Conversation navigation' })).toBeTruthy()
@@ -588,12 +598,7 @@ describe('MessageList nested tool calls', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
-          messages: [
-            { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-            { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
-            { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-            { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
-          ],
+          messages: makeConversationNavigationMessages(),
         }),
       },
     })
@@ -646,12 +651,7 @@ describe('MessageList nested tool calls', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
-          messages: [
-            { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-            { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
-            { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-            { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
-          ],
+          messages: makeConversationNavigationMessages(),
         }),
       },
     })
@@ -668,11 +668,52 @@ describe('MessageList nested tool calls', () => {
     })
 
     fireEvent.scroll(scroller)
-    expect(screen.getByRole('button', { name: /User message: First prompt/ }).getAttribute('aria-current')).toBe('location')
+    expect(screen.getByRole('button', { name: /Turn 1 of 4: First prompt/ }).getAttribute('aria-current')).toBe('location')
 
     scrollTop = 250
     fireEvent.scroll(scroller)
-    expect(screen.getByRole('button', { name: /User message: Second prompt/ }).getAttribute('aria-current')).toBe('location')
+    expect(screen.getByRole('button', { name: /Turn 2 of 4: Second prompt/ }).getAttribute('aria-current')).toBe('location')
+  })
+
+  it('keeps a clicked turn active until the user scrolls again', () => {
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          messages: makeConversationNavigationMessages(),
+        }),
+      },
+    })
+
+    const { container } = render(<MessageList />)
+    const scroller = container.querySelector('.chat-scroll-area') as HTMLElement
+    let scrollTop = 0
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 200 })
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 900 })
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => { scrollTop = value },
+    })
+    Object.defineProperty(scroller, 'scrollTo', {
+      configurable: true,
+      value: (options: ScrollToOptions) => { scrollTop = options.top ?? 0 },
+    })
+
+    const thirdTurn = screen.getByRole('button', { name: /Turn 3 of 4: Third prompt/ })
+    fireEvent.click(thirdTurn)
+
+    scrollTop = 250
+    fireEvent.scroll(scroller)
+    expect(thirdTurn.getAttribute('aria-current')).toBe('location')
+
+    fireEvent.pointerDown(scroller)
+    expect(thirdTurn.getAttribute('aria-current')).toBe('location')
+    fireEvent.wheel(scroller, { deltaY: -100 })
+    expect(thirdTurn.getAttribute('aria-current')).toBe('location')
+
+    scrollTop = 0
+    fireEvent.scroll(scroller)
+    expect(screen.getByRole('button', { name: /Turn 1 of 4: First prompt/ }).getAttribute('aria-current')).toBe('location')
   })
 
   it('mounts and highlights a far virtualized message selected from the navigator', async () => {
@@ -699,20 +740,15 @@ describe('MessageList nested tool calls', () => {
       set: (value: number) => { scrollTop = value },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /User message: Prompt 0/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Turn 1 of 110: Prompt 0/ }))
 
     await waitFor(() => expect(screen.getByText('Prompt 0')).toBeTruthy())
     expect(scrollTop).toBe(0)
     expect(container.querySelector('[data-chat-render-item-key="user-0"]')?.className).toContain('chat-render-item--navigation-target')
   })
 
-  it('resumes following new output after navigating to the latest message', async () => {
-    const messages: UIMessage[] = [
-      { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-      { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
-      { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-      { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
-    ]
+  it('keeps streaming output out of the user-turn navigator after a prompt jump', async () => {
+    const messages = makeConversationNavigationMessages()
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({ messages }),
@@ -722,19 +758,20 @@ describe('MessageList nested tool calls', () => {
     const { container } = render(<MessageList />)
     const scroller = container.querySelector('.chat-scroll-area') as HTMLElement
     let scrollTop = 100
-    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 })
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1400 })
     Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 })
     Object.defineProperty(scroller, 'scrollTop', {
       configurable: true,
       get: () => scrollTop,
-      set: (value: number) => { scrollTop = value >= 1_000_000_000 ? 600 : value },
+      set: (value: number) => { scrollTop = value >= 1_000_000_000 ? 1000 : value },
     })
     Object.defineProperty(scroller, 'scrollTo', {
       configurable: true,
       value: (options: ScrollToOptions) => { scroller.scrollTop = options.top ?? 0 },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /Assistant message: Second answer/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Turn 4 of 4: Fourth prompt/ }))
+    const promptScrollTop = scrollTop
     act(() => {
       useChatStore.setState({
         sessions: {
@@ -747,7 +784,12 @@ describe('MessageList nested tool calls', () => {
       })
     })
 
-    await waitFor(() => expect(scrollTop).toBe(600))
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /Turn \d of 4/ })).toHaveLength(4)
+    })
+    expect(screen.queryByRole('button', { name: /More output from the latest reply/ })).toBeNull()
+    expect(scrollTop).toBe(promptScrollTop)
+    expect(scrollTop).not.toBe(1000)
   })
 
   // #1149 — end-to-end pin for the tool duration badge. Injecting `durationMs`
@@ -794,17 +836,14 @@ describe('MessageList nested tool calls', () => {
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
           messages: [
-            { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-            { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
-            { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-            { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
+            ...makeConversationNavigationMessages(),
             {
               id: 'tool-tail',
               type: 'tool_use',
               toolName: 'Read',
               toolUseId: 'tool-tail-use',
               input: { file_path: '/tmp/example.txt' },
-              timestamp: 5,
+              timestamp: 9,
             },
           ],
         }),
@@ -822,7 +861,7 @@ describe('MessageList nested tool calls', () => {
       set: (value: number) => { scrollTop = value >= 1_000_000_000 ? 600 : value },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /Assistant message: Second answer/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Turn 4 of 4: Fourth prompt/ }))
 
     expect(scrollTop).not.toBe(600)
   })
@@ -5856,9 +5895,9 @@ describe('conversation navigation layout', () => {
     { signature: 'c', contentWeight: 1, estimatedHeight: 300 },
   ]
   const items: ConversationNavigationItem[] = [
-    { id: 'a', renderItemKey: 'a', renderIndex: 0, role: 'user', preview: 'A', attachmentCount: 0 },
-    { id: 'b', renderItemKey: 'b', renderIndex: 1, role: 'assistant', preview: 'B', attachmentCount: 0 },
-    { id: 'c', renderItemKey: 'c', renderIndex: 2, role: 'user', preview: 'C', attachmentCount: 0 },
+    { id: 'a', renderItemKey: 'a', renderIndex: 0, turnNumber: 1, preview: 'A', attachmentCount: 0 },
+    { id: 'b', renderItemKey: 'b', renderIndex: 1, turnNumber: 2, preview: 'B', attachmentCount: 0 },
+    { id: 'c', renderItemKey: 'c', renderIndex: 2, turnNumber: 3, preview: 'C', attachmentCount: 0 },
   ]
 
   it('uses measured heights when calculating transcript offsets', () => {
@@ -5891,12 +5930,7 @@ describe('conversation navigation layout', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
-          messages: [
-            { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-            { id: 'assistant-1', type: 'assistant_text', content: 'First reply', timestamp: 2 },
-            { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-            { id: 'assistant-2', type: 'assistant_text', content: 'Second reply', timestamp: 4 },
-          ],
+          messages: makeConversationNavigationMessages(),
         }),
       },
     })

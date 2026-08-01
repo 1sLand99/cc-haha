@@ -1642,6 +1642,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   })
   const [measuredItemsVersion, setMeasuredItemsVersion] = useState(0)
   const [highlightedNavigationItemKey, setHighlightedNavigationItemKey] = useState<string | null>(null)
+  const [programmaticNavigationItemId, setProgrammaticNavigationItemId] = useState<string | null>(null)
   const [activeConversationFindMatch, setActiveConversationFindMatch] = useState<ConversationFindMatch | null>(null)
   const conversationFindMatchesRef = useRef<ConversationFindMatch[]>([])
   const [messageListWidth, setMessageListWidth] = useState<number | null>(null)
@@ -1805,6 +1806,9 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       syncVirtualViewportFromContainer(container)
       return
     }
+    if (performance.now() < userScrollIntentUntilRef.current) {
+      setProgrammaticNavigationItemId(null)
+    }
     syncVirtualViewportFromContainer(container)
     const isAtBottom = isNearScrollBottom(container)
     const isPermissionLayoutShift =
@@ -1859,6 +1863,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       const snapshot = resolvedSessionId ? sessionScrollSnapshots.get(resolvedSessionId) : undefined
       shouldAutoScrollRef.current = snapshot?.wasAtBottom ?? true
       lastSessionIdRef.current = resolvedSessionId
+      setProgrammaticNavigationItemId(null)
       virtualItemHeightsRef.current = resolvedSessionId
         ? getHeightsForSession(resolvedSessionId)
         : new Map<string, number>()
@@ -1937,6 +1942,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   }, [messages.length, resolvedSessionId, scrollToBottom, streamingText, streamingToolInput])
 
   const handleJumpToLatest = useCallback(() => {
+    setProgrammaticNavigationItemId(null)
     scrollToBottom('auto')
   }, [scrollToBottom])
 
@@ -2040,7 +2046,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     }),
     [renderItemKeys, renderItems],
   )
-  const conversationNavigationHistoryItems = useMemo(() => {
+  const conversationNavigationItems = useMemo(() => {
     const sources = renderItems.flatMap((item, renderIndex) => item.kind === 'message'
       ? [{
           message: item.message,
@@ -2051,26 +2057,6 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
 
     return buildConversationNavigationItems(sources)
   }, [renderItems])
-  const streamingConversationNavigationItem = useMemo(() => {
-    if (!streamingText.trim()) return null
-
-    return buildConversationNavigationItems([{
-      message: {
-        id: `${STREAMING_ASSISTANT_NAVIGATION_KEY}-${resolvedSessionId ?? 'session'}`,
-        type: 'assistant_text',
-        content: streamingText,
-        timestamp: 0,
-      },
-      renderIndex: renderItems.length,
-      renderItemKey: STREAMING_ASSISTANT_NAVIGATION_KEY,
-    }])[0] ?? null
-  }, [renderItems, resolvedSessionId, streamingText])
-  const conversationNavigationItems = useMemo(
-    () => streamingConversationNavigationItem
-      ? [...conversationNavigationHistoryItems, streamingConversationNavigationItem]
-      : conversationNavigationHistoryItems,
-    [conversationNavigationHistoryItems, streamingConversationNavigationItem],
-  )
   const virtualTranscriptWindow = useMemo(
     () => buildVirtualTranscriptWindow(
       renderItems,
@@ -2091,6 +2077,10 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     ),
     [conversationNavigationItems, virtualTranscriptWindow.offsets, virtualViewport],
   )
+  const visibleConversationNavigationItemId =
+    programmaticNavigationItemId && conversationNavigationItems.some((item) => item.id === programmaticNavigationItemId)
+      ? programmaticNavigationItemId
+      : activeConversationNavigationItemId
   const conversationNavigationMode: ConversationNavigationMode =
     messageListWidth === null || messageListWidth >= CONVERSATION_NAVIGATION_FULL_MIN_WIDTH_PX
       ? 'full'
@@ -2327,9 +2317,8 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     if (!container) return
 
     const viewportHeight = container.clientHeight || virtualViewport.viewportHeight || VIRTUAL_DEFAULT_VIEWPORT_HEIGHT
-    const isTranscriptTail =
-      item.renderItemKey === STREAMING_ASSISTANT_NAVIGATION_KEY ||
-      item.renderIndex === renderItems.length - 1
+    userScrollIntentUntilRef.current = 0
+    setProgrammaticNavigationItemId(item.id)
     setHighlightedNavigationItemKey(item.renderItemKey)
 
     const scheduleHighlightClear = () => {
@@ -2340,12 +2329,6 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         setHighlightedNavigationItemKey((current) => current === item.renderItemKey ? null : current)
         navigationHighlightTimerRef.current = null
       }, 1400)
-    }
-
-    if (isTranscriptTail) {
-      scrollToBottom('auto')
-      requestAnimationFrame(scheduleHighlightClear)
-      return
     }
 
     const targetScrollTop = getConversationNavigationTargetScrollTop(
@@ -2389,8 +2372,6 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       scheduleHighlightClear()
     })
   }, [
-    renderItems.length,
-    scrollToBottom,
     syncVirtualViewportFromContainer,
     virtualTranscriptWindow.offsets,
     virtualTranscriptWindow.totalHeight,
@@ -2669,10 +2650,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
           ) : null}
 
           {streamingText.trim() && (
-            <div
-              data-chat-render-item-key={STREAMING_ASSISTANT_NAVIGATION_KEY}
-              className={highlightedNavigationItemKey === STREAMING_ASSISTANT_NAVIGATION_KEY ? 'chat-render-item--navigation-target' : ''}
-            >
+            <div data-chat-render-item-key={STREAMING_ASSISTANT_NAVIGATION_KEY}>
               <AssistantMessage content={streamingText} isStreaming={chatState === 'streaming'} />
             </div>
           )}
@@ -2703,7 +2681,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         <ConversationNavigator
           mode={conversationNavigationMode}
           items={conversationNavigationItems}
-          activeItemId={activeConversationNavigationItemId}
+          activeItemId={visibleConversationNavigationItemId}
           onNavigate={handleNavigateToConversationItem}
         />
       ) : null}

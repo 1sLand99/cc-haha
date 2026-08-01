@@ -1630,6 +1630,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'chat.userMessageReference': 'User message',
   'chat.assistantMessageReference': 'Assistant message',
   'chat.conversationNavigator.label': 'Conversation navigation',
+  'chat.conversationNavigator.turn': 'Turn {current} of {total}',
   'chat.conversationNavigator.attachments': '{count} attachments',
   'chat.slashCommands': 'Slash commands',
   'chat.slashSkillPersonal': 'Personal',
