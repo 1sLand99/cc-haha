@@ -27,6 +27,8 @@ import {
 import { MobileBottomSheet } from '@/components/ui/MobileBottomSheet'
 import { SearchField } from '@/components/ui/SearchField'
 import { ReasoningEffortPopover } from './ReasoningEffortPopover'
+import { useUIStore } from '../../stores/uiStore'
+import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
 
 type ProviderChoice = {
   providerId: string | null
@@ -205,6 +207,7 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   const {
     providers,
     activeId,
+    hasLoadedProviders,
     isLoading: providersLoading,
     fetchProviders,
   } = useProviderStore()
@@ -249,10 +252,15 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   const canEditRuntimeEffort = runtimeKey !== undefined
 
   useEffect(() => {
-    if (!isRuntimeScoped || providersLoading || requestedProvidersRef.current) return
+    if (
+      !isRuntimeScoped ||
+      hasLoadedProviders ||
+      providersLoading ||
+      requestedProvidersRef.current
+    ) return
     requestedProvidersRef.current = true
     void fetchProviders()
-  }, [fetchProviders, isRuntimeScoped, providersLoading])
+  }, [fetchProviders, hasLoadedProviders, isRuntimeScoped, providersLoading])
 
   useEffect(() => {
     if (!isRuntimeScoped || !open || requestedOAuthStatusRef.current) return
@@ -261,17 +269,6 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
     void fetchOpenAIOAuthStatus()
     void fetchGrokOAuthStatus()
   }, [fetchClaudeOAuthStatus, fetchGrokOAuthStatus, fetchOpenAIOAuthStatus, isRuntimeScoped, open])
-
-  const openSelector = useCallback(() => {
-    if (!disabled) {
-      setEffortOpen(false)
-      setOpen(true)
-    }
-  }, [disabled])
-
-  useImperativeHandle(selectorRef, () => ({
-    open: openSelector,
-  }), [openSelector])
 
   const closeSelector = useCallback(() => setOpen(false), [])
 
@@ -385,13 +382,18 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
     ? availableModels.find((model) => model.id === value) || null
     : storeModel
 
-  const activeRuntimeSelection = isRuntimeScoped
+  const requestedRuntimeSelection = isRuntimeScoped
     ? controlledRuntimeSelection ?? runtimeSelection ?? resolveDefaultRuntimeSelection(
       activeId,
       activeProviderName,
       providers,
       storeModel?.id,
     )
+    : null
+  const activeRuntimeSelection = requestedRuntimeSelection && providerChoices.some(
+    (choice) => choice.providerId === requestedRuntimeSelection.providerId,
+  )
+    ? requestedRuntimeSelection
     : null
 
   const selectedProviderChoice = activeRuntimeSelection
@@ -408,21 +410,99 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
       }
     : null
 
+  const needsProviderConfiguration = isRuntimeScoped && providerChoices.length === 0
   const buttonModelLabel = isRuntimeScoped
-    ? selectedRuntimeModel?.name ?? storeModel?.name ?? t('model.selectModel')
+    ? selectedRuntimeModel?.name
+      ?? (needsProviderConfiguration ? t('model.configureProvider') : t('model.selectModel'))
     : selectedModel?.name ?? t('model.selectModel')
   const buttonProviderLabel = isRuntimeScoped
-    ? selectedProviderChoice?.providerName ?? activeProviderName ?? t('settings.providers.officialName')
+    ? selectedProviderChoice?.providerName ?? null
     : null
   const supportedRuntimeEfforts = selectedRuntimeModel?.supportedReasoningEfforts
-  const selectedRuntimeEffort = supportedRuntimeEfforts?.length === 0
-    ? undefined
-    : activeRuntimeSelection?.effortLevel
-      ?? selectedRuntimeModel?.defaultReasoningEffort
-      ?? effortLevel
+  const selectedRuntimeEffort = selectedRuntimeModel
+    ? supportedRuntimeEfforts?.length === 0
+      ? undefined
+      : activeRuntimeSelection?.effortLevel
+        ?? selectedRuntimeModel.defaultReasoningEffort
+        ?? effortLevel
+    : undefined
   const runtimeEffortOptions = supportedRuntimeEfforts === undefined
     ? EFFORT_OPTIONS.filter((option) => option.value !== 'xhigh')
     : EFFORT_OPTIONS.filter((option) => supportedRuntimeEfforts.includes(option.value))
+
+  const navigateToProviderSettings = useCallback(() => {
+    setOpen(false)
+    useUIStore.getState().setPendingSettingsTab('providers')
+    useTabStore.getState().openTab(SETTINGS_TAB_ID, t('sidebar.settings'), 'settings')
+  }, [t])
+
+  const openSelector = useCallback(() => {
+    if (disabled) return
+    setEffortOpen(false)
+
+    if (!isRuntimeScoped || providerChoices.length > 0) {
+      setOpen(true)
+      return
+    }
+
+    const claudeStatus = useHahaOAuthStore.getState().status
+    const openAIStatus = useHahaOpenAIOAuthStore.getState().status
+    const grokStatus = useHahaGrokOAuthStore.getState().status
+    const statuses = [claudeStatus, openAIStatus, grokStatus]
+    const providerState = useProviderStore.getState()
+    if (providerState.providers.length > 0) {
+      setOpen(true)
+      return
+    }
+    if (statuses.some((status) => status?.loggedIn === true)) {
+      setOpen(true)
+      return
+    }
+    if (providerState.hasLoadedProviders && statuses.every((status) => status !== null)) {
+      navigateToProviderSettings()
+      return
+    }
+
+    void (async () => {
+      const latestProviderState = useProviderStore.getState()
+      if (!latestProviderState.hasLoadedProviders) {
+        await latestProviderState.fetchProviders()
+      }
+      if (useProviderStore.getState().providers.length > 0) {
+        setOpen(true)
+        return
+      }
+
+      requestedOAuthStatusRef.current = true
+      await Promise.all([
+        fetchClaudeOAuthStatus(),
+        fetchOpenAIOAuthStatus(),
+        fetchGrokOAuthStatus(),
+      ])
+      const hasOfficialLogin = [
+        useHahaOAuthStore.getState().status,
+        useHahaOpenAIOAuthStore.getState().status,
+        useHahaGrokOAuthStore.getState().status,
+      ].some((status) => status?.loggedIn === true)
+      if (hasOfficialLogin) {
+        setOpen(true)
+      } else {
+        navigateToProviderSettings()
+      }
+    })()
+  }, [
+    disabled,
+    fetchClaudeOAuthStatus,
+    fetchGrokOAuthStatus,
+    fetchOpenAIOAuthStatus,
+    isRuntimeScoped,
+    navigateToProviderSettings,
+    providerChoices.length,
+  ])
+
+  useImperativeHandle(selectorRef, () => ({
+    open: openSelector,
+  }), [openSelector])
 
   const handleRuntimeSelect = (selection: RuntimeSelection) => {
     onRuntimeSelectionChange?.(selection)
@@ -649,12 +729,15 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
         <button
           onClick={() => {
             if (disabled) return
-            setEffortOpen(false)
-            setOpen(!open)
+            if (open) {
+              setOpen(false)
+              return
+            }
+            openSelector()
           }}
           disabled={disabled}
-          aria-label={buttonProviderLabel ? `${buttonModelLabel}, ${buttonProviderLabel}` : undefined}
-          title={buttonProviderLabel ? `${buttonProviderLabel} · ${buttonModelLabel}` : undefined}
+          aria-label={buttonProviderLabel ? `${buttonModelLabel}, ${buttonProviderLabel}` : buttonModelLabel}
+          title={buttonProviderLabel ? `${buttonProviderLabel} · ${buttonModelLabel}` : buttonModelLabel}
           // `focus-visible:rounded-*` restores the other pair of corners while
           // focused. The ring traces `border-radius`, so on the half-rounded
           // halves of this segmented control it otherwise drew a box that was
@@ -671,7 +754,9 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
               {buttonProviderLabel}
             </span>
           )}
-          <span className="material-symbols-outlined flex-shrink-0 text-[12px] text-[var(--color-text-tertiary)]">expand_more</span>
+          <span className="material-symbols-outlined flex-shrink-0 text-[12px] text-[var(--color-text-tertiary)]">
+            {needsProviderConfiguration ? 'arrow_forward' : 'expand_more'}
+          </span>
         </button>
 
         {canEditRuntimeEffort && selectedRuntimeEffort && runtimeEffortOptions.length > 0 && (

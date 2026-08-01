@@ -23,6 +23,8 @@ import { useHahaGrokOAuthStore } from '../../stores/hahaGrokOAuthStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { useSessionRuntimeStore } from '../../stores/sessionRuntimeStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useTabStore, SETTINGS_TAB_ID } from '../../stores/tabStore'
+import { useUIStore } from '../../stores/uiStore'
 import { OPENAI_OFFICIAL_PROVIDER_ID } from '../../constants/openaiOfficialProvider'
 import type { ModelInfo } from '../../types/settings'
 
@@ -48,6 +50,8 @@ afterEach(() => {
   useHahaOAuthStore.setState(useHahaOAuthStore.getInitialState(), true)
   useHahaOpenAIOAuthStore.setState(useHahaOpenAIOAuthStore.getInitialState(), true)
   useHahaGrokOAuthStore.setState(useHahaGrokOAuthStore.getInitialState(), true)
+  useTabStore.setState(useTabStore.getInitialState(), true)
+  useUIStore.setState(useUIStore.getInitialState(), true)
 })
 
 beforeEach(() => {
@@ -180,6 +184,167 @@ describe('ModelSelector', () => {
 
     expect(fetchClaudeStatus).not.toHaveBeenCalled()
     expect(fetchOpenAIStatus).not.toHaveBeenCalled()
+  })
+
+  it('routes an unconfigured runtime to provider settings instead of showing a fallback model', async () => {
+    const fetchClaudeStatus = vi.fn(async () => {
+      useHahaOAuthStore.setState({ status: { loggedIn: false } })
+    })
+    const fetchOpenAIStatus = vi.fn(async () => {
+      useHahaOpenAIOAuthStore.setState({ status: { loggedIn: false } })
+    })
+    const fetchGrokStatus = vi.fn(async () => {
+      useHahaGrokOAuthStore.setState({ status: { loggedIn: false } })
+    })
+    useHahaOAuthStore.setState({ fetchStatus: fetchClaudeStatus })
+    useHahaOpenAIOAuthStore.setState({ fetchStatus: fetchOpenAIStatus })
+    useHahaGrokOAuthStore.setState({ fetchStatus: fetchGrokStatus })
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: MODELS,
+      currentModel: {
+        id: 'claude-opus-4-8',
+        name: 'Opus 4.8',
+        description: 'Fallback model',
+        context: '1m',
+      },
+      activeProviderName: null,
+    })
+    useProviderStore.setState({
+      providers: [],
+      activeId: null,
+      hasLoadedProviders: true,
+      isLoading: false,
+    })
+
+    render(<ModelSelector runtimeKey="unconfigured-session" />)
+
+    expect(screen.queryByText('Opus 4.8')).not.toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Configure model provider' }))
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(useUIStore.getState().pendingSettingsTab).toBe('providers')
+    })
+    expect(fetchClaudeStatus).toHaveBeenCalledTimes(1)
+    expect(fetchOpenAIStatus).toHaveBeenCalledTimes(1)
+    expect(fetchGrokStatus).toHaveBeenCalledTimes(1)
+    expect(useTabStore.getState().activeTabId).toBe(SETTINGS_TAB_ID)
+    expect(screen.queryByTestId('model-selector-dropdown')).not.toBeInTheDocument()
+  })
+
+  it('routes directly to provider settings when every official login is already known to be unavailable', () => {
+    const fetchClaudeStatus = vi.fn(async () => {})
+    const fetchOpenAIStatus = vi.fn(async () => {})
+    const fetchGrokStatus = vi.fn(async () => {})
+    useHahaOAuthStore.setState({ status: { loggedIn: false }, fetchStatus: fetchClaudeStatus })
+    useHahaOpenAIOAuthStore.setState({ status: { loggedIn: false }, fetchStatus: fetchOpenAIStatus })
+    useHahaGrokOAuthStore.setState({ status: { loggedIn: false }, fetchStatus: fetchGrokStatus })
+    useSettingsStore.setState({
+      locale: 'en',
+      currentModel: {
+        id: 'claude-opus-4-8',
+        name: 'Opus 4.8',
+        description: 'Fallback model',
+        context: '1m',
+      },
+    })
+    useProviderStore.setState({
+      providers: [],
+      activeId: null,
+      hasLoadedProviders: true,
+      isLoading: false,
+    })
+
+    render(<ModelSelector runtimeKey="known-unconfigured-session" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Configure model provider' }))
+
+    expect(fetchClaudeStatus).not.toHaveBeenCalled()
+    expect(fetchOpenAIStatus).not.toHaveBeenCalled()
+    expect(fetchGrokStatus).not.toHaveBeenCalled()
+    expect(useUIStore.getState().pendingSettingsTab).toBe('providers')
+    expect(useTabStore.getState().activeTabId).toBe(SETTINGS_TAB_ID)
+  })
+
+  it('opens Claude Official models when the configuration check finds a login', async () => {
+    const fetchClaudeStatus = vi.fn(async () => {
+      useHahaOAuthStore.setState({
+        status: { loggedIn: true, expiresAt: null, scopes: [], subscriptionType: 'pro' },
+      })
+    })
+    useHahaOAuthStore.setState({ fetchStatus: fetchClaudeStatus })
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: MODELS,
+      currentModel: MODELS[0],
+      activeProviderName: null,
+    })
+    useProviderStore.setState({
+      providers: [],
+      activeId: null,
+      hasLoadedProviders: true,
+      isLoading: false,
+    })
+
+    render(<ModelSelector runtimeKey="claude-login-session" />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Configure model provider' }))
+      await Promise.resolve()
+    })
+
+    const dropdown = await screen.findByTestId('model-selector-dropdown')
+    expect(within(dropdown).getByRole('button', { name: /Alpha/ })).toBeInTheDocument()
+    expect(fetchClaudeStatus).toHaveBeenCalledTimes(1)
+    expect(useUIStore.getState().pendingSettingsTab).toBeNull()
+  })
+
+  it('waits for saved providers before deciding that the runtime is unconfigured', async () => {
+    const provider = {
+      id: 'provider-late',
+      presetId: 'custom',
+      name: 'Late Provider',
+      apiKey: '***',
+      baseUrl: 'https://api.example.com',
+      apiFormat: 'anthropic' as const,
+      models: {
+        main: 'late-main',
+        haiku: '',
+        sonnet: '',
+        opus: '',
+      },
+    }
+    const fetchProviders = vi.fn(async () => {
+      useProviderStore.setState({
+        providers: [provider],
+        activeId: provider.id,
+        hasLoadedProviders: true,
+        isLoading: false,
+      })
+    })
+    useHahaOAuthStore.setState({ status: { loggedIn: false } })
+    useHahaOpenAIOAuthStore.setState({ status: { loggedIn: false } })
+    useHahaGrokOAuthStore.setState({ status: { loggedIn: false } })
+    useSettingsStore.setState({ locale: 'en', activeProviderName: null })
+    useProviderStore.setState({
+      providers: [],
+      activeId: null,
+      hasLoadedProviders: false,
+      isLoading: true,
+      fetchProviders,
+    })
+
+    render(<ModelSelector runtimeKey="provider-loading-session" />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Configure model provider' }))
+      await Promise.resolve()
+    })
+
+    const dropdown = await screen.findByTestId('model-selector-dropdown')
+    expect(within(dropdown).getByRole('button', { name: /late-main/ })).toBeInTheDocument()
+    expect(fetchProviders).toHaveBeenCalledTimes(1)
+    expect(useUIStore.getState().pendingSettingsTab).toBeNull()
   })
 
   it('uses controlled model selection without mutating settings directly', async () => {
@@ -371,6 +536,10 @@ describe('ModelSelector', () => {
   })
 
   it('closes the focus ring on both halves of the segmented control', () => {
+    useHahaOAuthStore.setState({
+      status: { loggedIn: true, expiresAt: null, scopes: [], subscriptionType: 'pro' },
+      fetchStatus: async () => {},
+    })
     useSettingsStore.setState({
       locale: 'en',
       availableModels: MODELS,
@@ -378,6 +547,7 @@ describe('ModelSelector', () => {
       activeProviderName: 'Provider A',
       effortLevel: 'max',
     })
+    useProviderStore.setState({ hasLoadedProviders: true, isLoading: false })
     useSessionRuntimeStore.getState().setSelection('session-ring', {
       providerId: null,
       modelId: 'alpha',
@@ -410,6 +580,7 @@ describe('ModelSelector', () => {
       activeProviderName: 'Provider A',
       effortLevel: 'max',
     })
+    useProviderStore.setState({ hasLoadedProviders: true, isLoading: false })
     useSessionRuntimeStore.getState().setSelection('session-touch', {
       providerId: null,
       modelId: 'alpha',

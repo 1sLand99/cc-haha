@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { ApiError } from '../api/client'
 import { agentsApi } from '../api/agents'
+import { providersApi } from '../api/providers'
 import { skillsApi } from '../api/skills'
 import { useTranslation } from '../i18n'
 import { useSessionStore } from '../stores/sessionStore'
@@ -307,6 +308,13 @@ export function EmptySession() {
 
     setIsSubmitting(true)
     try {
+      const authStatus = await providersApi.authStatus()
+      if (!authStatus.hasAuth) {
+        useUIStore.getState().setPendingSettingsTab('providers')
+        useTabStore.getState().openTab(SETTINGS_TAB_ID, t('sidebar.settings'), 'settings')
+        return
+      }
+
       const runtimeStore = useSessionRuntimeStore.getState()
       const explicitDraftSelection = runtimeStore.selections[DRAFT_RUNTIME_SELECTION_KEY]
       const defaultActiveProviderSelection = explicitDraftSelection

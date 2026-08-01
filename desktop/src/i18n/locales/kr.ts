@@ -2118,6 +2118,7 @@ export const kr: Record<TranslationKey, string> = {
 
   // ─── Model Selector ──────────────────────────────────────
   'model.selectModel': '모델 선택',
+  'model.configureProvider': '모델 공급자 설정',
   'model.configuration': '모델 구성',
   'model.searchPlaceholder': '모델 검색',
   'model.clearSearch': '모델 검색 지우기',

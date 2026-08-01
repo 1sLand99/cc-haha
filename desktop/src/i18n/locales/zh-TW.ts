@@ -2117,6 +2117,7 @@ export const zh: Record<TranslationKey, string> = {
 
   // ─── Model Selector ──────────────────────────────────────
   'model.selectModel': '選擇模型',
+  'model.configureProvider': '設定模型服務商',
   'model.configuration': '模型配置',
   'model.searchPlaceholder': '搜尋模型',
   'model.clearSearch': '清除模型搜尋',

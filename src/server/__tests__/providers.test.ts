@@ -542,6 +542,29 @@ describe('ProviderService', () => {
         })
       })
 
+      test('auth status reports Claude Official from the desktop Claude token file', async () => {
+        await fs.mkdir(path.join(tmpDir, 'cc-haha'), { recursive: true })
+        await fs.writeFile(
+          path.join(tmpDir, 'cc-haha', 'oauth.json'),
+          JSON.stringify({
+            accessToken: 'claude-access',
+            refreshToken: 'claude-refresh',
+            expiresAt: Date.now() + 60 * 60_000,
+            scopes: [],
+            subscriptionType: 'pro',
+          }),
+          'utf-8',
+        )
+
+        const svc = new ProviderService()
+
+        await expect(svc.checkAuthStatus()).resolves.toMatchObject({
+          hasAuth: true,
+          source: 'claude-oauth',
+          activeProvider: 'Claude Official',
+        })
+      })
+
       test('auth status reports ChatGPT Official as unauthenticated when the OpenAI token file is missing', async () => {
         const svc = new ProviderService()
         await svc.activateProvider('openai-official')

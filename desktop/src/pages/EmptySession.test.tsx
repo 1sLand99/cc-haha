@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   browse: vi.fn(),
   getTasksForList: vi.fn(),
   resetTaskList: vi.fn(),
+  getProviderAuthStatus: vi.fn(),
   wsClearHandlers: vi.fn(),
   wsConnect: vi.fn(),
   wsOnMessage: vi.fn(),
@@ -45,6 +46,12 @@ vi.mock('../api/skills', () => ({
 vi.mock('../api/agents', () => ({
   agentsApi: {
     list: mocks.listAgents,
+  },
+}))
+
+vi.mock('../api/providers', () => ({
+  providersApi: {
+    authStatus: mocks.getProviderAuthStatus,
   },
 }))
 
@@ -264,6 +271,10 @@ describe('EmptySession', () => {
     })
     mocks.getTasksForList.mockResolvedValue({ tasks: [] })
     mocks.resetTaskList.mockResolvedValue(undefined)
+    mocks.getProviderAuthStatus.mockResolvedValue({
+      hasAuth: true,
+      source: 'cc-haha-provider',
+    })
   })
 
   afterEach(() => {
@@ -694,6 +705,25 @@ describe('EmptySession', () => {
         },
       ],
     ])
+  })
+
+  it('opens provider settings instead of creating a session when no model authentication exists', async () => {
+    mocks.getProviderAuthStatus.mockResolvedValue({ hasAuth: false, source: 'none' })
+
+    render(<EmptySession />)
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'draft question', selectionStart: 14 },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Run/i }))
+
+    await waitFor(() => {
+      expect(mocks.getProviderAuthStatus).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.createSession).not.toHaveBeenCalled()
+    expect(mocks.wsSend).not.toHaveBeenCalled()
+    expect(useUIStore.getState().pendingSettingsTab).toBe('providers')
+    expect(useTabStore.getState().activeTabId).toBe('__settings__')
   })
 
   it('uses native desktop file paths for draft attachments', async () => {

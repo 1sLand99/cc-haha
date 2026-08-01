@@ -2118,6 +2118,7 @@ export const jp: Record<TranslationKey, string> = {
 
   // ─── Model Selector ──────────────────────────────────────
   'model.selectModel': 'モデルを選択',
+  'model.configureProvider': 'モデルプロバイダーを設定',
   'model.configuration': 'モデル設定',
   'model.searchPlaceholder': 'モデルを検索',
   'model.clearSearch': 'モデル検索をクリア',
