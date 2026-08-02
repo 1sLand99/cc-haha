@@ -1643,7 +1643,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const [branchingMessageId, setBranchingMessageId] = useState<string | null>(null)
   const [rewindingTurnId, setRewindingTurnId] = useState<string | null>(null)
   const [turnUndoConfirmTargetId, setTurnUndoConfirmTargetId] = useState<string | null>(null)
-  const [showJumpToLatest, setShowJumpToLatest] = useState(false)
+  const [isAwayFromLatest, setIsAwayFromLatest] = useState(false)
   const [virtualViewport, setVirtualViewport] = useState<VirtualViewport>({
     scrollTop: SCROLL_BOTTOM_SENTINEL,
     viewportHeight: VIRTUAL_DEFAULT_VIEWPORT_HEIGHT,
@@ -1741,7 +1741,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         wasAtBottom: true,
       })
     }
-    setShowJumpToLatest(false)
+    setIsAwayFromLatest(false)
     // Reset flag after the scroll event(s) from scrollIntoView have fired
     requestAnimationFrame(() => {
       const latestContainer = scrollContainerRef.current
@@ -1827,7 +1827,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     if (isPermissionLayoutShift) return
 
     shouldAutoScrollRef.current = isAtBottom
-    setShowJumpToLatest(!isAtBottom)
+    setIsAwayFromLatest(!isAtBottom)
 
     if (resolvedSessionId) {
       rememberSessionScroll(resolvedSessionId, container)
@@ -1842,7 +1842,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     markUserScrollIntent()
     if (event.deltaY < 0) {
       shouldAutoScrollRef.current = false
-      setShowJumpToLatest(true)
+      setIsAwayFromLatest(true)
     }
   }, [markUserScrollIntent])
 
@@ -1862,7 +1862,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     markUserScrollIntent()
     if (isUpwardScrollKey) {
       shouldAutoScrollRef.current = false
-      setShowJumpToLatest(true)
+      setIsAwayFromLatest(true)
     }
   }, [markUserScrollIntent])
 
@@ -1895,7 +1895,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
           scrollTop: snapshot.scrollTop,
           viewportHeight: container.clientHeight || current.viewportHeight || VIRTUAL_DEFAULT_VIEWPORT_HEIGHT,
         }))
-        setShowJumpToLatest(true)
+        setIsAwayFromLatest(true)
       } else if (container) {
         // Switch to a session we were at the bottom of (or first visit): write
         // the bottom sentinel without going through scrollToBottom's read path,
@@ -1909,7 +1909,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
           scrollTop: SCROLL_BOTTOM_SENTINEL,
           viewportHeight: container.clientHeight || current.viewportHeight || VIRTUAL_DEFAULT_VIEWPORT_HEIGHT,
         }))
-        setShowJumpToLatest(false)
+        setIsAwayFromLatest(false)
         if (resolvedSessionId) {
           sessionScrollSnapshots.set(resolvedSessionId, {
             scrollTop: container.scrollTop,
@@ -1942,7 +1942,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
 
   useEffect(() => {
     if (!shouldAutoScrollRef.current) {
-      setShowJumpToLatest(true)
+      setIsAwayFromLatest(true)
       return
     }
 
@@ -2077,13 +2077,15 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     [measuredItemsVersion, renderItemKeys, renderItemMetrics, renderItems, virtualViewport],
   )
   const activeConversationNavigationItemId = useMemo(
-    () => getActiveConversationNavigationItemId(
-      conversationNavigationItems,
-      virtualTranscriptWindow.offsets,
-      virtualViewport.scrollTop,
-      virtualViewport.viewportHeight,
-    ),
-    [conversationNavigationItems, virtualTranscriptWindow.offsets, virtualViewport],
+    () => isAwayFromLatest
+      ? getActiveConversationNavigationItemId(
+          conversationNavigationItems,
+          virtualTranscriptWindow.offsets,
+          virtualViewport.scrollTop,
+          virtualViewport.viewportHeight,
+        )
+      : null,
+    [conversationNavigationItems, isAwayFromLatest, virtualTranscriptWindow.offsets, virtualViewport],
   )
   const visibleConversationNavigationItemId =
     programmaticNavigationItemId && conversationNavigationItems.some((item) => item.id === programmaticNavigationItemId)
@@ -2349,7 +2351,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     const isNearby = Math.abs(container.scrollTop - targetScrollTop) <= viewportHeight * 1.25
 
     shouldAutoScrollRef.current = false
-    setShowJumpToLatest(true)
+    setIsAwayFromLatest(true)
     ignoreProgrammaticScrollUntilRef.current = performance.now() + 250
     ignoreProgrammaticScrollTopRef.current = targetScrollTop
 
@@ -2400,7 +2402,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
 
     setActiveConversationFindMatch(match)
     shouldAutoScrollRef.current = false
-    setShowJumpToLatest(true)
+    setIsAwayFromLatest(true)
     ignoreProgrammaticScrollUntilRef.current = performance.now() + 250
     ignoreProgrammaticScrollTopRef.current = targetScrollTop
     setScrollTopWithoutLayoutRead(container, targetScrollTop)
@@ -2695,7 +2697,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         />
       ) : null}
 
-      {showJumpToLatest && (
+      {isAwayFromLatest && (
         <Button
           variant="secondary"
           size="md"

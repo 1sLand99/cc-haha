@@ -658,9 +658,9 @@ describe('MessageList nested tool calls', () => {
 
     const { container } = render(<MessageList />)
     const scroller = container.querySelector('.chat-scroll-area') as HTMLElement
-    let scrollTop = 0
+    let scrollTop = 2
     Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 200 })
-    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 450 })
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 600 })
     Object.defineProperty(scroller, 'scrollTop', {
       configurable: true,
       get: () => scrollTop,
@@ -673,9 +673,15 @@ describe('MessageList nested tool calls', () => {
     scrollTop = 250
     fireEvent.scroll(scroller)
     expect(screen.getByRole('button', { name: /Turn 2 of 4: Second prompt/ }).getAttribute('aria-current')).toBe('location')
+
+    scrollTop = 400
+    fireEvent.scroll(scroller)
+    expect(screen.getAllByRole('button', { name: /Turn \d of 4/ }).every((marker) => (
+      marker.getAttribute('aria-current') === null
+    ))).toBe(true)
   })
 
-  it('keeps a clicked turn active until the user scrolls again', () => {
+  it('keeps a clicked turn active until user scrolling resumes, then clears it at latest', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
@@ -714,6 +720,15 @@ describe('MessageList nested tool calls', () => {
     scrollTop = 0
     fireEvent.scroll(scroller)
     expect(screen.getByRole('button', { name: /Turn 1 of 4: First prompt/ }).getAttribute('aria-current')).toBe('location')
+
+    fireEvent.click(thirdTurn)
+    expect(thirdTurn.getAttribute('aria-current')).toBe('location')
+    fireEvent.wheel(scroller, { deltaY: 100 })
+    scrollTop = 700
+    fireEvent.scroll(scroller)
+    expect(screen.getAllByRole('button', { name: /Turn \d of 4/ }).every((marker) => (
+      marker.getAttribute('aria-current') === null
+    ))).toBe(true)
   })
 
   it('mounts and highlights a far virtualized message selected from the navigator', async () => {
