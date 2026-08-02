@@ -132,7 +132,7 @@ describe('ContextUsageIndicator request behavior', () => {
     const { rerender } = render(
       <ContextUsageIndicator
         sessionId="session-1"
-        chatState="idle"
+        chatState="thinking"
         messageCount={0}
       />,
     )
@@ -145,7 +145,7 @@ describe('ContextUsageIndicator request behavior', () => {
     rerender(
       <ContextUsageIndicator
         sessionId="session-1"
-        chatState="idle"
+        chatState="thinking"
         messageCount={1}
       />,
     )
@@ -156,6 +156,37 @@ describe('ContextUsageIndicator request behavior', () => {
     expect(sessionsApiMock.getInspection).toHaveBeenCalledTimes(1)
   })
 
+  it('does not inspect context for a new session until its first turn starts', async () => {
+    sessionsApiMock.getInspection.mockResolvedValue(baseInspection)
+
+    const { rerender } = render(
+      <ContextUsageIndicator
+        sessionId="session-1"
+        chatState="idle"
+        messageCount={0}
+      />,
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(sessionsApiMock.getInspection).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('Context usage loading')).not.toBeInTheDocument()
+    expect(screen.getByTestId('context-usage-indicator')).toHaveTextContent('--')
+
+    rerender(
+      <ContextUsageIndicator
+        sessionId="session-1"
+        chatState="thinking"
+        messageCount={0}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(sessionsApiMock.getInspection).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it('starts a new auto inspection when the runtime identity changes', async () => {
     sessionsApiMock.getInspection.mockImplementation(() => new Promise(() => {}))
 
@@ -163,7 +194,7 @@ describe('ContextUsageIndicator request behavior', () => {
       <ContextUsageIndicator
         sessionId="session-1"
         chatState="idle"
-        messageCount={0}
+        messageCount={1}
         runtimeSelectionKey="deepseek:deepseek-chat"
       />,
     )
@@ -177,7 +208,7 @@ describe('ContextUsageIndicator request behavior', () => {
       <ContextUsageIndicator
         sessionId="session-1"
         chatState="idle"
-        messageCount={0}
+        messageCount={1}
         runtimeSelectionKey="deepseek:deepseek-reasoner"
       />,
     )
@@ -361,7 +392,7 @@ describe('ContextUsageIndicator request behavior', () => {
       <ContextUsageIndicator
         sessionId="session-1"
         chatState="idle"
-        messageCount={0}
+        messageCount={1}
         runtimeSelectionKey="deepseek:deepseek-chat"
       />,
     )
@@ -374,7 +405,7 @@ describe('ContextUsageIndicator request behavior', () => {
       <ContextUsageIndicator
         sessionId="session-1"
         chatState="idle"
-        messageCount={0}
+        messageCount={1}
         runtimeSelectionKey="deepseek:deepseek-reasoner"
       />,
     )
@@ -403,7 +434,7 @@ describe('ContextUsageIndicator request behavior', () => {
       <ContextUsageIndicator
         sessionId="session-1"
         chatState="idle"
-        messageCount={0}
+        messageCount={1}
         runtimeSelectionKey="deepseek:deepseek-chat"
       />,
     )
@@ -422,7 +453,7 @@ describe('ContextUsageIndicator request behavior', () => {
       <ContextUsageIndicator
         sessionId="session-1"
         chatState="idle"
-        messageCount={0}
+        messageCount={1}
         runtimeSelectionKey="deepseek:deepseek-reasoner"
       />,
     )

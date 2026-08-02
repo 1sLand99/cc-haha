@@ -69,8 +69,13 @@ function isDocumentVisible() {
   return typeof document === 'undefined' || document.visibilityState !== 'hidden'
 }
 
-function shouldFetchContext(sessionId: string | undefined, draft: boolean) {
-  return Boolean(sessionId) && !draft
+function shouldFetchContext(
+  sessionId: string | undefined,
+  draft: boolean,
+  messageCount: number,
+  chatState: ChatState,
+) {
+  return Boolean(sessionId) && !draft && (messageCount > 0 || chatState !== 'idle')
 }
 
 export function ContextUsageIndicator({
@@ -88,9 +93,10 @@ export function ContextUsageIndicator({
   // panel rather than for touch, so the phone touch target keys off the
   // viewport instead — see the trigger's height below.
   const isMobileBrowser = useMobileViewport() && !isDesktopRuntime()
+  const contextEnabled = shouldFetchContext(sessionId, draft, messageCount, chatState)
   const [context, setContext] = useState<SessionContextSnapshot | null>(null)
   const [contextSource, setContextSource] = useState<'live' | 'estimate' | null>(null)
-  const [loading, setLoading] = useState(() => shouldFetchContext(sessionId, draft))
+  const [loading, setLoading] = useState(contextEnabled)
   const [error, setError] = useState<string | null>(null)
   const [updatedAt, setUpdatedAt] = useState<number | null>(null)
   const [inspectionModel, setInspectionModel] = useState<string | null>(null)
@@ -101,9 +107,11 @@ export function ContextUsageIndicator({
   const inFlightRequestRef = useRef<Promise<boolean> | null>(null)
   const inFlightIdentityRef = useRef<string | null>(null)
   const lastAutoRefreshAtRef = useRef(0)
+  const contextEnabledRef = useRef(contextEnabled)
+  contextEnabledRef.current = contextEnabled
 
   const refresh = useCallback(async (mode: 'auto' | 'manual' | 'force' = 'manual'): Promise<boolean> => {
-    if (!sessionId || draft) {
+    if (!contextEnabledRef.current || !sessionId) {
       setLoading(false)
       return false
     }
@@ -173,9 +181,10 @@ export function ContextUsageIndicator({
     inFlightRequestRef.current = request
     inFlightIdentityRef.current = activeContextIdentity
     return request
-  }, [draft, runtimeSelectionKey, sessionId])
+  }, [runtimeSelectionKey, sessionId])
 
   const forceRefreshWithRetry = useCallback(() => {
+    if (!contextEnabledRef.current) return () => {}
     let cancelled = false
     let retryTimer: ReturnType<typeof setTimeout> | null = null
     void refresh('force').then((ok) => {
@@ -231,6 +240,27 @@ export function ContextUsageIndicator({
     void refresh('auto')
   }, [refresh, runtimeSelectionKey, sessionId])
 
+  const lastContextEnabledRef = useRef(contextEnabled)
+  useEffect(() => {
+    const wasEnabled = lastContextEnabledRef.current
+    lastContextEnabledRef.current = contextEnabled
+    if (contextEnabled) {
+      if (!wasEnabled) void refresh('auto')
+      return
+    }
+    requestSeq.current += 1
+    inFlightRequestRef.current = null
+    inFlightIdentityRef.current = null
+    lastAutoRefreshAtRef.current = 0
+    contextDataSessionIdRef.current = undefined
+    setContext(null)
+    setContextSource(null)
+    setInspectionModel(null)
+    setUpdatedAt(null)
+    setError(null)
+    setLoading(false)
+  }, [contextEnabled, refresh])
+
   const lastMessageCountRef = useRef(messageCount)
   useEffect(() => {
     if (lastMessageCountRef.current === messageCount) return
@@ -261,7 +291,7 @@ export function ContextUsageIndicator({
     return pickUsedContextCategory(context)
   }, [context])
 
-  const displayContext = contextDataSessionIdRef.current === sessionId ? context : null
+  const displayContext = contextEnabled && contextDataSessionIdRef.current === sessionId ? context : null
   const hasPlaceholderContext = !displayContext && (
     draft || (!loading && messageCount === 0 && (!error || isCliNotRunningError(error)))
   )
