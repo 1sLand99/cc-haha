@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
-import { useAnchoredPosition } from '@/hooks/useAnchoredPosition'
+import { useOverlayStore } from '../../stores/overlayStore'
 import { useDismissable } from '@/hooks/useDismissable'
 import { TargetIcon } from '@/components/composite/TargetIcon'
 
@@ -20,7 +20,6 @@ export function OpenProjectMenu({ path }: Props) {
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  const browserPreviewRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     if (!path) {
@@ -29,6 +28,15 @@ export function OpenProjectMenu({ path }: Props) {
     }
     void ensureTargets()
   }, [ensureTargets, path])
+
+  // The native browser preview always renders above DOM portals. Suppress it
+  // while this menu is open so targets below the browser toolbar stay visible.
+  useEffect(() => {
+    if (!open) return
+    const { push, pop } = useOverlayStore.getState()
+    push()
+    return () => pop()
+  }, [open])
 
   const handleDismiss = useCallback(() => setOpen(false), [])
 
@@ -44,20 +52,6 @@ export function OpenProjectMenu({ path }: Props) {
     [primaryTargetId, targets],
   )
   const hasMenu = targets.length > 1
-
-  useLayoutEffect(() => {
-    browserPreviewRef.current = open
-      ? document.querySelector<HTMLElement>('[data-browser-preview-host]')
-      : null
-  }, [open])
-
-  const { style: menuPosition } = useAnchoredPosition({
-    open: open && hasMenu,
-    anchorRef: buttonRef,
-    floatingRef: menuRef,
-    avoidRef: browserPreviewRef,
-    placement: 'bottom-end',
-  })
 
   const handleOpenTarget = async (targetId: string) => {
     if (!path) return
@@ -75,6 +69,8 @@ export function OpenProjectMenu({ path }: Props) {
   const buttonLabel = hasMenu
     ? t('openProject.openProject')
     : t('openProject.openIn', { target: primaryTarget.label })
+
+  const rect = buttonRef.current?.getBoundingClientRect()
 
   return (
     <div className="relative flex items-center">
@@ -102,12 +98,12 @@ export function OpenProjectMenu({ path }: Props) {
         {hasMenu && <ChevronDown size={14} strokeWidth={1.9} />}
       </button>
 
-      {open && hasMenu ? createPortal(
+      {open && hasMenu && rect ? createPortal(
         <div
           ref={menuRef}
           role="menu"
           className="glass-panel fixed z-[var(--z-dropdown)] min-w-[220px] overflow-hidden rounded-[var(--radius-lg)] py-1"
-          style={menuPosition}
+          style={{ top: rect.bottom + 6, right: Math.max(12, window.innerWidth - rect.right) }}
         >
           {targets.map((target) => (
             <button

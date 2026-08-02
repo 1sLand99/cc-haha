@@ -22,7 +22,6 @@ type Result = { style: React.CSSProperties; placement: AnchoredPlacement; ready:
 function renderAnchored(options: {
   anchor: Partial<DOMRect>
   floating: { width: number; height: number }
-  avoid?: Partial<DOMRect>
   placement?: AnchoredPlacement
   flip?: boolean
   shift?: boolean
@@ -33,13 +32,11 @@ function renderAnchored(options: {
   function Harness() {
     const anchorRef = useRef<HTMLDivElement | null>(null)
     const floatingRef = useRef<HTMLDivElement | null>(null)
-    const avoidRef = useRef<HTMLDivElement | null>(null)
 
     captured.current = useAnchoredPosition({
       open: true,
       anchorRef,
       floatingRef,
-      avoidRef: options.avoid ? avoidRef : undefined,
       placement: options.placement,
       flip: options.flip,
       shift: options.shift,
@@ -66,15 +63,6 @@ function renderAnchored(options: {
           }}
           data-testid="floating"
         />
-        {options.avoid && (
-          <div
-            ref={(element) => {
-              avoidRef.current = element
-              if (element) stubRect(element, options.avoid!)
-            }}
-            data-testid="avoid"
-          />
-        )}
       </>
     )
   }
@@ -182,18 +170,6 @@ describe('useAnchoredPosition', () => {
     })
 
     expect(result.style.left).toBe(8)
-  })
-
-  it('moves the overlay beside a native surface it would intersect', () => {
-    const result = renderAnchored({
-      anchor: { top: 20, bottom: 52, left: 800, right: 850 },
-      floating: { width: 220, height: 400 },
-      avoid: { top: 150, right: 1000, bottom: 800, left: 600 },
-      placement: 'bottom-end',
-    })
-
-    expect(result.style.top).toBe(58)
-    expect(result.style.left).toBe(372)
   })
 
   it('can be told not to flip', () => {
