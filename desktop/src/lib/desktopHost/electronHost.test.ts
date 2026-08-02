@@ -131,27 +131,6 @@ describe('electron desktop host', () => {
     expect(invoke).toHaveBeenCalledWith(ELECTRON_IPC_CHANNELS.traceOpenWindow, 'session-123')
   })
 
-  it('routes the native open-project popup through its dedicated IPC contract', async () => {
-    const invoke = vi.fn().mockResolvedValue('finder')
-    const subscribe = vi.fn().mockResolvedValue(() => {})
-    const host = createElectronHost({ invoke, subscribe })
-    const input = {
-      anchor: { x: 900, y: 8, width: 44, height: 32 },
-      targets: [
-        { id: 'vscode', kind: 'ide' as const, label: 'VS Code', icon: 'vscode', platform: 'darwin' },
-        { id: 'finder', kind: 'file_manager' as const, label: 'Finder', icon: 'finder', platform: 'darwin' },
-      ],
-      zoom: 1,
-    }
-    const onState = vi.fn()
-
-    await expect(host.openProjectMenu.show(input)).resolves.toBe('finder')
-    await host.openProjectMenu.onState(onState)
-
-    expect(invoke).toHaveBeenCalledWith(ELECTRON_IPC_CHANNELS.openProjectMenuShow, input)
-    expect(subscribe).toHaveBeenCalledWith(ELECTRON_EVENT_CHANNELS.openProjectMenuState, onState)
-  })
-
   it('routes preview zoom through the preview IPC channel', async () => {
     const invoke = vi.fn().mockResolvedValue(undefined)
     const host = createElectronHost({

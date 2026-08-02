@@ -51,12 +51,9 @@ vi.mock('../../stores/openTargetStore', () => ({
 
 import { OpenProjectMenu } from './OpenProjectMenu'
 import { useOverlayStore } from '../../stores/overlayStore'
-import { browserHost } from '../../lib/desktopHost/browserHost'
-import type { DesktopHost } from '../../lib/desktopHost/types'
 
 describe('OpenProjectMenu', () => {
   beforeEach(() => {
-    delete window.desktopHost
     useOverlayStore.setState(useOverlayStore.getInitialState(), true)
     storeMocks.ensureTargets.mockReset()
     storeMocks.openTarget.mockReset()
@@ -69,7 +66,6 @@ describe('OpenProjectMenu', () => {
   })
 
   afterEach(() => {
-    delete window.desktopHost
     vi.restoreAllMocks()
   })
 
@@ -114,59 +110,7 @@ describe('OpenProjectMenu', () => {
     expect(storeMocks.openTarget).toHaveBeenCalledWith('finder', '/repo')
   })
 
-  it('uses the native popup window in Electron without hiding the browser preview', async () => {
-    storeMocks.state.targets = [
-      { id: 'vscode', kind: 'ide', label: 'VS Code', icon: 'vscode', platform: 'darwin' },
-      { id: 'finder', kind: 'file_manager', label: 'Finder', icon: 'finder', platform: 'darwin' },
-    ]
-    storeMocks.state.primaryTargetId = 'vscode'
-    storeMocks.openTarget.mockResolvedValue(undefined)
-    let resolveSelection: (targetId: string | null) => void = () => {}
-    const show = vi.fn(() => new Promise<string | null>((resolve) => {
-      resolveSelection = resolve
-    }))
-    const dismiss = vi.fn().mockResolvedValue(undefined)
-    window.desktopHost = {
-      ...browserHost,
-      kind: 'electron',
-      isDesktop: true,
-      openProjectMenu: {
-        ...browserHost.openProjectMenu,
-        show,
-        dismiss,
-      },
-    } as DesktopHost
-
-    render(<OpenProjectMenu path="/repo" />)
-    const trigger = screen.getByRole('button', { name: 'Open project' })
-    trigger.getBoundingClientRect = () => domRect({
-      top: 8,
-      right: 944,
-      bottom: 40,
-      left: 900,
-      width: 44,
-      height: 32,
-    })
-
-    await act(async () => {
-      fireEvent.click(trigger)
-    })
-
-    expect(show).toHaveBeenCalledWith(expect.objectContaining({
-      anchor: { x: 900, y: 8, width: 44, height: 32 },
-      targets: storeMocks.state.targets,
-    }))
-    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
-    expect(useOverlayStore.getState().count).toBe(0)
-
-    await act(async () => {
-      resolveSelection('finder')
-      await Promise.resolve()
-    })
-    await waitFor(() => expect(storeMocks.openTarget).toHaveBeenCalledWith('finder', '/repo'))
-  })
-
-  it('keeps the browser preview visible and positions the DOM fallback outside it', async () => {
+  it('keeps the native browser preview visible and positions the menu outside it', async () => {
     storeMocks.state.targets = [
       { id: 'vscode', kind: 'ide', label: 'VS Code', icon: 'vscode', platform: 'darwin' },
       { id: 'finder', kind: 'file_manager', label: 'Finder', icon: 'finder', platform: 'darwin' },

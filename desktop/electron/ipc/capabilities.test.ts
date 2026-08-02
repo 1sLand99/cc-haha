@@ -3,7 +3,6 @@ import { ELECTRON_IPC_CHANNELS } from './channels'
 import {
   ELECTRON_IPC_VALIDATORS,
   isElectronIpcChannel,
-  isElectronIpcChannelAllowedForOpenProjectMenuWindow,
   isElectronIpcChannelAllowedForPetWindow,
   validateElectronIpcPayload,
 } from './capabilities'
@@ -31,21 +30,6 @@ describe('Electron IPC capabilities', () => {
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.clipboardWriteText, { text: 'paste me' })).toBe(false)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.traceOpenWindow, '4673a448-9e2c-475e-898d-9aa0ee2d1ab7')).toBe(true)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.traceOpenWindow, '../escape')).toBe(false)
-    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.openProjectMenuShow, {
-      anchor: { x: 900, y: 8, width: 44, height: 32 },
-      targets: [
-        { id: 'vscode', kind: 'ide', label: 'VS Code', icon: 'vscode', platform: 'darwin' },
-        { id: 'finder', kind: 'file_manager', label: 'Finder', icon: 'finder', platform: 'darwin' },
-      ],
-      zoom: 1,
-    })).toBe(true)
-    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.openProjectMenuShow, {
-      anchor: { x: 900, y: 8, width: 44, height: 32 },
-      targets: [{ id: 'vscode', kind: 'ide', label: 'VS Code', icon: 'vscode', platform: 'darwin' }],
-      zoom: 1,
-    })).toBe(false)
-    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.openProjectMenuReady, 1)).toBe(true)
-    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.openProjectMenuReady, 0)).toBe(false)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.windowClose, undefined)).toBe(true)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.windowClose, {})).toBe(false)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.windowStartDragging, undefined)).toBe(true)
@@ -176,21 +160,6 @@ describe('Electron IPC capabilities', () => {
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.petsFocusMainWindow, {})).toBe(false)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.petsFocusSession, 'session-123')).toBe(true)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.petsFocusSession, '../escape')).toBe(false)
-  })
-
-  it('limits the open-project popup to its narrow IPC surface', () => {
-    expect(isElectronIpcChannelAllowedForOpenProjectMenuWindow(
-      ELECTRON_IPC_CHANNELS.openProjectMenuGetState,
-    )).toBe(true)
-    expect(isElectronIpcChannelAllowedForOpenProjectMenuWindow(
-      ELECTRON_IPC_CHANNELS.openProjectMenuSelect,
-    )).toBe(true)
-    expect(isElectronIpcChannelAllowedForOpenProjectMenuWindow(
-      ELECTRON_IPC_CHANNELS.shellOpen,
-    )).toBe(false)
-    expect(isElectronIpcChannelAllowedForOpenProjectMenuWindow(
-      ELECTRON_IPC_CHANNELS.runtimeGetLocalAccessToken,
-    )).toBe(false)
   })
 
   it('pins the reported appearance colors to literal 6-digit hex', () => {

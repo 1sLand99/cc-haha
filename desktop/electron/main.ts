@@ -5,7 +5,6 @@ import { ELECTRON_EVENT_CHANNELS, ELECTRON_INTERNAL_CHANNELS, ELECTRON_IPC_CHANN
 import {
   isElectronIpcChannel,
   isElectronIpcChannelAllowedForPetWindow,
-  isElectronIpcChannelAllowedForOpenProjectMenuWindow,
   validateElectronIpcPayload,
 } from './ipc/capabilities'
 import { ElectronServerRuntime } from './services/serverRuntime'
@@ -24,7 +23,6 @@ import { ElectronUpdaterService, updaterSessionProxyConfig } from './services/up
 import { createUpdateSmokeUpdaterFromEnv } from './services/updateSmoke'
 import { ElectronTerminalService, type TerminalSpawnInput } from './services/terminal'
 import { ElectronPreviewService, type PreviewBounds } from './services/preview'
-import { OpenProjectMenuWindowController } from './services/openProjectMenuWindow'
 import {
   configureLocalServerRequestAuth,
   configurePreviewSessionPermissions,
@@ -66,7 +64,6 @@ import {
   writeLocalePreference,
 } from './services/localePreference'
 import type { Locale } from '../src/i18n/locale'
-import type { DesktopOpenProjectMenuInput } from '../src/lib/desktopHost/types'
 import {
   createCustomPetCatalogLoader,
   createCustomPetFromAtlas,
@@ -95,7 +92,6 @@ let serverRuntime: ElectronServerRuntime | null = null
 let updaterService: ElectronUpdaterService | null = null
 let terminalService: ElectronTerminalService | null = null
 let previewService: ElectronPreviewService | null = null
-let openProjectMenuWindowController: OpenProjectMenuWindowController | null = null
 let petWindowController: PetWindowController | null = null
 const traceWindows = new Map<string, BrowserWindow>()
 let isQuitting = false
@@ -125,10 +121,6 @@ function previewPreloadPath() {
 
 function petPreloadPath() {
   return path.join(appRoot(), 'electron-dist', 'pet-preload.cjs')
-}
-
-function openProjectMenuPreloadPath() {
-  return path.join(appRoot(), 'electron-dist', 'open-project-menu-preload.cjs')
 }
 
 function previewAgentPath() {
@@ -344,20 +336,6 @@ function getPetWindowController() {
   return petWindowController
 }
 
-function getOpenProjectMenuWindowController() {
-  openProjectMenuWindowController ??= new OpenProjectMenuWindowController({
-    createWindow: options => new BrowserWindow(options),
-    getWorkArea: parent => screen.getDisplayMatching(parent.getContentBounds()).workArea,
-    preloadPath: openProjectMenuPreloadPath(),
-    platform: process.platform,
-    onCreated: window => {
-      installMainWindowNavigationGuards(window.webContents, { openExternal: openExternalUrl })
-    },
-    load: window => loadRendererEntry(window as BrowserWindow, { openProjectMenuWindow: '1' }),
-  })
-  return openProjectMenuWindowController
-}
-
 const loadCustomPetCatalog = createCustomPetCatalogLoader(() => loadCustomPets({
     inspectImageSize: ({ data }) => nativeImage.createFromBuffer(data).getSize(),
   }))
@@ -392,12 +370,6 @@ function registerHandler<T>(
       !isElectronIpcChannelAllowedForPetWindow(channel)
     ) {
       throw new Error(`Electron IPC channel ${channel} is not available to the pet window`)
-    }
-    if (
-      openProjectMenuWindowController?.owns(senderWindow) &&
-      !isElectronIpcChannelAllowedForOpenProjectMenuWindow(channel)
-    ) {
-      throw new Error(`Electron IPC channel ${channel} is not available to the open-project menu window`)
     }
     return handler(event, payload)
   })
@@ -481,25 +453,6 @@ function registerIpcHandlers() {
   registerHandler(ELECTRON_IPC_CHANNELS.shellOpen, (_event, payload) => openExternalUrl(String(payload)))
   registerHandler(ELECTRON_IPC_CHANNELS.shellOpenPath, (_event, payload) => openSystemPath(String(payload)))
   registerHandler(ELECTRON_IPC_CHANNELS.traceOpenWindow, (_event, payload) => openTraceWindow(String(payload)))
-  registerHandler(ELECTRON_IPC_CHANNELS.openProjectMenuShow, (event, payload) => {
-    const window = currentWindow(event)
-    if (window !== mainWindow) throw new Error('Only the main window can show the open-project menu')
-    return getOpenProjectMenuWindowController().show(window, payload as DesktopOpenProjectMenuInput)
-  })
-  registerHandler(ELECTRON_IPC_CHANNELS.openProjectMenuGetState, event =>
-    getOpenProjectMenuWindowController().getState(currentWindow(event)))
-  registerHandler(ELECTRON_IPC_CHANNELS.openProjectMenuSelect, (event, payload) =>
-    getOpenProjectMenuWindowController().select(currentWindow(event), String(payload)))
-  registerHandler(ELECTRON_IPC_CHANNELS.openProjectMenuDismiss, event => {
-    const window = currentWindow(event)
-    const controller = getOpenProjectMenuWindowController()
-    if (window !== mainWindow && !controller.owns(window)) {
-      throw new Error('Only the main or open-project menu window can dismiss the menu')
-    }
-    controller.dismiss(controller.owns(window) ? window : null)
-  })
-  registerHandler(ELECTRON_IPC_CHANNELS.openProjectMenuReady, (event, payload) =>
-    getOpenProjectMenuWindowController().markReady(currentWindow(event), Number(payload)))
   registerHandler(ELECTRON_IPC_CHANNELS.petsList, () => listCustomPets())
   registerHandler(ELECTRON_IPC_CHANNELS.petsCreateFromImage, async (event, payload) => {
     const input = payload as {
@@ -753,12 +706,9 @@ async function createMainWindow() {
   configureLocalServerRequestAuth(
     mainWindow.webContents.session.webRequest,
     resolveMainRendererServerAccess,
-    details => (
-      isAllowlistedMainRendererMediaRequest(details, mainWindow!.webContents.id)
-      || (
-        openProjectMenuWindowController?.ownsWebContentsId(details.webContentsId) === true
-        && isAllowlistedMainRendererMediaRequest(details, details.webContentsId!)
-      )
+    details => isAllowlistedMainRendererMediaRequest(
+      details,
+      mainWindow!.webContents.id,
     ),
   )
   installMainWindowNavigationGuards(mainWindow.webContents, { openExternal: openExternalUrl })

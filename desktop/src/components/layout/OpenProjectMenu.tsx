@@ -6,9 +6,6 @@ import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { useAnchoredPosition } from '@/hooks/useAnchoredPosition'
 import { useDismissable } from '@/hooks/useDismissable'
 import { TargetIcon } from '@/components/composite/TargetIcon'
-import { getDesktopHost } from '@/lib/desktopHost'
-import { useSettingsStore } from '@/stores/settingsStore'
-import { OpenProjectMenuPanel } from './OpenProjectMenuPanel'
 
 type Props = {
   path: string | null | undefined
@@ -20,14 +17,10 @@ export function OpenProjectMenu({ path }: Props) {
   const primaryTargetId = useOpenTargetStore((state) => state.primaryTargetId)
   const ensureTargets = useOpenTargetStore((state) => state.ensureTargets)
   const openTarget = useOpenTargetStore((state) => state.openTarget)
-  const appZoom = useSettingsStore((state) => state.uiZoom)
   const [open, setOpen] = useState(false)
-  const [nativeMenuFailed, setNativeMenuFailed] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const browserPreviewRef = useRef<HTMLElement | null>(null)
-  const desktopHost = getDesktopHost()
-  const useNativeMenu = desktopHost.kind === 'electron' && !nativeMenuFailed
 
   useEffect(() => {
     if (!path) {
@@ -37,14 +30,10 @@ export function OpenProjectMenu({ path }: Props) {
     void ensureTargets()
   }, [ensureTargets, path])
 
-  useEffect(() => () => {
-    if (desktopHost.kind === 'electron') void desktopHost.openProjectMenu.dismiss()
-  }, [desktopHost])
-
   const handleDismiss = useCallback(() => setOpen(false), [])
 
   useDismissable({
-    open: open && !useNativeMenu,
+    open,
     refs: [menuRef],
     triggerRef: buttonRef,
     onDismiss: handleDismiss,
@@ -63,7 +52,7 @@ export function OpenProjectMenu({ path }: Props) {
   }, [open])
 
   const { style: menuPosition } = useAnchoredPosition({
-    open: open && hasMenu && !useNativeMenu,
+    open: open && hasMenu,
     anchorRef: buttonRef,
     floatingRef: menuRef,
     avoidRef: browserPreviewRef,
@@ -81,45 +70,6 @@ export function OpenProjectMenu({ path }: Props) {
     }
   }
 
-  const handleMenuToggle = () => {
-    if (!hasMenu) {
-      void handleOpenTarget(primaryTarget!.id)
-      return
-    }
-
-    if (!useNativeMenu) {
-      setOpen((value) => !value)
-      return
-    }
-
-    if (open) {
-      setOpen(false)
-      void desktopHost.openProjectMenu.dismiss()
-      return
-    }
-
-    const anchor = buttonRef.current?.getBoundingClientRect()
-    if (!anchor) return
-    setOpen(true)
-    void desktopHost.openProjectMenu.show({
-      anchor: {
-        x: anchor.left,
-        y: anchor.top,
-        width: anchor.width,
-        height: anchor.height,
-      },
-      targets,
-      zoom: appZoom,
-    }).then((targetId) => {
-      setOpen(false)
-      if (targetId) void handleOpenTarget(targetId)
-    }).catch(() => {
-      // Keep the in-page collision-avoiding menu as a runtime fallback.
-      setNativeMenuFailed(true)
-      setOpen(true)
-    })
-  }
-
   if (!path || !primaryTarget) return null
 
   const buttonLabel = hasMenu
@@ -135,7 +85,13 @@ export function OpenProjectMenu({ path }: Props) {
         aria-haspopup={hasMenu ? 'menu' : undefined}
         aria-expanded={hasMenu ? open : undefined}
         title={buttonLabel}
-        onClick={handleMenuToggle}
+        onClick={() => {
+          if (hasMenu) {
+            setOpen((value) => !value)
+            return
+          }
+          void handleOpenTarget(primaryTarget.id)
+        }}
         className={`inline-flex h-8 items-center justify-center gap-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] text-[var(--color-text-tertiary)] transition-[background-color,color,border-color,box-shadow] duration-150 ease-out hover:border-[var(--color-outline)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] ${
           hasMenu
             ? 'min-w-[2.75rem] px-2 hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]'
@@ -146,14 +102,28 @@ export function OpenProjectMenu({ path }: Props) {
         {hasMenu && <ChevronDown size={14} strokeWidth={1.9} />}
       </button>
 
-      {open && hasMenu && !useNativeMenu ? createPortal(
-        <OpenProjectMenuPanel
+      {open && hasMenu ? createPortal(
+        <div
           ref={menuRef}
-          targets={targets}
-          onSelect={(targetId) => void handleOpenTarget(targetId)}
-          className="fixed z-[var(--z-dropdown)]"
+          role="menu"
+          className="glass-panel fixed z-[var(--z-dropdown)] min-w-[220px] overflow-hidden rounded-[var(--radius-lg)] py-1"
           style={menuPosition}
-        />,
+        >
+          {targets.map((target) => (
+            <button
+              key={target.id}
+              type="button"
+              role="menuitem"
+              onClick={() => void handleOpenTarget(target.id)}
+              className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm font-medium text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:bg-[var(--color-surface-hover)]"
+            >
+              <span className="flex h-7 w-7 items-center justify-center text-[var(--color-text-secondary)]">
+                <TargetIcon target={target} size={24} />
+              </span>
+              <span className="min-w-0 truncate">{target.label}</span>
+            </button>
+          ))}
+        </div>,
         document.body,
       ) : null}
     </div>

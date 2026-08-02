@@ -2148,13 +2148,6 @@ html[data-window-kind='pet'] #root {
   overflow: hidden;
 }
 
-html[data-window-kind='open-project-menu'],
-html[data-window-kind='open-project-menu'] body,
-html[data-window-kind='open-project-menu'] #root {
-  background: transparent !important;
-  overflow: hidden;
-}
-
 .pet-window-root {
   position: relative;
   box-sizing: border-box;

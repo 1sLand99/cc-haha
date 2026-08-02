@@ -113,14 +113,6 @@ export function createElectronHost(bridge: ElectronHostBridge): DesktopHost {
     trace: {
       openWindow: sessionId => invoke(ELECTRON_IPC_CHANNELS.traceOpenWindow, sessionId),
     },
-    openProjectMenu: {
-      show: input => invoke(ELECTRON_IPC_CHANNELS.openProjectMenuShow, input),
-      getState: () => invoke(ELECTRON_IPC_CHANNELS.openProjectMenuGetState),
-      select: targetId => invoke(ELECTRON_IPC_CHANNELS.openProjectMenuSelect, targetId),
-      dismiss: () => invoke(ELECTRON_IPC_CHANNELS.openProjectMenuDismiss),
-      ready: requestId => invoke(ELECTRON_IPC_CHANNELS.openProjectMenuReady, requestId),
-      onState: handler => subscribe(ELECTRON_EVENT_CHANNELS.openProjectMenuState, handler),
-    },
     pets: {
       list: () => invoke(ELECTRON_IPC_CHANNELS.petsList),
       createFromImage: input => invoke(ELECTRON_IPC_CHANNELS.petsCreateFromImage, input),

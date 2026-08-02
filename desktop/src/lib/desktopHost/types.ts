@@ -136,31 +136,6 @@ export type PreviewBounds = {
   height: number
 }
 
-export type DesktopOpenProjectTarget = {
-  id: string
-  kind: 'ide' | 'file_manager'
-  label: string
-  icon: string
-  iconUrl?: string
-  platform: string
-}
-
-export type DesktopOpenProjectMenuInput = {
-  anchor: {
-    x: number
-    y: number
-    width: number
-    height: number
-  }
-  targets: DesktopOpenProjectTarget[]
-  zoom: number
-}
-
-export type DesktopOpenProjectMenuState = {
-  requestId: number
-  targets: DesktopOpenProjectTarget[]
-}
-
 export type PreviewEvent = {
   type: string
   payload?: unknown
@@ -327,14 +302,6 @@ export type DesktopHost = {
   }
   trace?: {
     openWindow(sessionId: string): Promise<void>
-  }
-  openProjectMenu: {
-    show(input: DesktopOpenProjectMenuInput): Promise<string | null>
-    getState(): Promise<DesktopOpenProjectMenuState | null>
-    select(targetId: string): Promise<void>
-    dismiss(): Promise<void>
-    ready(requestId: number): Promise<void>
-    onState(handler: (state: DesktopOpenProjectMenuState) => void): Promise<DesktopHostUnlisten>
   }
   pets: {
     list(): Promise<DesktopPetListResult>
