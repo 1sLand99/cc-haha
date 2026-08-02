@@ -8,6 +8,7 @@ import {
   __registerPendingUserTurnForTests,
   __markPrewarmedForTests,
   __resetWebSocketHandlerStateForTests,
+  __resolveRuntimeRestartWorkDirForTests,
   closeSessionConnection,
   getActiveSessionIds,
   handleWebSocket,
@@ -143,6 +144,27 @@ describe('WebSocket handler session isolation', () => {
     expect(getActiveSessionIds()).toContain(sessionId)
     expect(clearCallbacks).not.toHaveBeenCalled()
     expect(cancelComputerUse).not.toHaveBeenCalled()
+  })
+
+  it('falls back to persisted workDir when a queued runtime restart loses its active session', async () => {
+    const sessionId = `runtime-restart-workdir-${crypto.randomUUID()}`
+    const persistedWorkDir = '/persisted/runtime-project'
+    spyOn(conversationService, 'getSessionWorkDir').mockReturnValue('')
+    const getPersistedWorkDir = spyOn(sessionService, 'getSessionWorkDir')
+      .mockResolvedValue(persistedWorkDir)
+
+    await expect(__resolveRuntimeRestartWorkDirForTests(sessionId))
+      .resolves.toBe(persistedWorkDir)
+    expect(getPersistedWorkDir).toHaveBeenCalledWith(sessionId)
+  })
+
+  it('rejects a runtime restart when no active or persisted workDir remains', async () => {
+    const sessionId = `runtime-restart-missing-workdir-${crypto.randomUUID()}`
+    spyOn(conversationService, 'getSessionWorkDir').mockReturnValue('')
+    spyOn(sessionService, 'getSessionWorkDir').mockResolvedValue(null)
+
+    await expect(__resolveRuntimeRestartWorkDirForTests(sessionId))
+      .rejects.toThrow(`Unable to resolve working directory for session: ${sessionId}`)
   })
 
   it('rejects an old SDK socket after the same session starts with a new token', () => {

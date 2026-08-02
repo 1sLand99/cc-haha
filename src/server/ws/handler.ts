@@ -1705,12 +1705,22 @@ async function persistSessionRuntimeConfig(
   })
 }
 
+async function resolveRuntimeRestartWorkDir(sessionId: string): Promise<string> {
+  const activeWorkDir = conversationService.getSessionWorkDir(sessionId)
+  if (activeWorkDir) return activeWorkDir
+
+  const persistedWorkDir = await sessionService.getSessionWorkDir(sessionId).catch(() => null)
+  if (persistedWorkDir) return persistedWorkDir
+
+  throw new Error(`Unable to resolve working directory for session: ${sessionId}`)
+}
+
 async function restartSessionWithRuntimeConfig(
   ws: ServerWebSocket<WebSocketData>,
   sessionId: string,
 ): Promise<void> {
   try {
-    const workDir = conversationService.getSessionWorkDir(sessionId)
+    const workDir = await resolveRuntimeRestartWorkDir(sessionId)
     markActiveAgentsStopping(sessionId)
     runtimeExitStoppedSessions.add(sessionId)
     conversationService.stopSession(sessionId)
@@ -4935,6 +4945,10 @@ export function __enqueueRuntimeTransitionForTests(
   transition: Promise<void>,
 ): Promise<void> {
   return enqueueRuntimeTransition(sessionId, () => transition)
+}
+
+export function __resolveRuntimeRestartWorkDirForTests(sessionId: string): Promise<string> {
+  return resolveRuntimeRestartWorkDir(sessionId)
 }
 
 /** Test hook: settle a registered turn through the same CLI-result seam. */
