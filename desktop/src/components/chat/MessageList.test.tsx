@@ -1482,6 +1482,63 @@ describe('MessageList nested tool calls', () => {
     expect(container.textContent).toContain('Agent')
   })
 
+  it('keeps parallel agent rows running while the shared chat state crosses tool boundaries', async () => {
+    const agentMessages: Array<Extract<UIMessage, { type: 'tool_use' }>> = Array.from({ length: 4 }, (_, index) => ({
+      id: `tool-agent-${index}`,
+      type: 'tool_use',
+      toolName: 'Agent',
+      toolUseId: `agent-${index}`,
+      input: { description: `Review area ${index}` },
+      timestamp: index + 1,
+    }))
+    const backgroundAgentTasks = Object.fromEntries(
+      agentMessages.map((message, index) => {
+        return [
+          `task-${index}`,
+          {
+            taskId: `task-${index}`,
+            toolUseId: message.toolUseId,
+            status: 'running' as const,
+            taskType: 'local_agent',
+            description: `Review area ${index}`,
+            startedAt: index + 1,
+            updatedAt: index + 1,
+          },
+        ]
+      }),
+    )
+    const setChatState = (chatState: PerSessionState['chatState']) => {
+      useChatStore.setState({
+        sessions: {
+          [ACTIVE_TAB]: makeSessionState({
+            chatState,
+            messages: agentMessages,
+            backgroundAgentTasks,
+          }),
+        },
+      })
+    }
+
+    setChatState('thinking')
+    render(<MessageList />)
+    fireEvent.click(screen.getByRole('button', { name: /dispatched 4 agents/i }))
+
+    expect(screen.queryByText('Starting')).toBeNull()
+    expect(screen.getAllByText('Running')).toHaveLength(5)
+
+    act(() => setChatState('tool_executing'))
+    await waitFor(() => {
+      expect(screen.queryByText('Starting')).toBeNull()
+      expect(screen.getAllByText('Running')).toHaveLength(5)
+    })
+
+    act(() => setChatState('thinking'))
+    await waitFor(() => {
+      expect(screen.queryByText('Starting')).toBeNull()
+      expect(screen.getAllByText('Running')).toHaveLength(5)
+    })
+  })
+
   it('shows a dedicated compacting status indicator', () => {
     useChatStore.setState({
       sessions: {

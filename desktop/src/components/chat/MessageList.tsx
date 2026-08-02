@@ -29,7 +29,7 @@ import {
   type ConversationNavigationItem,
   type ConversationNavigationMode,
 } from './ConversationNavigator'
-import type { AgentTaskNotification, UIMessage } from '../../types/chat'
+import type { AgentTaskNotification, BackgroundAgentTask, UIMessage } from '../../types/chat'
 import { formatTokenCount } from '../../lib/formatTokenCount'
 import { formatDurationMs, hasRunningBackgroundTasks as hasAnyRunningBackgroundTasks } from '../../lib/backgroundTasks'
 import { buildTurnCompletionByMessageId, type TurnCompletion } from '../../lib/turnCompletion'
@@ -1587,7 +1587,15 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const streamingToolInput = sessionState?.streamingToolInput ?? ''
   const activeThinkingId = sessionState?.activeThinkingId ?? null
   const agentTaskNotifications = sessionState?.agentTaskNotifications ?? EMPTY_AGENT_TASK_NOTIFICATIONS
-  const hasRunningBackgroundTasks = hasAnyRunningBackgroundTasks(sessionState?.backgroundAgentTasks)
+  const backgroundAgentTasks = sessionState?.backgroundAgentTasks
+  const agentTaskStatuses = useMemo<Record<string, BackgroundAgentTask['status']>>(() => {
+    const statuses: Record<string, BackgroundAgentTask['status']> = {}
+    for (const task of Object.values(backgroundAgentTasks ?? {})) {
+      if (task.toolUseId) statuses[task.toolUseId] = task.status
+    }
+    return statuses
+  }, [backgroundAgentTasks])
+  const hasRunningBackgroundTasks = hasAnyRunningBackgroundTasks(backgroundAgentTasks)
   const pendingPermissions = listPendingPermissions(sessionState)
   const activeAskUserQuestionToolUseId =
     pendingPermissions
@@ -2562,6 +2570,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
             resultMap={toolResultMap}
             childToolCallsByParent={childToolCallsByParent}
             agentTaskNotifications={agentTaskNotifications}
+            agentTaskStatuses={agentTaskStatuses}
             isStreaming={
               chatState === 'tool_executing' &&
               item.toolCalls.some((tc) => !toolResultMap.has(tc.toolUseId))
