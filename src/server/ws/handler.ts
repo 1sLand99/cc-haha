@@ -26,6 +26,7 @@ import {
 } from '../services/sessionService.js'
 import { SettingsService } from '../services/settingsService.js'
 import { ProviderService } from '../services/providerService.js'
+import { getPresetDefaultEnv } from '../services/providerRuntimeEnv.js'
 import { isOpenAIOfficialProviderId } from '../services/openaiOfficialProvider.js'
 import { isGrokOfficialProviderId } from '../services/grokOfficialProvider.js'
 import { getOpenAICodexModelCatalog } from '../../services/openaiAuth/modelCatalog.js'
@@ -38,6 +39,7 @@ import { GROK_DEFAULT_MAIN_MODEL } from '../../services/grokAuth/models.js'
 import { getGrokModelCatalog } from '../../services/grokAuth/modelCatalog.js'
 import { hahaGrokOAuthService } from '../services/hahaGrokOAuthService.js'
 import {
+  getModelReasoningCapabilityOverride,
   isModelReasoningEffort,
   normalizeModelReasoningEffort,
 } from '../../shared/modelReasoning.js'
@@ -4500,6 +4502,11 @@ async function resolveRuntimeEffort(
     modelId,
     effort,
     provider.apiFormat ?? 'anthropic',
+    getModelReasoningCapabilityOverride(
+      modelId,
+      provider.models,
+      getPresetDefaultEnv(provider.presetId),
+    ),
   )
   return {
     valid: true,

@@ -364,8 +364,8 @@ export function buildProviderManagedEnv(
   const providerCapabilityEnv = getProviderCapabilityEnv(provider, models)
 
   return {
-    ...omitAuthEnv(presetDefaultEnv),
     ...providerCapabilityEnv,
+    ...omitAuthEnv(presetDefaultEnv),
     ...(provider.autoCompactWindow !== undefined && {
       CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(provider.autoCompactWindow),
     }),

@@ -9,8 +9,40 @@ export const MODEL_REASONING_EFFORTS = [
 export type ModelReasoningEffort = (typeof MODEL_REASONING_EFFORTS)[number]
 export type ModelReasoningApiFormat = 'anthropic' | 'openai_chat' | 'openai_responses'
 
+export const MODEL_REASONING_CAPABILITY_TIERS = [
+  {
+    slot: 'fable',
+    modelEnvVar: 'ANTHROPIC_DEFAULT_FABLE_MODEL',
+    capabilitiesEnvVar: 'ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES',
+  },
+  {
+    slot: 'opus',
+    modelEnvVar: 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    capabilitiesEnvVar: 'ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES',
+  },
+  {
+    slot: 'sonnet',
+    modelEnvVar: 'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    capabilitiesEnvVar: 'ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES',
+  },
+  {
+    slot: 'haiku',
+    modelEnvVar: 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+    capabilitiesEnvVar: 'ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES',
+  },
+] as const
+
 export type ModelReasoningProfile = {
-  family: 'deepseek-v4' | 'kimi-k3' | 'kimi-coding' | 'glm-5.2' | 'glm-legacy' | 'minimax' | 'mimo'
+  family:
+    | 'explicit'
+    | 'generic'
+    | 'deepseek-v4'
+    | 'kimi-k3'
+    | 'kimi-coding'
+    | 'glm-5.2'
+    | 'glm-legacy'
+    | 'minimax'
+    | 'mimo'
   apiFormats: readonly ModelReasoningApiFormat[]
   supportedReasoningEfforts: readonly ModelReasoningEffort[]
   defaultReasoningEffort?: ModelReasoningEffort
@@ -18,16 +50,20 @@ export type ModelReasoningProfile = {
   claudeCodeCapabilities: string
 }
 
-// Protocol compatibility only tells us where to put an effort value. Each
-// model family accepts a different subset, so this registry is the shared
-// authority for the desktop picker, runtime validation, and Claude Code env.
-// Unknown models intentionally receive no effort until their vendor contract
-// is documented here.
+// Known model families override the generic Claude Code pass-through behavior.
+// The registry records documented restrictions and aliases; it must not become
+// a closed allowlist that disables every newly introduced compatible model.
 type ModelReasoningRegistryEntry = ModelReasoningProfile & {
   matches: (modelId: string) => boolean
 }
 
 const ANTHROPIC_AND_OPENAI_CHAT = ['anthropic', 'openai_chat'] as const
+const GENERIC_REASONING_PROFILE: ModelReasoningProfile = {
+  family: 'generic',
+  apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
+  supportedReasoningEfforts: MODEL_REASONING_EFFORTS,
+  claudeCodeCapabilities: 'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
+}
 
 const MODEL_REASONING_REGISTRY: readonly ModelReasoningRegistryEntry[] = [
   {
@@ -92,21 +128,31 @@ const MODEL_REASONING_REGISTRY: readonly ModelReasoningRegistryEntry[] = [
     apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
     supportedReasoningEfforts: [],
     claudeCodeCapabilities: 'thinking',
-    matches: modelId => modelId.startsWith('glm-'),
+    matches: modelId => (
+      modelId.startsWith('glm-4.') ||
+      modelId === 'glm-5.1' ||
+      modelId.startsWith('glm-5.1-') ||
+      modelId === 'glm-5-turbo' ||
+      modelId.startsWith('glm-5-turbo-')
+    ),
   },
   {
     family: 'minimax',
     apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
     supportedReasoningEfforts: [],
     claudeCodeCapabilities: 'thinking,adaptive_thinking',
-    matches: modelId => modelId.startsWith('minimax-'),
+    matches: modelId => (
+      modelId.startsWith('minimax-m2.7') ||
+      modelId === 'minimax-m3' ||
+      modelId.startsWith('minimax-m3-')
+    ),
   },
   {
     family: 'mimo',
     apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
     supportedReasoningEfforts: [],
     claudeCodeCapabilities: 'thinking',
-    matches: modelId => modelId.startsWith('mimo-'),
+    matches: modelId => modelId.startsWith('mimo-v2.5'),
   },
 ]
 
@@ -122,20 +168,66 @@ export function normalizeReasoningModelId(modelId: string): string {
     : normalized
 }
 
+export function getModelReasoningCapabilityOverride(
+  modelId: string,
+  models: Partial<Record<(typeof MODEL_REASONING_CAPABILITY_TIERS)[number]['slot'], string>>,
+  env: Readonly<Record<string, string | undefined>>,
+): string | undefined {
+  const normalizedModelId = modelId.trim().toLowerCase()
+  for (const tier of MODEL_REASONING_CAPABILITY_TIERS) {
+    const mappedModel = models[tier.slot]?.trim().toLowerCase()
+    const capabilities = env[tier.capabilitiesEnvVar]
+    if (mappedModel === normalizedModelId && capabilities !== undefined) {
+      return capabilities
+    }
+  }
+  return undefined
+}
+
 export function isModelReasoningEffort(value: string): value is ModelReasoningEffort {
   return (MODEL_REASONING_EFFORTS as readonly string[]).includes(value)
+}
+
+function profileFromCapabilityOverride(
+  capabilities: string,
+  apiFormat?: ModelReasoningApiFormat,
+): ModelReasoningProfile {
+  const capabilitySet = new Set(
+    capabilities.toLowerCase().split(',').map(capability => capability.trim()),
+  )
+  const supportsEffort = capabilitySet.has('effort')
+  return {
+    family: 'explicit',
+    apiFormats: apiFormat ? [apiFormat] : ANTHROPIC_AND_OPENAI_CHAT,
+    supportedReasoningEfforts: supportsEffort
+      ? MODEL_REASONING_EFFORTS.filter(level => (
+          (level !== 'xhigh' || capabilitySet.has('xhigh_effort')) &&
+          (level !== 'max' || capabilitySet.has('max_effort'))
+        ))
+      : [],
+    claudeCodeCapabilities: capabilities,
+  }
 }
 
 export function resolveModelReasoningProfile(
   modelId: string,
   apiFormat?: ModelReasoningApiFormat,
+  capabilitiesOverride?: string,
 ): ModelReasoningProfile | undefined {
+  if (capabilitiesOverride !== undefined) {
+    return profileFromCapabilityOverride(capabilitiesOverride, apiFormat)
+  }
+
   const normalizedModelId = normalizeReasoningModelId(modelId)
   const entry = MODEL_REASONING_REGISTRY.find((candidate) => (
     candidate.matches(normalizedModelId) &&
     (apiFormat === undefined || candidate.apiFormats.includes(apiFormat))
   ))
-  if (!entry) return undefined
+  if (!entry) {
+    return apiFormat && GENERIC_REASONING_PROFILE.apiFormats.includes(apiFormat)
+      ? GENERIC_REASONING_PROFILE
+      : undefined
+  }
 
   const { matches: _matches, ...profile } = entry
   return profile
@@ -145,9 +237,10 @@ export function normalizeModelReasoningEffort(
   modelId: string,
   requestedEffort: ModelReasoningEffort | undefined,
   apiFormat?: ModelReasoningApiFormat,
+  capabilitiesOverride?: string,
 ): ModelReasoningEffort | undefined {
   if (requestedEffort === undefined) return undefined
-  const profile = resolveModelReasoningProfile(modelId, apiFormat)
+  const profile = resolveModelReasoningProfile(modelId, apiFormat, capabilitiesOverride)
   if (!profile || profile.supportedReasoningEfforts.length === 0) return undefined
   if (profile.supportedReasoningEfforts.includes(requestedEffort)) return requestedEffort
 
@@ -160,6 +253,11 @@ export function normalizeModelReasoningEffort(
 export function getClaudeCodeModelCapabilities(
   modelId: string,
   apiFormat?: ModelReasoningApiFormat,
+  capabilitiesOverride?: string,
 ): string {
-  return resolveModelReasoningProfile(modelId, apiFormat)?.claudeCodeCapabilities ?? 'none'
+  return resolveModelReasoningProfile(
+    modelId,
+    apiFormat,
+    capabilitiesOverride,
+  )?.claudeCodeCapabilities ?? 'none'
 }

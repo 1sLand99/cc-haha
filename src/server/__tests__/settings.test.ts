@@ -775,6 +775,40 @@ describe('Models API', () => {
     }])
   })
 
+  it('GET /api/models should apply preset capability overrides before generic fallback', async () => {
+    const providerSvc = new ProviderService()
+    const provider = await providerSvc.addProvider({
+      presetId: 'xuanshuapi',
+      name: 'XuanShu API',
+      baseUrl: 'https://www.xuanshuapi.com',
+      apiKey: 'test-key',
+      apiFormat: 'anthropic',
+      models: {
+        main: 'claude-opus-5',
+        haiku: 'claude-haiku-4-5',
+        sonnet: 'claude-sonnet-5',
+        opus: 'claude-opus-5',
+      },
+    })
+    await providerSvc.activateProvider(provider.id)
+
+    const { req, url, segments } = makeRequest('GET', '/api/models')
+    const res = await handleModelsApi(req, url, segments)
+    const body = await res.json() as {
+      models: Array<{ id: string; supportedReasoningEfforts?: string[] }>
+    }
+    const modelsById = new Map(body.models.map(model => [model.id, model]))
+
+    expect(modelsById.get('claude-opus-5')?.supportedReasoningEfforts).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
+    expect(modelsById.get('claude-sonnet-5')?.supportedReasoningEfforts).toEqual([])
+  })
+
   it('GET /api/models should merge env-configured provider models with saved OpenAI OAuth models', async () => {
     process.env.ANTHROPIC_API_KEY = 'deepseek-key'
     process.env.ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'

@@ -440,6 +440,7 @@ describe('ModelSelector', () => {
       availableModels: MODELS,
       currentModel: MODELS[0],
       activeProviderName: 'Provider A',
+      effortLevel: 'high',
     })
     useProviderStore.setState({
       providers: [{
@@ -485,10 +486,12 @@ describe('ModelSelector', () => {
     expect(useSessionRuntimeStore.getState().selections['session-1']).toEqual({
       providerId: 'provider-a',
       modelId: 'provider-fast',
+      effortLevel: 'high',
     })
     expect(setSessionRuntime).toHaveBeenCalledWith('session-1', {
       providerId: 'provider-a',
       modelId: 'provider-fast',
+      effortLevel: 'high',
     })
   })
 
@@ -659,6 +662,70 @@ describe('ModelSelector', () => {
       effortLevel: 'high',
     })
     expect(useSettingsStore.getState().effortLevel).toBe('max')
+  })
+
+  it('keeps effort selectable for unlisted Claude models from compatible providers', async () => {
+    const setSessionRuntime = vi.fn()
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: [],
+      currentModel: null,
+      activeProviderName: 'XuanShu API',
+      effortLevel: 'high',
+    })
+    useProviderStore.setState({
+      providers: [{
+        id: 'xuanshuapi-provider',
+        presetId: 'xuanshuapi',
+        name: 'XuanShu API',
+        apiKey: '***',
+        baseUrl: 'https://www.xuanshuapi.com',
+        apiFormat: 'anthropic',
+        models: {
+          main: 'claude-opus-5',
+          haiku: 'claude-haiku-4-5',
+          sonnet: 'claude-sonnet-5',
+          opus: 'claude-opus-5',
+        },
+      }],
+      activeId: 'xuanshuapi-provider',
+      hasLoadedProviders: true,
+      isLoading: false,
+    })
+    useSessionRuntimeStore.getState().setSelection('session-claude-future', {
+      providerId: 'xuanshuapi-provider',
+      modelId: 'claude-opus-5',
+      effortLevel: 'high',
+    })
+    useChatStore.setState({
+      setSessionRuntime,
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    render(<ModelSelector runtimeKey="session-claude-future" />)
+
+    expect(screen.getByRole('button', { name: 'Effort: High' })).toBeInTheDocument()
+    await clickByRole('Effort: High')
+    expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(5)
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Effort' }), { key: 'ArrowRight' })
+
+    const expectedSelection = {
+      providerId: 'xuanshuapi-provider',
+      modelId: 'claude-opus-5',
+      effortLevel: 'xhigh',
+    }
+    expect(useSessionRuntimeStore.getState().selections['session-claude-future']).toEqual(
+      expectedSelection,
+    )
+    expect(setSessionRuntime).toHaveBeenCalledWith('session-claude-future', expectedSelection)
+
+    await clickByRole('claude-opus-5, XuanShu API')
+    await clickByRole(/claude-sonnet-5/i)
+
+    expect(screen.queryByRole('button', { name: /Effort:/i })).not.toBeInTheDocument()
+    expect(useSessionRuntimeStore.getState().selections['session-claude-future']).toEqual({
+      providerId: 'xuanshuapi-provider',
+      modelId: 'claude-sonnet-5',
+    })
   })
 
   it('uses the ChatGPT Official catalog when that built-in provider is active', async () => {

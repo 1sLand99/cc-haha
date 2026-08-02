@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { BUNDLED_PROVIDER_PRESETS } from '../../config/providerPresets'
 import { OFFICIAL_MODELS } from '../../constants/modelCatalog'
 import {
   OPENAI_OFFICIAL_MODELS,
@@ -33,6 +34,7 @@ import { ReasoningEffortPopover } from './ReasoningEffortPopover'
 import { useUIStore } from '../../stores/uiStore'
 import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
 import {
+  getModelReasoningCapabilityOverride,
   isModelReasoningEffort,
   normalizeModelReasoningEffort,
   resolveModelReasoningProfile,
@@ -73,6 +75,20 @@ const DROPDOWN_GAP = 8
 const VIEWPORT_MARGIN = 16
 const DROPDOWN_MAX_HEIGHT = 420
 const DROPDOWN_MIN_HEIGHT = 180
+const PROVIDER_PRESET_DEFAULT_ENVS = new Map(
+  BUNDLED_PROVIDER_PRESETS.map(preset => [preset.id, preset.defaultEnv ?? {}]),
+)
+
+function getProviderModelCapabilityOverride(
+  provider: SavedProvider,
+  modelId: string,
+): string | undefined {
+  return getModelReasoningCapabilityOverride(
+    modelId,
+    provider.models,
+    PROVIDER_PRESET_DEFAULT_ENVS.get(provider.presetId) ?? {},
+  )
+}
 
 function officialChoices(
   providerId: string | null,
@@ -125,7 +141,11 @@ function buildProviderModels(
   }
 
   return [...byId.values()].map((entry) => {
-    const reasoningProfile = resolveModelReasoningProfile(entry.id, provider.apiFormat)
+    const reasoningProfile = resolveModelReasoningProfile(
+      entry.id,
+      provider.apiFormat,
+      getProviderModelCapabilityOverride(provider, entry.id),
+    )
     return {
       id: entry.id,
       name: entry.id,
@@ -606,15 +626,18 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
                         onClick={() => {
                           const supportedEfforts = model.supportedReasoningEfforts
                           const explicitEffort = activeRuntimeSelection?.effortLevel
-                          const providerApiFormat = providers.find(
+                          const selectedProvider = providers.find(
                             (provider) => provider.id === choice.providerId,
-                          )?.apiFormat
+                          )
                           const normalizedProviderEffort = explicitEffort &&
                             isModelReasoningEffort(explicitEffort)
                             ? normalizeModelReasoningEffort(
                                 model.id,
                                 explicitEffort,
-                                providerApiFormat,
+                                selectedProvider?.apiFormat,
+                                selectedProvider
+                                  ? getProviderModelCapabilityOverride(selectedProvider, model.id)
+                                  : undefined,
                               )
                             : undefined
                           const nextEffort = supportedEfforts === undefined
@@ -623,7 +646,9 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
                               ? normalizedProviderEffort
                                 ?? (explicitEffort && supportedEfforts.includes(explicitEffort)
                                 ? explicitEffort
-                                : model.defaultReasoningEffort ?? supportedEfforts[0])
+                                : supportedEfforts.includes(effortLevel)
+                                  ? effortLevel
+                                  : model.defaultReasoningEffort ?? supportedEfforts[0])
                               : undefined
                           handleRuntimeSelect({
                             providerId: choice.providerId,

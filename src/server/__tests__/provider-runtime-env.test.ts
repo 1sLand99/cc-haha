@@ -68,7 +68,7 @@ describe('providerRuntimeEnv', () => {
     expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
   })
 
-  test('uses deny-by-default model capabilities for an unknown custom model', async () => {
+  test('keeps Claude Code effort capabilities for an unlisted custom model', async () => {
     await writeJson(path.join(tmpDir, 'cc-haha', 'providers.json'), {
       activeId: 'provider-1',
       providers: [
@@ -100,13 +100,17 @@ describe('providerRuntimeEnv', () => {
       ENABLE_TOOL_SEARCH: 'true',
       ANTHROPIC_MODEL: 'active-main',
       ANTHROPIC_DEFAULT_FABLE_MODEL: 'active-fable',
-      ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES: 'none',
+      ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'active-main',
-      ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES: 'none',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'active-sonnet',
-      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'none',
+      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
       ANTHROPIC_DEFAULT_OPUS_MODEL: 'active-main',
-      ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES: 'none',
+      ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
     })
 
     const runtimeKeys = [
@@ -127,7 +131,9 @@ describe('providerRuntimeEnv', () => {
       delete process.env.CLAUDE_CODE_EFFORT_LEVEL
       clearCapabilityCache()
 
-      expect(get3PModelCapabilityOverride('active-main', 'effort')).toBe(false)
+      expect(get3PModelCapabilityOverride('active-main', 'effort')).toBe(true)
+      expect(get3PModelCapabilityOverride('active-main', 'xhigh_effort')).toBe(true)
+      expect(get3PModelCapabilityOverride('active-main', 'max_effort')).toBe(true)
     } finally {
       for (const key of runtimeKeys) {
         const value = originalRuntimeEnv[key]
@@ -136,6 +142,38 @@ describe('providerRuntimeEnv', () => {
       }
       clearCapabilityCache()
     }
+  })
+
+  test('keeps explicit preset capability denies above the generic fallback', async () => {
+    await writeJson(path.join(tmpDir, 'cc-haha', 'providers.json'), {
+      activeId: 'provider-xuanshu',
+      providers: [
+        {
+          id: 'provider-xuanshu',
+          presetId: 'xuanshuapi',
+          name: 'XuanShu API',
+          apiKey: 'sk-xuanshu',
+          authStrategy: 'auth_token',
+          baseUrl: 'https://www.xuanshuapi.com',
+          apiFormat: 'anthropic',
+          models: {
+            main: 'claude-opus-5',
+            haiku: 'claude-haiku-4-5',
+            sonnet: 'claude-sonnet-5',
+            opus: 'claude-opus-5',
+          },
+        },
+      ],
+    })
+
+    const env = readActiveProviderManagedEnv(tmpDir)
+
+    expect(env).toMatchObject({
+      ANTHROPIC_MODEL: 'claude-opus-5',
+      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'none',
+      ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
+    })
   })
 
   test('active provider env overrides stale proxy settings while preserving unrelated env', async () => {
