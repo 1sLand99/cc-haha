@@ -32,7 +32,8 @@ export type ExtractAssistantOutputTargetOptions = {
    * file is corrected to the actual changed path (so `index.html` resolves to the
    * `todo-app/index.html` that was really written), and a mentioned file that the
    * turn never changed is dropped instead of pointing at a non-existent path.
-   * Localhost URLs are unaffected. Omitted/empty → fall back to text-only behavior.
+   * Localhost URLs are unaffected. Omitted → fall back to text-only behavior;
+   * an empty array confirms the turn changed no files, so file targets are dropped.
    */
   changedFiles?: string[]
 }
@@ -239,7 +240,7 @@ export function extractAssistantOutputTargets(
     results.push(candidate.target)
   }
 
-  if (options.changedFiles && options.changedFiles.length > 0) {
+  if (options.changedFiles !== undefined) {
     return reconcileTargetsWithChangedFiles(results, options.changedFiles, workDir)
   }
 
