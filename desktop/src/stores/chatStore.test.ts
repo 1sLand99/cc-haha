@@ -2943,7 +2943,7 @@ describe('chatStore history mapping', () => {
     expect(setTasksFromTodosMock).toHaveBeenCalledWith(todos, TEST_SESSION_ID)
   })
 
-  it('replays saved runtime selection when reconnecting a session', () => {
+  it('replays saved runtime selection and effort when reconnecting a session', () => {
     sessionStoreSnapshot.sessions = [{
       id: TEST_SESSION_ID,
       title: 'New Session',
@@ -2966,6 +2966,7 @@ describe('chatStore history mapping', () => {
       type: 'set_runtime_config',
       providerId: 'provider-1',
       modelId: 'kimi-k2.6',
+      effortLevel: 'high',
     })
     expect(sendMock.mock.calls.slice(0, 2)).toEqual([
       [
@@ -2974,6 +2975,7 @@ describe('chatStore history mapping', () => {
           type: 'set_runtime_config',
           providerId: 'provider-1',
           modelId: 'kimi-k2.6',
+          effortLevel: 'high',
         },
       ],
       [TEST_SESSION_ID, { type: 'prewarm_session' }],

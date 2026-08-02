@@ -147,9 +147,7 @@
     "websiteUrl": "https://jiekou.ai",
     "deprecated": true,
     "authStrategy": "auth_token",
-    "defaultEnv": {
-      "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "none"
-    },
+    "defaultEnv": {},
     "modelContextWindows": {
       "claude-sonnet-4-6": 1000000,
       "claude-haiku-4-5-20251001": 200000,
@@ -174,8 +172,7 @@
     "authStrategy": "auth_token",
     "defaultEnv": {
       "API_TIMEOUT_MS": "3000000",
-      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-      "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "none"
+      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
     },
     "modelContextWindows": {
       "anthropic/claude-sonnet-4.6": 1000000,
@@ -201,8 +198,7 @@
     "featured": true,
     "authStrategy": "auth_token",
     "defaultEnv": {
-      "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5",
-      "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "none"
+      "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5"
     },
     "modelContextWindows": {
       "claude-opus-4-8": 1000000,
@@ -229,8 +225,7 @@
     "featured": true,
     "authStrategy": "auth_token",
     "defaultEnv": {
-      "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5",
-      "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "none"
+      "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5"
     },
     "modelContextWindows": {
       "claude-opus-5": 1000000,

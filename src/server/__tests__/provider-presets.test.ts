@@ -186,7 +186,6 @@ describe('provider presets API', () => {
     expect(shengsuanyun?.defaultEnv).toEqual({
       API_TIMEOUT_MS: '3000000',
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'none',
     })
     expect(shengsuanyun?.modelContextWindows?.['anthropic/claude-opus-4.7']).toBe(1000000)
     expect(teamorouter?.apiKeyUrl).toBe(
@@ -196,7 +195,6 @@ describe('provider presets API', () => {
     expect(teamorouter?.featured).toBe(true)
     expect(teamorouter?.defaultEnv).toEqual({
       CLAUDE_CODE_SUBAGENT_MODEL: 'claude-sonnet-5',
-      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'none',
     })
     expect(teamorouter?.modelContextWindows?.['claude-sonnet-5']).toBe(1000000)
     expect(xuanshuapi?.apiKeyUrl).toBe('https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA')
@@ -204,7 +202,6 @@ describe('provider presets API', () => {
     expect(xuanshuapi?.featured).toBe(true)
     expect(xuanshuapi?.defaultEnv).toEqual({
       CLAUDE_CODE_SUBAGENT_MODEL: 'claude-sonnet-5',
-      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'none',
     })
     expect(xuanshuapi?.modelContextWindows?.['claude-sonnet-5']).toBe(1000000)
     expect(custom?.promoText).toBeUndefined()
@@ -258,12 +255,12 @@ describe('provider presets API', () => {
     }
   })
 
-  test('retired 接口AI preset keeps the third-party Sonnet guards it was retired with', () => {
+  test('retired 接口AI preset keeps runtime metadata without the obsolete Sonnet sentinel', () => {
     const jiekouai = PROVIDER_PRESETS.find((preset) => preset.id === 'jiekouai')
 
-    // Dropping this flips modelSupportsThinking('claude-sonnet-4-6') to true, which makes
-    // the CLI send thinking on a provider that was configured not to accept it.
-    expect(jiekouai?.defaultEnv?.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES).toBe('none')
+    // The shared capability resolver now emits the provider model capabilities.
+    // Keeping the old `none` sentinel here would disable effort as well as thinking.
+    expect(jiekouai?.defaultEnv).toEqual({})
     // Dropping this silently collapses the context window 1M -> 200k.
     expect(jiekouai?.modelContextWindows?.['claude-sonnet-4-6']).toBe(1000000)
     expect(jiekouai?.modelContextWindows?.['claude-opus-4-7']).toBe(1000000)

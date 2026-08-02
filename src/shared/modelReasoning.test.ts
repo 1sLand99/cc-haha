@@ -4,61 +4,43 @@ import {
   getClaudeCodeModelCapabilities,
   getModelReasoningCapabilityOverride,
   normalizeModelReasoningEffort,
-  normalizeReasoningModelId,
   resolveModelReasoningProfile,
 } from './modelReasoning.js'
 
-describe('model reasoning capability registry', () => {
-  test('normalizes namespaced and 1M model ids before matching', () => {
-    expect(normalizeReasoningModelId(' vendor/DeepSeek-V4-Pro[1m] ')).toBe('deepseek-v4-pro')
-    expect(resolveModelReasoningProfile('vendor/DeepSeek-V4-Pro[1m]')?.family).toBe('deepseek-v4')
+describe('model reasoning capability pass-through', () => {
+  test('passes every Claude Code effort through without vendor-specific model rules', () => {
+    const modelIds = [
+      'deepseek-v4-pro',
+      'k3',
+      'kimi-k2.7-code',
+      'glm-4.7',
+      'glm-5.2[1m]',
+      'MiniMax-M3[1m]',
+      'mimo-v2.5-pro[1m]',
+      'future-model',
+    ]
+    const apiFormats = ['anthropic', 'openai_chat', 'openai_responses'] as const
+    const efforts = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+
+    for (const modelId of modelIds) {
+      for (const apiFormat of apiFormats) {
+        expect(resolveModelReasoningProfile(modelId, apiFormat)).toMatchObject({
+          supportedReasoningEfforts: efforts,
+        })
+        for (const effort of efforts) {
+          expect(normalizeModelReasoningEffort(modelId, effort, apiFormat)).toBe(effort)
+        }
+      }
+    }
   })
 
-  test('normalizes documented DeepSeek V4 effort aliases', () => {
-    expect(normalizeModelReasoningEffort('deepseek-v4-pro', 'medium', 'anthropic')).toBe('high')
-    expect(normalizeModelReasoningEffort('deepseek-v4-pro', 'xhigh', 'openai_chat')).toBe('max')
-  })
-
-  test('keeps K3 low, high, and max while mapping inherited aliases', () => {
-    expect(resolveModelReasoningProfile('k3')?.supportedReasoningEfforts).toEqual([
-      'low',
-      'high',
-      'max',
-    ])
-    expect(normalizeModelReasoningEffort('k3', 'low', 'anthropic')).toBe('low')
-    expect(normalizeModelReasoningEffort('k3', 'medium', 'anthropic')).toBe('high')
-    expect(normalizeModelReasoningEffort('k3', 'xhigh', 'anthropic')).toBe('max')
-  })
-
-  test('uses GLM-5.2 high and max without enabling effort on older GLM models', () => {
-    expect(normalizeModelReasoningEffort('glm-5.2[1m]', 'medium', 'anthropic')).toBe('high')
-    expect(normalizeModelReasoningEffort('glm-5.2', 'xhigh', 'openai_chat')).toBe('max')
-    expect(normalizeModelReasoningEffort('glm-4.7', 'high', 'anthropic')).toBeUndefined()
-    expect(normalizeModelReasoningEffort('glm-5.1', 'high', 'anthropic')).toBeUndefined()
-  })
-
-  test('does not expose controllable effort for MiniMax or older Kimi models', () => {
-    expect(resolveModelReasoningProfile('MiniMax-M3[1m]')?.supportedReasoningEfforts).toEqual([])
-    expect(normalizeModelReasoningEffort('MiniMax-M3', 'high', 'anthropic')).toBeUndefined()
-    expect(normalizeModelReasoningEffort('kimi-k2.7-code', 'max', 'anthropic')).toBeUndefined()
-  })
-
-  test('passes unlisted compatible models through to Claude Code', () => {
-    expect(resolveModelReasoningProfile('claude-opus-5', 'anthropic')).toMatchObject({
-      family: 'generic',
-      supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    })
-    expect(normalizeModelReasoningEffort('claude-opus-5', 'xhigh', 'anthropic')).toBe('xhigh')
-    expect(getClaudeCodeModelCapabilities('claude-opus-5', 'anthropic')).toBe(
+  test('enables the current Claude Code effort capabilities for compatible models', () => {
+    expect(getClaudeCodeModelCapabilities('MiniMax-M3', 'anthropic')).toBe(
       'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
     )
-  })
-
-  test('keeps future family versions out of documented legacy exceptions', () => {
-    for (const modelId of ['glm-5.3', 'minimax-m4', 'mimo-v3']) {
-      expect(resolveModelReasoningProfile(modelId, 'anthropic')?.family).toBe('generic')
-    }
-    expect(normalizeModelReasoningEffort('future-model', 'max', 'openai_chat')).toBe('max')
+    expect(getClaudeCodeModelCapabilities('gpt-5.6-sol', 'openai_responses')).toBe(
+      'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
+    )
   })
 
   test('applies explicit slot capabilities before model profiles', () => {
@@ -92,9 +74,20 @@ describe('model reasoning capability registry', () => {
     )).toBeUndefined()
   })
 
-  test('does not apply generic capabilities to unsupported protocols', () => {
-    expect(resolveModelReasoningProfile('k3', 'openai_responses')).toBeUndefined()
-    expect(resolveModelReasoningProfile('future-model', 'openai_responses')).toBeUndefined()
-    expect(normalizeModelReasoningEffort('k3', 'high', 'openai_responses')).toBeUndefined()
+  test('uses explicit capabilities only to validate, never to remap effort', () => {
+    const capabilities = 'thinking,effort,adaptive_thinking'
+
+    expect(normalizeModelReasoningEffort(
+      'provider-model',
+      'medium',
+      'anthropic',
+      capabilities,
+    )).toBe('medium')
+    expect(normalizeModelReasoningEffort(
+      'provider-model',
+      'xhigh',
+      'anthropic',
+      capabilities,
+    )).toBeUndefined()
   })
 })

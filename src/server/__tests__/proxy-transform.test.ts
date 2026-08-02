@@ -197,6 +197,17 @@ describe('anthropicToOpenaiChat', () => {
     expect(result.reasoning_effort).toBe('high')
   })
 
+  test('preserves provider-specific effort values for the upstream compatibility layer', () => {
+    const req: AnthropicRequest = {
+      model: 'deepseek-v4-pro',
+      max_tokens: 100,
+      messages: [{ role: 'user', content: 'Hi' }],
+      output_config: { effort: 'medium' },
+    }
+
+    expect(anthropicToOpenaiChat(req).reasoning_effort).toBe('medium')
+  })
+
   test('preserves xhigh output_config effort for OpenAI-compatible chat providers', () => {
     const req: AnthropicRequest = {
       model: 'gpt-5.6-luna',

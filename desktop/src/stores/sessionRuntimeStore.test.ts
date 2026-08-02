@@ -62,7 +62,7 @@ describe('sessionRuntimeStore runtime cleanup', () => {
     })
   })
 
-  it('cleans a custom-provider xhigh selection loaded from localStorage', async () => {
+  it('preserves a custom-provider xhigh selection loaded from localStorage', async () => {
     localStorage.setItem('cc-haha-session-runtime', JSON.stringify({
       'session-loaded-kimi': {
         providerId: 'kimi-provider',
@@ -77,7 +77,7 @@ describe('sessionRuntimeStore runtime cleanup', () => {
     const expectedSelection = {
       providerId: 'kimi-provider',
       modelId: 'k3',
-      effortLevel: 'max',
+      effortLevel: 'xhigh',
     }
     expect(loadedStore.getState().selections['session-loaded-kimi']).toEqual(
       expectedSelection,

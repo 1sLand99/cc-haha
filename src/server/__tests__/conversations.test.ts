@@ -5153,7 +5153,7 @@ describe('WebSocket Chat Integration', () => {
     }
   }, 20_000)
 
-  it('should normalize an inherited xhigh effort to K3 max without a runtime error', async () => {
+  it('should pass an inherited xhigh effort to a K3 provider without remapping it', async () => {
     const providerService = new ProviderService()
     const provider = await providerService.addProvider({
       presetId: 'kimi',
@@ -5189,7 +5189,7 @@ describe('WebSocket Chat Integration', () => {
         const ws = new WebSocket(`${wsUrl}/ws/${sessionId}`)
         const timeout = setTimeout(() => {
           ws.close()
-          reject(new Error('Timed out waiting for normalized K3 runtime turn'))
+          reject(new Error('Timed out waiting for K3 runtime turn'))
         }, 10_000)
 
         ws.onmessage = (event) => {
@@ -5201,7 +5201,7 @@ describe('WebSocket Chat Integration', () => {
               modelId: 'k3',
               effortLevel: 'xhigh',
             }))
-            ws.send(JSON.stringify({ type: 'user_message', content: 'use normalized K3 effort' }))
+            ws.send(JSON.stringify({ type: 'user_message', content: 'use K3 xhigh effort' }))
           } else if (message.type === 'error') {
             clearTimeout(timeout)
             ws.close()
@@ -5212,13 +5212,13 @@ describe('WebSocket Chat Integration', () => {
             resolve()
           }
         }
-        ws.onerror = () => reject(new Error('WebSocket failed for normalized K3 runtime'))
+        ws.onerror = () => reject(new Error('WebSocket failed for K3 runtime'))
       })
 
       expect(startCalls.find((call) => call.options?.providerId === provider.id)?.options).toMatchObject({
         providerId: provider.id,
         model: 'k3',
-        effort: 'max',
+        effort: 'xhigh',
       })
     } finally {
       conversationService.startSession = originalStartSession
@@ -5699,7 +5699,7 @@ describe('WebSocket Chat Integration', () => {
         options: {
           providerId: providerA.id,
           model: 'deepseek-v4-pro',
-          effort: 'high',
+          effort: 'medium',
         },
       })
       expect(startCalls[1]).toMatchObject({

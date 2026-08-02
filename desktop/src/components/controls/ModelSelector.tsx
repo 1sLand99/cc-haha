@@ -640,10 +640,16 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
                                   : undefined,
                               )
                             : undefined
+                          const supportedProviderEffort = normalizedProviderEffort && (
+                            supportedEfforts === undefined ||
+                            supportedEfforts.includes(normalizedProviderEffort)
+                          )
+                            ? normalizedProviderEffort
+                            : undefined
                           const nextEffort = supportedEfforts === undefined
                             ? explicitEffort ?? effortLevel
                             : supportedEfforts.length
-                              ? normalizedProviderEffort
+                              ? supportedProviderEffort
                                 ?? (explicitEffort && supportedEfforts.includes(explicitEffort)
                                 ? explicitEffort
                                 : supportedEfforts.includes(effortLevel)

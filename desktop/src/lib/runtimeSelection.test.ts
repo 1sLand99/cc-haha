@@ -15,7 +15,7 @@ describe('normalizeRuntimeSelection', () => {
     expect(normalizeRuntimeSelection(selection)).toBe(selection)
   })
 
-  it('maps xhigh to max for a Claude-compatible custom provider', () => {
+  it('preserves xhigh for a Claude-compatible custom provider', () => {
     expect(normalizeRuntimeSelection({
       providerId: 'kimi-provider',
       modelId: 'k3',
@@ -23,11 +23,11 @@ describe('normalizeRuntimeSelection', () => {
     })).toEqual({
       providerId: 'kimi-provider',
       modelId: 'k3',
-      effortLevel: 'max',
+      effortLevel: 'xhigh',
     })
   })
 
-  it('maps documented aliases and removes effort from models without the capability', () => {
+  it('does not apply vendor-specific aliases or denies to compatible providers', () => {
     expect(normalizeRuntimeSelection({
       providerId: 'deepseek-provider',
       modelId: 'deepseek-v4-pro',
@@ -35,7 +35,7 @@ describe('normalizeRuntimeSelection', () => {
     }, 'anthropic')).toEqual({
       providerId: 'deepseek-provider',
       modelId: 'deepseek-v4-pro',
-      effortLevel: 'high',
+      effortLevel: 'medium',
     })
 
     expect(normalizeRuntimeSelection({
@@ -45,6 +45,7 @@ describe('normalizeRuntimeSelection', () => {
     }, 'anthropic')).toEqual({
       providerId: 'minimax-provider',
       modelId: 'MiniMax-M3[1m]',
+      effortLevel: 'high',
     })
 
     expect(normalizeRuntimeSelection({
@@ -54,6 +55,7 @@ describe('normalizeRuntimeSelection', () => {
     }, 'openai_responses')).toEqual({
       providerId: 'custom-provider',
       modelId: 'future-model',
+      effortLevel: 'high',
     })
   })
 

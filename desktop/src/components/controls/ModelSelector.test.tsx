@@ -599,7 +599,7 @@ describe('ModelSelector', () => {
     expect(segmented?.classList.contains('min-h-11')).toBe(expected)
   })
 
-  it('keeps runtime effort scoped to the selected session', async () => {
+  it('keeps every CLI effort stop scoped to the selected session', async () => {
     const setSessionRuntime = vi.fn()
     useSettingsStore.setState({
       locale: 'en',
@@ -649,7 +649,7 @@ describe('ModelSelector', () => {
     expect(useSessionRuntimeStore.getState().selections['session-1']).toEqual({
       providerId: 'kimi-provider',
       modelId: 'k3',
-      effortLevel: 'high',
+      effortLevel: 'xhigh',
     })
     expect(useSessionRuntimeStore.getState().selections['session-2']).toEqual({
       providerId: 'kimi-provider',
@@ -659,7 +659,7 @@ describe('ModelSelector', () => {
     expect(setSessionRuntime).toHaveBeenCalledWith('session-1', {
       providerId: 'kimi-provider',
       modelId: 'k3',
-      effortLevel: 'high',
+      effortLevel: 'xhigh',
     })
     expect(useSettingsStore.getState().effortLevel).toBe('max')
   })
@@ -721,11 +721,52 @@ describe('ModelSelector', () => {
     await clickByRole('claude-opus-5, XuanShu API')
     await clickByRole(/claude-sonnet-5/i)
 
-    expect(screen.queryByRole('button', { name: /Effort:/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Effort: X-High' })).toBeInTheDocument()
     expect(useSessionRuntimeStore.getState().selections['session-claude-future']).toEqual({
       providerId: 'xuanshuapi-provider',
       modelId: 'claude-sonnet-5',
+      effortLevel: 'xhigh',
     })
+  })
+
+  it('keeps effort selectable for OpenAI Responses models from compatible providers', async () => {
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: [],
+      currentModel: null,
+      activeProviderName: 'Sub2API-ChatGPT',
+      effortLevel: 'high',
+    })
+    useProviderStore.setState({
+      providers: [{
+        id: 'sub2api-provider',
+        presetId: 'custom',
+        name: 'Sub2API-ChatGPT',
+        apiKey: '***',
+        baseUrl: 'https://api.example.com/v1',
+        apiFormat: 'openai_responses',
+        models: {
+          main: 'gpt-5.6-sol',
+          haiku: 'gpt-5.6-luna',
+          sonnet: 'gpt-5.6-terra',
+          opus: 'gpt-5.6-sol',
+        },
+      }],
+      activeId: 'sub2api-provider',
+      hasLoadedProviders: true,
+      isLoading: false,
+    })
+    useSessionRuntimeStore.getState().setSelection('session-openai-compatible', {
+      providerId: 'sub2api-provider',
+      modelId: 'gpt-5.6-sol',
+      effortLevel: 'high',
+    })
+
+    render(<ModelSelector runtimeKey="session-openai-compatible" />)
+
+    expect(screen.getByRole('button', { name: 'Effort: High' })).toBeInTheDocument()
+    await clickByRole('Effort: High')
+    expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(5)
   })
 
   it('uses the ChatGPT Official catalog when that built-in provider is active', async () => {
@@ -865,7 +906,7 @@ describe('ModelSelector', () => {
     })
   })
 
-  it('drops xhigh when switching from GPT-5.6-Sol to Kimi K3', async () => {
+  it('keeps xhigh when switching from GPT-5.6-Sol to a compatible Kimi provider', async () => {
     const solModel: ModelInfo = {
       id: 'gpt-5.6-sol',
       name: 'GPT-5.6-Sol',
@@ -922,13 +963,13 @@ describe('ModelSelector', () => {
     const expectedSelection = {
       providerId: 'kimi-provider',
       modelId: 'k3',
-      effortLevel: 'max',
+      effortLevel: 'xhigh',
     }
     expect(useSessionRuntimeStore.getState().selections['session-kimi-switch']).toEqual(
       expectedSelection,
     )
     expect(setSessionRuntime).toHaveBeenCalledWith('session-kimi-switch', expectedSelection)
-    expect(screen.getByRole('button', { name: 'Effort: Max' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Effort: X-High' })).toBeInTheDocument()
   })
 
   it('selects Grok Official models for a logged-in runtime', async () => {

@@ -144,7 +144,7 @@ describe('providerRuntimeEnv', () => {
     }
   })
 
-  test('keeps explicit preset capability denies above the generic fallback', async () => {
+  test('does not let legacy preset metadata disable compatible model effort', async () => {
     await writeJson(path.join(tmpDir, 'cc-haha', 'providers.json'), {
       activeId: 'provider-xuanshu',
       providers: [
@@ -170,7 +170,8 @@ describe('providerRuntimeEnv', () => {
 
     expect(env).toMatchObject({
       ANTHROPIC_MODEL: 'claude-opus-5',
-      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'none',
+      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
       ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES:
         'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
     })
@@ -365,7 +366,7 @@ describe('providerRuntimeEnv', () => {
       ANTHROPIC_API_KEY: 'sk-kimi',
       ANTHROPIC_MODEL: 'k3',
       ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES:
-        'thinking,required_thinking,effort,max_effort',
+        'thinking,required_thinking,effort,xhigh_effort,max_effort',
     })
     expect(kimiEnv?.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
     expect(JSON.parse(kimiEnv!.CLAUDE_CODE_MODEL_CONTEXT_WINDOWS)).toMatchObject({
@@ -402,7 +403,8 @@ describe('providerRuntimeEnv', () => {
       ANTHROPIC_API_KEY: '',
       ANTHROPIC_AUTH_TOKEN: 'sk-kimi-legacy',
       ANTHROPIC_MODEL: 'kimi-k2.7-code',
-      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'thinking,required_thinking',
+      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,required_thinking,effort,xhigh_effort,max_effort',
     })
 
     await writeJson(path.join(tmpDir, 'cc-haha', 'providers.json'), {
@@ -431,8 +433,10 @@ describe('providerRuntimeEnv', () => {
     expect(zhipuEnv).toMatchObject({
       ANTHROPIC_MODEL: 'glm-5.2[1m]',
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.7',
-      ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES: 'thinking',
-      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'thinking,effort,max_effort',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,xhigh_effort,max_effort',
+      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,xhigh_effort,max_effort',
     })
     // No provider-wide auto-compact window: it is model-agnostic and pinned
     // small-context models at 1M so auto-compact never fired (#1162).
@@ -489,7 +493,8 @@ describe('providerRuntimeEnv', () => {
       // preset defaultEnv survives the retirement
       API_TIMEOUT_MS: '3000000',
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'none',
+      ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES:
+        'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
     })
     // preset authStrategy (auth_token) survives: bearer token, blanked api key
     expect(env?.ANTHROPIC_AUTH_TOKEN).toBe('sk-shengsuanyun')

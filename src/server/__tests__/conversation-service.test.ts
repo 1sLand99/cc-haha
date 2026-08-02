@@ -915,7 +915,9 @@ describe('ConversationService', () => {
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe('provider-key')
     expect(env.ANTHROPIC_API_KEY).toBe('')
     expect(env.ANTHROPIC_MODEL).toBe('claude-sonnet-4-6')
-    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES).toBe('none')
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES).toBe(
+      'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
+    )
     expect(env.CLAUDE_CODE_ATTRIBUTION_HEADER).toBe('1')
   })
 

@@ -770,12 +770,11 @@ describe('Models API', () => {
       name: 'k3',
       description: 'Main model',
       context: '',
-      defaultReasoningEffort: 'high',
-      supportedReasoningEfforts: ['low', 'high', 'max'],
+      supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     }])
   })
 
-  it('GET /api/models should apply preset capability overrides before generic fallback', async () => {
+  it('GET /api/models should keep generic effort for compatible preset models', async () => {
     const providerSvc = new ProviderService()
     const provider = await providerSvc.addProvider({
       presetId: 'xuanshuapi',
@@ -806,7 +805,13 @@ describe('Models API', () => {
       'xhigh',
       'max',
     ])
-    expect(modelsById.get('claude-sonnet-5')?.supportedReasoningEfforts).toEqual([])
+    expect(modelsById.get('claude-sonnet-5')?.supportedReasoningEfforts).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
   })
 
   it('GET /api/models should merge env-configured provider models with saved OpenAI OAuth models', async () => {

@@ -42,41 +42,38 @@ export type ModelReasoningProfile = {
     | 'glm-5.2'
     | 'glm-legacy'
     | 'minimax'
-    | 'mimo'
   apiFormats: readonly ModelReasoningApiFormat[]
   supportedReasoningEfforts: readonly ModelReasoningEffort[]
   defaultReasoningEffort?: ModelReasoningEffort
-  effortAliases?: Partial<Record<ModelReasoningEffort, ModelReasoningEffort>>
   claudeCodeCapabilities: string
 }
 
-// Known model families override the generic Claude Code pass-through behavior.
-// The registry records documented restrictions and aliases; it must not become
-// a closed allowlist that disables every newly introduced compatible model.
-type ModelReasoningRegistryEntry = ModelReasoningProfile & {
+type ModelReasoningCapabilityEntry = Pick<
+  ModelReasoningProfile,
+  'family' | 'apiFormats' | 'claudeCodeCapabilities'
+> & {
   matches: (modelId: string) => boolean
 }
 
-const ANTHROPIC_AND_OPENAI_CHAT = ['anthropic', 'openai_chat'] as const
+const COMPATIBLE_REASONING_API_FORMATS = [
+  'anthropic',
+  'openai_chat',
+  'openai_responses',
+] as const
 const GENERIC_REASONING_PROFILE: ModelReasoningProfile = {
   family: 'generic',
-  apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
+  apiFormats: COMPATIBLE_REASONING_API_FORMATS,
   supportedReasoningEfforts: MODEL_REASONING_EFFORTS,
   claudeCodeCapabilities: 'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
 }
 
-const MODEL_REASONING_REGISTRY: readonly ModelReasoningRegistryEntry[] = [
+// These entries preserve thinking-mode compatibility only. Effort levels are
+// always inherited from Claude Code and are never remapped by model name.
+const MODEL_REASONING_CAPABILITY_REGISTRY: readonly ModelReasoningCapabilityEntry[] = [
   {
     family: 'deepseek-v4',
-    apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
-    supportedReasoningEfforts: ['high', 'max'],
-    defaultReasoningEffort: 'high',
-    effortAliases: {
-      low: 'high',
-      medium: 'high',
-      xhigh: 'max',
-    },
-    claudeCodeCapabilities: 'thinking,effort,adaptive_thinking,max_effort',
+    apiFormats: ['anthropic', 'openai_chat'],
+    claudeCodeCapabilities: 'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
     matches: modelId => (
       modelId.startsWith('deepseek-v4') ||
       modelId === 'deepseek-chat' ||
@@ -85,14 +82,8 @@ const MODEL_REASONING_REGISTRY: readonly ModelReasoningRegistryEntry[] = [
   },
   {
     family: 'kimi-k3',
-    apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
-    supportedReasoningEfforts: ['low', 'high', 'max'],
-    defaultReasoningEffort: 'high',
-    effortAliases: {
-      medium: 'high',
-      xhigh: 'max',
-    },
-    claudeCodeCapabilities: 'thinking,required_thinking,effort,max_effort',
+    apiFormats: ['anthropic', 'openai_chat'],
+    claudeCodeCapabilities: 'thinking,required_thinking,effort,xhigh_effort,max_effort',
     matches: modelId => (
       modelId === 'k3' ||
       modelId.startsWith('k3-') ||
@@ -102,9 +93,8 @@ const MODEL_REASONING_REGISTRY: readonly ModelReasoningRegistryEntry[] = [
   },
   {
     family: 'kimi-coding',
-    apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
-    supportedReasoningEfforts: [],
-    claudeCodeCapabilities: 'thinking,required_thinking',
+    apiFormats: ['anthropic', 'openai_chat'],
+    claudeCodeCapabilities: 'thinking,required_thinking,effort,xhigh_effort,max_effort',
     matches: modelId => (
       modelId.startsWith('kimi-for-coding') ||
       modelId.startsWith('kimi-k2.')
@@ -112,22 +102,14 @@ const MODEL_REASONING_REGISTRY: readonly ModelReasoningRegistryEntry[] = [
   },
   {
     family: 'glm-5.2',
-    apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
-    supportedReasoningEfforts: ['high', 'max'],
-    defaultReasoningEffort: 'max',
-    effortAliases: {
-      low: 'high',
-      medium: 'high',
-      xhigh: 'max',
-    },
-    claudeCodeCapabilities: 'thinking,effort,max_effort',
+    apiFormats: ['anthropic', 'openai_chat'],
+    claudeCodeCapabilities: 'thinking,effort,xhigh_effort,max_effort',
     matches: modelId => modelId === 'glm-5.2' || modelId.startsWith('glm-5.2-'),
   },
   {
     family: 'glm-legacy',
-    apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
-    supportedReasoningEfforts: [],
-    claudeCodeCapabilities: 'thinking',
+    apiFormats: ['anthropic', 'openai_chat'],
+    claudeCodeCapabilities: 'thinking,effort,xhigh_effort,max_effort',
     matches: modelId => (
       modelId.startsWith('glm-4.') ||
       modelId === 'glm-5.1' ||
@@ -138,25 +120,17 @@ const MODEL_REASONING_REGISTRY: readonly ModelReasoningRegistryEntry[] = [
   },
   {
     family: 'minimax',
-    apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
-    supportedReasoningEfforts: [],
-    claudeCodeCapabilities: 'thinking,adaptive_thinking',
+    apiFormats: ['anthropic', 'openai_chat'],
+    claudeCodeCapabilities: 'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
     matches: modelId => (
       modelId.startsWith('minimax-m2.7') ||
       modelId === 'minimax-m3' ||
       modelId.startsWith('minimax-m3-')
     ),
   },
-  {
-    family: 'mimo',
-    apiFormats: ANTHROPIC_AND_OPENAI_CHAT,
-    supportedReasoningEfforts: [],
-    claudeCodeCapabilities: 'thinking',
-    matches: modelId => modelId.startsWith('mimo-v2.5'),
-  },
 ]
 
-export function normalizeReasoningModelId(modelId: string): string {
+function normalizeReasoningModelId(modelId: string): string {
   const normalized = modelId
     .trim()
     .replace(/\[1m\]$/i, '')
@@ -198,7 +172,7 @@ function profileFromCapabilityOverride(
   const supportsEffort = capabilitySet.has('effort')
   return {
     family: 'explicit',
-    apiFormats: apiFormat ? [apiFormat] : ANTHROPIC_AND_OPENAI_CHAT,
+    apiFormats: apiFormat ? [apiFormat] : COMPATIBLE_REASONING_API_FORMATS,
     supportedReasoningEfforts: supportsEffort
       ? MODEL_REASONING_EFFORTS.filter(level => (
           (level !== 'xhigh' || capabilitySet.has('xhigh_effort')) &&
@@ -218,19 +192,23 @@ export function resolveModelReasoningProfile(
     return profileFromCapabilityOverride(capabilitiesOverride, apiFormat)
   }
 
+  if (apiFormat !== undefined && !GENERIC_REASONING_PROFILE.apiFormats.includes(apiFormat)) {
+    return undefined
+  }
+
   const normalizedModelId = normalizeReasoningModelId(modelId)
-  const entry = MODEL_REASONING_REGISTRY.find((candidate) => (
+  const entry = MODEL_REASONING_CAPABILITY_REGISTRY.find(candidate => (
     candidate.matches(normalizedModelId) &&
     (apiFormat === undefined || candidate.apiFormats.includes(apiFormat))
   ))
-  if (!entry) {
-    return apiFormat && GENERIC_REASONING_PROFILE.apiFormats.includes(apiFormat)
-      ? GENERIC_REASONING_PROFILE
-      : undefined
-  }
-
-  const { matches: _matches, ...profile } = entry
-  return profile
+  return entry
+    ? {
+        family: entry.family,
+        apiFormats: entry.apiFormats,
+        supportedReasoningEfforts: MODEL_REASONING_EFFORTS,
+        claudeCodeCapabilities: entry.claudeCodeCapabilities,
+      }
+    : GENERIC_REASONING_PROFILE
 }
 
 export function normalizeModelReasoningEffort(
@@ -242,12 +220,9 @@ export function normalizeModelReasoningEffort(
   if (requestedEffort === undefined) return undefined
   const profile = resolveModelReasoningProfile(modelId, apiFormat, capabilitiesOverride)
   if (!profile || profile.supportedReasoningEfforts.length === 0) return undefined
-  if (profile.supportedReasoningEfforts.includes(requestedEffort)) return requestedEffort
-
-  const aliased = profile.effortAliases?.[requestedEffort]
-  return aliased && profile.supportedReasoningEfforts.includes(aliased)
-    ? aliased
-    : profile.defaultReasoningEffort
+  return profile.supportedReasoningEfforts.includes(requestedEffort)
+    ? requestedEffort
+    : undefined
 }
 
 export function getClaudeCodeModelCapabilities(
