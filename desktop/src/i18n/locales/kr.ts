@@ -2303,6 +2303,8 @@ export const kr: Record<TranslationKey, string> = {
   'session.active': '세션 활성',
   'session.lastUpdated': '마지막 업데이트 {time}',
   'session.messages': '{count}개의 메시지',
+  'session.apiTokens': '{count} API tokens',
+  'session.apiTokenBreakdown': 'API 사용량: {total} tokens · 입력 {input} · 출력 {output} · 캐시 {cache}',
   'session.historyLoadFailed': '세션 기록을 불러오지 못했습니다.',
   'session.workspaceUnavailable': '작업 공간을 사용할 수 없습니다: {dir}',
   'session.worktreeRemoved': '임시 작업 공간이 정리되었습니다. 기록은 계속 볼 수 있습니다. {dir}에서 새 세션을 시작해 계속하세요.',

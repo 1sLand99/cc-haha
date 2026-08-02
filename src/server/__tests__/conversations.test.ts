@@ -226,6 +226,47 @@ describe('ConversationService', () => {
     expect(removeAbortListener).toHaveBeenCalledWith('abort', expect.any(Function))
   })
 
+  it('should reject an in-flight control request when its CLI session is stopped', async () => {
+    const svc = new ConversationService()
+    const sid = crypto.randomUUID()
+    const sent: unknown[] = []
+    const session: any = {
+      proc: { kill() {}, exited: Promise.resolve(0) },
+      outputCallbacks: [],
+      workDir: process.cwd(),
+      permissionMode: 'default',
+      sdkToken: 'token',
+      sdkSocket: {
+        send(data: string) {
+          sent.push(JSON.parse(data))
+        },
+      },
+      pendingOutbound: [],
+      startupPending: false,
+      startupExitCode: null,
+      stdoutLines: [],
+      stderrLines: [],
+      outputDrain: Promise.resolve(),
+      sdkMessages: [],
+      initMessage: null,
+      pendingPermissionRequests: new Map(),
+    }
+    ;(svc as any).sessions.set(sid, session)
+
+    const request = svc.requestControl(
+      sid,
+      { subtype: 'get_context_usage' },
+      50,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(sent).toHaveLength(1)
+
+    svc.stopSession(sid)
+
+    await expect(request).rejects.toThrow('CLI session stopped')
+    expect(session.outputCallbacks).toHaveLength(0)
+  })
+
   it('should ignore a stale SDK disconnect after a replacement socket attaches', () => {
     const svc = new ConversationService()
     const sessionId = crypto.randomUUID()

@@ -2301,6 +2301,8 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'session.active': 'session active',
   'session.lastUpdated': 'last updated {time}',
   'session.messages': '{count} messages',
+  'session.apiTokens': '{count} API tokens',
+  'session.apiTokenBreakdown': 'API usage: {total} tokens · input {input} · output {output} · cache {cache}',
   'session.historyLoadFailed': 'Failed to load session history.',
   'session.workspaceUnavailable': 'Workspace unavailable: {dir}',
   'session.worktreeRemoved': 'The temporary workspace was cleaned up. History is still available; start a new session in {dir} to continue.',

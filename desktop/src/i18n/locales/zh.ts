@@ -2302,6 +2302,8 @@ export const zh: Record<TranslationKey, string> = {
   'session.active': '会话活跃中',
   'session.lastUpdated': '最后更新 {time}',
   'session.messages': '{count} 条消息',
+  'session.apiTokens': '{count} API tokens',
+  'session.apiTokenBreakdown': 'API 用量：{total} tokens · 输入 {input} · 输出 {output} · 缓存 {cache}',
   'session.historyLoadFailed': '历史会话加载失败。',
   'session.workspaceUnavailable': '工作目录不可用: {dir}',
   'session.worktreeRemoved': '临时工作区已清理，历史记录仍可查看。请在原项目 {dir} 中新建会话继续。',

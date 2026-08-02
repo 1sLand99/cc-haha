@@ -98,6 +98,7 @@ export function ContextUsageIndicator({
   const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false)
   const requestSeq = useRef(0)
   const contextIdentityRef = useRef('')
+  const contextDataIdentityRef = useRef('')
   const inFlightRequestRef = useRef<Promise<boolean> | null>(null)
   const inFlightIdentityRef = useRef<string | null>(null)
   const lastAutoRefreshAtRef = useRef(0)
@@ -140,6 +141,7 @@ export function ContextUsageIndicator({
         const nextContext = inspection.context ?? inspection.contextEstimate ?? null
         const nextSource = inspection.context ? 'live' : inspection.contextEstimate ? 'estimate' : null
         const usageModel = inspection.usage?.models.find((model) => firstNonEmpty(model.displayName, model.model)) ?? null
+        contextDataIdentityRef.current = nextContext ? activeContextIdentity : ''
         setContext(nextContext)
         setContextSource(nextSource)
         setInspectionModel(firstNonEmpty(
@@ -155,6 +157,12 @@ export function ContextUsageIndicator({
       })
       .catch((err) => {
         if (seq !== requestSeq.current || activeContextIdentity !== contextIdentityRef.current) return false
+        if (contextDataIdentityRef.current !== activeContextIdentity) {
+          contextDataIdentityRef.current = ''
+          setContext(null)
+          setContextSource(null)
+          setUpdatedAt(null)
+        }
         setError(err instanceof Error ? err.message : String(err))
         return false
       })
@@ -199,10 +207,7 @@ export function ContextUsageIndicator({
     if (identityChanged) {
       requestSeq.current += 1
       lastAutoRefreshAtRef.current = 0
-      setContext(null)
-      setContextSource(null)
       setError(null)
-      setUpdatedAt(null)
       setInspectionModel(null)
     }
     void refresh('auto')
@@ -251,7 +256,12 @@ export function ContextUsageIndicator({
       : 'var(--color-surface-container-high)',
   }
   const displayPercent = displayContext ? formatPercent(percentage) : '--'
-  const displayModel = firstNonEmpty(context?.model, inspectionModel, fallbackModelLabel)
+  const currentContextIdentity = `${sessionId}:${runtimeSelectionKey}`
+  const isContextFromPreviousRuntime = Boolean(displayContext) &&
+    contextDataIdentityRef.current !== currentContextIdentity
+  const displayModel = isContextFromPreviousRuntime
+    ? firstNonEmpty(fallbackModelLabel, inspectionModel, context?.model)
+    : firstNonEmpty(context?.model, inspectionModel, fallbackModelLabel)
   const ariaLabel = displayContext
     ? t('contextIndicator.ariaLabel', { percent: formatPercent(percentage) })
     : isPendingContext

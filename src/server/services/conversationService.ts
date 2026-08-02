@@ -223,6 +223,7 @@ type SessionProcess = {
       permissionSuggestions?: unknown[]
     }
   >
+  pendingControlRequests: Map<string, (reason: Error) => void>
 }
 
 export type PendingPermissionRequest = {
@@ -480,6 +481,7 @@ export class ConversationService {
       usesOfficialOAuth,
       officialOAuthToken: childEnv.CLAUDE_CODE_OAUTH_TOKEN ?? null,
       pendingPermissionRequests: new Map(),
+      pendingControlRequests: new Map(),
     }
     this.sessions.set(sessionId, session)
 
@@ -856,6 +858,10 @@ export class ConversationService {
 
     const startedAt = Date.now()
     await this.waitForControlChannelReady(sessionId, timeoutMs, signal)
+    const session = this.sessions.get(sessionId)
+    if (!session) {
+      throw new Error('CLI session is not running')
+    }
     const responseTimeoutMs = Math.max(1, timeoutMs - (Date.now() - startedAt))
     const requestId = crypto.randomUUID()
     return new Promise((resolve, reject) => {
@@ -867,7 +873,8 @@ export class ConversationService {
         settled = true
         clearTimeout(timeout)
         signal?.removeEventListener('abort', handleAbort)
-        this.removeOutputCallback(sessionId, handleOutput)
+        session.outputCallbacks = session.outputCallbacks.filter((entry) => entry !== handleOutput)
+        session.pendingControlRequests?.delete(requestId)
         fn()
       }
 
@@ -900,13 +907,18 @@ export class ConversationService {
           `Timed out waiting for ${String(request.subtype ?? 'control')} response`,
         )))
       }, responseTimeoutMs)
-      this.onOutput(sessionId, handleOutput)
+      session.outputCallbacks.push(handleOutput)
+      const pendingControlRequests = session.pendingControlRequests ?? new Map<string, (reason: Error) => void>()
+      session.pendingControlRequests = pendingControlRequests
+      pendingControlRequests.set(requestId, (reason) => {
+        finish(() => reject(reason))
+      })
       signal?.addEventListener('abort', handleAbort, { once: true })
       if (signal?.aborted) {
         handleAbort()
         return
       }
-      const sent = this.sendSdkMessage(sessionId, {
+      const sent = this.sessions.get(sessionId) === session && this.sendSdkMessage(sessionId, {
         type: 'control_request',
         request_id: requestId,
         request,
@@ -1214,10 +1226,23 @@ export class ConversationService {
     return `${truncated}\n[truncated]`
   }
 
+  private cancelPendingControlRequests(
+    session: SessionProcess,
+    reason = new Error('CLI session stopped'),
+  ): void {
+    const pending = session.pendingControlRequests
+    if (!pending || pending.size === 0) return
+    for (const cancel of [...pending.values()]) {
+      cancel(reason)
+    }
+    pending.clear()
+  }
+
   stopSession(sessionId: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
 
+    this.cancelPendingControlRequests(session)
     this.sessions.delete(sessionId)
     this.killProcess(sessionId, session)
   }
@@ -1229,6 +1254,7 @@ export class ConversationService {
     const session = this.sessions.get(sessionId)
     if (!session) return
 
+    this.cancelPendingControlRequests(session)
     this.sessions.delete(sessionId)
     await this.stopProcessAndWait(sessionId, session, timeoutMs)
   }
@@ -1245,6 +1271,9 @@ export class ConversationService {
     const activeSessions = Array.from(this.sessions.entries())
     if (activeSessions.length === 0) return
 
+    for (const [, session] of activeSessions) {
+      this.cancelPendingControlRequests(session)
+    }
     this.sessions.clear()
     await Promise.all(
       activeSessions.map(([sessionId, session]) =>
@@ -1398,6 +1427,10 @@ export class ConversationService {
 
     const activeSession = this.sessions.get(sessionId)
     if (activeSession?.proc === proc) {
+      this.cancelPendingControlRequests(
+        activeSession,
+        new Error('CLI session exited before the control request completed'),
+      )
       if (activeSession.startupPending) {
         activeSession.startupExitCode = code
         return

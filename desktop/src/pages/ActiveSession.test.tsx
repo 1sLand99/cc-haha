@@ -266,8 +266,8 @@ describe('ActiveSession task polling', () => {
 
     render(<ActiveSession />)
 
-    const tokenBadge = screen.getByTitle(/1,500/)
-    expect(tokenBadge).toHaveTextContent('1.5k')
+    const tokenBadge = screen.getByTitle(/cache 1,500/i)
+    expect(tokenBadge).toHaveTextContent('1.5k API tokens')
   })
 
   it('shows a loading state for historical sessions while messages are loading', () => {
@@ -2034,7 +2034,7 @@ describe('ActiveSession header', () => {
     // 元数据挤在标题右侧时会离标题很远，读起来像飘在角落的另一块内容。
     expect(within(titleRow).queryByText('2 messages')).not.toBeInTheDocument()
     expect(within(meta).getByText('2 messages')).toBeInTheDocument()
-    expect(within(meta).getByText('15k tokens')).toBeInTheDocument()
+    expect(within(meta).getByText('15k API tokens')).toBeInTheDocument()
     expect(header).toHaveClass('py-3')
   })
 

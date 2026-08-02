@@ -188,6 +188,61 @@ describe('ContextUsageIndicator request behavior', () => {
     expect(sessionsApiMock.getInspection).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps the last context visible while the switched runtime is still starting', async () => {
+    const nextInspection = deferred<typeof baseInspection>()
+    sessionsApiMock.getInspection
+      .mockResolvedValueOnce(baseInspection)
+      .mockReturnValueOnce(nextInspection.promise)
+
+    const { rerender } = render(
+      <ContextUsageIndicator
+        sessionId="session-1"
+        chatState="idle"
+        messageCount={1}
+        runtimeSelectionKey="deepseek:deepseek-chat"
+        fallbackModelLabel="deepseek-chat"
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('context-usage-indicator')).toHaveTextContent('21%')
+    })
+
+    rerender(
+      <ContextUsageIndicator
+        sessionId="session-1"
+        chatState="idle"
+        messageCount={1}
+        runtimeSelectionKey="deepseek:deepseek-reasoner"
+        fallbackModelLabel="deepseek-reasoner"
+      />,
+    )
+
+    // A runtime switch restarts the CLI. Keep the last confirmed percentage
+    // in place instead of replacing it with a long-running spinner while the
+    // replacement control channel comes online.
+    expect(screen.getByTestId('context-usage-indicator')).toHaveTextContent('21%')
+    expect(screen.queryByLabelText('Context usage loading')).not.toBeInTheDocument()
+    expect(screen.getByText('deepseek-reasoner')).toBeInTheDocument()
+
+    await act(async () => {
+      nextInspection.resolve({
+        ...baseInspection,
+        status: { ...baseInspection.status, model: 'deepseek-reasoner' },
+        context: {
+          ...baseInspection.context,
+          model: 'deepseek-reasoner',
+          percentage: 12,
+        },
+      })
+      await nextInspection.promise
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('context-usage-indicator')).toHaveTextContent('12%')
+    })
+  })
+
   it('ignores a stale inspection response after the runtime identity changes', async () => {
     const first = deferred<typeof baseInspection>()
     sessionsApiMock.getInspection

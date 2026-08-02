@@ -408,6 +408,8 @@ export function ActiveSession() {
     (trackedTaskSessionId === activeTabId && hasRunningTasks) ||
     hasRunningBackgroundTasks
   const totalTokens = getTokenUsageTotal(tokenUsage)
+  const cachedTokens = (tokenUsage.cache_read_tokens ?? 0) +
+    (tokenUsage.cache_creation_tokens ?? 0)
   const activityTeamMembers = useMemo(() => {
     if (!activeTeam || activeTeam.leadSessionId !== activeTabId) return []
     return activeTeam.members.filter((member) =>
@@ -661,8 +663,17 @@ export function ActiveSession() {
                           </span>
                         ),
                         totalTokens > 0 && (
-                          <span key="tokens" className="shrink-0" title={t('common.tokens', { count: totalTokens.toLocaleString() })}>
-                            {t('common.tokens', { count: formatTokenCount(totalTokens) })}
+                          <span
+                            key="tokens"
+                            className="shrink-0"
+                            title={t('session.apiTokenBreakdown', {
+                              total: totalTokens.toLocaleString(),
+                              input: tokenUsage.input_tokens.toLocaleString(),
+                              output: tokenUsage.output_tokens.toLocaleString(),
+                              cache: cachedTokens.toLocaleString(),
+                            })}
+                          >
+                            {t('session.apiTokens', { count: formatTokenCount(totalTokens) })}
                           </span>
                         ),
                         lastUpdated && (

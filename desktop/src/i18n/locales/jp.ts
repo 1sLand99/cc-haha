@@ -2303,6 +2303,8 @@ export const jp: Record<TranslationKey, string> = {
   'session.active': 'セッションがアクティブ',
   'session.lastUpdated': '最終更新 {time}',
   'session.messages': '{count} 件のメッセージ',
+  'session.apiTokens': '{count} API tokens',
+  'session.apiTokenBreakdown': 'API 使用量: {total} tokens · 入力 {input} · 出力 {output} · キャッシュ {cache}',
   'session.historyLoadFailed': 'セッション履歴の読み込みに失敗しました。',
   'session.workspaceUnavailable': 'ワークスペースが利用できません: {dir}',
   'session.worktreeRemoved': '一時ワークスペースはクリーンアップされました。履歴は引き続き閲覧できます。{dir} で新しいセッションを開始してください。',
