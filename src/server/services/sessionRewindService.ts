@@ -1056,15 +1056,19 @@ export async function listSessionTurnCheckpoints(
     const checkpointPreview = targetSnapshot
       ? await buildTurnCodePreview(sessionId, checkpointBaseDir, targetSnapshot, nextSnapshot)
       : null
-    const preview = checkpointPreview?.available && checkpointPreview.filesChanged.length > 0
-      ? checkpointPreview
-      : buildTranscriptTurnCodePreview(
-          activeMessages,
-          target.targetUserMessageId,
-          checkpointBaseDir,
-        )
+    let preview = checkpointPreview
+    if (!preview?.available || preview.filesChanged.length === 0) {
+      const transcriptPreview = buildTranscriptTurnCodePreview(
+        activeMessages,
+        target.targetUserMessageId,
+        checkpointBaseDir,
+      )
+      if (transcriptPreview.available) {
+        preview = transcriptPreview
+      }
+    }
 
-    if (!preview.available || preview.filesChanged.length === 0) continue
+    if (!preview?.available) continue
     checkpoints.push(buildTurnPreview(target, preview, checkpointBaseDir))
   }
 
