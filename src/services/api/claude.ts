@@ -1501,8 +1501,6 @@ async function* queryModel(
     skipGlobalCacheForSystemPrompt: needsToolBasedCacheMarker,
     querySource: options.querySource,
   });
-  const useBetas = betas.length > 0;
-
   // Build minimal context for detailed tracing (when beta tracing is enabled)
   // Note: The actual new_context message extraction is done in sessionTracing.ts using
   // hash-based tracking per querySource (agent) from the messagesForAPI array
@@ -1854,13 +1852,12 @@ async function* queryModel(
       system,
       tools: allTools,
       tool_choice: options.toolChoice,
-      ...(useBetas && { betas: betasParams }),
+      ...(betasParams.length > 0 && { betas: betasParams }),
       metadata: getAPIMetadata(),
       max_tokens: maxOutputTokens,
       thinking,
       ...(temperature !== undefined && { temperature }),
       ...(contextManagement &&
-        useBetas &&
         betasParams.includes(CONTEXT_MANAGEMENT_BETA_HEADER) && {
           context_management: contextManagement,
         }),
@@ -1882,7 +1879,7 @@ async function* queryModel(
       thinkingConfig,
     });
     const logMessagesLength = queryParams.messages.length;
-    const logBetas = useBetas ? (queryParams.betas ?? []) : [];
+    const logBetas = queryParams.betas ?? [];
     const logThinkingType = queryParams.thinking?.type ?? "disabled";
     const logEffortValue = queryParams.output_config?.effort;
     void options.getToolPermissionContext().then((permissionContext) => {
