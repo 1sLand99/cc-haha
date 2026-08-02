@@ -14,6 +14,7 @@ import type {
   StreamingFallbackCause,
   TokenUsage,
 } from './events.js'
+import { RUNTIME_CONFIG_APPLIED_EVENT } from './events.js'
 import * as os from 'node:os'
 import {
   ConversationStartupError,
@@ -1582,6 +1583,8 @@ async function handleSetRuntimeConfig(
     const currentRuntimeVersion = runtimeOverrideVersions.get(sessionId) ?? 0
     if (startupRuntimeVersion >= currentRuntimeVersion) {
       await persistSessionRuntimeConfig(sessionId, nextOverride)
+      await pendingStartup
+      broadcastAppliedRuntimeConfig(sessionId)
       return
     }
 
@@ -1603,6 +1606,7 @@ async function handleSetRuntimeConfig(
   }
 
   await persistSessionRuntimeConfig(sessionId, nextOverride)
+  broadcastAppliedRuntimeConfig(sessionId)
 }
 
 async function restartSessionWithPermissionMode(
@@ -1705,6 +1709,17 @@ async function persistSessionRuntimeConfig(
   })
 }
 
+function broadcastAppliedRuntimeConfig(sessionId: string): void {
+  const runtime = runtimeOverrides.get(sessionId)
+  if (!runtime) return
+  sendToSession(sessionId, {
+    type: RUNTIME_CONFIG_APPLIED_EVENT,
+    providerId: runtime.providerId,
+    modelId: runtime.modelId,
+    ...(runtime.effort ? { effortLevel: runtime.effort } : {}),
+  })
+}
+
 async function resolveRuntimeRestartWorkDir(sessionId: string): Promise<string> {
   const activeWorkDir = conversationService.getSessionWorkDir(sessionId)
   if (activeWorkDir) return activeWorkDir
@@ -1732,6 +1747,7 @@ async function restartSessionWithRuntimeConfig(
     await conversationService.startSession(sessionId, workDir, sdkUrl, runtimeSettings)
     runtimeExitStoppedSessions.delete(sessionId)
 
+    broadcastAppliedRuntimeConfig(sessionId)
     sendMessage(ws, { type: 'status', state: 'idle' })
     console.log(`[WS] Restarted CLI for ${sessionId} with runtime override`)
   } catch (err) {

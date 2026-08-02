@@ -122,6 +122,8 @@ export type PerSessionState = {
    * Optional: legacy persisted sessions predate the field.
    */
   compactCount?: number
+  /** Bumped when the server confirms the selected runtime is applied. */
+  runtimeConfigReadyCount?: number
   /**
    * Characters streamed by the assistant during the current turn (text,
    * thinking, tool input). ÷4 approximates output tokens for the streaming
@@ -176,6 +178,7 @@ const DEFAULT_SESSION_STATE: PerSessionState = {
   pendingComputerUsePermissions: {},
   tokenUsage: { input_tokens: 0, output_tokens: 0 },
   compactCount: 0,
+  runtimeConfigReadyCount: 0,
   streamingResponseChars: 0,
   elapsedSeconds: 0,
   statusVerb: '',
@@ -2302,6 +2305,20 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             : 'running',
         )
         break
+
+      case 'runtime_config_applied': {
+        const selected = useSessionRuntimeStore.getState().selections[sessionId]
+        const matchesCurrentSelection = Boolean(selected) &&
+          (selected?.providerId ?? null) === msg.providerId &&
+          selected?.modelId === msg.modelId &&
+          selected?.effortLevel === msg.effortLevel
+        if (matchesCurrentSelection) {
+          update((session) => ({
+            runtimeConfigReadyCount: (session.runtimeConfigReadyCount ?? 0) + 1,
+          }))
+        }
+        break
+      }
 
       case 'permission_mode_changed': {
         // CLI 是权限模式的真相来源。这里把它恢复/切换后的权威值校正到本地镜像。

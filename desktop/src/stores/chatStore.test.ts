@@ -3180,6 +3180,35 @@ describe('chatStore history mapping', () => {
     })
   })
 
+  it('bumps context refresh only for the runtime config currently selected', () => {
+    useSessionRuntimeStore.getState().setSelection(TEST_SESSION_ID, {
+      providerId: 'provider-b',
+      modelId: 'model-b',
+      effortLevel: 'high',
+    })
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ runtimeConfigReadyCount: 0 }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'runtime_config_applied',
+      providerId: 'provider-a',
+      modelId: 'model-a',
+      effortLevel: 'high',
+    })
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.runtimeConfigReadyCount).toBe(0)
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'runtime_config_applied',
+      providerId: 'provider-b',
+      modelId: 'model-b',
+      effortLevel: 'high',
+    })
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.runtimeConfigReadyCount).toBe(1)
+  })
+
   it('keeps AskUserQuestion permission requests out of the message list while tracking the pending request', () => {
     useChatStore.setState({
       sessions: {

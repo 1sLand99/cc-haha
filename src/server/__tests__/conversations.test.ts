@@ -3729,7 +3729,11 @@ describe('WebSocket Chat Integration', () => {
       }))
 
       await waitUntil(
-        async () => messages.slice(switchStartIndex).some((msg) => msg.type === 'status' && msg.state === 'idle'),
+        async () => {
+          const switchMessages = messages.slice(switchStartIndex)
+          return switchMessages.some((msg) => msg.type === 'runtime_config_applied') &&
+            switchMessages.some((msg) => msg.type === 'status' && msg.state === 'idle')
+        },
         `idle runtime switch completion for ${sessionId}`,
       )
 
@@ -3747,6 +3751,15 @@ describe('WebSocket Chat Integration', () => {
           .filter((msg) => msg.type === 'status')
           .map((msg) => msg.state),
       ).toEqual(['idle'])
+      expect(
+        messages
+          .slice(switchStartIndex)
+          .find((msg) => msg.type === 'runtime_config_applied'),
+      ).toMatchObject({
+        type: 'runtime_config_applied',
+        providerId: provider.id,
+        modelId: 'idle-sonnet',
+      })
       expect(messages.slice(switchStartIndex).some((msg) => msg.type === 'error')).toBe(false)
     } finally {
       ws.close()
