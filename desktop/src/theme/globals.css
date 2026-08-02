@@ -1012,7 +1012,7 @@
    the third: it renders transparent, and only in that one theme. */
 :root {
   /* Layout dimensions */
-  --sidebar-width: 300px;
+  --sidebar-width: 280px;
   --sidebar-rail-width: 72px;
   --titlebar-height: 52px;
   --statusbar-height: 36px;
