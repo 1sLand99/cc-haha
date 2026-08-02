@@ -122,6 +122,24 @@ export const browserHost: DesktopHost = {
       unsupported('Opening trace windows')
     },
   },
+  openProjectMenu: {
+    async show() {
+      return null
+    },
+    async getState() {
+      return null
+    },
+    async select() {
+      unsupported('Native open-project menu')
+    },
+    async dismiss() {},
+    async ready() {
+      unsupported('Native open-project menu')
+    },
+    async onState() {
+      return noopUnlisten
+    },
+  },
   pets: {
     async list() {
       unsupported('Custom pets')

@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
 vi.mock('../../i18n', () => ({
@@ -51,9 +51,12 @@ vi.mock('../../stores/openTargetStore', () => ({
 
 import { OpenProjectMenu } from './OpenProjectMenu'
 import { useOverlayStore } from '../../stores/overlayStore'
+import { browserHost } from '../../lib/desktopHost/browserHost'
+import type { DesktopHost } from '../../lib/desktopHost/types'
 
 describe('OpenProjectMenu', () => {
   beforeEach(() => {
+    delete window.desktopHost
     useOverlayStore.setState(useOverlayStore.getInitialState(), true)
     storeMocks.ensureTargets.mockReset()
     storeMocks.openTarget.mockReset()
@@ -63,6 +66,11 @@ describe('OpenProjectMenu', () => {
       loading: false,
       error: null,
     }
+  })
+
+  afterEach(() => {
+    delete window.desktopHost
+    vi.restoreAllMocks()
   })
 
   it('renders a single Finder action when only file manager is detected', async () => {
@@ -106,20 +114,97 @@ describe('OpenProjectMenu', () => {
     expect(storeMocks.openTarget).toHaveBeenCalledWith('finder', '/repo')
   })
 
-  it('suppresses the native browser preview while the target menu is open', async () => {
+  it('uses the native popup window in Electron without hiding the browser preview', async () => {
+    storeMocks.state.targets = [
+      { id: 'vscode', kind: 'ide', label: 'VS Code', icon: 'vscode', platform: 'darwin' },
+      { id: 'finder', kind: 'file_manager', label: 'Finder', icon: 'finder', platform: 'darwin' },
+    ]
+    storeMocks.state.primaryTargetId = 'vscode'
+    storeMocks.openTarget.mockResolvedValue(undefined)
+    let resolveSelection: (targetId: string | null) => void = () => {}
+    const show = vi.fn(() => new Promise<string | null>((resolve) => {
+      resolveSelection = resolve
+    }))
+    const dismiss = vi.fn().mockResolvedValue(undefined)
+    window.desktopHost = {
+      ...browserHost,
+      kind: 'electron',
+      isDesktop: true,
+      openProjectMenu: {
+        ...browserHost.openProjectMenu,
+        show,
+        dismiss,
+      },
+    } as DesktopHost
+
+    render(<OpenProjectMenu path="/repo" />)
+    const trigger = screen.getByRole('button', { name: 'Open project' })
+    trigger.getBoundingClientRect = () => domRect({
+      top: 8,
+      right: 944,
+      bottom: 40,
+      left: 900,
+      width: 44,
+      height: 32,
+    })
+
+    await act(async () => {
+      fireEvent.click(trigger)
+    })
+
+    expect(show).toHaveBeenCalledWith(expect.objectContaining({
+      anchor: { x: 900, y: 8, width: 44, height: 32 },
+      targets: storeMocks.state.targets,
+    }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(useOverlayStore.getState().count).toBe(0)
+
+    await act(async () => {
+      resolveSelection('finder')
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(storeMocks.openTarget).toHaveBeenCalledWith('finder', '/repo'))
+  })
+
+  it('keeps the browser preview visible and positions the DOM fallback outside it', async () => {
     storeMocks.state.targets = [
       { id: 'vscode', kind: 'ide', label: 'VS Code', icon: 'vscode', platform: 'darwin' },
       { id: 'finder', kind: 'file_manager', label: 'Finder', icon: 'finder', platform: 'darwin' },
     ]
     storeMocks.state.primaryTargetId = 'vscode'
 
-    const { unmount } = render(<OpenProjectMenu path="/repo" />)
+    window.innerWidth = 1000
+    window.innerHeight = 800
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute('data-browser-preview-host')) {
+        return domRect({ top: 150, right: 1000, bottom: 800, left: 600, width: 400, height: 650 })
+      }
+      if (this.getAttribute('aria-label') === 'Open project') {
+        return domRect({ top: 20, right: 850, bottom: 52, left: 800, width: 50, height: 32 })
+      }
+      if (this.getAttribute('role') === 'menu') {
+        return domRect({ width: 220, height: 400 })
+      }
+      return domRect({})
+    })
+
+    const { unmount } = render(
+      <>
+        <div data-browser-preview-host data-testid="preview-host" />
+        <OpenProjectMenu path="/repo" />
+      </>,
+    )
 
     expect(useOverlayStore.getState().count).toBe(0)
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Open project' }))
     })
-    expect(useOverlayStore.getState().count).toBe(1)
+
+    const menu = screen.getByRole('menu')
+    await waitFor(() => expect(menu).toHaveStyle({ visibility: 'visible' }))
+    expect(useOverlayStore.getState().count).toBe(0)
+    expect(menu).toHaveStyle({ left: '372px' })
+    expect(Number.parseFloat(menu.style.left) + 220).toBeLessThanOrEqual(592)
 
     unmount()
     expect(useOverlayStore.getState().count).toBe(0)
@@ -130,3 +215,18 @@ describe('OpenProjectMenu', () => {
     expect(container).toBeEmptyDOMElement()
   })
 })
+
+function domRect(rect: Partial<DOMRect>): DOMRect {
+  return {
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    width: 0,
+    height: 0,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+    ...rect,
+  } as DOMRect
+}

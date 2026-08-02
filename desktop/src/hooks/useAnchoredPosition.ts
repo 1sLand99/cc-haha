@@ -11,6 +11,10 @@ type AnchorSource =
 export type UseAnchoredPositionOptions = AnchorSource & {
   open: boolean
   floatingRef: { current: HTMLElement | null }
+  /** A native surface that the DOM overlay must not intersect. */
+  avoidRef?: { current: HTMLElement | null }
+  /** Gap between the overlay and `avoidRef`, in pixels. */
+  avoidanceGap?: number
   placement?: AnchoredPlacement
   /** Gap between anchor and overlay, in pixels. */
   offset?: number
@@ -49,6 +53,8 @@ export function useAnchoredPosition({
   anchorRef,
   anchorRect,
   floatingRef,
+  avoidRef,
+  avoidanceGap = DEFAULT_MARGIN,
   placement = 'bottom-start',
   offset = 6,
   viewportMargin = DEFAULT_MARGIN,
@@ -102,6 +108,32 @@ export function useAnchoredPosition({
       left = Math.max(viewportMargin, Math.min(left, viewportWidth - width - viewportMargin))
     }
 
+    const avoidBox = avoidRef?.current?.getBoundingClientRect()
+    if (avoidBox && width > 0 && height > 0 && intersects({ top, left, width, height }, avoidBox)) {
+      const candidates = [
+        { top, left: avoidBox.left - avoidanceGap - width },
+        { top, left: avoidBox.right + avoidanceGap },
+        { top: avoidBox.top - avoidanceGap - height, left },
+        { top: avoidBox.bottom + avoidanceGap, left },
+      ]
+        .filter((candidate) => (
+          candidate.top >= viewportMargin
+          && candidate.left >= viewportMargin
+          && candidate.top + height <= viewportHeight - viewportMargin
+          && candidate.left + width <= viewportWidth - viewportMargin
+          && !intersects({ ...candidate, width, height }, avoidBox)
+        ))
+        .sort((a, b) => (
+          Math.abs(a.top - top) + Math.abs(a.left - left)
+          - Math.abs(b.top - top) - Math.abs(b.left - left)
+        ))
+
+      if (candidates[0]) {
+        top = candidates[0].top
+        left = candidates[0].left
+      }
+    }
+
     setState({ top, left, placement: resolved, ready: true })
   }, [
     anchorRect?.top,
@@ -110,6 +142,8 @@ export function useAnchoredPosition({
     anchorRect?.left,
     anchorRef,
     floatingRef,
+    avoidRef,
+    avoidanceGap,
     placement,
     offset,
     viewportMargin,
@@ -135,4 +169,14 @@ export function useAnchoredPosition({
     placement: state.placement,
     ready: state.ready,
   }
+}
+
+function intersects(
+  floating: { top: number; left: number; width: number; height: number },
+  boundary: AnchoredRect,
+): boolean {
+  return floating.left < boundary.right
+    && floating.left + floating.width > boundary.left
+    && floating.top < boundary.bottom
+    && floating.top + floating.height > boundary.top
 }

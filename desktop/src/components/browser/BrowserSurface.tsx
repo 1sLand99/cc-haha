@@ -406,7 +406,12 @@ export function BrowserSurface({ sessionId }: { sessionId: string }) {
       <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface)]">
         <div className="relative min-h-0 flex-1 overflow-hidden" data-testid="browser-preview-stage">
           {/* WebContentsView renders above DOM, so keep the floating controls outside its bounds. */}
-          <div ref={hostRef} className="absolute inset-x-0 top-0 bottom-12 overflow-hidden" data-testid="preview-host">
+          <div
+            ref={hostRef}
+            className="absolute inset-x-0 top-0 bottom-12 overflow-hidden"
+            data-browser-preview-host
+            data-testid="preview-host"
+          >
             {session.loading && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--color-surface)] text-[var(--color-text-tertiary)]">
                 <Spinner size={18} label={t('browser.loading')} />

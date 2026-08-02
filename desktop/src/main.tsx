@@ -26,10 +26,16 @@ export function isPetWindowLocation(search = window.location.search): boolean {
   return new URLSearchParams(search).get('petWindow') === '1'
 }
 
+export function isOpenProjectMenuWindowLocation(search = window.location.search): boolean {
+  return new URLSearchParams(search).get('openProjectMenuWindow') === '1'
+}
+
 function loadDesktopBootstrapModules() {
-  const appModule = isPetWindowLocation()
-    ? import('./features/pets/PetApp').then(({ PetApp }) => ({ App: PetApp }))
-    : import('./App')
+  const appModule = isOpenProjectMenuWindowLocation()
+    ? import('./components/layout/OpenProjectMenuWindow').then(({ OpenProjectMenuWindow }) => ({ App: OpenProjectMenuWindow }))
+    : isPetWindowLocation()
+      ? import('./features/pets/PetApp').then(({ PetApp }) => ({ App: PetApp }))
+      : import('./App')
   return Promise.all([
     appModule,
     import('./components/ErrorBoundary'),
@@ -40,6 +46,8 @@ function loadDesktopBootstrapModules() {
 
 if (isPetWindowLocation()) {
   document.documentElement.dataset.windowKind = 'pet'
+} else if (isOpenProjectMenuWindowLocation()) {
+  document.documentElement.dataset.windowKind = 'open-project-menu'
 }
 
 export async function bootstrapDesktopApp(
@@ -78,6 +86,9 @@ export async function bootstrapDesktopApp(
 
 runDesktopPersistenceMigrations()
 initializeTouchH5()
-void initializeAppZoom()
 
-void bootstrapDesktopApp()
+void (async () => {
+  if (isOpenProjectMenuWindowLocation()) await initializeAppZoom()
+  else void initializeAppZoom()
+  await bootstrapDesktopApp()
+})()

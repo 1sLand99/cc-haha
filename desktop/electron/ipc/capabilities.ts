@@ -181,6 +181,52 @@ const urlWithOptionalBounds: Validator = value =>
 
 const zoomPayload: Validator = value => typeof value === 'number' && Number.isFinite(value)
 
+const finiteUiCoordinate = (value: unknown) =>
+  typeof value === 'number'
+  && Number.isFinite(value)
+  && Math.abs(value) <= 100_000
+
+const openProjectMenuShow: Validator = value => {
+  if (!isRecord(value) || !hasOnlyKeys(value, ['anchor', 'targets', 'zoom'])) return false
+  if (!isRecord(value.anchor) || !hasOnlyKeys(value.anchor, ['x', 'y', 'width', 'height'])) return false
+  if (
+    !finiteUiCoordinate(value.anchor.x)
+    || !finiteUiCoordinate(value.anchor.y)
+    || !finiteUiCoordinate(value.anchor.width)
+    || !finiteUiCoordinate(value.anchor.height)
+    || Number(value.anchor.width) <= 0
+    || Number(value.anchor.height) <= 0
+  ) return false
+  if (typeof value.zoom !== 'number' || !Number.isFinite(value.zoom) || value.zoom < 0.5 || value.zoom > 2) {
+    return false
+  }
+  if (!Array.isArray(value.targets) || value.targets.length < 2 || value.targets.length > 32) return false
+  return value.targets.every((target) => {
+    if (!isRecord(target) || !hasOnlyKeys(target, ['id', 'kind', 'label', 'icon', 'iconUrl', 'platform'])) {
+      return false
+    }
+    return typeof target.id === 'string'
+      && target.id.length > 0
+      && target.id.length <= 120
+      && !/[\u0000-\u001f\u007f-\u009f]/.test(target.id)
+      && (target.kind === 'ide' || target.kind === 'file_manager')
+      && isSafeUiLabel(target.label)
+      && typeof target.icon === 'string'
+      && target.icon.length <= 120
+      && typeof target.platform === 'string'
+      && target.platform.length <= 40
+      && (
+        target.iconUrl === undefined
+        || (typeof target.iconUrl === 'string' && target.iconUrl.length <= 2_048)
+      )
+  })
+}
+
+const openProjectMenuRequestId: Validator = value =>
+  typeof value === 'number'
+  && Number.isSafeInteger(value)
+  && value > 0
+
 // The colors reach BrowserWindow.setBackgroundColor, so they are pinned to a
 // literal 6-digit #RRGGBB. This is load-bearing, not tidiness: that API also
 // accepts #AARRGGBB, so an 8-digit value would let a compromised renderer make
@@ -224,6 +270,11 @@ export const ELECTRON_IPC_VALIDATORS = {
   [ELECTRON_IPC_CHANNELS.shellOpen]: stringPayload,
   [ELECTRON_IPC_CHANNELS.shellOpenPath]: stringPayload,
   [ELECTRON_IPC_CHANNELS.traceOpenWindow]: sessionIdPayload,
+  [ELECTRON_IPC_CHANNELS.openProjectMenuShow]: openProjectMenuShow,
+  [ELECTRON_IPC_CHANNELS.openProjectMenuGetState]: noPayload,
+  [ELECTRON_IPC_CHANNELS.openProjectMenuSelect]: stringPayload,
+  [ELECTRON_IPC_CHANNELS.openProjectMenuDismiss]: noPayload,
+  [ELECTRON_IPC_CHANNELS.openProjectMenuReady]: openProjectMenuRequestId,
   [ELECTRON_IPC_CHANNELS.petsList]: noPayload,
   [ELECTRON_IPC_CHANNELS.petsCreateFromImage]: petCreateFromAtlas,
   [ELECTRON_IPC_CHANNELS.petsCreateFromAtlas]: petCreateFromAtlas,
@@ -298,6 +349,16 @@ const petWindowChannels = new Set<ElectronIpcChannel>([
   ELECTRON_IPC_CHANNELS.petsFocusSession,
 ])
 
+const openProjectMenuWindowChannels = new Set<ElectronIpcChannel>([
+  ELECTRON_IPC_CHANNELS.appGetLocalePreference,
+  ELECTRON_IPC_CHANNELS.appGetPreferredSystemLanguages,
+  ELECTRON_IPC_CHANNELS.openProjectMenuGetState,
+  ELECTRON_IPC_CHANNELS.openProjectMenuSelect,
+  ELECTRON_IPC_CHANNELS.openProjectMenuDismiss,
+  ELECTRON_IPC_CHANNELS.openProjectMenuReady,
+  ELECTRON_IPC_CHANNELS.zoomSet,
+])
+
 export function isElectronIpcChannel(channel: string): channel is ElectronIpcChannel {
   return allowedChannels.has(channel as ElectronIpcChannel)
 }
@@ -308,4 +369,8 @@ export function validateElectronIpcPayload(channel: ElectronIpcChannel, payload:
 
 export function isElectronIpcChannelAllowedForPetWindow(channel: ElectronIpcChannel): boolean {
   return petWindowChannels.has(channel)
+}
+
+export function isElectronIpcChannelAllowedForOpenProjectMenuWindow(channel: ElectronIpcChannel): boolean {
+  return openProjectMenuWindowChannels.has(channel)
 }
