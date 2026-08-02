@@ -275,6 +275,35 @@ function collectToolResults(
   return resultsByToolUseId
 }
 
+function collectSubagentCreatedTaskIds(messages: UIMessage[]): Set<string> {
+  const taskIds = new Set<string>()
+  const resultsByToolUseId = collectToolResults(messages)
+
+  for (const message of messages) {
+    if (
+      message.type !== 'tool_use' ||
+      message.toolName !== 'TaskCreate' ||
+      !message.parentToolUseId
+    ) {
+      continue
+    }
+
+    const result = resultsByToolUseId.get(message.toolUseId)
+    if (!result || result.isError) continue
+    const createdTask = parseCreatedTaskResult(result.content)
+    if (createdTask) taskIds.add(createdTask.id)
+  }
+
+  return taskIds
+}
+
+function keepSessionLevelTaskMessage(message: UIMessage): boolean {
+  return !(
+    (message.type === 'tool_use' || message.type === 'tool_result') &&
+    message.parentToolUseId
+  )
+}
+
 /**
  * TaskUpdate 的 deleted 是删除动作而非状态，删除可能发生在创建它的那一轮之后，
  * 所以要跨轮次收集，避免已删任务留在历史统计里。
@@ -616,15 +645,19 @@ function buildHistoricalTasksRow(groups: TaskTurnRows[]): ActivityRow | null {
 }
 
 function buildTaskRowsFromMessages(messages: UIMessage[], liveTasks: CLITask[]): ActivityRow[] {
+  const subagentCreatedTaskIds = collectSubagentCreatedTaskIds(messages)
+  const sessionMessages = messages.filter(keepSessionLevelTaskMessage)
   const deletedTaskIds = collectDeletedTaskIds(messages)
-  const resultsByToolUseId = collectToolResults(messages)
-  const isLiveRow = (row: ActivityRow) => (row.taskId ? !deletedTaskIds.has(row.taskId) : true)
+  const resultsByToolUseId = collectToolResults(sessionMessages)
+  const isSessionTaskRow = (row: ActivityRow) => row.taskId
+    ? !deletedTaskIds.has(row.taskId) && !subagentCreatedTaskIds.has(row.taskId)
+    : true
   // 任务列表要等 tool_result 到达后才异步刷新，这中间 liveTasks 里还留着已删的任务
-  const liveRows = liveTasks.filter((task) => !deletedTaskIds.has(task.id)).map(buildTaskRow)
-  const taskTurnRows = splitMessagesIntoTurns(messages)
+  const liveRows = liveTasks.map(buildTaskRow).filter(isSessionTaskRow)
+  const taskTurnRows = splitMessagesIntoTurns(sessionMessages)
     .map((turn) => ({
       turn,
-      rows: buildTaskRowsFromTurnMessages(turn.messages, resultsByToolUseId).filter(isLiveRow),
+      rows: buildTaskRowsFromTurnMessages(turn.messages, resultsByToolUseId).filter(isSessionTaskRow),
     }))
     .filter((group) => group.rows.length > 0)
 

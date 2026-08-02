@@ -557,6 +557,98 @@ describe('buildSessionActivityModel', () => {
     expect(model.badgeCount).toBe(1)
   })
 
+  it('keeps parent-linked SubAgent tasks out of the session task section', () => {
+    const model = buildSessionActivityModel({
+      sessionId: 'session-1',
+      messages: [
+        {
+          id: 'root-task-create',
+          type: 'tool_use',
+          toolName: 'TaskCreate',
+          toolUseId: 'root-task-create-call',
+          input: { subject: '审查最近七天全部 Git 提交' },
+          timestamp: 1000,
+        },
+        {
+          id: 'root-task-create-result',
+          type: 'tool_result',
+          toolUseId: 'root-task-create-call',
+          content: 'Task #1 created successfully: 审查最近七天全部 Git 提交',
+          isError: false,
+          timestamp: 1001,
+        },
+        {
+          id: 'agent-tool',
+          type: 'tool_use',
+          toolName: 'Agent',
+          toolUseId: 'agent-tool-call',
+          input: { description: '审查提交潜在回归' },
+          timestamp: 1002,
+        },
+        {
+          id: 'child-task-create',
+          type: 'tool_use',
+          toolName: 'TaskCreate',
+          toolUseId: 'agent-tool-call/child-task-create-call',
+          originalToolUseId: 'child-task-create-call',
+          input: { subject: '审查最近七天全部提交' },
+          parentToolUseId: 'agent-tool-call',
+          timestamp: 1003,
+        },
+        {
+          id: 'child-task-create-result',
+          type: 'tool_result',
+          toolUseId: 'agent-tool-call/child-task-create-call',
+          originalToolUseId: 'child-task-create-call',
+          content: 'Task #2 created successfully: 审查最近七天全部提交',
+          isError: false,
+          parentToolUseId: 'agent-tool-call',
+          timestamp: 1004,
+        },
+      ],
+      tasks: [
+        task({ id: '1', subject: '审查最近七天全部 Git 提交' }),
+        task({ id: '2', subject: '审查最近七天全部提交' }),
+      ],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.tasks.rows).toEqual([
+      expect.objectContaining({
+        id: '1',
+        label: '审查最近七天全部 Git 提交',
+      }),
+    ])
+    expect(model.badgeCount).toBe(2)
+  })
+
+  it('does not restore parent-linked SubAgent TodoWrite rows as session tasks', () => {
+    const model = buildSessionActivityModel({
+      sessionId: 'session-1',
+      messages: [{
+        id: 'child-todo',
+        type: 'tool_use',
+        toolName: 'TodoWrite',
+        toolUseId: 'agent-tool-call/child-todo-call',
+        originalToolUseId: 'child-todo-call',
+        input: {
+          todos: [{ content: '子代理内部检查项', status: 'in_progress' }],
+        },
+        parentToolUseId: 'agent-tool-call',
+        timestamp: 1000,
+      }],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.tasks.rows).toEqual([])
+    expect(model.badgeCount).toBe(0)
+  })
+
   it('keeps the last successful status when a later TaskUpdate fails', () => {
     const model = buildSessionActivityModel({
       sessionId: 'session-1',
