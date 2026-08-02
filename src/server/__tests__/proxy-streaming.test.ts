@@ -309,6 +309,71 @@ describe('openaiChatStreamToAnthropic', () => {
 // ─── OpenAI Responses SSE → Anthropic SSE ──────────────────────
 
 describe('openaiResponsesStreamToAnthropic', () => {
+  test('maps reasoning summary deltas to Anthropic thinking blocks', async () => {
+    const sseChunks = [
+      'event: response.created\ndata: {"sequence_number":0,"type":"response.created","response":{"id":"r-reasoning","model":"grok-4.5","status":"in_progress"}}\n\n',
+      'event: response.output_item.added\ndata: {"sequence_number":1,"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"in_progress","summary":[]}}\n\n',
+      'event: response.reasoning_summary_part.added\ndata: {"sequence_number":2,"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}\n\n',
+      'event: response.reasoning_summary_text.delta\ndata: {"sequence_number":3,"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"Inspecting the repository"}\n\n',
+      'event: response.reasoning_summary_text.delta\ndata: {"sequence_number":4,"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":" and recent changes."}\n\n',
+      'event: response.reasoning_summary_text.done\ndata: {"sequence_number":5,"type":"response.reasoning_summary_text.done","item_id":"rs_1","output_index":0,"summary_index":0,"text":"Inspecting the repository and recent changes."}\n\n',
+      'event: response.reasoning_summary_part.done\ndata: {"sequence_number":6,"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"Inspecting the repository and recent changes."}}\n\n',
+      'event: response.output_item.done\ndata: {"sequence_number":7,"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"completed","summary":[],"encrypted_content":"reasoning-signature"}}\n\n',
+      'event: response.output_item.added\ndata: {"sequence_number":8,"type":"response.output_item.added","output_index":1,"item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress","content":[]}}\n\n',
+      'event: response.content_part.added\ndata: {"sequence_number":9,"type":"response.content_part.added","item_id":"msg_1","output_index":1,"content_index":0,"part":{"type":"output_text","text":""}}\n\n',
+      'event: response.output_text.delta\ndata: {"sequence_number":10,"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"Done"}\n\n',
+      'event: response.output_text.done\ndata: {"sequence_number":11,"type":"response.output_text.done","item_id":"msg_1","output_index":1,"content_index":0,"text":"Done"}\n\n',
+      'event: response.completed\ndata: {"sequence_number":12,"type":"response.completed","response":{"id":"r-reasoning","model":"grok-4.5","status":"completed","usage":{"input_tokens":10,"output_tokens":8}}}\n\n',
+    ]
+
+    const events = await collectSse(
+      openaiResponsesStreamToAnthropic(makeStream(sseChunks), 'grok-4.5'),
+    )
+    const thinkingStart = events.find(
+      (event) => event.event === 'content_block_start'
+        && (event.data.content_block as Record<string, unknown>)?.type === 'thinking',
+    )
+    const thinkingDeltas = events.filter(
+      (event) => event.event === 'content_block_delta'
+        && (event.data.delta as Record<string, unknown>)?.type === 'thinking_delta',
+    )
+    const signatureDelta = events.find(
+      (event) => event.event === 'content_block_delta'
+        && (event.data.delta as Record<string, unknown>)?.type === 'signature_delta',
+    )
+    const textStart = events.find(
+      (event) => event.event === 'content_block_start'
+        && (event.data.content_block as Record<string, unknown>)?.type === 'text',
+    )
+
+    expect(thinkingStart).toBeDefined()
+    expect(thinkingDeltas.map(
+      (event) => (event.data.delta as Record<string, unknown>).thinking,
+    )).toEqual(['Inspecting the repository', ' and recent changes.'])
+    expect((signatureDelta!.data.delta as Record<string, unknown>).signature).toBe(
+      'reasoning-signature',
+    )
+    expect(textStart).toBeDefined()
+    expect(thinkingStart!.data.index).toBeLessThan(textStart!.data.index as number)
+    expect(events.filter((event) => event.event === 'content_block_stop')).toHaveLength(2)
+  })
+
+  test('maps the Responses reasoning text delta alias', async () => {
+    const events = await collectSse(openaiResponsesStreamToAnthropic(makeStream([
+      'event: response.created\ndata: {"type":"response.created","response":{"id":"r-reasoning-alias","model":"grok-4.5","status":"in_progress"}}\n\n',
+      'event: response.output_item.added\ndata: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_alias","type":"reasoning","status":"in_progress"}}\n\n',
+      'event: response.reasoning_text.delta\ndata: {"type":"response.reasoning_text.delta","item_id":"rs_alias","output_index":0,"delta":"Still working"}\n\n',
+      'event: response.output_item.done\ndata: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_alias","type":"reasoning","status":"completed"}}\n\n',
+      'event: response.completed\ndata: {"type":"response.completed","response":{"id":"r-reasoning-alias","model":"grok-4.5","status":"completed"}}\n\n',
+    ]), 'grok-4.5'))
+
+    const thinkingDelta = events.find(
+      (event) => event.event === 'content_block_delta'
+        && (event.data.delta as Record<string, unknown>)?.type === 'thinking_delta',
+    )
+    expect((thinkingDelta!.data.delta as Record<string, unknown>).thinking).toBe('Still working')
+  })
+
   test('basic text streaming', async () => {
     const sseChunks = [
       'event: response.created\ndata: {"id":"r1","model":"gpt-4o","status":"in_progress"}\n\n',
@@ -400,6 +465,8 @@ describe('openaiResponsesStreamToAnthropic', () => {
     const sseChunks = [
       'event: response.created\ndata: {"response":{"id":"r4","model":"gpt-5.6-terra","status":"in_progress"}}\n\n',
       'event: response.output_item.added\ndata: {"output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[]}}\n\n',
+      'event: response.reasoning_summary_part.added\ndata: {"item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}\n\n',
+      'event: response.reasoning_summary_text.delta\ndata: {"item_id":"rs_1","output_index":0,"summary_index":0,"delta":"private summary"}\n\n',
       'event: response.output_item.done\ndata: {"output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"encrypted-reasoning"}}\n\n',
       'event: response.output_item.added\ndata: {"output_index":1,"item":{"type":"message","role":"assistant"}}\n\n',
       'event: response.content_part.added\ndata: {"output_index":1,"content_index":0,"part":{"type":"output_text","text":""}}\n\n',
@@ -419,6 +486,9 @@ describe('openaiResponsesStreamToAnthropic', () => {
 
     expect(reasoningStart).toBeDefined()
     expect((reasoningStart!.data.content_block as Record<string, unknown>).data).toContain('encrypted-reasoning')
+    expect(events.some((event) =>
+      event.event === 'content_block_start' &&
+      (event.data.content_block as Record<string, unknown>)?.type === 'thinking')).toBe(false)
     expect(events.at(-1)?.event).toBe('message_stop')
   })
 

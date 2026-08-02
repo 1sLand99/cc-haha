@@ -28,6 +28,7 @@ export type OpenAIResponsesStreamOptions = {
 type StreamState = {
   nextContentIndex: number
   indexByKey: Map<string, number>
+  reasoningIndexByOutputIndex: Map<number, number>
   toolIndexByItemId: Map<string, number>
   model: string
   messageStarted: boolean
@@ -59,6 +60,7 @@ export function openaiResponsesStreamToAnthropic(
   const state: StreamState = {
     nextContentIndex: 0,
     indexByKey: new Map(),
+    reasoningIndexByOutputIndex: new Map(),
     toolIndexByItemId: new Map(),
     model,
     messageStarted: false,
@@ -91,6 +93,7 @@ export function openaiResponsesStreamToAnthropic(
           }
           if (!options.openAICodexOAuth && !state.messageStopped) {
             state.terminalSeen = true
+            closeAllReasoningBlocks(state, controller, encoder)
             emitMessageStop(state, controller, encoder, model)
             return true
           }
@@ -261,14 +264,21 @@ function processEvent(
             input: {},
           },
         })))
+      } else if (item.type === 'reasoning' && !options.openAICodexOAuth) {
+        ensureReasoningBlock(data, state, controller, encoder)
       }
       break
     }
 
     case 'response.output_item.done': {
-      if (!options.openAICodexOAuth) break
       const item = asRecord(data.item)
       if (!item || item.type !== 'reasoning') break
+
+      if (!options.openAICodexOAuth) {
+        closeReasoningBlock(data, state, controller, encoder)
+        break
+      }
+
       const reasoning = item as OpenAIResponsesReasoningItem
       const reasoningData = encodeOpenAIReasoningEnvelope(reasoning)
       if (!reasoningData) break
@@ -302,6 +312,28 @@ function processEvent(
         type: 'content_block_start',
         index,
         content_block: { type: 'text', text: '' },
+      })))
+      break
+    }
+
+    case 'response.reasoning_summary_part.added': {
+      if (!options.openAICodexOAuth) {
+        ensureReasoningBlock(data, state, controller, encoder)
+      }
+      break
+    }
+
+    case 'response.reasoning_summary_text.delta':
+    case 'response.reasoning_text.delta': {
+      if (options.openAICodexOAuth) break
+      const index = ensureReasoningBlock(data, state, controller, encoder)
+      const delta = typeof data.delta === 'string' ? data.delta : ''
+      if (!delta) break
+
+      controller.enqueue(encoder.encode(formatSse('content_block_delta', {
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'thinking_delta', thinking: delta },
       })))
       break
     }
@@ -424,6 +456,7 @@ function processEvent(
         : status === 'incomplete' ? 'max_tokens' : 'end_turn'
 
       if (!state.messageStarted) emitMessageStart(state, controller, encoder, state.model)
+      closeAllReasoningBlocks(state, controller, encoder)
       controller.enqueue(encoder.encode(formatSse('message_delta', {
         type: 'message_delta',
         delta: { stop_reason: stopReason, stop_sequence: null },
@@ -435,6 +468,72 @@ function processEvent(
   }
 
   return false
+}
+
+function ensureReasoningBlock(
+  data: Record<string, unknown>,
+  state: StreamState,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+): number {
+  if (!state.messageStarted) {
+    emitMessageStart(state, controller, encoder, state.model)
+  }
+
+  const outputIndex = (data.output_index as number) ?? 0
+  const existing = state.reasoningIndexByOutputIndex.get(outputIndex)
+  if (existing !== undefined) return existing
+
+  const index = state.nextContentIndex++
+  state.reasoningIndexByOutputIndex.set(outputIndex, index)
+  controller.enqueue(encoder.encode(formatSse('content_block_start', {
+    type: 'content_block_start',
+    index,
+    content_block: { type: 'thinking', thinking: '' },
+  })))
+  return index
+}
+
+function closeReasoningBlock(
+  data: Record<string, unknown>,
+  state: StreamState,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+): void {
+  const outputIndex = typeof data.output_index === 'number' ? data.output_index : 0
+  const index = state.reasoningIndexByOutputIndex.get(outputIndex)
+  if (index === undefined) return
+
+  const item = asRecord(data.item)
+  const signature = typeof item?.encrypted_content === 'string'
+    ? item.encrypted_content
+    : ''
+  if (signature) {
+    controller.enqueue(encoder.encode(formatSse('content_block_delta', {
+      type: 'content_block_delta',
+      index,
+      delta: { type: 'signature_delta', signature },
+    })))
+  }
+  controller.enqueue(encoder.encode(formatSse('content_block_stop', {
+    type: 'content_block_stop',
+    index,
+  })))
+  state.reasoningIndexByOutputIndex.delete(outputIndex)
+}
+
+function closeAllReasoningBlocks(
+  state: StreamState,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+): void {
+  for (const [outputIndex, index] of state.reasoningIndexByOutputIndex) {
+    controller.enqueue(encoder.encode(formatSse('content_block_stop', {
+      type: 'content_block_stop',
+      index,
+    })))
+    state.reasoningIndexByOutputIndex.delete(outputIndex)
+  }
 }
 
 function readStreamError(
