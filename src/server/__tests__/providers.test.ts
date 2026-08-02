@@ -1591,7 +1591,7 @@ describe('ProviderService', () => {
             model: 'gpt-4',
             max_tokens: 64,
             system: [
-              { type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.92.693; cc_entrypoint=cli; cch=00000;' },
+              { type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.220.693; cc_entrypoint=cli; cch=00000;' },
               { type: 'text', text: 'You are a helpful assistant.' },
             ],
             messages: [{ role: 'user', content: 'hello from proxy' }],

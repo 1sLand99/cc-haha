@@ -5150,6 +5150,142 @@ describe('Sessions API', () => {
     expect(remainingMessages).toHaveLength(0)
   })
 
+  it('POST /api/sessions/:id/rewind should skip symlink and hard-link tracked paths', async () => {
+    const sessionId = 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeef'
+    const workDir = path.join(tmpDir, 'linked-file-fixture')
+    const outsideDir = path.join(tmpDir, 'outside-linked-file-fixture')
+    const safeFile = path.join(workDir, 'safe.txt')
+    const missingFile = path.join(workDir, 'missing.txt')
+    const symlinkFile = path.join(workDir, 'symlink.txt')
+    const linkedDir = path.join(workDir, 'linked-dir')
+    const hardLinkFile = path.join(workDir, 'hard-link.txt')
+    const hardLinkDeleteFile = path.join(workDir, 'hard-link-delete.txt')
+    const outsideSafeFile = path.join(outsideDir, 'safe-absolute.txt')
+    const outsideRelativeFile = path.join(outsideDir, 'relative-target.txt')
+    const outsideSymlinkFile = path.join(outsideDir, 'symlink-target.txt')
+    const outsideDeleteFile = path.join(outsideDir, 'delete-target.txt')
+    const outsideHardLinkFile = path.join(outsideDir, 'hard-link-target.txt')
+    const outsideHardLinkDeleteFile = path.join(outsideDir, 'hard-link-delete-target.txt')
+    const userId = crypto.randomUUID()
+    const safeBackup = 'linked-safe@v1'
+    const missingBackup = 'linked-missing@v1'
+    const outsideSafeBackup = 'linked-safe-absolute@v1'
+    const outsideRelativeBackup = 'linked-relative@v1'
+    const symlinkBackup = 'linked-symlink@v1'
+    const hardLinkBackup = 'linked-hard-link@v1'
+
+    await fs.mkdir(workDir, { recursive: true })
+    await fs.mkdir(outsideDir, { recursive: true })
+    await fs.writeFile(safeFile, 'safe after\n', 'utf-8')
+    await fs.writeFile(outsideSafeFile, 'safe absolute after\n', 'utf-8')
+    await fs.writeFile(outsideRelativeFile, 'relative outside after\n', 'utf-8')
+    await fs.writeFile(outsideSymlinkFile, 'symlink outside after\n', 'utf-8')
+    await fs.writeFile(outsideDeleteFile, 'delete outside after\n', 'utf-8')
+    await fs.writeFile(outsideHardLinkFile, 'hard link outside after\n', 'utf-8')
+    await fs.writeFile(outsideHardLinkDeleteFile, 'hard link delete outside after\n', 'utf-8')
+    await fs.symlink(outsideSymlinkFile, symlinkFile)
+    await fs.symlink(outsideDir, linkedDir)
+    await fs.link(outsideHardLinkFile, hardLinkFile)
+    await fs.link(outsideHardLinkDeleteFile, hardLinkDeleteFile)
+    await writeFileHistoryBackup(sessionId, safeBackup, 'safe before\n')
+    await writeFileHistoryBackup(sessionId, missingBackup, 'missing before\n')
+    await writeFileHistoryBackup(sessionId, outsideSafeBackup, 'safe absolute before\n')
+    await writeFileHistoryBackup(sessionId, outsideRelativeBackup, 'relative before\n')
+    await writeFileHistoryBackup(sessionId, symlinkBackup, 'symlink before\n')
+    await writeFileHistoryBackup(sessionId, hardLinkBackup, 'hard link before\n')
+
+    await writeSessionFile('-tmp-api-linked-file', sessionId, [
+      makeSessionMetaEntry(workDir),
+      makeFileHistorySnapshotEntry(userId, {
+        'safe.txt': {
+          backupFileName: safeBackup,
+          version: 1,
+          backupTime: '2026-01-01T00:00:00.000Z',
+        },
+        'missing.txt': {
+          backupFileName: missingBackup,
+          version: 1,
+          backupTime: '2026-01-01T00:00:00.000Z',
+        },
+        [outsideSafeFile]: {
+          backupFileName: outsideSafeBackup,
+          version: 1,
+          backupTime: '2026-01-01T00:00:00.000Z',
+        },
+        '../outside-linked-file-fixture/relative-target.txt': {
+          backupFileName: outsideRelativeBackup,
+          version: 1,
+          backupTime: '2026-01-01T00:00:00.000Z',
+        },
+        'symlink.txt': {
+          backupFileName: symlinkBackup,
+          version: 1,
+          backupTime: '2026-01-01T00:00:00.000Z',
+        },
+        'linked-dir/delete-target.txt': {
+          backupFileName: null,
+          version: 1,
+          backupTime: '2026-01-01T00:00:00.000Z',
+        },
+        'hard-link.txt': {
+          backupFileName: hardLinkBackup,
+          version: 1,
+          backupTime: '2026-01-01T00:00:00.000Z',
+        },
+        'hard-link-delete.txt': {
+          backupFileName: null,
+          version: 1,
+          backupTime: '2026-01-01T00:00:00.000Z',
+        },
+      }),
+      {
+        ...makeUserEntry('edit linked files', userId),
+        cwd: workDir,
+        sessionId,
+      },
+      makeAssistantEntry('DONE', userId),
+    ])
+
+    const previewRes = await fetch(`${baseUrl}/api/sessions/${sessionId}/rewind`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userMessageIndex: 0, dryRun: true }),
+    })
+    expect(previewRes.status).toBe(200)
+    const preview = await previewRes.json() as {
+      code: { available: boolean; filesChanged: string[] }
+    }
+    expect(preview.code.filesChanged).toEqual([
+      safeFile,
+      missingFile,
+      outsideSafeFile,
+    ])
+
+    const executeRes = await fetch(`${baseUrl}/api/sessions/${sessionId}/rewind`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userMessageIndex: 0 }),
+    })
+    expect(executeRes.status).toBe(200)
+
+    expect(await fs.readFile(safeFile, 'utf-8')).toBe('safe before\n')
+    expect(await fs.readFile(missingFile, 'utf-8')).toBe('missing before\n')
+    expect(await fs.readFile(outsideSafeFile, 'utf-8')).toBe('safe absolute before\n')
+    expect(await fs.readFile(outsideRelativeFile, 'utf-8')).toBe(
+      'relative outside after\n',
+    )
+    expect(await fs.readFile(outsideSymlinkFile, 'utf-8')).toBe('symlink outside after\n')
+    expect(await fs.readFile(outsideDeleteFile, 'utf-8')).toBe('delete outside after\n')
+    expect(await fs.readFile(outsideHardLinkFile, 'utf-8')).toBe('hard link outside after\n')
+    expect(await fs.readFile(outsideHardLinkDeleteFile, 'utf-8')).toBe(
+      'hard link delete outside after\n',
+    )
+    expect((await fs.lstat(symlinkFile)).isSymbolicLink()).toBe(true)
+    expect((await fs.lstat(linkedDir)).isSymbolicLink()).toBe(true)
+    expect((await fs.stat(hardLinkFile)).nlink).toBe(2)
+    expect((await fs.stat(hardLinkDeleteFile)).nlink).toBe(2)
+  })
+
   it('POST /api/sessions/:id/rewind should resolve checkpoint paths from the target prompt cwd', async () => {
     const sessionId = 'bbbbbbbb-bbbb-cccc-dddd-ffffffffffff'
     const parentDir = path.join(tmpDir, 'nested-cwd-parent')

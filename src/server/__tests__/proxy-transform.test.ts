@@ -12,7 +12,7 @@ import { openaiUsageToAnthropic } from '../proxy/transform/usage.js'
 import { resolvePromptCacheKey } from '../proxy/promptCacheKey.js'
 import type { AnthropicRequest, OpenAIChatResponse, OpenAIResponsesResponse } from '../proxy/transform/types.js'
 
-const BILLING_HEADER = 'x-anthropic-billing-header: cc_version=2.1.92.693; cc_entrypoint=cli; cch=00000;'
+const BILLING_HEADER = 'x-anthropic-billing-header: cc_version=2.1.220.693; cc_entrypoint=cli; cch=00000;'
 
 // ─── anthropicToOpenaiChat ──────────────────────────────────────
 
