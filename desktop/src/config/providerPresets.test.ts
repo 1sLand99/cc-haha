@@ -37,13 +37,13 @@ describe('selectableProviderPresets', () => {
 })
 
 describe('bundled provider presets', () => {
-  it('includes both MiniMax regional Anthropic endpoints', () => {
+  it('defaults MiniMax to the China endpoint while retaining the global endpoint', () => {
     const minimax = BUNDLED_PROVIDER_PRESETS.find((preset) => preset.id === 'minimax')
 
-    expect(minimax?.baseUrl).toBe('https://api.minimax.io/anthropic')
+    expect(minimax?.baseUrl).toBe('https://api.minimaxi.com/anthropic')
     expect(minimax?.regionalEndpoints).toEqual([
-      { region: 'global_en', baseUrl: 'https://api.minimax.io/anthropic' },
       { region: 'cn_zh', baseUrl: 'https://api.minimaxi.com/anthropic' },
+      { region: 'global_en', baseUrl: 'https://api.minimax.io/anthropic' },
     ])
   })
 
@@ -52,6 +52,24 @@ describe('bundled provider presets', () => {
 
     expect(minimax && presetMatchesBaseUrl(minimax, 'https://api.minimax.io/anthropic')).toBe(true)
     expect(minimax && presetMatchesBaseUrl(minimax, 'https://api.minimaxi.com/anthropic')).toBe(true)
+  })
+
+  it('defaults Zhipu GLM to China while retaining its official global endpoint', () => {
+    const zhipu = BUNDLED_PROVIDER_PRESETS.find((preset) => preset.id === 'zhipuglm')
+
+    expect(zhipu?.baseUrl).toBe('https://open.bigmodel.cn/api/anthropic')
+    expect(zhipu?.regionalEndpoints).toEqual([
+      { region: 'cn_zh', baseUrl: 'https://open.bigmodel.cn/api/anthropic' },
+      { region: 'global_en', baseUrl: 'https://api.z.ai/api/anthropic' },
+    ])
+    expect(zhipu && presetMatchesBaseUrl(zhipu, ' HTTPS://API.Z.AI/api/anthropic/ ')).toBe(true)
+  })
+
+  it('keeps Kimi Code on its only official Anthropic-compatible endpoint', () => {
+    const kimi = BUNDLED_PROVIDER_PRESETS.find((preset) => preset.id === 'kimi')
+
+    expect(kimi?.baseUrl).toBe('https://api.kimi.com/coding/')
+    expect(kimi?.regionalEndpoints).toBeUndefined()
   })
 
   // Retiring a preset must not break providers already configured against it: the

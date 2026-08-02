@@ -86,6 +86,11 @@ describe('provider presets API', () => {
     expect(deepseek?.defaultModels.opus).toBe('deepseek-v4-pro[1m]')
     expect(deepseek?.defaultEnv?.CC_HAHA_SEND_DISABLED_THINKING).toBeUndefined()
     expect(deepseek?.defaultEnv).toEqual({})
+    expect(zhipu?.baseUrl).toBe('https://open.bigmodel.cn/api/anthropic')
+    expect(zhipu?.regionalEndpoints).toEqual([
+      { region: 'cn_zh', baseUrl: 'https://open.bigmodel.cn/api/anthropic' },
+      { region: 'global_en', baseUrl: 'https://api.z.ai/api/anthropic' },
+    ])
     expect(zhipu?.authStrategy).toBe('auth_token')
     expect(zhipu?.defaultModels.main).toBe('glm-5.2[1m]')
     expect(zhipu?.defaultModels.haiku).toBe('glm-4.7')
@@ -97,14 +102,15 @@ describe('provider presets API', () => {
     expect(deepseek?.defaultEnv?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined()
     expect(zhipu?.defaultEnv?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined()
     expect(kimi?.baseUrl).toBe('https://api.kimi.com/coding/')
+    expect(kimi?.regionalEndpoints).toBeUndefined()
     expect(kimi?.authStrategy).toBe('api_key')
     expect(kimi?.defaultModels.main).toBe('k3')
     expect(kimi?.defaultEnv?.CC_HAHA_SEND_DISABLED_THINKING).toBeUndefined()
     expect(kimi?.defaultEnv).toEqual({})
-    expect(minimax?.baseUrl).toBe('https://api.minimax.io/anthropic')
+    expect(minimax?.baseUrl).toBe('https://api.minimaxi.com/anthropic')
     expect(minimax?.regionalEndpoints).toEqual([
-      { region: 'global_en', baseUrl: 'https://api.minimax.io/anthropic' },
       { region: 'cn_zh', baseUrl: 'https://api.minimaxi.com/anthropic' },
+      { region: 'global_en', baseUrl: 'https://api.minimax.io/anthropic' },
     ])
     expect(minimax?.authStrategy).toBe('auth_token')
     expect(minimax?.defaultModels.main).toBe('MiniMax-M3[1m]')

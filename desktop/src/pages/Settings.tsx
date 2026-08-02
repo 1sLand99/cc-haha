@@ -24,6 +24,7 @@ import { useTranslation, type TranslationKey } from '../i18n'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Input } from '@/components/ui/Input'
+import { SelectField } from '@/components/ui/SelectField'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { Badge, StatusDot } from '@/components/ui/Badge'
@@ -55,7 +56,7 @@ import {
   type ModelSlot,
 } from '../lib/providerModelContext'
 import type { ProviderPreset } from '../types/providerPreset'
-import { presetMatchesBaseUrl, selectableProviderPresets } from '../config/providerPresets'
+import { normalizeProviderBaseUrl, presetMatchesBaseUrl, selectableProviderPresets } from '../config/providerPresets'
 import { AdapterSettings } from './AdapterSettings'
 import { useSessionStore } from '../stores/sessionStore'
 import { MarkdownRenderer } from '../components/markdown/MarkdownRenderer'
@@ -1309,7 +1310,23 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   const [settingsJson, setSettingsJson] = useState('')
   const [settingsJsonError, setSettingsJsonError] = useState<string | null>(null)
   const jsonPastedRef = useRef(false)
+  const settingsJsonUserEditedRef = useRef(false)
   const providerProxyBaseUrl = useMemo(() => getProviderProxyBaseUrl(), [])
+  const currentProviderSettings = {
+    selectedPreset,
+    baseUrl,
+    apiFormat,
+    authStrategy,
+    apiKey,
+    models,
+    model1mSupport,
+    modelContextInputs,
+    autoCompactWindow,
+    toolSearchEnabled,
+    disableExperimentalBetas,
+  }
+  const providerSettingsRef = useRef(currentProviderSettings)
+  providerSettingsRef.current = currentProviderSettings
 
   // Load current settings.json and merge provider env vars
   useEffect(() => {
@@ -1318,8 +1335,24 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
       jsonPastedRef.current = false
       return
     }
+    let cancelled = false
     import('../api/providers').then(({ providersApi }) => {
+      if (cancelled) return
       providersApi.getSettings().then((settings) => {
+        if (cancelled || settingsJsonUserEditedRef.current) return
+        const {
+          selectedPreset,
+          baseUrl,
+          apiFormat,
+          authStrategy,
+          apiKey,
+          models,
+          model1mSupport,
+          modelContextInputs,
+          autoCompactWindow,
+          toolSearchEnabled,
+          disableExperimentalBetas,
+        } = providerSettingsRef.current
         const needsProxy = apiFormat !== 'anthropic'
         const autoCompactWindowEnv = autoCompactWindow.trim()
         const modelContextWindows = buildModelContextWindows(models, modelContextInputs)
@@ -1351,9 +1384,14 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
         }
         setSettingsJson(JSON.stringify(merged, null, 2))
       }).catch(() => {
-        setSettingsJson(JSON.stringify({}, null, 2))
+        if (!cancelled && !settingsJsonUserEditedRef.current) {
+          setSettingsJson((current) => current.trim() ? current : JSON.stringify({}, null, 2))
+        }
       })
     })
+    return () => {
+      cancelled = true
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPreset.id, providerProxyBaseUrl])
 
@@ -1372,6 +1410,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   }, [baseUrl, apiKey])
 
   const handlePresetChange = (preset: ProviderPreset) => {
+    settingsJsonUserEditedRef.current = false
     setSelectedPreset(preset)
     setName(preset.name)
     setBaseUrl(preset.baseUrl)
@@ -1398,11 +1437,24 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   const autoCompactWindowErrorKey = getAutoCompactWindowErrorKey(autoCompactWindow)
   const modelContextWindowErrorSlots = MODEL_SLOTS.filter((slot) => getModelContextWindowErrorKey(modelContextInputs[slot]))
   const canSubmit = name.trim() && baseUrl.trim() && (mode === 'edit' || !requiresApiKey || apiKey.trim()) && models.main.trim() && !settingsJsonError && !autoCompactWindowErrorKey && modelContextWindowErrorSlots.length === 0
-  const apiKeyUrl = selectedPreset.apiKeyUrl?.trim()
-  const promoText = selectedPreset.promoText?.trim()
+  const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl)
+  const isPresetDefaultEndpoint = normalizedBaseUrl === normalizeProviderBaseUrl(selectedPreset.baseUrl)
+  const apiKeyUrl = isPresetDefaultEndpoint ? selectedPreset.apiKeyUrl?.trim() : undefined
+  const promoText = isPresetDefaultEndpoint ? selectedPreset.promoText?.trim() : undefined
   const displayedSettingsJson = showApiKey
     ? settingsJson
     : maskSettingsJsonSecrets(settingsJson)
+  const regionalEndpointOptions = (selectedPreset.regionalEndpoints ?? []).map((endpoint) => ({
+    value: endpoint.baseUrl,
+    label: endpoint.region === 'cn_zh'
+      ? t('settings.providers.regionChina')
+      : endpoint.region === 'global_en'
+        ? t('settings.providers.regionGlobal')
+        : endpoint.region,
+  }))
+  const selectedRegionalEndpointUrl = regionalEndpointOptions.find(
+    (option) => normalizeProviderBaseUrl(option.value) === normalizedBaseUrl,
+  )?.value ?? ''
   const apiFormatItems = [
     {
       value: 'anthropic' as const,
@@ -1755,6 +1807,15 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
         <Input label={t('settings.providers.name')} required value={name} onChange={(e) => setName(e.target.value)} placeholder={t('settings.providers.namePlaceholder')} />
 
         <Input label={t('settings.providers.notes')} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('settings.providers.notesPlaceholder')} />
+
+        {regionalEndpointOptions.length > 1 && (
+          <SelectField
+            label={t('settings.providers.endpointRegion')}
+            options={regionalEndpointOptions}
+            value={selectedRegionalEndpointUrl}
+            onChange={handleBaseUrlChange}
+          />
+        )}
 
         <Input label={t('settings.providers.baseUrl')} required value={baseUrl} onChange={(e) => handleBaseUrlChange(e.target.value)} placeholder={t('settings.providers.baseUrlPlaceholder')} className="font-mono text-[13px]" />
 
@@ -2116,6 +2177,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
           <textarea
             value={displayedSettingsJson}
             onChange={(e) => {
+              settingsJsonUserEditedRef.current = true
               const raw = e.target.value
               try {
                 const parsed = restoreSettingsJsonSecrets(JSON.parse(raw), settingsJson, apiKey)

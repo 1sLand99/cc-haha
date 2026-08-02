@@ -53,6 +53,27 @@ const providerStoreState = {
   fetchModels: vi.fn(),
 }
 
+const ZHIPU_REGIONAL_PRESET: ProviderPreset = {
+  id: 'zhipuglm',
+  name: 'Zhipu GLM',
+  baseUrl: 'https://open.bigmodel.cn/api/anthropic',
+  regionalEndpoints: [
+    { region: 'cn_zh', baseUrl: 'https://open.bigmodel.cn/api/anthropic' },
+    { region: 'global_en', baseUrl: 'https://api.z.ai/api/anthropic' },
+  ],
+  apiFormat: 'anthropic',
+  defaultModels: {
+    main: 'glm-5.2[1m]',
+    haiku: 'glm-4.7',
+    sonnet: 'glm-5.2[1m]',
+    opus: 'glm-5.2[1m]',
+  },
+  needsApiKey: true,
+  websiteUrl: 'https://open.bigmodel.cn',
+  apiKeyUrl: 'https://www.bigmodel.cn/api-keys',
+  promoText: 'Mainland China promotion',
+}
+
 vi.mock('../api/agents', () => ({
   agentsApi: {
     list: vi.fn().mockResolvedValue({ activeAgents: [], allAgents: [] }),
@@ -1822,6 +1843,82 @@ describe('Settings > Providers tab', () => {
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByLabelText(/Name/i)).toHaveValue('Custom')
     expect(within(dialog).getByLabelText(/Base URL/i)).toBeEnabled()
+  })
+
+  it.each(['resolves', 'rejects'] as const)(
+    'keeps the selected regional endpoint when settings loading %s late',
+    async (outcome) => {
+      let settleSettings: (() => void) | undefined
+      MOCK_GET_SETTINGS.mockImplementationOnce(() => new Promise((resolve, reject) => {
+        settleSettings = () => outcome === 'resolves'
+          ? resolve({})
+          : reject(new Error('settings unavailable'))
+      }))
+      providerStoreState.presets = [ZHIPU_REGIONAL_PRESET]
+
+      render(<Settings />)
+      fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }))
+
+      const dialog = screen.getByRole('dialog')
+      await waitFor(() => expect(settleSettings).toBeTypeOf('function'))
+      const regionSelect = within(dialog).getByLabelText('Service region')
+      const baseUrlInput = within(dialog).getByLabelText(/Base URL/i)
+      expect(regionSelect).toHaveValue('https://open.bigmodel.cn/api/anthropic')
+      expect(baseUrlInput).toHaveValue('https://open.bigmodel.cn/api/anthropic')
+      expect(within(dialog).getByRole('button', { name: /Get API Key/i })).toBeInTheDocument()
+      expect(within(dialog).getByText('Mainland China promotion')).toBeInTheDocument()
+
+      fireEvent.change(regionSelect, { target: { value: 'https://api.z.ai/api/anthropic' } })
+
+      expect(baseUrlInput).toHaveValue('https://api.z.ai/api/anthropic')
+      expect(within(dialog).queryByRole('button', { name: /Get API Key/i })).not.toBeInTheDocument()
+      expect(within(dialog).queryByText('Mainland China promotion')).not.toBeInTheDocument()
+      await act(async () => settleSettings?.())
+      await waitFor(() => {
+        expect(dialog.querySelector('textarea')?.value).toContain(
+          '"ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic"',
+        )
+      })
+    },
+  )
+
+  it('preserves pasted regional settings when the initial settings load finishes late', async () => {
+    let resolveSettings: (() => void) | undefined
+    MOCK_GET_SETTINGS.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSettings = () => resolve({ fromDisk: true })
+    }))
+    providerStoreState.presets = [ZHIPU_REGIONAL_PRESET]
+
+    render(<Settings />)
+    fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }))
+
+    const dialog = screen.getByRole('dialog')
+    await waitFor(() => expect(resolveSettings).toBeTypeOf('function'))
+    const settingsTextarea = dialog.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.change(settingsTextarea, {
+      target: {
+        value: JSON.stringify({
+          customSetting: 'keep-me',
+          env: {
+            ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+            ANTHROPIC_MODEL: 'glm-global',
+          },
+        }),
+      },
+    })
+
+    expect(within(dialog).getByLabelText('Service region')).toHaveValue('https://api.z.ai/api/anthropic')
+    expect(within(dialog).getByLabelText(/Base URL/i)).toHaveValue('https://api.z.ai/api/anthropic')
+    await act(async () => resolveSettings?.())
+    await waitFor(() => {
+      expect(JSON.parse(settingsTextarea.value)).toMatchObject({
+        customSetting: 'keep-me',
+        env: {
+          ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+          ANTHROPIC_MODEL: 'glm-global',
+        },
+      })
+    })
   })
 
   it('uses the shared dropdown for API format in the provider form', () => {
