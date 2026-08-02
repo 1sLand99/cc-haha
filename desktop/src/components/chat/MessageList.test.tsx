@@ -5254,7 +5254,7 @@ describe('MessageList nested tool calls', () => {
     expect(await screen.findByText('blank-response.ts')).toBeTruthy()
   })
 
-  it('keeps historical turn change cards visible while the next turn is running', async () => {
+  it('keeps checkpoint evidence while hiding change cards for a running background task', async () => {
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
       checkpoints: [
         {
@@ -5283,7 +5283,7 @@ describe('MessageList nested tool calls', () => {
       {
         id: 'assistant-1',
         type: 'assistant_text',
-        content: 'done',
+        content: '我正准备查看 test123.md',
         timestamp: 2,
       },
     ]
@@ -5297,6 +5297,7 @@ describe('MessageList nested tool calls', () => {
     render(<MessageList />)
 
     expect(await screen.findByText('first.ts')).toBeTruthy()
+    expect(screen.queryByText('Markdown')).toBeNull()
 
     act(() => {
       useChatStore.setState({
@@ -5322,6 +5323,7 @@ describe('MessageList nested tool calls', () => {
     await waitFor(() => {
       expect(screen.queryByText('first.ts')).toBeNull()
     })
+    expect(screen.queryByText('Markdown')).toBeNull()
 
     act(() => {
       useChatStore.setState({
@@ -5347,6 +5349,7 @@ describe('MessageList nested tool calls', () => {
     await waitFor(() => {
       expect(screen.getByText('first.ts')).toBeTruthy()
     })
+    expect(screen.queryByText('Markdown')).toBeNull()
   })
 
   it('does not load turn change cards while background tasks are still running', async () => {
@@ -5604,7 +5607,7 @@ describe('MessageList nested tool calls', () => {
             {
               id: 'assistant-2',
               type: 'assistant_text',
-              content: 'second done',
+              content: '我正准备查看 test123.md',
               timestamp: 4,
             },
           ],
@@ -5618,6 +5621,9 @@ describe('MessageList nested tool calls', () => {
     expect(cards).toHaveLength(1)
     expect(screen.getByText('first.ts')).toBeTruthy()
     expect(screen.queryByText('second.ts')).toBeNull()
+    await waitFor(() => {
+      expect(screen.queryByText('Markdown')).toBeNull()
+    })
   })
 
   it('shows raw startup details under translated CLI startup errors', () => {

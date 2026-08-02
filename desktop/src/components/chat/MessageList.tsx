@@ -793,6 +793,7 @@ function buildTurnCardInsertionMap(
 
   const cardsByRenderIndex = new Map<number, TurnChangeCardModel[]>()
   turnChangeCards.forEach((card) => {
+    if (card.checkpoint.code.filesChanged.length === 0) return
     const renderIndex =
       lastResponseIndexByTurnId.get(card.target.messageId) ??
       userIndexByTurnId.get(card.target.messageId)
@@ -820,9 +821,7 @@ function buildChangedFilesByRenderIndex(
 ): Map<number, string[]> {
   const filesByTurnId = new Map<string, string[]>()
   for (const card of turnChangeCards) {
-    if (card.checkpoint.code.filesChanged.length > 0) {
-      filesByTurnId.set(card.target.messageId, card.checkpoint.code.filesChanged)
-    }
+    filesByTurnId.set(card.target.messageId, card.checkpoint.code.filesChanged)
   }
   if (filesByTurnId.size === 0) return new Map()
 
@@ -2022,8 +2021,8 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     [renderItems, visibleTurnChangeCards],
   )
   const changedFilesByRenderIndex = useMemo(
-    () => buildChangedFilesByRenderIndex(renderItems, visibleTurnChangeCards),
-    [renderItems, visibleTurnChangeCards],
+    () => buildChangedFilesByRenderIndex(renderItems, turnChangeCards),
+    [renderItems, turnChangeCards],
   )
   const renderItemKeys = useMemo(
     () => renderItems.map(getRenderItemKey),
@@ -2170,7 +2169,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
             const target =
               targetByMessageId.get(checkpoint.target.targetUserMessageId) ??
               targetByUserMessageIndex.get(checkpoint.target.userMessageIndex)
-            if (!target || !checkpoint.code.available || checkpoint.code.filesChanged.length === 0) {
+            if (!target || !checkpoint.code.available) {
               return []
             }
             return [{

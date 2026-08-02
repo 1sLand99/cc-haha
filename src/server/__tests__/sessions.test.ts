@@ -5572,6 +5572,119 @@ describe('Sessions API', () => {
     ])
   })
 
+  it('GET /api/sessions/:id/turn-checkpoints should keep an available empty preview for an unchanged snapshot-backed turn', async () => {
+    const sessionId = '99999999-bbbb-cccc-dddd-000000000005'
+    const workDir = path.join(tmpDir, 'unchanged-snapshot-session')
+    const targetFile = path.join(workDir, 'src', 'unchanged.ts')
+    const userId = crypto.randomUUID()
+    const backupName = 'unchanged-snapshot@v1'
+    const content = 'export const unchanged = true\n'
+
+    await fs.mkdir(path.dirname(targetFile), { recursive: true })
+    await fs.writeFile(targetFile, content, 'utf-8')
+    await writeFileHistoryBackup(sessionId, backupName, content)
+    await writeSessionFile('-tmp-unchanged-snapshot-session', sessionId, [
+      makeSessionMetaEntry(workDir),
+      makeFileHistorySnapshotEntry(userId, {
+        'src/unchanged.ts': {
+          backupFileName: backupName,
+          version: 1,
+          backupTime: '2026-01-01T00:00:00.000Z',
+        },
+      }),
+      {
+        ...makeUserEntry('inspect the project', userId),
+        cwd: workDir,
+        sessionId,
+      },
+      makeAssistantEntry('No files needed changes.', userId),
+    ])
+
+    const res = await fetch(`${baseUrl}/api/sessions/${sessionId}/turn-checkpoints`)
+    expect(res.status).toBe(200)
+    const body = await res.json() as {
+      checkpoints: Array<{
+        target: { targetUserMessageId: string }
+        code: {
+          available: boolean
+          filesChanged: string[]
+          insertions: number
+          deletions: number
+        }
+      }>
+    }
+
+    expect(body.checkpoints).toHaveLength(1)
+    expect(body.checkpoints[0]).toMatchObject({
+      target: { targetUserMessageId: userId },
+      code: {
+        available: true,
+        filesChanged: [],
+        insertions: 0,
+        deletions: 0,
+      },
+    })
+  })
+
+  it('GET /api/sessions/:id/turn-checkpoints should retain transcript changes when the snapshot diff is empty', async () => {
+    const sessionId = '99999999-bbbb-cccc-dddd-000000000006'
+    const workDir = path.join(tmpDir, 'empty-snapshot-transcript-session')
+    const unchangedFile = path.join(workDir, 'src', 'unchanged.ts')
+    const transcriptFile = path.join(workDir, 'test123.md')
+    const userId = crypto.randomUUID()
+    const backupName = 'empty-snapshot-transcript@v1'
+    const content = 'export const unchanged = true\n'
+
+    await fs.mkdir(path.dirname(unchangedFile), { recursive: true })
+    await fs.writeFile(unchangedFile, content, 'utf-8')
+    await writeFileHistoryBackup(sessionId, backupName, content)
+    await writeSessionFile('-tmp-empty-snapshot-transcript-session', sessionId, [
+      makeSessionMetaEntry(workDir),
+      makeFileHistorySnapshotEntry(userId, {
+        'src/unchanged.ts': {
+          backupFileName: backupName,
+          version: 1,
+          backupTime: '2026-01-01T00:00:00.000Z',
+        },
+      }),
+      {
+        ...makeUserEntry('write a short note', userId),
+        cwd: workDir,
+        sessionId,
+      },
+      makeAssistantToolUseEntry([{
+        id: 'Write:empty-snapshot-fallback',
+        name: 'Write',
+        input: {
+          file_path: transcriptFile,
+          content: '# Notes\n',
+        },
+      }], userId),
+      makeAssistantEntry('Note written.', userId),
+    ])
+
+    const res = await fetch(`${baseUrl}/api/sessions/${sessionId}/turn-checkpoints`)
+    expect(res.status).toBe(200)
+    const body = await res.json() as {
+      checkpoints: Array<{
+        code: {
+          available: boolean
+          filesChanged: string[]
+          insertions: number
+          deletions: number
+        }
+      }>
+    }
+
+    expect(body.checkpoints).toHaveLength(1)
+    expect(body.checkpoints[0]!.code).toEqual({
+      available: true,
+      filesChanged: [transcriptFile],
+      insertions: 1,
+      deletions: 0,
+    })
+  })
+
   it('GET /api/sessions/:id/turn-checkpoints/diff should return target-bound checkpoint diffs', async () => {
     const fixture = await createThreeTurnCheckpointFixture(
       '99999999-bbbb-cccc-dddd-ffffffffffff',
