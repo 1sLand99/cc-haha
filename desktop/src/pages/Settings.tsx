@@ -24,7 +24,6 @@ import { useTranslation, type TranslationKey } from '../i18n'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Input } from '@/components/ui/Input'
-import { SelectField } from '@/components/ui/SelectField'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { Badge, StatusDot } from '@/components/ui/Badge'
@@ -1444,17 +1443,28 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   const displayedSettingsJson = showApiKey
     ? settingsJson
     : maskSettingsJsonSecrets(settingsJson)
-  const regionalEndpointOptions = (selectedPreset.regionalEndpoints ?? []).map((endpoint) => ({
+  const regionalEndpointItems = (selectedPreset.regionalEndpoints ?? []).map((endpoint) => ({
     value: endpoint.baseUrl,
     label: endpoint.region === 'cn_zh'
       ? t('settings.providers.regionChina')
       : endpoint.region === 'global_en'
         ? t('settings.providers.regionGlobal')
         : endpoint.region,
+    description: endpoint.baseUrl,
+    icon: (
+      <span className="material-symbols-outlined text-[17px]">
+        {endpoint.region === 'cn_zh' ? 'location_on' : endpoint.region === 'global_en' ? 'public' : 'link'}
+      </span>
+    ),
   }))
-  const selectedRegionalEndpointUrl = regionalEndpointOptions.find(
+  const selectedRegionalEndpointUrl = regionalEndpointItems.find(
     (option) => normalizeProviderBaseUrl(option.value) === normalizedBaseUrl,
   )?.value ?? ''
+  // A hand-typed or pasted baseUrl may match no regional endpoint; the old
+  // native select went blank there, but the Dropdown trigger needs real text.
+  const selectedRegionalEndpointLabel = regionalEndpointItems.find(
+    (item) => item.value === selectedRegionalEndpointUrl,
+  )?.label ?? t('settings.providers.regionCustom')
   const apiFormatItems = [
     {
       value: 'anthropic' as const,
@@ -1808,13 +1818,24 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
 
         <Input label={t('settings.providers.notes')} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('settings.providers.notesPlaceholder')} />
 
-        {regionalEndpointOptions.length > 1 && (
-          <SelectField
-            label={t('settings.providers.endpointRegion')}
-            options={regionalEndpointOptions}
-            value={selectedRegionalEndpointUrl}
-            onChange={handleBaseUrlChange}
-          />
+        {regionalEndpointItems.length > 1 && (
+          <div>
+            <label className="text-sm font-medium text-[var(--color-text-primary)] mb-1 block">{t('settings.providers.endpointRegion')}</label>
+            <Dropdown<string>
+              items={regionalEndpointItems}
+              value={selectedRegionalEndpointUrl}
+              onChange={handleBaseUrlChange}
+              label={t('settings.providers.endpointRegion')}
+              width="100%"
+              className="block w-full"
+              trigger={
+                <Button variant="secondary" size="md" block className="h-10 gap-3">
+                  <span className="min-w-0 flex-1 truncate text-left">{selectedRegionalEndpointLabel}</span>
+                  <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">expand_more</span>
+                </Button>
+              }
+            />
+          </div>
         )}
 
         <Input label={t('settings.providers.baseUrl')} required value={baseUrl} onChange={(e) => handleBaseUrlChange(e.target.value)} placeholder={t('settings.providers.baseUrlPlaceholder')} className="font-mono text-[13px]" />

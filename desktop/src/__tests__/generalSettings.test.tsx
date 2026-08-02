@@ -1861,14 +1861,15 @@ describe('Settings > Providers tab', () => {
 
       const dialog = screen.getByRole('dialog')
       await waitFor(() => expect(settleSettings).toBeTypeOf('function'))
-      const regionSelect = within(dialog).getByLabelText('Service region')
+      expect(within(dialog).queryByRole('combobox')).not.toBeInTheDocument()
+      const regionTrigger = within(dialog).getByRole('button', { name: /China mainland/ })
       const baseUrlInput = within(dialog).getByLabelText(/Base URL/i)
-      expect(regionSelect).toHaveValue('https://open.bigmodel.cn/api/anthropic')
       expect(baseUrlInput).toHaveValue('https://open.bigmodel.cn/api/anthropic')
       expect(within(dialog).getByRole('button', { name: /Get API Key/i })).toBeInTheDocument()
       expect(within(dialog).getByText('Mainland China promotion')).toBeInTheDocument()
 
-      fireEvent.change(regionSelect, { target: { value: 'https://api.z.ai/api/anthropic' } })
+      fireEvent.click(regionTrigger)
+      fireEvent.click(within(dialog).getByRole('option', { name: /Global/ }))
 
       expect(baseUrlInput).toHaveValue('https://api.z.ai/api/anthropic')
       expect(within(dialog).queryByRole('button', { name: /Get API Key/i })).not.toBeInTheDocument()
@@ -1907,7 +1908,7 @@ describe('Settings > Providers tab', () => {
       },
     })
 
-    expect(within(dialog).getByLabelText('Service region')).toHaveValue('https://api.z.ai/api/anthropic')
+    expect(within(dialog).getByRole('button', { name: /Global/ })).toBeInTheDocument()
     expect(within(dialog).getByLabelText(/Base URL/i)).toHaveValue('https://api.z.ai/api/anthropic')
     await act(async () => resolveSettings?.())
     await waitFor(() => {

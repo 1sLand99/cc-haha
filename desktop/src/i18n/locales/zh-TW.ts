@@ -694,6 +694,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.providers.endpointRegion': '服務區域',
   'settings.providers.regionChina': '中國大陸',
   'settings.providers.regionGlobal': '海外',
+  'settings.providers.regionCustom': '自訂',
   'settings.providers.apiKey': 'API 金鑰',
   'settings.providers.apiKeyKeep': 'API 金鑰（留空保持不變）',
   'settings.providers.showApiKey': '顯示 API 金鑰',

@@ -695,6 +695,7 @@ export const jp: Record<TranslationKey, string> = {
   'settings.providers.endpointRegion': 'サービス地域',
   'settings.providers.regionChina': '中国本土',
   'settings.providers.regionGlobal': 'グローバル',
+  'settings.providers.regionCustom': 'カスタム',
   'settings.providers.apiKey': 'API キー',
   'settings.providers.apiKeyKeep': 'API キー（空欄のままにすると現在の値を保持）',
   'settings.providers.showApiKey': 'API キーを表示',

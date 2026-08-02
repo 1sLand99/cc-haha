@@ -695,6 +695,7 @@ export const kr: Record<TranslationKey, string> = {
   'settings.providers.endpointRegion': '서비스 지역',
   'settings.providers.regionChina': '중국 본토',
   'settings.providers.regionGlobal': '글로벌',
+  'settings.providers.regionCustom': '사용자 지정',
   'settings.providers.apiKey': 'API 키',
   'settings.providers.apiKeyKeep': 'API 키 (비워 두면 현재 값 유지)',
   'settings.providers.showApiKey': 'API 키 표시',
