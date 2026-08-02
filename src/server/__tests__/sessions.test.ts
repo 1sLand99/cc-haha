@@ -1627,6 +1627,7 @@ describe('SessionService', () => {
         id: 'Agent:0/abc123/Read:0',
         name: 'Read',
         input: { file_path: '/tmp/alpha.txt' },
+        original_tool_use_id: 'Read:0',
       },
     ])
     expect(childToolResult?.content).toEqual([
@@ -1634,6 +1635,7 @@ describe('SessionService', () => {
         type: 'tool_result',
         tool_use_id: 'Agent:0/abc123/Read:0',
         content: 'alpha body',
+        original_tool_use_id: 'Read:0',
       },
     ])
   })

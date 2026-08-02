@@ -2584,19 +2584,21 @@ function discardActiveTitleTurn(sessionId: string, count: number | null): void {
 // CLI message translation
 // ============================================================================
 
-/**
- * Per-session streaming state to avoid cross-session interference.
- * Each session tracks its own dedup flag, active block types, and tool blocks.
- */
+const ROOT_STREAM_SCOPE = '\u0000root'
+
+/** Per-session state for correlating raw stream events with buffered messages. */
 type SessionStreamState = {
-  hasReceivedStreamEvents: boolean
-  activeBlockTypes: Map<number, 'text' | 'tool_use' | 'thinking'>
-  activeToolBlocks: Map<number, { toolName: string; toolUseId: string; inputJson: string; parentToolUseId?: string }>
+  streamedAssistantMessageIds: Set<string>
+  unidentifiedStreamScopes: Set<string>
+  activeMessageIdsByScope: Map<string, string>
+  activeBlockScopesByIndex: Map<number, Set<string>>
+  activeBlockTypes: Map<string, 'text' | 'tool_use' | 'thinking'>
+  activeToolBlocks: Map<string, { toolName: string; toolUseId: string; inputJson: string; parentToolUseId?: string }>
   pendingLocalCommand?: { name: string; args: string }
   /** Tool blocks whose input JSON failed to parse in content_block_stop.
    *  The assistant message carries the complete input — defer to that. */
   pendingToolBlocks: Map<string, { toolName: string; toolUseId: string; parentToolUseId?: string }>
-  toolParentUseIds: Map<string, string>
+  toolParentUseIds: Map<string, Set<string>>
   lastApiError?: {
     message: string
     code: string
@@ -2609,7 +2611,10 @@ function getStreamState(sessionId: string): SessionStreamState {
   let state = sessionStreamStates.get(sessionId)
   if (!state) {
     state = {
-      hasReceivedStreamEvents: false,
+      streamedAssistantMessageIds: new Set(),
+      unidentifiedStreamScopes: new Set(),
+      activeMessageIdsByScope: new Map(),
+      activeBlockScopesByIndex: new Map(),
       activeBlockTypes: new Map(),
       activeToolBlocks: new Map(),
       pendingLocalCommand: undefined,
@@ -2623,10 +2628,14 @@ function getStreamState(sessionId: string): SessionStreamState {
 }
 
 function resetCurrentStreamAttempt(state: SessionStreamState): void {
-  state.hasReceivedStreamEvents = false
+  state.streamedAssistantMessageIds.clear()
+  state.unidentifiedStreamScopes.clear()
+  state.activeMessageIdsByScope.clear()
+  state.activeBlockScopesByIndex.clear()
   state.activeBlockTypes.clear()
   state.activeToolBlocks.clear()
   state.pendingToolBlocks.clear()
+  state.toolParentUseIds.clear()
 }
 
 function cliParentToolUseId(cliMsg: any): string | undefined {
@@ -2635,13 +2644,93 @@ function cliParentToolUseId(cliMsg: any): string | undefined {
     : undefined
 }
 
+function cliStreamScope(cliMsg: any): string {
+  return cliParentToolUseId(cliMsg) ?? ROOT_STREAM_SCOPE
+}
+
+function streamBlockKey(scope: string, index: number): string {
+  return JSON.stringify([scope, index])
+}
+
+function rememberActiveBlockScope(
+  streamState: SessionStreamState,
+  index: number,
+  scope: string,
+): void {
+  const scopes = streamState.activeBlockScopesByIndex.get(index) ?? new Set()
+  scopes.add(scope)
+  streamState.activeBlockScopesByIndex.set(index, scopes)
+}
+
+function forgetActiveBlockScope(
+  streamState: SessionStreamState,
+  index: number,
+  scope: string,
+): void {
+  const scopes = streamState.activeBlockScopesByIndex.get(index)
+  if (!scopes) return
+  scopes.delete(scope)
+  if (scopes.size === 0) streamState.activeBlockScopesByIndex.delete(index)
+}
+
+function resolveActiveBlockKey(
+  streamState: SessionStreamState,
+  cliMsg: any,
+  index: number,
+): { key: string; scope: string } | null {
+  const parentToolUseId = cliParentToolUseId(cliMsg)
+  if (parentToolUseId) {
+    return {
+      key: streamBlockKey(parentToolUseId, index),
+      scope: parentToolUseId,
+    }
+  }
+
+  const scopes = streamState.activeBlockScopesByIndex.get(index)
+  if (scopes?.size !== 1) return null
+  const scope = scopes.values().next().value
+  if (typeof scope !== 'string') return null
+  return { key: streamBlockKey(scope, index), scope }
+}
+
+function pendingToolBlockKey(
+  parentToolUseId: string | undefined,
+  toolUseId: string,
+): string {
+  return JSON.stringify([parentToolUseId ?? null, toolUseId])
+}
+
+function scopedToolUseId(
+  parentToolUseId: string | undefined,
+  toolUseId: string,
+): string {
+  if (!parentToolUseId || toolUseId.startsWith(`${parentToolUseId}/`)) {
+    return toolUseId
+  }
+  return `${parentToolUseId}/${toolUseId}`
+}
+
 function rememberToolParentUseId(
   streamState: SessionStreamState,
   toolUseId: string | undefined,
   parentToolUseId: string | undefined,
 ): void {
   if (!toolUseId || !parentToolUseId) return
-  streamState.toolParentUseIds.set(toolUseId, parentToolUseId)
+  const parents = streamState.toolParentUseIds.get(toolUseId) ?? new Set()
+  parents.add(parentToolUseId)
+  streamState.toolParentUseIds.set(toolUseId, parents)
+}
+
+function forgetToolParentUseId(
+  streamState: SessionStreamState,
+  toolUseId: string | undefined,
+  parentToolUseId: string | undefined,
+): void {
+  if (!toolUseId || !parentToolUseId) return
+  const parents = streamState.toolParentUseIds.get(toolUseId)
+  if (!parents) return
+  parents.delete(parentToolUseId)
+  if (parents.size === 0) streamState.toolParentUseIds.delete(toolUseId)
 }
 
 function consumeToolParentUseId(
@@ -2649,9 +2738,10 @@ function consumeToolParentUseId(
   toolUseId: string | undefined,
 ): string | undefined {
   if (!toolUseId) return undefined
-  const parentToolUseId = streamState.toolParentUseIds.get(toolUseId)
+  const parents = streamState.toolParentUseIds.get(toolUseId)
   streamState.toolParentUseIds.delete(toolUseId)
-  return parentToolUseId
+  if (parents?.size !== 1) return undefined
+  return parents.values().next().value
 }
 
 /** Clean up stream state when session disconnects */
@@ -2903,46 +2993,63 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
         }]
       }
 
-      // If we already received stream_events, text/thinking were already sent.
-      // Only extract tool_use blocks (stream_event's content_block_stop lacks complete tool info).
+      // Raw stream events and the buffered assistant carry the same message ID.
+      // Deduplicate that exact API message rather than the whole session or
+      // parent Agent lifetime, where unrelated subagent progress can interleave.
       if (cliMsg.message?.content && Array.isArray(cliMsg.message.content)) {
         const messages: ServerMessage[] = []
+        const parentToolUseId = cliParentToolUseId(cliMsg)
+        const streamScope = cliStreamScope(cliMsg)
+        const messageId = typeof cliMsg.message.id === 'string'
+          ? cliMsg.message.id
+          : undefined
+        const receivedMatchingStream = messageId
+          ? streamState.streamedAssistantMessageIds.has(messageId)
+          : streamState.unidentifiedStreamScopes.delete(streamScope)
+        if (messageId) streamState.unidentifiedStreamScopes.delete(streamScope)
+        if (
+          messageId &&
+          streamState.activeMessageIdsByScope.get(streamScope) === messageId
+        ) {
+          streamState.activeMessageIdsByScope.delete(streamScope)
+        }
 
         for (const block of cliMsg.message.content) {
-          if (streamState.hasReceivedStreamEvents) {
+          if (receivedMatchingStream) {
             // Stream events handled most blocks — but any tool_use whose
             // input JSON failed to parse in content_block_stop was deferred.
             // Emit those now with the complete input from the assistant message.
-            if (block.type === 'tool_use' && streamState.pendingToolBlocks.has(block.id)) {
-              const pending = streamState.pendingToolBlocks.get(block.id)!
-              streamState.pendingToolBlocks.delete(block.id)
+            const pendingKey = block.type === 'tool_use'
+              ? pendingToolBlockKey(parentToolUseId, block.id)
+              : undefined
+            if (pendingKey && streamState.pendingToolBlocks.has(pendingKey)) {
+              const pending = streamState.pendingToolBlocks.get(pendingKey)!
+              streamState.pendingToolBlocks.delete(pendingKey)
               rememberToolParentUseId(streamState, block.id, pending.parentToolUseId)
               messages.push({
                 type: 'tool_use_complete',
                 toolName: pending.toolName || block.name,
-                toolUseId: block.id,
+                toolUseId: scopedToolUseId(pending.parentToolUseId, block.id),
+                ...(pending.parentToolUseId ? { originalToolUseId: block.id } : {}),
                 input: block.input,
                 parentToolUseId: pending.parentToolUseId,
               })
             }
-          } else {
-            // No stream events received — this is the only source, process everything
-            if (block.type === 'thinking' && block.thinking) {
-              messages.push({ type: 'thinking', text: block.thinking })
-            } else if (block.type === 'text' && block.text) {
-              messages.push({ type: 'content_start', blockType: 'text' })
-              messages.push({ type: 'content_delta', text: block.text })
-            } else if (block.type === 'tool_use') {
-              const parentToolUseId = cliParentToolUseId(cliMsg)
-              rememberToolParentUseId(streamState, block.id, parentToolUseId)
-              messages.push({
-                type: 'tool_use_complete',
-                toolName: block.name,
-                toolUseId: block.id,
-                input: block.input,
-                parentToolUseId,
-              })
-            }
+          } else if (block.type === 'tool_use') {
+            rememberToolParentUseId(streamState, block.id, parentToolUseId)
+            messages.push({
+              type: 'tool_use_complete',
+              toolName: block.name,
+              toolUseId: scopedToolUseId(parentToolUseId, block.id),
+              ...(parentToolUseId ? { originalToolUseId: block.id } : {}),
+              input: block.input,
+              parentToolUseId,
+            })
+          } else if (!parentToolUseId && block.type === 'thinking' && block.thinking) {
+            messages.push({ type: 'thinking', text: block.thinking })
+          } else if (!parentToolUseId && block.type === 'text' && block.text) {
+            messages.push({ type: 'content_start', blockType: 'text' })
+            messages.push({ type: 'content_delta', text: block.text })
           }
         }
 
@@ -2995,12 +3102,18 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
       if (cliMsg.message?.content && Array.isArray(cliMsg.message.content)) {
         for (const block of cliMsg.message.content) {
           if (block.type === 'tool_result') {
-            const rememberedParentToolUseId = consumeToolParentUseId(streamState, block.tool_use_id)
-            const parentToolUseId =
-              cliParentToolUseId(cliMsg) ?? rememberedParentToolUseId
+            const directParentToolUseId = cliParentToolUseId(cliMsg)
+            const parentToolUseId = directParentToolUseId ??
+              consumeToolParentUseId(streamState, block.tool_use_id)
+            forgetToolParentUseId(
+              streamState,
+              block.tool_use_id,
+              directParentToolUseId,
+            )
             messages.push({
               type: 'tool_result',
-              toolUseId: block.tool_use_id,
+              toolUseId: scopedToolUseId(parentToolUseId, block.tool_use_id),
+              ...(parentToolUseId ? { originalToolUseId: block.tool_use_id } : {}),
               content: normalizeAskUserQuestionToolResult(block.content, cliMsg.toolUseResult),
               isError: !!block.is_error,
               parentToolUseId,
@@ -3021,12 +3134,22 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
     }
 
     case 'stream_event': {
-      streamState.hasReceivedStreamEvents = true
       const event = cliMsg.event
       if (!event) return []
 
       switch (event.type) {
         case 'message_start': {
+          const scope = cliStreamScope(cliMsg)
+          const messageId = typeof event.message?.id === 'string'
+            ? event.message.id
+            : undefined
+          if (messageId) {
+            streamState.streamedAssistantMessageIds.add(messageId)
+            streamState.activeMessageIdsByScope.set(scope, messageId)
+            streamState.unidentifiedStreamScopes.delete(scope)
+          } else {
+            streamState.unidentifiedStreamScopes.add(scope)
+          }
           return [{ type: 'status', state: 'thinking', attemptStart: true }]
         }
 
@@ -3034,13 +3157,21 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
           const contentBlock = event.content_block
           if (!contentBlock) return []
 
+          const scope = cliStreamScope(cliMsg)
+          if (!streamState.activeMessageIdsByScope.has(scope)) {
+            streamState.unidentifiedStreamScopes.add(scope)
+          }
           const index = event.index ?? 0
+          const blockKey = streamBlockKey(scope, index)
+          rememberActiveBlockScope(streamState, index, scope)
 
           if (contentBlock.type === 'tool_use') {
-            const parentToolUseId = cliParentToolUseId(cliMsg)
-            streamState.activeBlockTypes.set(index, 'tool_use')
+            const parentToolUseId = cliParentToolUseId(cliMsg) ?? (
+              scope === ROOT_STREAM_SCOPE ? undefined : scope
+            )
+            streamState.activeBlockTypes.set(blockKey, 'tool_use')
             // Track tool info so content_block_stop can emit complete data
-            streamState.activeToolBlocks.set(index, {
+            streamState.activeToolBlocks.set(blockKey, {
               toolName: contentBlock.name || '',
               toolUseId: contentBlock.id || '',
               inputJson: '',
@@ -3050,17 +3181,18 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
               type: 'content_start',
               blockType: 'tool_use',
               toolName: contentBlock.name,
-              toolUseId: contentBlock.id,
+              toolUseId: scopedToolUseId(parentToolUseId, contentBlock.id || ''),
+              ...(parentToolUseId ? { originalToolUseId: contentBlock.id } : {}),
               parentToolUseId,
             }]
           }
 
           if (contentBlock.type === 'thinking' || contentBlock.type === 'redacted_thinking') {
-            streamState.activeBlockTypes.set(index, 'thinking')
+            streamState.activeBlockTypes.set(blockKey, 'thinking')
             return [{ type: 'status', state: 'thinking', verb: 'Thinking' }]
           }
 
-          streamState.activeBlockTypes.set(index, 'text')
+          streamState.activeBlockTypes.set(blockKey, 'text')
           return [{ type: 'content_start', blockType: 'text' }]
         }
 
@@ -3074,8 +3206,12 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
           if (delta.type === 'input_json_delta' && delta.partial_json) {
             // Accumulate tool input JSON
             const index = event.index ?? 0
-            const toolBlock = streamState.activeToolBlocks.get(index)
-            if (toolBlock) toolBlock.inputJson += delta.partial_json
+            const activeBlock = resolveActiveBlockKey(streamState, cliMsg, index)
+            const toolBlock = activeBlock
+              ? streamState.activeToolBlocks.get(activeBlock.key)
+              : undefined
+            if (!toolBlock) return []
+            toolBlock.inputJson += delta.partial_json
             return [{ type: 'content_delta', toolInput: delta.partial_json }]
           }
           if (delta.type === 'thinking_delta' && delta.thinking) {
@@ -3086,12 +3222,15 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
 
         case 'content_block_stop': {
           const index = event.index ?? 0
-          const blockType = streamState.activeBlockTypes.get(index)
-          streamState.activeBlockTypes.delete(index)
+          const activeBlock = resolveActiveBlockKey(streamState, cliMsg, index)
+          if (!activeBlock) return []
+          const blockType = streamState.activeBlockTypes.get(activeBlock.key)
+          streamState.activeBlockTypes.delete(activeBlock.key)
+          forgetActiveBlockScope(streamState, index, activeBlock.scope)
 
           if (blockType === 'tool_use') {
-            const toolBlock = streamState.activeToolBlocks.get(index)
-            streamState.activeToolBlocks.delete(index)
+            const toolBlock = streamState.activeToolBlocks.get(activeBlock.key)
+            streamState.activeToolBlocks.delete(activeBlock.key)
             if (toolBlock) {
               const parentToolUseId =
                 cliParentToolUseId(cliMsg) ?? toolBlock.parentToolUseId
@@ -3103,7 +3242,8 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
                 return [{
                   type: 'tool_use_complete',
                   toolName: toolBlock.toolName,
-                  toolUseId: toolBlock.toolUseId,
+                  toolUseId: scopedToolUseId(parentToolUseId, toolBlock.toolUseId),
+                  ...(parentToolUseId ? { originalToolUseId: toolBlock.toolUseId } : {}),
                   input: parsedInput,
                   parentToolUseId,
                 }]
@@ -3116,11 +3256,14 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
               console.debug(
                 `[WS] Tool input JSON parse failed for ${toolBlock.toolName} (${toolBlock.toolUseId}), deferring to assistant message`,
               )
-              streamState.pendingToolBlocks.set(toolBlock.toolUseId, {
-                toolName: toolBlock.toolName,
-                toolUseId: toolBlock.toolUseId,
-                parentToolUseId,
-              })
+              streamState.pendingToolBlocks.set(
+                pendingToolBlockKey(parentToolUseId, toolBlock.toolUseId),
+                {
+                  toolName: toolBlock.toolName,
+                  toolUseId: toolBlock.toolUseId,
+                  parentToolUseId,
+                },
+              )
             }
           }
           return []
@@ -3393,7 +3536,8 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
           return [{
             type: 'tool_use_complete',
             toolName: activity.tool_name,
-            toolUseId: activity.tool_use_id,
+            toolUseId: scopedToolUseId(parentToolUseId, activity.tool_use_id),
+            originalToolUseId: activity.tool_use_id,
             input: activity.input,
             parentToolUseId,
           }]
@@ -3401,7 +3545,8 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
         if (activity?.kind === 'tool_result') {
           return [{
             type: 'tool_result',
-            toolUseId: activity.tool_use_id,
+            toolUseId: scopedToolUseId(parentToolUseId, activity.tool_use_id),
+            originalToolUseId: activity.tool_use_id,
             content: activity.content,
             isError: activity.is_error === true,
             parentToolUseId,

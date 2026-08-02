@@ -1811,10 +1811,18 @@ export class SessionService {
     return (content as ContentBlock[]).map((block) => {
       if (!block || typeof block !== 'object') return block
       if (block.type === 'tool_use' && typeof block.id === 'string') {
-        return { ...block, id: `${namespace}/${block.id}` }
+        return {
+          ...block,
+          id: `${namespace}/${block.id}`,
+          original_tool_use_id: block.id,
+        }
       }
       if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
-        return { ...block, tool_use_id: `${namespace}/${block.tool_use_id}` }
+        return {
+          ...block,
+          tool_use_id: `${namespace}/${block.tool_use_id}`,
+          original_tool_use_id: block.tool_use_id,
+        }
       }
       return block
     })

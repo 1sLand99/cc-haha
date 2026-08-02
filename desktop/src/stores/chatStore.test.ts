@@ -1311,6 +1311,134 @@ describe('chatStore history mapping', () => {
     })
   })
 
+  function mockRestoredSubagentActivity() {
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [
+        {
+          id: 'restored-child-use',
+          type: 'assistant',
+          timestamp: '2026-08-02T10:22:48.000Z',
+          parentToolUseId: 'agent-parent',
+          content: [{
+            type: 'tool_use',
+            id: 'agent-parent/agent-a500/call-child',
+            original_tool_use_id: 'call-child',
+            name: 'Grep',
+            input: { pattern: 'needle' },
+          }],
+        },
+        {
+          id: 'restored-child-result',
+          type: 'user',
+          timestamp: '2026-08-02T10:22:49.000Z',
+          parentToolUseId: 'agent-parent',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'agent-parent/agent-a500/call-child',
+            original_tool_use_id: 'call-child',
+            content: 'match',
+          }],
+        },
+      ],
+    })
+  }
+
+  it('backfills a synchronous subagent tool call missing from the live stream', async () => {
+    mockRestoredSubagentActivity()
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          messages: [
+            {
+              id: 'live-agent',
+              type: 'tool_use',
+              toolName: 'Agent',
+              toolUseId: 'agent-parent',
+              input: { description: 'Review code' },
+              timestamp: 1,
+            },
+            {
+              id: 'live-orphan-result',
+              type: 'tool_result',
+              toolUseId: 'agent-parent/call-child',
+              originalToolUseId: 'call-child',
+              content: 'match',
+              isError: false,
+              parentToolUseId: 'agent-parent',
+              timestamp: 2,
+            },
+          ],
+        }),
+      },
+    })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    const messages = useChatStore.getState().sessions[TEST_SESSION_ID]?.messages ?? []
+    const childUses = messages.filter((message) =>
+      message.type === 'tool_use' && message.parentToolUseId === 'agent-parent')
+    const childResults = messages.filter((message) =>
+      message.type === 'tool_result' && message.parentToolUseId === 'agent-parent')
+    expect(childUses).toHaveLength(1)
+    expect(childUses[0]).toMatchObject({
+      toolName: 'Grep',
+      toolUseId: 'agent-parent/call-child',
+    })
+    expect(childResults).toHaveLength(1)
+    expect(childResults[0]).toMatchObject({ toolUseId: 'agent-parent/call-child' })
+    expect(messages.indexOf(childUses[0]!)).toBeLessThan(
+      messages.indexOf(childResults[0]!),
+    )
+  })
+
+  it('does not duplicate complete live subagent activity during history hydration', async () => {
+    mockRestoredSubagentActivity()
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          messages: [
+            {
+              id: 'live-agent',
+              type: 'tool_use',
+              toolName: 'Agent',
+              toolUseId: 'agent-parent',
+              input: { description: 'Review code' },
+              timestamp: 1,
+            },
+            {
+              id: 'live-child-use',
+              type: 'tool_use',
+              toolName: 'Grep',
+              toolUseId: 'agent-parent/call-child',
+              originalToolUseId: 'call-child',
+              input: { pattern: 'needle' },
+              parentToolUseId: 'agent-parent',
+              timestamp: 2,
+            },
+            {
+              id: 'live-child-result',
+              type: 'tool_result',
+              toolUseId: 'agent-parent/call-child',
+              originalToolUseId: 'call-child',
+              content: 'match',
+              isError: false,
+              parentToolUseId: 'agent-parent',
+              timestamp: 3,
+            },
+          ],
+        }),
+      },
+    })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    const messages = useChatStore.getState().sessions[TEST_SESSION_ID]?.messages ?? []
+    expect(messages.filter((message) =>
+      message.type === 'tool_use' && message.parentToolUseId === 'agent-parent')).toHaveLength(1)
+    expect(messages.filter((message) =>
+      message.type === 'tool_result' && message.parentToolUseId === 'agent-parent')).toHaveLength(1)
+  })
+
   it('hydrates transcript ids for a just-completed live turn', async () => {
     vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
       messages: [
@@ -2260,14 +2388,16 @@ describe('chatStore history mapping', () => {
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'tool_use_complete',
       toolName: 'Read',
-      toolUseId: 'tool-1',
+      toolUseId: 'agent-1/tool-1',
+      originalToolUseId: 'tool-1',
       input: { file_path: 'src/App.tsx' },
       parentToolUseId: 'agent-1',
     })
 
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'tool_result',
-      toolUseId: 'tool-1',
+      toolUseId: 'agent-1/tool-1',
+      originalToolUseId: 'tool-1',
       content: 'ok',
       isError: false,
       parentToolUseId: 'agent-1',
@@ -2276,12 +2406,14 @@ describe('chatStore history mapping', () => {
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toMatchObject([
       {
         type: 'tool_use',
-        toolUseId: 'tool-1',
+        toolUseId: 'agent-1/tool-1',
+        originalToolUseId: 'tool-1',
         parentToolUseId: 'agent-1',
       },
       {
         type: 'tool_result',
-        toolUseId: 'tool-1',
+        toolUseId: 'agent-1/tool-1',
+        originalToolUseId: 'tool-1',
         parentToolUseId: 'agent-1',
       },
     ])
@@ -2298,20 +2430,23 @@ describe('chatStore history mapping', () => {
       type: 'content_start',
       blockType: 'tool_use',
       toolName: 'Read',
-      toolUseId: 'tool-1',
+      toolUseId: 'agent-1/tool-1',
+      originalToolUseId: 'tool-1',
       parentToolUseId: 'agent-1',
     })
 
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'tool_use_complete',
       toolName: 'Read',
-      toolUseId: 'tool-1',
+      toolUseId: 'agent-1/tool-1',
+      originalToolUseId: 'tool-1',
       input: { file_path: 'src/App.tsx' },
     })
 
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'tool_result',
-      toolUseId: 'tool-1',
+      toolUseId: 'agent-1/tool-1',
+      originalToolUseId: 'tool-1',
       content: 'ok',
       isError: false,
     })
@@ -2319,12 +2454,14 @@ describe('chatStore history mapping', () => {
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toMatchObject([
       {
         type: 'tool_use',
-        toolUseId: 'tool-1',
+        toolUseId: 'agent-1/tool-1',
+        originalToolUseId: 'tool-1',
         parentToolUseId: 'agent-1',
       },
       {
         type: 'tool_result',
-        toolUseId: 'tool-1',
+        toolUseId: 'agent-1/tool-1',
+        originalToolUseId: 'tool-1',
         parentToolUseId: 'agent-1',
       },
     ])

@@ -912,13 +912,142 @@ function dropDuplicateTranscriptTextMessages(messages: UIMessage[]): UIMessage[]
   return changed ? deduped : messages
 }
 
+type ParentLinkedToolMessage = Extract<
+  UIMessage,
+  { type: 'tool_use' | 'tool_result' }
+>
+
+type ParentLinkedToolMergeRecord = {
+  toolUseId: string
+  messageTypes: Set<ParentLinkedToolMessage['type']>
+  liveMessages: Partial<
+    Record<ParentLinkedToolMessage['type'], ParentLinkedToolMessage>
+  >
+}
+
+function parentLinkedToolIdentity(message: UIMessage): {
+  parentToolUseId: string
+  originalToolUseId: string
+  messageType: ParentLinkedToolMessage['type']
+} | null {
+  if (
+    (message.type !== 'tool_use' && message.type !== 'tool_result') ||
+    !message.parentToolUseId
+  ) {
+    return null
+  }
+  return {
+    parentToolUseId: message.parentToolUseId,
+    originalToolUseId: message.originalToolUseId ?? message.toolUseId,
+    messageType: message.type,
+  }
+}
+
+function mergeRestoredParentToolMessages(
+  messages: UIMessage[],
+  restoredMessages: UIMessage[],
+): UIMessage[] {
+  const liveToolUseIds = new Set<string>()
+  const recordsByParent = new Map<
+    string,
+    Map<string, ParentLinkedToolMergeRecord>
+  >()
+
+  for (const message of messages) {
+    if (message.type === 'tool_use') liveToolUseIds.add(message.toolUseId)
+    const identity = parentLinkedToolIdentity(message)
+    if (!identity) continue
+    const toolMessage = message as ParentLinkedToolMessage
+
+    let parentRecords = recordsByParent.get(identity.parentToolUseId)
+    if (!parentRecords) {
+      parentRecords = new Map()
+      recordsByParent.set(identity.parentToolUseId, parentRecords)
+    }
+    const existing = parentRecords.get(identity.originalToolUseId)
+    if (existing) {
+      existing.messageTypes.add(identity.messageType)
+      existing.liveMessages[identity.messageType] = toolMessage
+    } else {
+      parentRecords.set(identity.originalToolUseId, {
+        toolUseId: toolMessage.toolUseId,
+        messageTypes: new Set([identity.messageType]),
+        liveMessages: { [identity.messageType]: toolMessage },
+      })
+    }
+  }
+
+  const insertBefore = new Map<UIMessage, ParentLinkedToolMessage[]>()
+  const insertAfter = new Map<UIMessage, ParentLinkedToolMessage[]>()
+  const unanchored: ParentLinkedToolMessage[] = []
+
+  for (const restoredMessage of restoredMessages) {
+    const identity = parentLinkedToolIdentity(restoredMessage)
+    if (!identity || !liveToolUseIds.has(identity.parentToolUseId)) continue
+
+    let parentRecords = recordsByParent.get(identity.parentToolUseId)
+    if (!parentRecords) {
+      parentRecords = new Map()
+      recordsByParent.set(identity.parentToolUseId, parentRecords)
+    }
+    const existing = parentRecords.get(identity.originalToolUseId)
+    if (existing?.messageTypes.has(identity.messageType)) continue
+
+    const restoredToolMessage = restoredMessage as ParentLinkedToolMessage
+    const toolUseId = existing?.toolUseId ?? restoredToolMessage.toolUseId
+    const recoveredMessage = toolUseId === restoredToolMessage.toolUseId
+      ? restoredToolMessage
+      : { ...restoredToolMessage, toolUseId }
+    const counterpart = identity.messageType === 'tool_use'
+      ? existing?.liveMessages.tool_result
+      : existing?.liveMessages.tool_use
+
+    if (counterpart) {
+      const insertionMap = identity.messageType === 'tool_use'
+        ? insertBefore
+        : insertAfter
+      const additions = insertionMap.get(counterpart) ?? []
+      additions.push(recoveredMessage)
+      insertionMap.set(counterpart, additions)
+    } else {
+      unanchored.push(recoveredMessage)
+    }
+
+    if (existing) {
+      existing.messageTypes.add(identity.messageType)
+    } else {
+      parentRecords.set(identity.originalToolUseId, {
+        toolUseId,
+        messageTypes: new Set([identity.messageType]),
+        liveMessages: {},
+      })
+    }
+  }
+
+  if (insertBefore.size === 0 && insertAfter.size === 0 && unanchored.length === 0) {
+    return messages
+  }
+
+  const merged: UIMessage[] = []
+  for (const message of messages) {
+    merged.push(...(insertBefore.get(message) ?? []))
+    merged.push(message)
+    merged.push(...(insertAfter.get(message) ?? []))
+  }
+  merged.push(...unanchored)
+  return merged
+}
+
 function mergeRestoredHistoryIntoLiveMessages(
   messages: UIMessage[],
   restoredMessages: UIMessage[],
 ): UIMessage[] {
   return mergeRestoredTerminalGoalEvents(
-    dropDuplicateTranscriptTextMessages(
-      mergeRestoredTranscriptMessageIds(messages, restoredMessages),
+    mergeRestoredParentToolMessages(
+      dropDuplicateTranscriptTextMessages(
+        mergeRestoredTranscriptMessageIds(messages, restoredMessages),
+      ),
+      restoredMessages,
     ),
     restoredMessages,
   )
@@ -2236,6 +2365,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                     type: 'tool_use',
                     toolName,
                     toolUseId,
+                    originalToolUseId: msg.originalToolUseId ?? existing?.originalToolUseId,
                     input: existing?.input ?? {},
                     timestamp: existing?.timestamp ?? Date.now(),
                     parentToolUseId: msg.parentToolUseId ?? existing?.parentToolUseId,
@@ -2385,6 +2515,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                             type: 'tool_use',
                             toolName,
                             toolUseId: activeToolUseId,
+                            originalToolUseId: existing?.originalToolUseId,
                             input: buildPartialToolInputPreview(partialInput, existing?.input),
                             timestamp: existing?.timestamp ?? Date.now(),
                             parentToolUseId: existing?.parentToolUseId ?? getPendingToolParentUseId(sessionId, activeToolUseId),
@@ -2484,6 +2615,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                   type: 'tool_use',
                   toolName,
                   toolUseId,
+                  originalToolUseId: msg.originalToolUseId ?? existing?.originalToolUseId,
                   input: msg.input,
                   timestamp: existing?.timestamp ?? Date.now(),
                   parentToolUseId,
@@ -2492,6 +2624,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               : [...base, {
                   id: nextId(), type: 'tool_use', toolName,
                   toolUseId,
+                  originalToolUseId: msg.originalToolUseId,
                   input: msg.input, timestamp: Date.now(), parentToolUseId,
                   isPending: false,
                 }],
@@ -2515,6 +2648,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         update((s) => {
           let messages: UIMessage[] = [...s.messages, {
             id: nextId(), type: 'tool_result', toolUseId: msg.toolUseId,
+            originalToolUseId: msg.originalToolUseId,
             content: msg.content, isError: msg.isError, timestamp: now, parentToolUseId,
           }]
           let backgroundAgentTasks = s.backgroundAgentTasks ?? {}
@@ -3169,8 +3303,8 @@ function updateOptimisticSessionTitle(sessionId: string, content: string): void 
 
 // ─── History mapping helpers ─────────
 
-type AssistantHistoryBlock = { type: string; text?: string; thinking?: string; name?: string; id?: string; input?: unknown }
-type UserHistoryBlock = { type: string; text?: string; tool_use_id?: string; content?: unknown; is_error?: boolean; source?: { data?: string; media_type?: string }; mimeType?: string; media_type?: string; name?: string }
+type AssistantHistoryBlock = { type: string; text?: string; thinking?: string; name?: string; id?: string; original_tool_use_id?: string; input?: unknown }
+type UserHistoryBlock = { type: string; text?: string; tool_use_id?: string; original_tool_use_id?: string; content?: unknown; is_error?: boolean; source?: { data?: string; media_type?: string }; mimeType?: string; media_type?: string; name?: string }
 
 const TASK_NOTIFICATION_RE = /^<task-notification>\s*[\s\S]*<\/task-notification>$/i
 const GOAL_EVENT_ACTIONS = new Set<GoalEventAction>([
@@ -4564,7 +4698,7 @@ export function mapHistoryMessagesToUiMessages(
         else if (block.type === 'text' && block.text) {
           pushAssistantHistoryText(uiMessages, block.text, timestamp, msg.model, msg.id || undefined)
         }
-        else if (block.type === 'tool_use') uiMessages.push({ id: `${msg.id}-block-${blockIndex}`, type: 'tool_use', toolName: block.name ?? 'unknown', toolUseId: block.id ?? '', input: block.input, timestamp, parentToolUseId: msg.parentToolUseId })
+        else if (block.type === 'tool_use') uiMessages.push({ id: `${msg.id}-block-${blockIndex}`, type: 'tool_use', toolName: block.name ?? 'unknown', toolUseId: block.id ?? '', originalToolUseId: block.original_tool_use_id, input: block.input, timestamp, parentToolUseId: msg.parentToolUseId })
       }
       continue
     }
@@ -4595,6 +4729,7 @@ export function mapHistoryMessagesToUiMessages(
           id: `${msg.id}-block-${blockIndex}`,
           type: 'tool_result',
           toolUseId: block.tool_use_id ?? '',
+          originalToolUseId: block.original_tool_use_id,
           content: normalizeHistoryToolResultContent(block.content, msg.toolUseResult),
           isError: !!block.is_error,
           timestamp,
