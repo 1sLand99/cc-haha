@@ -232,7 +232,10 @@ export function extractAssistantOutputTargets(
   })
 
   for (const candidate of candidates) {
-    if (results.length >= limit || seen.has(candidate.key)) {
+    if (options.changedFiles === undefined && results.length >= limit) {
+      break
+    }
+    if (seen.has(candidate.key)) {
       continue
     }
 
@@ -241,7 +244,7 @@ export function extractAssistantOutputTargets(
   }
 
   if (options.changedFiles !== undefined) {
-    return reconcileTargetsWithChangedFiles(results, options.changedFiles, workDir)
+    return reconcileTargetsWithChangedFiles(results, options.changedFiles, workDir, limit)
   }
 
   return results
@@ -258,13 +261,17 @@ function reconcileTargetsWithChangedFiles(
   targets: AssistantOutputTarget[],
   changedFiles: string[],
   workDir: string | null,
+  limit: number,
 ): AssistantOutputTarget[] {
+  if (limit <= 0) return []
+
   const out: AssistantOutputTarget[] = []
   const seen = new Set<string>()
 
   for (const target of targets) {
     if (target.kind === 'localhost-url') {
       out.push(target)
+      if (out.length >= limit) break
       continue
     }
 
@@ -291,6 +298,7 @@ function reconcileTargetsWithChangedFiles(
       normalizedPath: corrected,
       subtitle: corrected,
     })
+    if (out.length >= limit) break
   }
 
   return out

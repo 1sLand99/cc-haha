@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { ImageGalleryModal } from './ImageGalleryModal'
 import { localImageFileUrl } from '../../lib/attachmentImages'
 import { extractAssistantOutputTargets } from '../../lib/assistantOutputTargets'
-import { previewFsUrl } from '../../lib/handlePreviewLink'
+import { isAbsoluteLocalPath, previewFsUrl } from '../../lib/handlePreviewLink'
 import { getServerBaseUrl } from '../../lib/desktopRuntime'
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|bmp|avif|ico)$/i
@@ -34,6 +34,12 @@ function fileName(filePath: string): string {
   return filePath.split('/').pop() || filePath
 }
 
+function filePathComparisonKey(filePath: string): string {
+  const normalized = filePath.trim().replaceAll('\\', '/')
+  const isWindowsPath = /^[A-Za-z]:\//.test(normalized) || normalized.startsWith('//')
+  return isWindowsPath ? normalized.toLocaleLowerCase('en-US') : normalized
+}
+
 type GalleryImage = {
   src: string
   name: string
@@ -48,12 +54,19 @@ type Props = {
    */
   sessionId?: string
   workDir?: string | null
+  changedFiles?: string[]
 }
 
-export function InlineImageGallery({ text, sessionId, workDir }: Props) {
+export function InlineImageGallery({ text, sessionId, workDir, changedFiles }: Props) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null)
 
-  const imagePaths = useMemo(() => extractImagePaths(text), [text])
+  const imagePaths = useMemo(() => {
+    const paths = extractImagePaths(text)
+    if (changedFiles === undefined) return paths
+
+    const changedFileSet = new Set(changedFiles.map(filePathComparisonKey))
+    return paths.filter((filePath) => changedFileSet.has(filePathComparisonKey(filePath)))
+  }, [changedFiles, text])
 
   const images = useMemo<GalleryImage[]>(() => {
     // 1. Absolute paths (legacy behavior) — served via /api/filesystem/file.
@@ -67,7 +80,7 @@ export function InlineImageGallery({ text, sessionId, workDir }: Props) {
     //    build a /preview-fs URL. Reuses the sandboxed target extractor instead of
     //    a bespoke relative-path regex.
     const base = getServerBaseUrl()
-    const relativeTargets = extractAssistantOutputTargets(text, { workDir }).filter(
+    const relativeTargets = extractAssistantOutputTargets(text, { workDir, changedFiles }).filter(
       (target) => target.kind === 'image',
     )
 
@@ -84,7 +97,9 @@ export function InlineImageGallery({ text, sessionId, workDir }: Props) {
       if (absoluteNames.has(name)) {
         continue
       }
-      const src = previewFsUrl(base, sessionId, relPath)
+      const src = isAbsoluteLocalPath(relPath)
+        ? localImageFileUrl(relPath)
+        : previewFsUrl(base, sessionId, relPath)
       if (seenSrc.has(src)) {
         continue
       }
@@ -93,7 +108,7 @@ export function InlineImageGallery({ text, sessionId, workDir }: Props) {
     }
 
     return [...absolute, ...relative]
-  }, [imagePaths, sessionId, text, workDir])
+  }, [changedFiles, imagePaths, sessionId, text, workDir])
 
   if (images.length === 0) return null
 

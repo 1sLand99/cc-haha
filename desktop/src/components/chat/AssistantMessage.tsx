@@ -113,8 +113,22 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
             streaming={isStreaming}
             onLinkClick={sessionId ? handleLinkClick : undefined}
           />
-          {!isStreaming && <InlineImageGallery text={content} sessionId={sessionId} workDir={workDir} />}
-          {!isStreaming && <InlineVideoGallery text={content} sessionId={sessionId} workDir={workDir} />}
+          {!isStreaming && (
+            <InlineImageGallery
+              text={content}
+              sessionId={sessionId}
+              workDir={workDir}
+              changedFiles={turnChangedFiles}
+            />
+          )}
+          {!isStreaming && (
+            <InlineVideoGallery
+              text={content}
+              sessionId={sessionId}
+              workDir={workDir}
+              changedFiles={turnChangedFiles}
+            />
+          )}
           {isStreaming && (
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-shimmer bg-[var(--color-brand)] align-text-bottom" />
           )}

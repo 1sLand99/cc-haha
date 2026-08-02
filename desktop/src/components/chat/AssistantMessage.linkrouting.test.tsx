@@ -186,6 +186,20 @@ describe('AssistantMessage output-target cards', () => {
     expect(screen.queryByText('assistantOutputs.kind.image')).toBeNull()
   })
 
+  it('does not render stale inline media when the turn changed no files', () => {
+    const { container } = render(
+      <AssistantMessage
+        sessionId="s1"
+        content={'旧图 /work/old.png、相对图 outputs/old.png、旧视频 outputs/old.mp4'}
+        isStreaming={false}
+        turnChangedFiles={[]}
+      />,
+    )
+
+    expect(screen.queryAllByRole('img')).toHaveLength(0)
+    expect(container.querySelector('video')).toBeNull()
+  })
+
   it('still renders md/html/localhost cards when those references are present', () => {
     render(
       <AssistantMessage

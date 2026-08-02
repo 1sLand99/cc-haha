@@ -48,6 +48,21 @@ describe('InlineImageGallery', () => {
     expect(srcs[0]).toBe('http://127.0.0.1:4321/preview-fs/s1/outputs/a/frame.png')
   })
 
+  it('uses the absolute-file route for a changed image outside the workspace', () => {
+    render(
+      <InlineImageGallery
+        text={'render saved to result.png'}
+        sessionId="s1"
+        workDir="/w"
+        changedFiles={['/outside/result.png']}
+      />,
+    )
+
+    expect(imgSrcs()).toEqual([
+      'http://127.0.0.1:3456/api/filesystem/file?path=' + encodeURIComponent('/outside/result.png'),
+    ])
+  })
+
   it('renders both absolute and relative images together', () => {
     render(
       <InlineImageGallery
