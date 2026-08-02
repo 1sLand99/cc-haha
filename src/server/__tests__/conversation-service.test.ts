@@ -275,7 +275,9 @@ describe('ConversationService', () => {
       const nonSdkEnv = (await service.buildChildEnv('/tmp')) as Record<string, string>
 
       expect(sdkEnv.CLAUDE_CODE_EAGER_FLUSH).toBe('1')
+      expect(sdkEnv.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS).toBe('1')
       expect(nonSdkEnv.CLAUDE_CODE_EAGER_FLUSH).toBeUndefined()
+      expect(nonSdkEnv.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS).toBeUndefined()
 
       process.env.CLAUDE_CODE_EAGER_FLUSH = '0'
       resetTerminalShellEnvironmentCacheForTests()

@@ -1613,6 +1613,12 @@ export class ConversationService {
             // arrives. Flush the completed turn first so the replacement can
             // reliably choose --resume and load the context (#1033).
             CLAUDE_CODE_EAGER_FLUSH: cleanEnv.CLAUDE_CODE_EAGER_FLUSH || '1',
+            // The CLI may keep processing internally after an SDK `result`
+            // (for example, a completed background Agent can enqueue one last
+            // model follow-up). Desktop cleanup must use the CLI's authoritative
+            // running/idle boundary or a disconnected renderer can kill that
+            // follow-up after the fixed idle grace period.
+            CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1',
             CC_HAHA_COMPUTER_USE_HOST_BUNDLE_ID: 'com.claude-code-haha.desktop',
           }
         : {}),

@@ -170,6 +170,7 @@ type ActiveAgentTaskState = {
 
 const runtimeOverrides = new Map<string, RuntimeOverride>()
 const activeUserTurns = new Map<string, ActiveUserTurnState>()
+const activeCliRuns = new Set<string>()
 const activeBackgroundTaskIds = new Map<string, Set<string>>()
 const activeAgentTasks = new Map<string, Map<string, ActiveAgentTaskState>>()
 const activeNonAgentTasks = new Map<string, Map<string, ActiveNonAgentTaskState>>()
@@ -450,6 +451,41 @@ function hasActiveBackgroundTasks(sessionId: string): boolean {
   })
 }
 
+function trackCliRunState(sessionId: string, cliMsg: any): 'running' | 'idle' | null {
+  if (
+    cliMsg?.type === 'result' &&
+    cliMsg.is_error === true &&
+    !conversationService.hasSession(sessionId)
+  ) {
+    // ConversationService removes a crashed subprocess before publishing its
+    // synthetic terminal result. No CLI idle event can follow that exit.
+    activeCliRuns.delete(sessionId)
+    return 'idle'
+  }
+  if (cliMsg?.type !== 'system' || cliMsg.subtype !== 'session_state_changed') {
+    return null
+  }
+  if (cliMsg.state === 'running') {
+    activeCliRuns.add(sessionId)
+    return 'running'
+  }
+  if (cliMsg.state === 'idle') {
+    activeCliRuns.delete(sessionId)
+    return 'idle'
+  }
+  return null
+}
+
+function hasActiveCliRun(sessionId: string): boolean {
+  return activeCliRuns.has(sessionId)
+}
+
+function hasActiveSessionWork(sessionId: string): boolean {
+  return hasPendingOrActiveUserTurn(sessionId) ||
+    hasActiveCliRun(sessionId) ||
+    hasActiveBackgroundTasks(sessionId)
+}
+
 export function getSessionChatActivityState(sessionId: string): SessionChatActivityState {
   // An explicit stop wins over permission queues that the CLI has not emitted
   // cancellation events for yet. Otherwise the stopped pet would remain stuck
@@ -461,7 +497,11 @@ export function getSessionChatActivityState(sessionId: string): SessionChatActiv
   ) {
     return 'waiting'
   }
-  if (activeUserTurns.has(sessionId) || hasActiveBackgroundTasks(sessionId)) return 'running'
+  if (
+    activeUserTurns.has(sessionId) ||
+    hasActiveCliRun(sessionId) ||
+    hasActiveBackgroundTasks(sessionId)
+  ) return 'running'
   return terminalSessionChatStates.get(sessionId)
     ?? (legacyQueuedSessionChats.has(sessionId) ? 'running' : 'idle')
 }
@@ -763,7 +803,7 @@ export const handleWebSocket = {
     // running must finish (issue #764) — never kill it just because a renderer
     // closed. Defer cleanup until all active work completes, then apply the
     // idle grace period. Sessions that are already idle go straight to the timer.
-    if (hasPendingOrActiveUserTurn(sessionId) || hasActiveBackgroundTasks(sessionId)) {
+    if (hasActiveSessionWork(sessionId)) {
       // A turn blocked on permission cannot finish without user input. Keep the
       // completion watcher for early cleanup, but also enforce the existing
       // pending-permission maximum so an abandoned prompt cannot pin the CLI.
@@ -2632,6 +2672,7 @@ function cleanupSessionRuntimeState(
   sessionTitleState.delete(sessionId)
   runtimeOverrides.delete(sessionId)
   activeUserTurns.delete(sessionId)
+  activeCliRuns.delete(sessionId)
   sessionStopRequested.delete(sessionId)
   pendingInterruptedTurnResults.delete(sessionId)
   terminalSessionChatStates.delete(sessionId)
@@ -3527,7 +3568,7 @@ function scheduleDisconnectCleanup(sessionId: string): void {
       .getPendingPermissionRequests(sessionId).length > 0
     if (
       !permissionBoundExpired &&
-      (hasPendingOrActiveUserTurn(sessionId) || hasActiveBackgroundTasks(sessionId))
+      hasActiveSessionWork(sessionId)
     ) {
       console.log(`[WS] Session ${sessionId} became active during its idle grace period; keeping CLI alive`)
       watchTurnCompletionForCleanup(sessionId)
@@ -3544,8 +3585,7 @@ function scheduleDisconnectCleanup(sessionId: string): void {
 function scheduleDisconnectedSessionCleanupIfIdle(sessionId: string): void {
   if (
     hasActiveClients(sessionId) ||
-    hasPendingOrActiveUserTurn(sessionId) ||
-    hasActiveBackgroundTasks(sessionId)
+    hasActiveSessionWork(sessionId)
   ) {
     return
   }
@@ -3564,11 +3604,15 @@ function watchTurnCompletionForCleanup(sessionId: string): void {
   cancelSessionDisconnectWatcher(sessionId)
 
   const onComplete = (cliMsg: any) => {
+    const cliRunState = trackCliRunState(sessionId, cliMsg)
     const taskLifecycle = trackCliBackgroundTaskLifecycle(sessionId, cliMsg)
     stopLateAgentTaskIfRequested(sessionId, taskLifecycle)
     closeLateNonAgentTaskAfterRuntimeExit(sessionId, taskLifecycle)
     closeStoppedAgentsAfterRuntimeExit(sessionId, cliMsg)
-    if (taskLifecycle?.running && !hasActiveClients(sessionId)) {
+    if (
+      (cliRunState === 'running' || taskLifecycle?.running) &&
+      !hasActiveClients(sessionId)
+    ) {
       // A pending permission uses a hard 30-minute disconnect bound. A late
       // background task may outlive (or never emit) its terminal notification,
       // so it must not turn that bound into an unbounded watcher. Ordinary idle
@@ -3593,10 +3637,16 @@ function watchTurnCompletionForCleanup(sessionId: string): void {
     }
 
     const foregroundTurnCompleted = cliMsg?.type === 'result'
+    const cliRunCompleted = cliRunState === 'idle'
     const backgroundTaskCompleted = taskLifecycle?.running === false
-    if (!foregroundTurnCompleted && !backgroundTaskCompleted) return
+    if (!foregroundTurnCompleted && !cliRunCompleted && !backgroundTaskCompleted) return
+    if (hasActiveCliRun(sessionId)) return
     if (hasActiveBackgroundTasks(sessionId)) return
-    if (!foregroundTurnCompleted && hasPendingOrActiveUserTurn(sessionId)) return
+    if (
+      !foregroundTurnCompleted &&
+      !cliRunCompleted &&
+      hasPendingOrActiveUserTurn(sessionId)
+    ) return
 
     cancelSessionDisconnectWatcher(sessionId)
     // All observed work finished while still disconnected — fall back to the
@@ -3621,7 +3671,7 @@ function watchTurnCompletionForCleanup(sessionId: string): void {
 function refreshDisconnectedTurnCleanupWatcher(sessionId: string): void {
   if (
     hasActiveClients(sessionId) ||
-    (!hasPendingOrActiveUserTurn(sessionId) && !hasActiveBackgroundTasks(sessionId))
+    !hasActiveSessionWork(sessionId)
   ) return
 
   const pendingTimer = sessionCleanupTimers.get(sessionId)
@@ -4124,6 +4174,7 @@ function bindClientSessionOutput(
     consumeInterruptedTurnResult(sessionId, cliMsg)
     acknowledgeActiveTurnReplay(sessionId, cliMsg)
     const transcriptEpoch = sessionTranscriptEpochs.get(sessionId) ?? 0
+    trackCliRunState(sessionId, cliMsg)
     const taskLifecycle = trackCliBackgroundTaskLifecycle(sessionId, cliMsg)
     stopLateAgentTaskIfRequested(sessionId, taskLifecycle)
     closeLateNonAgentTaskAfterRuntimeExit(sessionId, taskLifecycle)
@@ -4676,6 +4727,7 @@ export function __resetWebSocketHandlerStateForTests(): void {
   prewarmedSessions.clear()
   prewarmIdleTimers.clear()
   activeUserTurns.clear()
+  activeCliRuns.clear()
   activeBackgroundTaskIds.clear()
   activeAgentTasks.clear()
   activeNonAgentTasks.clear()

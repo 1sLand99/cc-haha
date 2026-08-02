@@ -4,17 +4,36 @@
  * Original work by Jason Young, MIT License
  */
 
+import { encodeOpenAIReasoningEnvelope } from '../transform/openaiReasoning.js'
 import { stringifyOpenAIToolArguments } from '../transform/toolArguments.js'
 import { openaiUsageToAnthropic } from '../transform/usage.js'
-import type { OpenAICompatibleUsage } from '../transform/types.js'
+import type {
+  OpenAICompatibleUsage,
+  OpenAIResponsesReasoningItem,
+} from '../transform/types.js'
+
+export type OpenAIResponsesStreamOptions = {
+  /**
+   * Enables the stricter ChatGPT Codex OAuth contract without changing generic
+   * Responses-compatible providers: encrypted reasoning is preserved, HTTP 200
+   * stream errors are surfaced, and EOF without response.completed is rejected.
+   */
+  openAICodexOAuth?: boolean
+  /** Internal lifecycle hooks used by the OAuth fetch adapter. */
+  onTerminal?: (event: string) => void
+  onCancel?: (reason: unknown) => void
+  onSettled?: () => void
+}
 
 type StreamState = {
   nextContentIndex: number
-  indexByKey: Map<string, number>        // content part key → Anthropic index
-  toolIndexByItemId: Map<string, number> // tool item ID → Anthropic index
+  indexByKey: Map<string, number>
+  toolIndexByItemId: Map<string, number>
   model: string
   messageStarted: boolean
   messageStopped: boolean
+  terminalSeen: boolean
+  lastUpstreamEvent: string | null
 }
 
 function formatSse(event: string, data: unknown): string {
@@ -27,10 +46,15 @@ function formatSse(event: string, data: unknown): string {
 export function openaiResponsesStreamToAnthropic(
   upstream: ReadableStream<Uint8Array>,
   model: string,
+  options: OpenAIResponsesStreamOptions = {},
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
   const decoder = new TextDecoder()
+  const reader = upstream.getReader()
   let buffer = ''
+  let currentEvent = ''
+  let dataLines: string[] = []
+  let cancelled = false
 
   const state: StreamState = {
     nextContentIndex: 0,
@@ -39,65 +63,128 @@ export function openaiResponsesStreamToAnthropic(
     model,
     messageStarted: false,
     messageStopped: false,
+    terminalSeen: false,
+    lastUpstreamEvent: null,
+  }
+
+  const resetEvent = (): void => {
+    currentEvent = ''
+    dataLines = []
   }
 
   return new ReadableStream({
-    async start(controller) {
-      const reader = upstream.getReader()
-      let currentEvent = ''
+    start(controller) {
+      const dispatchEvent = (): boolean => {
+        if (dataLines.length === 0) {
+          resetEvent()
+          return false
+        }
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+        const dataText = dataLines.join('\n')
+        const eventName = currentEvent
+        resetEvent()
 
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
+        if (dataText === '[DONE]') {
+          if (options.openAICodexOAuth) {
+            state.lastUpstreamEvent = '[DONE]'
+            return true
+          }
+          if (!options.openAICodexOAuth && !state.messageStopped) {
+            state.terminalSeen = true
+            emitMessageStop(state, controller, encoder, model)
+            return true
+          }
+          return false
+        }
 
-          for (const line of lines) {
-            const trimmed = line.trim()
+        let data: Record<string, unknown>
+        try {
+          data = JSON.parse(dataText) as Record<string, unknown>
+        } catch {
+          return false
+        }
 
-            if (trimmed.startsWith('event: ')) {
-              currentEvent = trimmed.slice(7).trim()
-              continue
-            }
+        const resolvedEvent = eventName || (typeof data.type === 'string' ? data.type : '')
+        if (!resolvedEvent) return false
+        state.lastUpstreamEvent = resolvedEvent
+        const terminal = processEvent(
+          resolvedEvent,
+          data,
+          state,
+          controller,
+          encoder,
+          options,
+        )
+        if (terminal) options.onTerminal?.(resolvedEvent)
+        return terminal
+      }
 
-            if (trimmed.startsWith('data: ')) {
-              const jsonStr = trimmed.slice(6)
-              if (jsonStr === '[DONE]') {
-                if (!state.messageStopped) {
-                  state.messageStopped = true
-                  if (!state.messageStarted) {
-                    emitMessageStart(state, controller, encoder, model)
-                  }
-                  controller.enqueue(encoder.encode(formatSse('message_stop', { type: 'message_stop' })))
-                }
-                continue
-              }
+      const processLine = (rawLine: string): boolean => {
+        const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+        if (line === '') return dispatchEvent()
+        if (line.startsWith(':')) return false
 
-              let data: Record<string, unknown>
-              try {
-                data = JSON.parse(jsonStr)
-              } catch {
-                continue
-              }
+        const colon = line.indexOf(':')
+        const field = colon === -1 ? line : line.slice(0, colon)
+        let value = colon === -1 ? '' : line.slice(colon + 1)
+        if (value.startsWith(' ')) value = value.slice(1)
 
-              processEvent(currentEvent, data, state, controller, encoder)
-              currentEvent = ''
-              continue
-            }
+        if (field === 'event') currentEvent = value
+        if (field === 'data') dataLines.push(value)
+        return false
+      }
 
-            if (trimmed === '') {
-              currentEvent = ''
+      const pump = async (): Promise<void> => {
+        try {
+          let terminal = false
+          while (!terminal && !cancelled) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+            let newline = buffer.indexOf('\n')
+            while (newline !== -1) {
+              terminal = processLine(buffer.slice(0, newline))
+              buffer = buffer.slice(newline + 1)
+              if (terminal) break
+              newline = buffer.indexOf('\n')
             }
           }
+
+          if (cancelled) return
+
+          if (!state.terminalSeen) {
+            buffer += decoder.decode()
+            if (buffer) processLine(buffer)
+            dispatchEvent()
+          }
+
+          if (options.openAICodexOAuth && !state.terminalSeen) {
+            const error = new Error(
+              `OpenAI Responses stream closed before response.completed (last event: ${state.lastUpstreamEvent ?? 'none'})`,
+            ) as Error & { code: string }
+            error.code = 'ERR_STREAM_PREMATURE_CLOSE'
+            controller.error(error)
+            return
+          }
+
+          controller.close()
+        } catch (error) {
+          if (!cancelled) controller.error(error)
+        } finally {
+          if (state.terminalSeen && !cancelled) {
+            await reader.cancel('OpenAI Responses terminal event received').catch(() => {})
+          }
+          options.onSettled?.()
         }
-      } catch (err) {
-        controller.error(err)
-        return // don't call close() after error()
       }
-      controller.close()
+
+      void pump()
+    },
+    async cancel(reason) {
+      cancelled = true
+      if (!state.terminalSeen) options.onCancel?.(reason)
+      await reader.cancel(reason).catch(() => {})
     },
   })
 }
@@ -108,6 +195,7 @@ function emitMessageStart(
   encoder: TextEncoder,
   model: string,
 ): void {
+  if (state.messageStarted) return
   state.messageStarted = true
   controller.enqueue(encoder.encode(formatSse('message_start', {
     type: 'message_start',
@@ -124,16 +212,29 @@ function emitMessageStart(
   })))
 }
 
+function emitMessageStop(
+  state: StreamState,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  model: string,
+): void {
+  if (state.messageStopped) return
+  if (!state.messageStarted) emitMessageStart(state, controller, encoder, model)
+  state.messageStopped = true
+  controller.enqueue(encoder.encode(formatSse('message_stop', { type: 'message_stop' })))
+}
+
 function processEvent(
   event: string,
   data: Record<string, unknown>,
   state: StreamState,
   controller: ReadableStreamDefaultController,
   encoder: TextEncoder,
-): void {
+  options: OpenAIResponsesStreamOptions,
+): boolean {
   switch (event) {
     case 'response.created': {
-      const response = data as Record<string, unknown>
+      const response = asRecord(data.response) ?? data
       state.model = (response.model as string) || state.model
       emitMessageStart(state, controller, encoder, state.model)
       break
@@ -141,14 +242,14 @@ function processEvent(
 
     case 'response.output_item.added': {
       if (!state.messageStarted) emitMessageStart(state, controller, encoder, state.model)
-      const item = data.item as Record<string, unknown> | undefined
+      const item = asRecord(data.item)
       if (!item) break
 
       if (item.type === 'function_call') {
         const index = state.nextContentIndex++
         const callId = (item.call_id as string) || (item.id as string) || ''
         const name = (item.name as string) || ''
-        state.toolIndexByItemId.set(item.id as string || callId, index)
+        state.toolIndexByItemId.set((item.id as string) || callId, index)
 
         controller.enqueue(encoder.encode(formatSse('content_block_start', {
           type: 'content_block_start',
@@ -164,9 +265,31 @@ function processEvent(
       break
     }
 
+    case 'response.output_item.done': {
+      if (!options.openAICodexOAuth) break
+      const item = asRecord(data.item)
+      if (!item || item.type !== 'reasoning') break
+      const reasoning = item as OpenAIResponsesReasoningItem
+      const reasoningData = encodeOpenAIReasoningEnvelope(reasoning)
+      if (!reasoningData) break
+
+      if (!state.messageStarted) emitMessageStart(state, controller, encoder, state.model)
+      const index = state.nextContentIndex++
+      controller.enqueue(encoder.encode(formatSse('content_block_start', {
+        type: 'content_block_start',
+        index,
+        content_block: { type: 'redacted_thinking', data: reasoningData },
+      })))
+      controller.enqueue(encoder.encode(formatSse('content_block_stop', {
+        type: 'content_block_stop',
+        index,
+      })))
+      break
+    }
+
     case 'response.content_part.added': {
       if (!state.messageStarted) emitMessageStart(state, controller, encoder, state.model)
-      const part = data.part as Record<string, unknown> | undefined
+      const part = asRecord(data.part)
       if (!part) break
 
       const contentIndex = (data.content_index as number) ?? 0
@@ -256,8 +379,42 @@ function processEvent(
       break
     }
 
+    case 'response.incomplete':
+      if (!options.openAICodexOAuth) break
+      state.terminalSeen = true
+      if (readIncompleteReason(asRecord(data.response)) === 'max_output_tokens') {
+        const response = asRecord(data.response)
+        if (!state.messageStarted) emitMessageStart(state, controller, encoder, state.model)
+        controller.enqueue(encoder.encode(formatSse('message_delta', {
+          type: 'message_delta',
+          delta: { stop_reason: 'max_tokens', stop_sequence: null },
+          usage: openaiUsageToAnthropic(response?.usage as OpenAICompatibleUsage | undefined),
+        })))
+        emitMessageStop(state, controller, encoder, state.model)
+        return true
+      }
+      controller.enqueue(encoder.encode(formatSse('error', {
+        type: 'error',
+        error: readStreamError(event, data),
+      })))
+      return true
+
+    case 'response.failed':
+    case 'response.cancelled':
+    case 'error': {
+      if (!options.openAICodexOAuth) break
+      state.terminalSeen = true
+      const streamError = readStreamError(event, data)
+      controller.enqueue(encoder.encode(formatSse('error', {
+        type: 'error',
+        error: streamError,
+      })))
+      return true
+    }
+
     case 'response.completed': {
-      const response = data.response as Record<string, unknown> | undefined
+      state.terminalSeen = true
+      const response = asRecord(data.response)
       const status = (response?.status as string) || 'completed'
       const usage = response?.usage as OpenAICompatibleUsage | undefined
       const hasToolUse = state.toolIndexByItemId.size > 0
@@ -266,16 +423,49 @@ function processEvent(
         ? (hasToolUse ? 'tool_use' : 'end_turn')
         : status === 'incomplete' ? 'max_tokens' : 'end_turn'
 
+      if (!state.messageStarted) emitMessageStart(state, controller, encoder, state.model)
       controller.enqueue(encoder.encode(formatSse('message_delta', {
         type: 'message_delta',
         delta: { stop_reason: stopReason, stop_sequence: null },
         usage: openaiUsageToAnthropic(usage),
       })))
-      if (!state.messageStopped) {
-        state.messageStopped = true
-        controller.enqueue(encoder.encode(formatSse('message_stop', { type: 'message_stop' })))
-      }
-      break
+      emitMessageStop(state, controller, encoder, state.model)
+      return true
     }
   }
+
+  return false
+}
+
+function readStreamError(
+  event: string,
+  data: Record<string, unknown>,
+): { type: 'api_error' | 'overloaded_error'; message: string } {
+  const response = asRecord(data.response)
+  const error = asRecord(response?.error) ?? asRecord(data.error) ?? data
+  const code = typeof error?.code === 'string' ? error.code : ''
+  const errorType = typeof error?.type === 'string' ? error.type : ''
+  const message = typeof error?.message === 'string' && error.message
+    ? error.message
+    : event === 'response.incomplete'
+      ? `OpenAI response was incomplete: ${readIncompleteReason(response)}`
+      : `OpenAI stream ended with ${event}`
+  const overloaded = [code, errorType].some((value) => (
+    value.includes('rate_limit') ||
+    value.includes('capacity') ||
+    value.includes('overload')
+  ))
+
+  return { type: overloaded ? 'overloaded_error' : 'api_error', message }
+}
+
+function readIncompleteReason(response: Record<string, unknown> | null): string {
+  const details = asRecord(response?.incomplete_details)
+  return typeof details?.reason === 'string' ? details.reason : 'unknown'
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }

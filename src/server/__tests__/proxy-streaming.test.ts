@@ -5,6 +5,7 @@
 import { describe, test, expect } from 'bun:test'
 import { openaiChatStreamToAnthropic } from '../proxy/streaming/openaiChatStreamToAnthropic.js'
 import { openaiResponsesStreamToAnthropic } from '../proxy/streaming/openaiResponsesStreamToAnthropic.js'
+import { openaiResponsesStreamToAnthropicResponse } from '../proxy/streaming/openaiResponsesStreamToAnthropicResponse.js'
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -393,5 +394,237 @@ describe('openaiResponsesStreamToAnthropic', () => {
       output_tokens: 40,
       cache_read_input_tokens: 1000,
     })
+  })
+
+  test('OpenAI OAuth mode preserves encrypted reasoning as redacted thinking', async () => {
+    const sseChunks = [
+      'event: response.created\ndata: {"response":{"id":"r4","model":"gpt-5.6-terra","status":"in_progress"}}\n\n',
+      'event: response.output_item.added\ndata: {"output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[]}}\n\n',
+      'event: response.output_item.done\ndata: {"output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"encrypted-reasoning"}}\n\n',
+      'event: response.output_item.added\ndata: {"output_index":1,"item":{"type":"message","role":"assistant"}}\n\n',
+      'event: response.content_part.added\ndata: {"output_index":1,"content_index":0,"part":{"type":"output_text","text":""}}\n\n',
+      'event: response.output_text.delta\ndata: {"output_index":1,"content_index":0,"delta":"done"}\n\n',
+      'event: response.output_text.done\ndata: {"output_index":1,"content_index":0,"text":"done"}\n\n',
+      'event: response.completed\ndata: {"response":{"id":"r4","model":"gpt-5.6-terra","status":"completed","usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+    ]
+
+    const events = await collectSse(openaiResponsesStreamToAnthropic(
+      makeStream(sseChunks),
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    ))
+    const reasoningStart = events.find((event) =>
+      event.event === 'content_block_start' &&
+      (event.data.content_block as Record<string, unknown>)?.type === 'redacted_thinking')
+
+    expect(reasoningStart).toBeDefined()
+    expect((reasoningStart!.data.content_block as Record<string, unknown>).data).toContain('encrypted-reasoning')
+    expect(events.at(-1)?.event).toBe('message_stop')
+  })
+
+  test('OpenAI OAuth mode rejects EOF before response.completed', async () => {
+    const incomplete = [
+      'event: response.created\ndata: {"response":{"id":"r5","model":"gpt-5.6-terra","status":"in_progress"}}\n\n',
+      'event: response.output_item.done\ndata: {"output_index":0,"item":{"type":"reasoning","id":"rs_2","summary":[],"encrypted_content":"still-thinking"}}\n\n',
+    ]
+
+    await expect(collectSse(openaiResponsesStreamToAnthropic(
+      makeStream(incomplete),
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    ))).rejects.toThrow('before response.completed')
+  })
+
+  test('OpenAI OAuth mode rejects DONE without waiting for socket EOF', async () => {
+    const encoder = new TextEncoder()
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+      },
+    })
+
+    await expect(collectSse(openaiResponsesStreamToAnthropic(
+      upstream,
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    ))).rejects.toThrow('before response.completed')
+  })
+
+  test('OpenAI OAuth mode turns response.failed inside HTTP 200 into a retryable stream error', async () => {
+    const failed = [
+      'event: response.created\ndata: {"response":{"id":"r6","model":"gpt-5.6-terra","status":"in_progress"}}\n\n',
+      'event: response.failed\ndata: {"response":{"id":"r6","status":"failed","error":{"code":"rate_limit_exceeded","message":"Too many requests"}}}\n\n',
+    ]
+
+    const events = await collectSse(openaiResponsesStreamToAnthropic(
+      makeStream(failed),
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    ))
+    const error = events.find((event) => event.event === 'error')
+
+    expect(error?.data).toEqual({
+      type: 'error',
+      error: { type: 'overloaded_error', message: 'Too many requests' },
+    })
+    expect(events.some((event) => event.event === 'message_stop')).toBe(false)
+  })
+
+  test('OpenAI OAuth mode maps a max-token incomplete response to a clean Anthropic stop', async () => {
+    const incomplete = [
+      'event: response.created\ndata: {"response":{"id":"r8","model":"gpt-5.6-terra","status":"in_progress"}}\n\n',
+      'event: response.incomplete\ndata: {"response":{"id":"r8","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":12,"output_tokens":64}}}\n\n',
+    ]
+
+    const events = await collectSse(openaiResponsesStreamToAnthropic(
+      makeStream(incomplete),
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    ))
+
+    expect(events.find((event) => event.event === 'message_delta')?.data).toMatchObject({
+      delta: { stop_reason: 'max_tokens' },
+    })
+    expect(events.at(-1)?.event).toBe('message_stop')
+    expect(events.some((event) => event.event === 'error')).toBe(false)
+  })
+
+  test('OpenAI OAuth mode propagates downstream cancellation to the upstream body', async () => {
+    const encoder = new TextEncoder()
+    let cancelReason: unknown
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          'event: response.created\ndata: {"response":{"id":"r7","model":"gpt-5.6-terra","status":"in_progress"}}\n\n',
+        ))
+      },
+      cancel(reason) {
+        cancelReason = reason
+      },
+    })
+    const reader = openaiResponsesStreamToAnthropic(
+      upstream,
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    ).getReader()
+
+    await reader.read()
+    await reader.cancel('user-abort')
+    await Promise.resolve()
+
+    expect(cancelReason).toBe('user-abort')
+  })
+
+  test('generic mode still accepts a bare DONE sentinel', async () => {
+    const events = await collectSse(openaiResponsesStreamToAnthropic(
+      makeStream(['data: [DONE]\n\n']),
+      'gpt-4o',
+    ))
+
+    expect(events.map(event => event.event)).toEqual(['message_start', 'message_stop'])
+  })
+
+  test('ignores malformed events and converts refusal deltas', async () => {
+    const events = await collectSse(openaiResponsesStreamToAnthropic(
+      makeStream([
+        'data: not-json\n\n',
+        'event: response.created\ndata: {"response":{"id":"r9","model":"gpt-5.6-terra","status":"in_progress"}}\n\n',
+        'event: response.content_part.added\ndata: {"output_index":0,"content_index":0,"part":{"type":"refusal","refusal":""}}\n\n',
+        'event: response.refusal.delta\ndata: {"output_index":0,"content_index":0,"delta":"cannot comply"}\n\n',
+        'event: response.refusal.done\ndata: {"output_index":0,"content_index":0,"refusal":"cannot comply"}\n\n',
+        'event: response.completed\ndata: {"response":{"id":"r9","status":"completed"}}\n\n',
+      ]),
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    ))
+
+    expect(events.find(event => event.event === 'content_block_delta')?.data).toMatchObject({
+      delta: { type: 'text_delta', text: 'cannot comply' },
+    })
+  })
+
+  test('OpenAI OAuth mode surfaces non-limit incomplete responses as errors', async () => {
+    const events = await collectSse(openaiResponsesStreamToAnthropic(
+      makeStream([
+        'event: response.incomplete\ndata: {"response":{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}}\n\n',
+      ]),
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    ))
+
+    expect(events).toEqual([{
+      event: 'error',
+      data: {
+        type: 'error',
+        error: {
+          type: 'api_error',
+          message: 'OpenAI response was incomplete: content_filter',
+        },
+      },
+    }])
+  })
+})
+
+describe('openaiResponsesStreamToAnthropicResponse', () => {
+  test('preserves encrypted reasoning from a completed OAuth response', async () => {
+    const result = await openaiResponsesStreamToAnthropicResponse(
+      makeStream([
+        'event: response.completed\ndata: {"response":{"id":"resp_collect","object":"response","created_at":1,"model":"gpt-5.6-terra","status":"completed","output":[{"type":"reasoning","id":"rs_collect","summary":[],"encrypted_content":"opaque-collect"}],"usage":{"input_tokens":3,"output_tokens":2}}}\n\n',
+      ]),
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    )
+
+    expect(result.content).toHaveLength(1)
+    expect(result.content[0]).toMatchObject({ type: 'redacted_thinking' })
+    if (result.content[0].type === 'redacted_thinking') {
+      expect(result.content[0].data).toContain('opaque-collect')
+    }
+  })
+
+  test('accepts max-token incomplete OAuth responses as normal completion', async () => {
+    const result = await openaiResponsesStreamToAnthropicResponse(
+      makeStream([
+        'event: response.incomplete\ndata: {"response":{"id":"resp_limit","object":"response","created_at":1,"model":"gpt-5.6-terra","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"partial"}]}]}}\n\n',
+      ]),
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    )
+
+    expect(result.stop_reason).toBe('max_tokens')
+    expect(result.content).toEqual([{ type: 'text', text: 'partial' }])
+  })
+
+  test('throws the embedded OAuth failure message', async () => {
+    await expect(openaiResponsesStreamToAnthropicResponse(
+      makeStream([
+        'event: response.failed\ndata: {"response":{"status":"failed","error":{"message":"upstream exploded"}}}\n\n',
+      ]),
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    )).rejects.toThrow('upstream exploded')
+  })
+
+  test('describes incomplete OAuth failures without an error object', async () => {
+    await expect(openaiResponsesStreamToAnthropicResponse(
+      makeStream([
+        'event: response.incomplete\ndata: {"response":{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}}\n\n',
+      ]),
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    )).rejects.toThrow('OpenAI response was incomplete: content_filter')
+  })
+
+  test('rejects OAuth EOF before a terminal response event', async () => {
+    const error = await openaiResponsesStreamToAnthropicResponse(
+      makeStream([
+        'event: response.created\ndata: {"response":{"id":"resp_eof","status":"in_progress"}}\n\n',
+      ]),
+      'gpt-5.6-terra',
+      { openAICodexOAuth: true },
+    ).catch(value => value as Error & { code?: string })
+
+    expect(error.message).toContain('before response.completed')
+    expect(error.code).toBe('ERR_STREAM_PREMATURE_CLOSE')
   })
 })

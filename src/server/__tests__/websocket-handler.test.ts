@@ -3669,6 +3669,52 @@ describe('WebSocket handler session isolation', () => {
     expect(stopSession).not.toHaveBeenCalled()
   })
 
+  it('keeps a disconnected CLI alive through an internal Agent follow-up after the user result', () => {
+    const sessionId = `cli-follow-up-disconnect-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+    const setTimeoutSpy = spyOn(globalThis, 'setTimeout').mockImplementation(() => 321 as any)
+    const stopSession = spyOn(conversationService, 'stopSession').mockImplementation(() => {})
+    spyOn(conversationService, 'getPendingPermissionRequests').mockReturnValue([])
+    spyOn(conversationService, 'hasSession').mockReturnValue(true)
+
+    const outputCallbacks: Array<(cliMsg: any) => void> = []
+    spyOn(conversationService, 'onOutput').mockImplementation((_sid, callback) => {
+      outputCallbacks.push(callback)
+    })
+    spyOn(conversationService, 'removeOutputCallback').mockImplementation(() => {})
+
+    handleWebSocket.open(ws)
+    outputCallbacks[0]?.({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'running',
+    })
+    setTimeoutSpy.mockClear()
+
+    // An SDK result can precede the CLI's internally queued Agent-summary
+    // turn. The authoritative idle event, not that intermediate result, owns
+    // disconnected cleanup.
+    handleWebSocket.close(ws, 1006, 'runner reached its observation deadline')
+    expect(setTimeoutSpy).not.toHaveBeenCalled()
+    expect(stopSession).not.toHaveBeenCalled()
+    expect(outputCallbacks).toHaveLength(2)
+
+    outputCallbacks[1]?.({ type: 'result', subtype: 'success' })
+    expect(setTimeoutSpy).not.toHaveBeenCalled()
+
+    outputCallbacks[1]?.({
+      type: 'system',
+      subtype: 'session_state_changed',
+      state: 'idle',
+    })
+    expect(setTimeoutSpy).toHaveBeenCalledTimes(1)
+    expect(stopSession).not.toHaveBeenCalled()
+
+    const expireIdleGrace = setTimeoutSpy.mock.calls[0]?.[0] as (() => void) | undefined
+    expireIdleGrace?.()
+    expect(stopSession).toHaveBeenCalledWith(sessionId)
+  })
+
   it('keeps the last disconnected client session alive until all background tasks finish', () => {
     const sessionId = `background-task-disconnect-${crypto.randomUUID()}`
     const ws = makeClientSocket(sessionId, 'pet')

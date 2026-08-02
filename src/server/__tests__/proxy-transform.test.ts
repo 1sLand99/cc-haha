@@ -712,6 +712,28 @@ describe('anthropicToOpenaiResponses', () => {
     expect(result.reasoning).toEqual({ effort: 'high' })
   })
 
+  test('OpenAI OAuth mode restores namespaced redacted thinking as encrypted reasoning input', () => {
+    const req = {
+      model: 'gpt-5.6-terra',
+      max_tokens: 100,
+      messages: [{
+        role: 'assistant',
+        content: [{
+          type: 'redacted_thinking',
+          data: 'cc-haha:openai-reasoning:v1:{"id":"rs_1","summary":[],"encrypted_content":"encrypted-reasoning"}',
+        }],
+      }],
+    } as AnthropicRequest
+
+    expect(anthropicToOpenaiResponses(req).input).toEqual([])
+    expect(anthropicToOpenaiResponses(req, { preserveOpenAIReasoning: true }).input).toEqual([{
+      type: 'reasoning',
+      id: 'rs_1',
+      summary: [],
+      encrypted_content: 'encrypted-reasoning',
+    }])
+  })
+
   test('output_config effort → reasoning effort', () => {
     const req: AnthropicRequest = {
       model: 'gpt-5.5',
@@ -915,6 +937,56 @@ describe('openaiResponsesToAnthropic', () => {
       expect(result.content[0].thinking).toBe('Thinking...')
     }
     expect(result.content[1].type).toBe('text')
+  })
+
+  test('OpenAI OAuth mode preserves encrypted reasoning as namespaced redacted thinking', () => {
+    const res: OpenAIResponsesResponse = {
+      id: 'resp_reasoning_encrypted',
+      object: 'response',
+      created_at: 0,
+      model: 'gpt-5.6-terra',
+      status: 'completed',
+      output: [{
+        type: 'reasoning',
+        id: 'rs_encrypted',
+        summary: [],
+        encrypted_content: 'opaque-reasoning',
+      }],
+    }
+
+    const result = openaiResponsesToAnthropic(
+      res,
+      'gpt-5.6-terra',
+      { preserveOpenAIReasoning: true },
+    )
+
+    expect(result.content[0]).toMatchObject({ type: 'redacted_thinking' })
+    if (result.content[0].type === 'redacted_thinking') {
+      expect(result.content[0].data).toContain('opaque-reasoning')
+    }
+  })
+
+  test('OpenAI OAuth mode falls back to reasoning summary without encrypted content', () => {
+    const res: OpenAIResponsesResponse = {
+      id: 'resp_reasoning_summary',
+      object: 'response',
+      created_at: 0,
+      model: 'gpt-5.6-terra',
+      status: 'completed',
+      output: [{
+        type: 'reasoning',
+        id: 'rs_summary',
+        summary: [{ type: 'summary_text', text: 'safe summary' }],
+      }],
+    }
+
+    const result = openaiResponsesToAnthropic(
+      res,
+      'gpt-5.6-terra',
+      { preserveOpenAIReasoning: true },
+    )
+
+    expect(result.content).toEqual([{ type: 'thinking', thinking: 'safe summary' }])
   })
 
   test('status incomplete → max_tokens', () => {
