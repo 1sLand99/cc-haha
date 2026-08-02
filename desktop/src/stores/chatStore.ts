@@ -2632,9 +2632,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             activeToolUseId: null, activeToolName: null, activeThinkingId: null, streamingToolInput: '',
           }
         })
-        if (toolName === 'TodoWrite' && Array.isArray((msg.input as any)?.todos)) {
+        if (!parentToolUseId && toolName === 'TodoWrite' && Array.isArray((msg.input as any)?.todos)) {
           useCLITaskStore.getState().setTasksFromTodos((msg.input as any).todos, sessionId)
-        } else if (TASK_TOOL_NAMES.has(toolName)) {
+        } else if (!parentToolUseId && TASK_TOOL_NAMES.has(toolName)) {
           const useId = msg.toolUseId || session?.activeToolUseId
           if (useId) addPendingTaskToolUseId(sessionId, useId)
         }
@@ -4794,6 +4794,7 @@ function extractLastTodoWriteFromHistory(messages: MessageEntry[]): Array<{ cont
   let todos: Array<{ content: string; status: string; activeForm?: string }> | null = null
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]!
+    if (msg.parentToolUseId) continue
     if ((msg.type === 'assistant' || msg.type === 'tool_use') && Array.isArray(msg.content)) {
       const blocks = msg.content as AssistantHistoryBlock[]
       for (let j = blocks.length - 1; j >= 0; j--) {
@@ -4814,7 +4815,7 @@ function extractLastTodoWriteFromHistory(messages: MessageEntry[]): Array<{ cont
   const allDone = todos.every((t) => t.status === 'completed')
   if (allDone) {
     for (let i = foundIndex + 1; i < messages.length; i++) {
-      if (messages[i]!.type === 'user' && messages[i]!.content) return null
+      if (messages[i]!.type === 'user' && !messages[i]!.parentToolUseId && messages[i]!.content) return null
     }
   }
   return todos
@@ -4826,12 +4827,15 @@ function hasUserMessagesAfterTaskCompletion(messages: MessageEntry[]): boolean {
   let lastTaskIndex = -1
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]!
+    if (msg.parentToolUseId) continue
     if ((msg.type === 'assistant' || msg.type === 'tool_use') && Array.isArray(msg.content)) {
       const blocks = msg.content as AssistantHistoryBlock[]
       if (blocks.some((b) => b.type === 'tool_use' && TASK_RELATED_TOOL_NAMES.has(b.name ?? ''))) { lastTaskIndex = i; break }
     }
   }
   if (lastTaskIndex < 0) return false
-  for (let i = lastTaskIndex + 1; i < messages.length; i++) { if (messages[i]!.type === 'user') return true }
+  for (let i = lastTaskIndex + 1; i < messages.length; i++) {
+    if (messages[i]!.type === 'user' && !messages[i]!.parentToolUseId) return true
+  }
   return false
 }

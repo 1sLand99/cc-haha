@@ -2269,6 +2269,43 @@ describe('chatStore history mapping', () => {
     expect(setTasksFromTodosMock).toHaveBeenCalledWith(todos, TEST_SESSION_ID)
   })
 
+  it('does not hydrate parent-linked SubAgent task history into the session task store', async () => {
+    const childTodos = [{ content: 'SubAgent internal task', status: 'completed' }]
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [
+        {
+          id: 'child-todo',
+          type: 'assistant',
+          timestamp: '2026-04-06T00:00:00.000Z',
+          parentToolUseId: 'agent-tool-1',
+          content: [
+            { type: 'tool_use', name: 'TodoWrite', id: 'todo-child', input: { todos: childTodos } },
+            { type: 'tool_use', name: 'TaskCreate', id: 'task-child', input: { subject: 'Child task' } },
+          ],
+        },
+        {
+          id: 'user-next',
+          type: 'user',
+          timestamp: '2026-04-06T00:00:01.000Z',
+          content: '继续下一步',
+        },
+      ],
+    })
+    cliTaskStoreSnapshot.sessionId = TEST_SESSION_ID
+    cliTaskStoreSnapshot.tasks = []
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ messages: [] }),
+      },
+    })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    expect(setTasksFromTodosMock).not.toHaveBeenCalledWith(childTodos, TEST_SESSION_ID)
+    expect(setTasksFromTodosMock).toHaveBeenCalledWith([], TEST_SESSION_ID)
+    expect(markCompletedAndDismissedMock).not.toHaveBeenCalled()
+  })
+
   it('marks history task completion dismissed when the user already continued', async () => {
     vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
       messages: [
@@ -2941,6 +2978,44 @@ describe('chatStore history mapping', () => {
     })
 
     expect(setTasksFromTodosMock).toHaveBeenCalledWith(todos, TEST_SESSION_ID)
+  })
+
+  it('does not sync parent-linked SubAgent task tools into the session task store', () => {
+    const childTodos = [{ content: 'SubAgent internal task', status: 'in_progress' }]
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'tool_executing' }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_use_complete',
+      toolName: 'TodoWrite',
+      toolUseId: 'agent-tool-1/todo-child',
+      input: { todos: childTodos },
+      parentToolUseId: 'agent-tool-1',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_use_complete',
+      toolName: 'TaskCreate',
+      toolUseId: 'agent-tool-1/task-child',
+      input: { subject: 'Child task' },
+      parentToolUseId: 'agent-tool-1',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_result',
+      toolUseId: 'agent-tool-1/task-child',
+      content: 'Task #2 created successfully: Child task',
+      isError: false,
+      parentToolUseId: 'agent-tool-1',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'message_complete',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    })
+
+    expect(setTasksFromTodosMock).not.toHaveBeenCalledWith(childTodos, TEST_SESSION_ID)
+    expect(refreshTasksMock).not.toHaveBeenCalled()
   })
 
   it('replays saved runtime selection and effort when reconnecting a session', () => {
