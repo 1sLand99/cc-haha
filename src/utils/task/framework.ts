@@ -101,6 +101,10 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
   // Replacement (resume) — not a new start. Skip to avoid double-emit.
   if (isReplacement) return
 
+  // Subagent shell activity is already grouped under its Agent tool call.
+  // Exposing it as a session task leaves the parent Activity row unowned.
+  if (task.type === 'local_bash' && task.agentId) return
+
   enqueueSdkEvent({
     type: 'system',
     subtype: 'task_started',
