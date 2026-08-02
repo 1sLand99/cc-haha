@@ -5698,6 +5698,62 @@ describe('MessageList nested tool calls', () => {
     })
   })
 
+  it('keeps an inline absolute image when the turn checkpoint recorded no tracked changes', async () => {
+    // Regression: Bash-written files (e.g. a PIL render at /tmp/result.png) are
+    // invisible to the checkpoint, so filesChanged=[] must NOT hide the image.
+    vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
+      checkpoints: [
+        {
+          target: {
+            targetUserMessageId: 'user-1',
+            userMessageIndex: 0,
+            userMessageCount: 1,
+          },
+          code: {
+            available: true,
+            filesChanged: [],
+            insertions: 0,
+            deletions: 0,
+          },
+        },
+      ],
+    })
+
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          messages: [
+            {
+              id: 'user-1',
+              type: 'user_text',
+              content: '在 /tmp 生成一张图',
+              timestamp: 1,
+            },
+            {
+              id: 'assistant-1',
+              type: 'assistant_text',
+              content: '已生成，保存到 /tmp/result.png（1280×800）。',
+              timestamp: 2,
+            },
+          ],
+        }),
+      },
+    })
+
+    render(<MessageList />)
+
+    // Wait for the checkpoint fetch to resolve and its state update to flush —
+    // the bug only hid the image AFTER the empty checkpoint arrived.
+    await waitFor(() => {
+      expect(sessionsApi.getTurnCheckpoints).toHaveBeenCalled()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(screen.getByRole('img', { name: 'result.png' })).toBeTruthy()
+  })
+
   it('shows raw startup details under translated CLI startup errors', () => {
     useChatStore.setState({
       sessions: {

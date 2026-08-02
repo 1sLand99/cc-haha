@@ -34,12 +34,6 @@ function fileName(filePath: string): string {
   return filePath.split('/').pop() || filePath
 }
 
-function filePathComparisonKey(filePath: string): string {
-  const normalized = filePath.trim().replaceAll('\\', '/')
-  const isWindowsPath = /^[A-Za-z]:\//.test(normalized) || normalized.startsWith('//')
-  return isWindowsPath ? normalized.toLocaleLowerCase('en-US') : normalized
-}
-
 type GalleryImage = {
   src: string
   name: string
@@ -60,13 +54,17 @@ type Props = {
 export function InlineImageGallery({ text, sessionId, workDir, changedFiles }: Props) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null)
 
-  const imagePaths = useMemo(() => {
-    const paths = extractImagePaths(text)
-    if (changedFiles === undefined) return paths
+  // Absolute paths are explicitly written out in the prose (not guessed), and the
+  // turn checkpoint can't see files written via Bash or outside its tracking scope
+  // — so they keep the legacy behavior and render unconditionally. changedFiles
+  // only steers the relative-target extraction below, where mentions genuinely
+  // need to be reconciled against what the turn actually wrote.
+  const imagePaths = useMemo(() => extractImagePaths(text), [text])
 
-    const changedFileSet = new Set(changedFiles.map(filePathComparisonKey))
-    return paths.filter((filePath) => changedFileSet.has(filePathComparisonKey(filePath)))
-  }, [changedFiles, text])
+  // An empty changedFiles only means "no TRACKED file changed" (Bash writes are
+  // invisible to the checkpoint), so it is treated as "no evidence" and falls
+  // back to text-only extraction instead of filtering every mention away.
+  const changedFileEvidence = changedFiles !== undefined && changedFiles.length === 0 ? undefined : changedFiles
 
   const images = useMemo<GalleryImage[]>(() => {
     // 1. Absolute paths (legacy behavior) — served via /api/filesystem/file.
@@ -80,7 +78,7 @@ export function InlineImageGallery({ text, sessionId, workDir, changedFiles }: P
     //    build a /preview-fs URL. Reuses the sandboxed target extractor instead of
     //    a bespoke relative-path regex.
     const base = getServerBaseUrl()
-    const relativeTargets = extractAssistantOutputTargets(text, { workDir, changedFiles }).filter(
+    const relativeTargets = extractAssistantOutputTargets(text, { workDir, changedFiles: changedFileEvidence }).filter(
       (target) => target.kind === 'image',
     )
 
@@ -108,7 +106,7 @@ export function InlineImageGallery({ text, sessionId, workDir, changedFiles }: P
     }
 
     return [...absolute, ...relative]
-  }, [changedFiles, imagePaths, sessionId, text, workDir])
+  }, [changedFileEvidence, imagePaths, sessionId, text, workDir])
 
   if (images.length === 0) return null
 

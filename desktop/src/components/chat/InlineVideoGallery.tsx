@@ -58,8 +58,14 @@ export function InlineVideoGallery({ text, sessionId, workDir, changedFiles }: P
       return []
     }
 
+    // An empty changedFiles only means "no TRACKED file changed" (Bash writes are
+    // invisible to the checkpoint), so it is treated as "no evidence" and falls
+    // back to text-only extraction instead of filtering every mention away.
+    const changedFileEvidence =
+      changedFiles !== undefined && changedFiles.length === 0 ? undefined : changedFiles
+
     const base = getServerBaseUrl()
-    const targets = extractAssistantOutputTargets(text, { workDir, changedFiles }).filter(
+    const targets = extractAssistantOutputTargets(text, { workDir, changedFiles: changedFileEvidence }).filter(
       (target) => target.kind === 'video',
     )
     const representedPathKeys = new Set(

@@ -24,6 +24,19 @@ describe('InlineVideoGallery', () => {
     expect(srcs[0]).toBe('http://127.0.0.1:4321/preview-fs/s1/outputs/demo.mp4')
   })
 
+  it('treats an empty changedFiles as no evidence for relative mentions', () => {
+    const { container } = render(
+      <InlineVideoGallery
+        text={'render saved to outputs/demo.mp4'}
+        sessionId="s1"
+        workDir="/w"
+        changedFiles={[]}
+      />,
+    )
+
+    expect(videoSrcs(container)).toEqual(['http://127.0.0.1:4321/preview-fs/s1/outputs/demo.mp4'])
+  })
+
   it('uses the local-file route for a changed video outside the workspace', () => {
     const { container } = render(
       <InlineVideoGallery
