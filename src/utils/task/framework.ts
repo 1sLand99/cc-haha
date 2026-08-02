@@ -83,11 +83,14 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
     // replaces the task; user's retain shouldn't reset). startTime keeps
     // the panel sort stable; messages + diskLoaded preserve the viewed
     // transcript across the replace (the user's just-appended prompt lives
-    // in messages and isn't on disk yet).
+    // in messages and isn't on disk yet). toolUseId keeps the task bound to
+    // the Agent card that spawned it — a resume triggered by another tool
+    // (SendMessage) would otherwise re-file it under that tool's call.
     const merged =
       existing && 'retain' in existing
         ? {
             ...task,
+            toolUseId: existing.toolUseId ?? task.toolUseId,
             retain: existing.retain,
             startTime: existing.startTime,
             messages: existing.messages,

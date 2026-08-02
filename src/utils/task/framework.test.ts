@@ -127,3 +127,29 @@ test('still exposes a local agent task in the session activity stream', () => {
     task_type: 'local_agent',
   }))
 })
+
+test('keeps the original Agent tool_use id when a resume re-registers the task', () => {
+  const harness = makeHarness()
+  const spawned = makeTask({
+    id: 'resumable-agent',
+    type: 'local_agent',
+    toolUseId: 'toolu_agent',
+    agentId: 'resumable-agent',
+    retain: true,
+  })
+  registerTask(spawned, harness.setAppState)
+  drainSdkEvents()
+
+  // SendMessage resumes a stopped agent and re-registers it with its own id.
+  const resumed = makeTask({
+    id: 'resumable-agent',
+    type: 'local_agent',
+    toolUseId: 'toolu_sendmessage',
+    agentId: 'resumable-agent',
+    retain: false,
+  })
+  registerTask(resumed, harness.setAppState)
+
+  expect(harness.state.tasks['resumable-agent']?.toolUseId).toBe('toolu_agent')
+  expect(drainSdkEvents()).toEqual([])
+})

@@ -634,7 +634,8 @@ export const AgentTool = buildTool({
         useExactTools: true
       }),
       worktreePath: worktreeInfo?.worktreePath,
-      description
+      description,
+      spawningToolUseId: toolUseContext.toolUseId
     };
 
     // Helper to wrap execution with a cwd override: explicit cwd arg (KAIROS)
@@ -675,7 +676,10 @@ export const AgentTool = buildTool({
           void writeAgentMetadata(asAgentId(earlyAgentId), {
             agentType: selectedAgent.agentType,
             ...(model && { model }),
-            description
+            description,
+            ...(toolUseContext.toolUseId && {
+              toolUseId: toolUseContext.toolUseId
+            })
           }).catch(_err => logForDebugging(`Failed to clear worktree metadata: ${_err}`));
           return {};
         }
@@ -748,6 +752,8 @@ export const AgentTool = buildTool({
         metadata,
         description,
         toolUseContext,
+        // Spawn path: this Agent call is itself the card.
+        parentToolUseId: toolUseContext.toolUseId,
         rootSetAppState,
         agentIdForCleanup: asyncAgentId,
         enableSummarization: isCoordinator || isForkSubagentEnabled() || getSdkAgentProgressSummariesEnabled(),
