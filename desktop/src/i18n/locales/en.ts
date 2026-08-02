@@ -2211,6 +2211,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
 
   // ─── SubAgent Run ──────────────────────────────────────
   'subagentRun.refresh': 'Refresh SubAgent run',
+  'subagentRun.backToParent': 'Back to parent session',
   'subagentRun.loading': 'Loading SubAgent run...',
   'subagentRun.source': 'Source',
   'subagentRun.agent': 'Agent',

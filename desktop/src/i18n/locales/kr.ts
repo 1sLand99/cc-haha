@@ -2213,6 +2213,7 @@ export const kr: Record<TranslationKey, string> = {
 
   // ─── SubAgent Run ──────────────────────────────────────
   'subagentRun.refresh': 'SubAgent 실행 새로고침',
+  'subagentRun.backToParent': '상위 세션으로 돌아가기',
   'subagentRun.loading': 'SubAgent 실행을 불러오는 중...',
   'subagentRun.source': '소스',
   'subagentRun.agent': 'Agent',

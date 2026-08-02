@@ -2212,6 +2212,7 @@ export const zh: Record<TranslationKey, string> = {
 
   // ─── SubAgent Run ──────────────────────────────────────
   'subagentRun.refresh': '刷新 SubAgent 运行',
+  'subagentRun.backToParent': '返回父级会话',
   'subagentRun.loading': '正在加载 SubAgent 运行...',
   'subagentRun.source': '来源',
   'subagentRun.agent': 'Agent',

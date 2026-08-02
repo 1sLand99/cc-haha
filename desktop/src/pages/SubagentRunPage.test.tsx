@@ -12,6 +12,7 @@ vi.mock('../api/subagents', () => ({
 
 import { subagentsApi } from '../api/subagents'
 import { useChatStore } from '../stores/chatStore'
+import { useTabStore } from '../stores/tabStore'
 import { SubagentRunPage } from './SubagentRunPage'
 
 const TRANSCRIPT_TIMESTAMP = '2026-07-03T10:20:11.000Z'
@@ -59,12 +60,27 @@ describe('SubagentRunPage', () => {
   beforeEach(() => {
     useSettingsStore.setState({ locale: 'en' })
     useChatStore.setState({ sessions: {} })
+    useTabStore.setState({ tabs: [], activeTabId: null })
+    localStorage.clear()
   })
 
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
     vi.mocked(subagentsApi.getRunByTool).mockReset()
+  })
+
+  it('returns to the parent session and closes its own tab via the back button', async () => {
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun())
+    useTabStore.getState().openTab('session-1', 'Parent session')
+    useTabStore.getState().openSubagentTab('session-1', 'tool-1', 'Kuhn')
+
+    render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" taskId="agent-1" title="Kuhn" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to parent session' }))
+
+    expect(useTabStore.getState().activeTabId).toBe('session-1')
+    expect(useTabStore.getState().tabs.map((tab) => tab.sessionId)).toEqual(['session-1'])
   })
 
   it('renders SubAgent run details', async () => {

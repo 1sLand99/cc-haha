@@ -2213,6 +2213,7 @@ export const jp: Record<TranslationKey, string> = {
 
   // ─── SubAgent Run ──────────────────────────────────────
   'subagentRun.refresh': 'SubAgent 実行を更新',
+  'subagentRun.backToParent': '親セッションに戻る',
   'subagentRun.loading': 'SubAgent 実行を読み込み中...',
   'subagentRun.source': 'ソース',
   'subagentRun.agent': 'Agent',
