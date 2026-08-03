@@ -35,12 +35,15 @@ Rules closer to the code take precedence. Before editing `.github/`, `src/`, `de
 ## Verification
 
 1. Run the narrowest relevant test while iterating.
-2. Run `bun run check:impact`; every command it selects is part of the minimum handoff for the current diff.
+2. Run `bun run check:impact`; every command it selects is part of the minimum handoff for the current diff. Selection is import-aware: a change is routed to every surface that imports it, not only to its own directory. The report's `## Cross-surface impact` section names the importer that pulled in each extra check.
 3. Run `bun run verify` only when full validation is requested or before claiming a code change is PR-ready or push-ready.
 
 Additional invariants:
 
 - Required PR checks must be deterministic and work on an untrusted fork: no real models, public network, repository secrets, saved providers, or real user home/config. Use fake credentials, fixtures, mocked/loopback transports, temporary directories, and explicit cleanup.
+- `bun run check:agent-flow` is the deterministic end-to-end agent lane: it drives the real server and WebSocket through session creation, runtime selection, streaming, tool permission allow/deny, tool failure, API error, interrupt, reconnect replay, and session recovery using the repository's mock SDK CLI. It needs no provider, credentials, or network, so every contributor can run it.
+- `bun run check:desktop-ui-smoke` drives the real desktop UI against that same mock runtime and answers the permission dialog by clicking the real button. It skips with a printed reason when `agent-browser` or desktop dependencies are missing.
+- Quality-gate lanes that boot the real server must run in a sandbox config dir (`scripts/quality-gate/sandbox.ts`) and fail if they wrote to the developer's real `~/.claude`.
 - Provider/auth/proxy/runtime changes may select `bun run check:provider-contract`; desktop chat/WebSocket/session changes may select `bun run check:chat-contract`. These contracts are offline and do not replace their selected surface checks.
 - Any persisted JSON, `localStorage`, or app-config shape change requires a forward migration, an old-fixture regression test, and `bun run check:persistence-upgrade`.
 - User-visible desktop or cross-process behavior needs an actual browser/desktop smoke path when unit tests cannot prove the workflow.
