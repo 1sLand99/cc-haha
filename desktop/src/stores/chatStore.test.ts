@@ -7127,6 +7127,46 @@ describe('chatStore history mapping', () => {
     ])
   })
 
+  it('does not duplicate a slash-command prompt when the replay normalizes extra spaces', () => {
+    // The composer keeps the raw input (`/ego-browser␣␣https://…` — two spaces
+    // after the command name). The CLI preserves them inside <command-args>,
+    // but the server display text (formatCommandDisplayText) trims args and
+    // re-joins name + args with a single space. The replay must still match the
+    // optimistic bubble — HTML collapses the extra space, so a mismatch renders
+    // as a visually identical duplicate bubble mid-stream.
+    const typed = '/ego-browser  https://huggingface.co/MiniMaxAI/MiniMax-H3 \n\n去帮我看一下这个页面，我们本地部署这个模型需要大概怎样的配置？\n\n如果是用 macOS，它 M 系列芯片的统一内存大概要多少？'
+    const replay = '/ego-browser https://huggingface.co/MiniMaxAI/MiniMax-H3 \n\n去帮我看一下这个页面，我们本地部署这个模型需要大概怎样的配置？\n\n如果是用 macOS，它 M 系列芯片的统一内存大概要多少？'
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          messages: [
+            {
+              id: 'live-user',
+              type: 'user_text',
+              content: typed.trim(),
+              timestamp: 1,
+            },
+          ],
+          chatState: 'thinking',
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'thinking',
+      text: 'Checking the model page.',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'user_message_replay',
+      content: replay,
+    })
+
+    const userMessages = useChatStore.getState().sessions[TEST_SESSION_ID]?.messages
+      .filter((message) => message.type === 'user_text')
+    expect(userMessages).toHaveLength(1)
+    expect(userMessages?.[0]).toMatchObject({ content: typed.trim() })
+  })
+
   it('restores workspace diff comment styling from a replayed model prompt', () => {
     const modelPrompt = [
       '@"/repo/src/App.vue" Referenced workspace context:',

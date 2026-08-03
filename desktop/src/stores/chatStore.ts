@@ -4340,6 +4340,16 @@ function replayAttachmentsMatchCurrent(
   )
 }
 
+// The server-side replay normalizes whitespace that the optimistic bubble
+// keeps verbatim: `readXmlTag` trims <command-args> and
+// formatCommandDisplayText re-joins name + args with a single space, so
+// `/ego-browser␣␣https://…` replays as `/ego-browser https://…`. HTML
+// collapses the extra space anyway, so a literal comparison would append a
+// visually identical duplicate bubble. Compare with whitespace runs collapsed.
+function collapseWhitespaceRuns(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
 function replayMatchesCurrentUserMessage(
   message: Extract<UIMessage, { type: 'user_text' }>,
   replayDisplay: RestoredUserDisplay,
@@ -4347,6 +4357,11 @@ function replayMatchesCurrentUserMessage(
 ): boolean {
   const currentModelContent = (message.modelContent ?? message.content).trim()
   if (currentModelContent === replayModelContent) return true
+  if (
+    collapseWhitespaceRuns(currentModelContent) === collapseWhitespaceRuns(replayModelContent)
+  ) {
+    return true
+  }
 
   const currentAttachments = message.attachments ?? []
   if (
@@ -4360,7 +4375,11 @@ function replayMatchesCurrentUserMessage(
   }
 
   const currentDisplay = extractRestoredUserDisplay(currentModelContent)
-  if (currentDisplay.content.trim() !== replayDisplay.content.trim()) return false
+  if (
+    collapseWhitespaceRuns(currentDisplay.content) !== collapseWhitespaceRuns(replayDisplay.content)
+  ) {
+    return false
+  }
 
   return replayAttachmentsMatchCurrent(
     replayDisplay.attachments ?? [],
