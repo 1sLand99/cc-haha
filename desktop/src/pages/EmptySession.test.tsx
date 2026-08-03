@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   browse: vi.fn(),
   getTasksForList: vi.fn(),
   resetTaskList: vi.fn(),
+  getProviderAuthStatus: vi.fn(),
   wsClearHandlers: vi.fn(),
   wsConnect: vi.fn(),
   wsOnMessage: vi.fn(),
@@ -45,6 +46,12 @@ vi.mock('../api/skills', () => ({
 vi.mock('../api/agents', () => ({
   agentsApi: {
     list: mocks.listAgents,
+  },
+}))
+
+vi.mock('../api/providers', () => ({
+  providersApi: {
+    authStatus: mocks.getProviderAuthStatus,
   },
 }))
 
@@ -99,8 +106,8 @@ vi.mock('@tauri-apps/api/webview', () => ({
 }))
 
 vi.mock('@/components/composite/DirectoryPicker', () => ({
-  DirectoryPicker: ({ value, onChange }: { value: string; onChange: (path: string) => void }) => (
-    <button type="button" aria-label="Pick project" data-value={value} onClick={() => onChange('/workspace/project')}>
+  RecentProjectsPanel: ({ value, onSelect }: { value: string; onSelect: (path: string) => void }) => (
+    <button type="button" aria-label="Pick project" data-value={value} onClick={() => onSelect('/workspace/project')}>
       Pick project
     </button>
   ),
@@ -197,13 +204,21 @@ async function openLaunchMenu() {
 }
 
 /**
- * Picks the mocked project. The directory picker is no longer a standing
- * button on a bar under the composer — it is a row inside the run-location
- * pill's menu, so it has to be opened first.
+ * Picks the mocked project. The directory list is no longer a standing button
+ * on a bar under the composer — it is a view of the run-location pill's menu,
+ * which a fresh session opens directly onto.
  */
 async function pickProject() {
   await openLaunchMenu()
   fireEvent.click(await screen.findByRole('button', { name: 'Pick project' }))
+  // Picking a repo holds the menu open on the root view, where the branch and
+  // worktree rows have just appeared. Close it so callers start from a clean
+  // slate and open it themselves when they mean to.
+  fireEvent.keyDown(document, { key: 'Escape' })
+  await waitFor(() => {
+    expect(screen.queryByRole('menu', { name: 'Location' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Pick project' })).not.toBeInTheDocument()
+  })
 }
 
 describe('EmptySession', () => {
@@ -256,6 +271,10 @@ describe('EmptySession', () => {
     })
     mocks.getTasksForList.mockResolvedValue({ tasks: [] })
     mocks.resetTaskList.mockResolvedValue(undefined)
+    mocks.getProviderAuthStatus.mockResolvedValue({
+      hasAuth: true,
+      source: 'cc-haha-provider',
+    })
   })
 
   afterEach(() => {
@@ -688,6 +707,25 @@ describe('EmptySession', () => {
     ])
   })
 
+  it('opens provider settings instead of creating a session when no model authentication exists', async () => {
+    mocks.getProviderAuthStatus.mockResolvedValue({ hasAuth: false, source: 'none' })
+
+    render(<EmptySession />)
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'draft question', selectionStart: 14 },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Run/i }))
+
+    await waitFor(() => {
+      expect(mocks.getProviderAuthStatus).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.createSession).not.toHaveBeenCalled()
+    expect(mocks.wsSend).not.toHaveBeenCalled()
+    expect(useUIStore.getState().pendingSettingsTab).toBe('providers')
+    expect(useTabStore.getState().activeTabId).toBe('__settings__')
+  })
+
   it('uses native desktop file paths for draft attachments', async () => {
     mocks.isTauriRuntime = true
     window.desktopHost = {
@@ -906,15 +944,15 @@ describe('EmptySession', () => {
 
     expect(screen.queryByText('Current project is not a Git repository.')).not.toBeInTheDocument()
 
-    // Without a repo the pill carries the folder alone, and its menu drops the
-    // branch and worktree rows entirely.
+    // Without a repo the pill carries the folder alone, and there are no
+    // branch or worktree rows to drop back to — so the menu opens straight on
+    // the directory list instead of a root view holding a single row.
     await openLaunchMenu()
-    const menu = await screen.findByRole('menu', { name: 'Location' })
-    expect(within(menu).queryByRole('menuitem', { name: /Branch/ })).not.toBeInTheDocument()
-    expect(within(menu).queryByRole('menuitemradio')).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Pick project' })).toBeInTheDocument()
+    expect(screen.queryByRole('menu', { name: 'Location' })).not.toBeInTheDocument()
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => {
-      expect(screen.queryByRole('menu', { name: 'Location' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Pick project' })).not.toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByRole('button', { name: /Run/i }))

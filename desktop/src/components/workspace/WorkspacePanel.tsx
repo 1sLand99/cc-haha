@@ -27,6 +27,8 @@ import { useDismissable } from '@/hooks/useDismissable'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import { clearWindowSelection, getSelectionPopoverPosition, useSelectionPopoverDismiss } from '../../hooks/useSelectionPopoverDismiss'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
+import { createWorkspaceMarkdownImageResolver } from '../../lib/markdownImages'
+import { getServerBaseUrl } from '../../lib/desktopRuntime'
 import {
   getFileExtension,
   normalizePrismLanguage,
@@ -860,14 +862,34 @@ function CodeSurface({
 
 function MarkdownSurface({
   value,
+  path,
+  sessionId,
+  workDir,
   onAddSelection,
 }: {
   value: string
+  path: string
+  sessionId: string
+  workDir?: string | null
   onAddSelection: (selection: WorkspaceTextSelection) => void
 }) {
   const surfaceRef = useRef<HTMLDivElement>(null)
   const selectionMenuRef = useRef<HTMLButtonElement>(null)
   const [selectionMenu, setSelectionMenu] = useState<FloatingSelectionMenuState | null>(null)
+
+  // The document is user-owned local content, so its images are trusted:
+  // relative paths resolve against the file's directory (served sandboxed via
+  // /preview-fs or /local-file) and remote URLs are left to CSP. Untrusted
+  // assistant Markdown gets no resolver and keeps the blob:/data:-only policy.
+  const resolveImageSrc = useMemo(
+    () => createWorkspaceMarkdownImageResolver({
+      baseUrl: getServerBaseUrl(),
+      sessionId,
+      filePath: path,
+      workDir,
+    }),
+    [path, sessionId, workDir],
+  )
 
   useEffect(() => {
     setSelectionMenu(null)
@@ -915,6 +937,7 @@ function MarkdownSurface({
         <MarkdownRenderer
           content={value}
           variant="document"
+          resolveImageSrc={resolveImageSrc}
           className="workspace-markdown-preview prose-p:text-[14px] prose-p:leading-7 prose-h1:text-[24px] prose-h2:text-[18px] prose-h3:text-[15px] prose-code:text-[12px] prose-pre:my-4"
         />
       </div>
@@ -1866,6 +1889,9 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
         ) : state === 'ok' && isMarkdownPreview(activePreviewTab) ? (
           <MarkdownSurface
             value={activePreviewTab.content ?? ''}
+            path={activePreviewTab.path}
+            sessionId={sessionId}
+            workDir={status?.workDir}
             onAddSelection={(selection) => addSelectionToChat(activePreviewTab.path, selection)}
           />
         ) : state === 'ok' ? (

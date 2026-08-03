@@ -38,6 +38,7 @@ import { AttachmentStore } from '../common/attachment/attachment-store.js'
 import { checkAttachmentLimit } from '../common/attachment/attachment-limits.js'
 import { ImageBlockWatcher } from '../common/attachment/image-block-watcher.js'
 import type { PendingUpload } from '../common/attachment/attachment-types.js'
+import { materializePendingUploadImage } from '../common/attachment/safe-remote-image.js'
 import { isOutsideWorkDir } from './path-safety.js'
 
 // ---------- init ----------
@@ -141,20 +142,7 @@ async function dispatchOutboundImage(chatId: string, pending: PendingUpload): Pr
   if (cache.has(pending.id)) return // already uploaded within this chat
 
   try {
-    let buffer: Buffer
-    let mime = 'image/png'
-    switch (pending.source.kind) {
-      case 'base64': {
-        buffer = Buffer.from(pending.source.data, 'base64')
-        mime = pending.source.mime
-        break
-      }
-      case 'path': {
-        buffer = await fs.readFile(pending.source.path)
-        mime = pending.source.mime ?? 'image/png'
-        break
-      }
-    }
+    const { buffer, mime } = await materializePendingUploadImage(pending.source)
 
     const check = checkAttachmentLimit('image', buffer.length, mime)
     if (!check.ok) {

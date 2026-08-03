@@ -5,6 +5,7 @@ import {
   configureLocalServerRequestAuth,
   configurePreviewSessionPermissions,
   createPreviewSessionPartition,
+  isAllowlistedMainRendererMediaRequest,
 } from './services/previewSession'
 
 const desktopRoot = existsSync(path.resolve(process.cwd(), 'electron', 'main.ts'))
@@ -39,11 +40,124 @@ describe('Electron preview security boundary', () => {
     expect(mainSource).toContain('partition: createPreviewSessionPartition()')
   })
 
-  it('does not implicitly authenticate arbitrary preview or main-renderer subresources', () => {
+  it('does not authenticate preview resources and only enables the main media allowlist', () => {
     expect(previewServiceSource).not.toContain('configureLocalServerRequestAuth')
     expect(previewServiceSource).not.toContain('resolveLocalServerAccess')
-    expect(mainWindowSource).not.toContain('configureLocalServerRequestAuth')
-    expect(mainWindowSource).not.toContain('resolveLocalServerAccess')
+    expect(mainWindowSource).toContain('configureLocalServerRequestAuth')
+    expect(mainWindowSource).toContain('isAllowlistedMainRendererMediaRequest')
+  })
+
+  it.each([
+    ['open-target icon', 'GET', 'image', 'http://127.0.0.1:49321/api/open-targets/icons/cursor'],
+    ['profile avatar', 'GET', 'image', 'http://127.0.0.1:49321/api/desktop-ui/preferences/profile/avatar?v=1'],
+    ['path attachment', 'GET', 'image', 'http://127.0.0.1:49321/api/filesystem/file?path=%2Ftmp%2Fimage.png'],
+    ['workspace image', 'GET', 'image', 'http://127.0.0.1:49321/preview-fs/session/image.png'],
+    ['workspace video range', 'GET', 'media', 'http://127.0.0.1:49321/preview-fs/session/video.mp4'],
+  ])('allows the main renderer %s request', (_name, method, resourceType, url) => {
+    expect(isAllowlistedMainRendererMediaRequest({
+      method,
+      resourceType,
+      url,
+      webContentsId: 42,
+    }, 42)).toBe(true)
+  })
+
+  it.each([
+    ['privileged API image probe', 'GET', 'image', 'http://127.0.0.1:49321/api/sessions'],
+    ['allowlisted path through fetch', 'GET', 'xhr', 'http://127.0.0.1:49321/api/open-targets/icons/cursor'],
+    ['allowlisted path with mutation', 'POST', 'image', 'http://127.0.0.1:49321/api/filesystem/file?path=%2Ftmp%2Fimage.png'],
+  ])('rejects the main renderer %s request', (_name, method, resourceType, url) => {
+    expect(isAllowlistedMainRendererMediaRequest({
+      method,
+      resourceType,
+      url,
+      webContentsId: 42,
+    }, 42)).toBe(false)
+  })
+
+  it('rejects allowlisted media from another web contents in the default session', () => {
+    expect(isAllowlistedMainRendererMediaRequest({
+      method: 'GET',
+      resourceType: 'image',
+      url: 'http://127.0.0.1:49321/api/open-targets/icons/cursor',
+      webContentsId: 99,
+    }, 42)).toBe(false)
+  })
+
+  it('injects the desktop token only for allowlisted media and preserves range headers', () => {
+    let beforeSendHeaders: ((details: {
+      method: string
+      resourceType: string
+      url: string
+      webContentsId: number
+      requestHeaders: Record<string, string>
+    }, callback: (response: { requestHeaders: Record<string, string> }) => void) => void) | undefined
+    const webRequest = {
+      onBeforeSendHeaders(handler: typeof beforeSendHeaders) {
+        beforeSendHeaders = handler
+      },
+    }
+
+    configureLocalServerRequestAuth(
+      webRequest as never,
+      () => ({
+        serverUrl: 'http://127.0.0.1:49321',
+        token: 'desktop-local-token',
+      }),
+      details => isAllowlistedMainRendererMediaRequest(details, 42),
+    )
+
+    const videoCallback = vi.fn()
+    beforeSendHeaders?.({
+      method: 'GET',
+      resourceType: 'media',
+      url: 'http://127.0.0.1:49321/preview-fs/session/video.mp4',
+      webContentsId: 42,
+      requestHeaders: { Accept: 'video/*', Range: 'bytes=0-1023' },
+    }, videoCallback)
+    expect(videoCallback).toHaveBeenCalledWith({
+      requestHeaders: {
+        Accept: 'video/*',
+        Range: 'bytes=0-1023',
+        Authorization: 'Bearer desktop-local-token',
+      },
+    })
+
+    for (const details of [
+      {
+        method: 'GET',
+        resourceType: 'image',
+        url: 'http://127.0.0.1:49321/api/sessions',
+        webContentsId: 42,
+      },
+      {
+        method: 'GET',
+        resourceType: 'xhr',
+        url: 'http://127.0.0.1:49321/api/open-targets/icons/cursor',
+        webContentsId: 42,
+      },
+      {
+        method: 'GET',
+        resourceType: 'image',
+        url: 'https://example.com/api/open-targets/icons/cursor',
+        webContentsId: 42,
+      },
+      {
+        method: 'GET',
+        resourceType: 'image',
+        url: 'http://127.0.0.1:49321/api/open-targets/icons/cursor',
+        webContentsId: 99,
+      },
+    ]) {
+      const callback = vi.fn()
+      beforeSendHeaders?.({
+        ...details,
+        requestHeaders: { Accept: '*/*' },
+      }, callback)
+      expect(callback).toHaveBeenCalledWith({
+        requestHeaders: { Accept: '*/*' },
+      })
+    }
   })
 
   it('denies preview permission checks and requests by default', () => {

@@ -85,6 +85,12 @@ describe('handleLocalFile', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8')
     expect(res.headers.get('accept-ranges')).toBe('bytes')
+    const csp = res.headers.get('content-security-policy')
+    expect(csp).toContain('sandbox')
+    expect(csp).toContain('allow-same-origin')
+    expect(csp).toContain('allow-popups')
+    expect(csp).toContain("default-src 'none'")
+    expect(csp).toContain("connect-src 'none'")
     expect(await res.text()).toBe('<h1>ok</h1>')
   })
 

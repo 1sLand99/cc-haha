@@ -53,8 +53,17 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024
 const MAX_TRANSFORMED_HTML_BYTES = 10 * 1024 * 1024
 const ROOT_RELATIVE_HTML_ATTR_RE = /\b(src|href)=(["'])\/(?!\/)([^"']*)\2/gi
 const PREVIEW_HTML_CSP = [
-  'sandbox allow-scripts allow-modals allow-popups allow-downloads',
+  'sandbox allow-scripts allow-same-origin allow-modals allow-downloads allow-popups',
+  "default-src 'none'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "media-src 'self' blob:",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
   "connect-src 'none'",
+  "frame-src 'none'",
   "form-action 'none'",
   "object-src 'none'",
 ].join('; ')
@@ -261,6 +270,11 @@ export async function serveFileWithRange(
   reqHeaders?: Headers,
   extraHeaders: Record<string, string> = {},
 ): Promise<Response> {
+  const responseHeaders = (
+    ['.html', '.htm'].includes(path.extname(target).toLowerCase())
+      ? { 'Content-Security-Policy': PREVIEW_HTML_CSP, ...extraHeaders }
+      : extraHeaders
+  )
   let stat: fs.Stats
   try {
     stat = fs.statSync(target)
@@ -285,7 +299,7 @@ export async function serveFileWithRange(
         'Content-Range': `bytes */${size}`,
         'Accept-Ranges': 'bytes',
         'Cache-Control': 'no-cache',
-        ...extraHeaders,
+        ...responseHeaders,
       },
     })
   }
@@ -302,7 +316,7 @@ export async function serveFileWithRange(
         'Accept-Ranges': 'bytes',
         'Content-Length': String(end - start + 1),
         'Cache-Control': 'no-cache',
-        ...extraHeaders,
+        ...responseHeaders,
       },
     })
   }
@@ -315,7 +329,7 @@ export async function serveFileWithRange(
       'Content-Length': String(size),
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-cache',
-      ...extraHeaders,
+      ...responseHeaders,
     },
   })
 }

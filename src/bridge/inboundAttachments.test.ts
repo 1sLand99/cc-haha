@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getSessionId } from '../bootstrap/state.js'
@@ -123,23 +123,27 @@ describe('inbound bridge attachment limits', () => {
     expect(await uploadedFiles()).toEqual([])
   })
 
-  it('does not overwrite an existing staged attachment path', async () => {
+  it('stages a unique non-overwriting file when the same attachment is resent', async () => {
     const attachment = {
       file_uuid: 'file-0',
       file_name: 'collision',
     }
-    await mkdir(join(
-      configDir,
-      'uploads',
-      getSessionId(),
-      'file-0-collision',
-    ), { recursive: true })
-
+    let responseNumber = 0
     const download: InboundAttachmentDownloader = async () => ({
       status: 200,
-      data: Buffer.from('safe'),
+      data: Buffer.from(`safe-${++responseNumber}`),
     })
 
-    expect(await resolveInboundAttachments([attachment], { download })).toBe('')
+    const first = await resolveInboundAttachments([attachment], { download })
+    const second = await resolveInboundAttachments([attachment], { download })
+    const files = await uploadedFiles()
+
+    expect(first).toMatch(/^@"[^"]+" $/)
+    expect(second).toMatch(/^@"[^"]+" $/)
+    expect(second).not.toBe(first)
+    expect(files).toHaveLength(2)
+    expect(await Promise.all(files.map((file) =>
+      readFile(join(configDir, 'uploads', getSessionId(), file), 'utf8')
+    ))).toEqual(expect.arrayContaining(['safe-1', 'safe-2']))
   })
 })

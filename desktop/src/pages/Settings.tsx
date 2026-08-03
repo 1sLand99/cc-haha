@@ -36,14 +36,26 @@ import {
 } from '@/components/settings/SettingsSection'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Switch } from '@/components/ui/Switch'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { PermissionModeSelector } from '../components/controls/PermissionModeSelector'
 import { isDarkThemeMode, isLightThemeMode } from '../types/settings'
 import type { ThemeMode, UpdateProxyMode, NetworkProxyMode, WebSearchMode, AppMode, ChatSendBehavior, OutputStyleSource } from '../types/settings'
 import type { Locale } from '../i18n'
 import type { SavedProvider, UpdateProviderInput, ProviderTestResult, ModelMapping, Model1mSupport, ApiFormat, ProviderAuthStrategy, ProviderModelInfo, ProviderModelsErrorCode } from '../types/provider'
 import { groupProviderModels, providerModelsErrorKey } from '../lib/providerModels'
+import {
+  apply1mSupportToContextInput,
+  apply1mSupportToContextInputs,
+  getAutoCompactWindowErrorKey,
+  getModelContextWindowErrorKey,
+  MODEL_SLOTS,
+  parseAutoCompactWindowInput,
+  parseModelContextWindowsInput,
+  type ModelContextInputs,
+  type ModelSlot,
+} from '../lib/providerModelContext'
 import type { ProviderPreset } from '../types/providerPreset'
-import { selectableProviderPresets } from '../config/providerPresets'
+import { normalizeProviderBaseUrl, presetMatchesBaseUrl, selectableProviderPresets } from '../config/providerPresets'
 import { AdapterSettings } from './AdapterSettings'
 import { useSessionStore } from '../stores/sessionStore'
 import { MarkdownRenderer } from '../components/markdown/MarkdownRenderer'
@@ -231,8 +243,17 @@ export function Settings() {
         {/* Tab navigation */}
         {/* Narrow enough that the rail is not a gutter of dead space, wide
             enough that the longest label in any locale — the Japanese
-            "コンピューター操作" — still clears the truncation on TabButton. */}
-        <div className="w-[220px] flex-shrink-0 flex flex-col overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-4">
+            "コンピューター操作" — still clears the truncation on TabButton.
+
+            Paper, separated by the rule, the way every other secondary panel
+            in the app is (the workbench, the diff split). It used to be
+            `--color-surface-container-low`, which is the same value the tab
+            strip's trough resolves to — so the Settings tab, the one tab whose
+            content this rail *is*, was the only selected tab in the app whose
+            paper fill met a different colour at its bottom edge. It read as a
+            white card stranded on a grey panel. Nothing else changed to fix
+            it: the tab is right, this was the odd one out. */}
+        <div className="w-[220px] flex-shrink-0 flex flex-col overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-4">
           <div className="flex-1 flex flex-col gap-0.5">
             <TabButton icon="dns" label={t('settings.tab.providers')} active={activeTab === 'providers'} onClick={() => setActiveTab('providers')} />
             <TabButton icon="tune" label={t('settings.tab.general')} active={activeTab === 'general'} onClick={() => setActiveTab('general')} />
@@ -296,7 +317,9 @@ function TabButton({ icon, label, active, onClick }: { icon: string; label: stri
       ref={ref}
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
-      className={`w-full flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-[13.5px] text-left transition-[background-color,color] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-container-low)] ${
+      // `ring-offset` has to name the rail's own fill — it is painted, not
+      // transparent, so it tracks whatever the rail is.
+      className={`w-full flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-[13.5px] text-left transition-[background-color,color] duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] ${
         active
           ? 'bg-[var(--color-surface-hover)] text-[var(--color-text-primary)] font-medium'
           : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]'
@@ -804,10 +827,6 @@ function requirePreset(preset: ProviderPreset | undefined): ProviderPreset {
 const AUTO_COMPACT_WINDOW_ENV_KEY = 'CLAUDE_CODE_AUTO_COMPACT_WINDOW'
 const MODEL_CONTEXT_WINDOWS_ENV_KEY = 'CLAUDE_CODE_MODEL_CONTEXT_WINDOWS'
 const DISABLE_EXPERIMENTAL_BETAS_ENV_KEY = 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'
-const MODEL_CONTEXT_WINDOW_MIN = 16000
-const MODEL_CONTEXT_WINDOW_MAX = 10000000
-const MODEL_1M_CONTEXT_WINDOW = 1000000
-const MODEL_SLOTS = ['main', 'haiku', 'sonnet', 'opus'] as const
 const DEFAULT_MODEL_1M_SUPPORT: Model1mSupport = {
   main: false,
   haiku: false,
@@ -816,8 +835,6 @@ const DEFAULT_MODEL_1M_SUPPORT: Model1mSupport = {
 }
 const DEFAULT_PROVIDER_AUTH_STRATEGY: ProviderAuthStrategy = 'auth_token'
 const AUTH_ENV_KEYS = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])
-type ModelSlot = typeof MODEL_SLOTS[number]
-type ModelContextInputs = Record<ModelSlot, string>
 
 function formatContextWindow(value: number): string {
   return value.toLocaleString('en-US')
@@ -879,30 +896,11 @@ function inferAuthStrategyFromEnv(env: Record<string, string>): ProviderAuthStra
   return null
 }
 
-function parseAutoCompactWindowInput(value: string): number | undefined {
-  const trimmed = value.trim()
-  if (!trimmed) return undefined
-  const parsed = Number(trimmed)
-  if (!Number.isInteger(parsed)) return undefined
-  if (parsed < MODEL_CONTEXT_WINDOW_MIN || parsed > MODEL_CONTEXT_WINDOW_MAX) return undefined
-  return parsed
-}
-
-function getAutoCompactWindowErrorKey(value: string): 'number' | 'range' | null {
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const parsed = Number(trimmed)
-  if (!Number.isInteger(parsed)) return 'number'
-  if (parsed < MODEL_CONTEXT_WINDOW_MIN || parsed > MODEL_CONTEXT_WINDOW_MAX) return 'range'
-  return null
-}
-
-function parseModelContextWindowsInput(value: string): number | undefined {
-  return parseAutoCompactWindowInput(value)
-}
-
-function getModelContextWindowErrorKey(value: string): 'number' | 'range' | null {
-  return getAutoCompactWindowErrorKey(value)
+function getPresetContextInputValue(model: string | undefined, preset: ProviderPreset): string {
+  const trimmedModel = model?.trim()
+  if (!trimmedModel) return ''
+  const value = preset.modelContextWindows?.[trimmedModel]
+  return value !== undefined ? String(value) : ''
 }
 
 function getModelContextInputValue(
@@ -912,8 +910,9 @@ function getModelContextInputValue(
 ): string {
   const trimmedModel = model?.trim()
   if (!trimmedModel) return ''
-  const value = provider?.modelContextWindows?.[trimmedModel] ?? preset.modelContextWindows?.[trimmedModel]
-  return value !== undefined ? String(value) : ''
+  const saved = provider?.modelContextWindows?.[trimmedModel]
+  if (saved !== undefined) return String(saved)
+  return getPresetContextInputValue(trimmedModel, preset)
 }
 
 function getModelContextInputs(
@@ -993,31 +992,6 @@ function applyModel1mSupportMapping(
 
 function hasAnyModel1mSupport(model1mSupport: Model1mSupport): boolean {
   return MODEL_SLOTS.some((slot) => model1mSupport[slot])
-}
-
-function shouldFill1mContextWindow(value: string): boolean {
-  const parsed = parseModelContextWindowsInput(value)
-  return parsed === undefined || parsed < MODEL_1M_CONTEXT_WINDOW
-}
-
-function apply1mSupportToContextInput(
-  inputs: ModelContextInputs,
-  slot: ModelSlot,
-  enabled: boolean,
-): ModelContextInputs {
-  if (!enabled || !shouldFill1mContextWindow(inputs[slot])) return inputs
-  return { ...inputs, [slot]: String(MODEL_1M_CONTEXT_WINDOW) }
-}
-
-function apply1mSupportToContextInputs(
-  inputs: ModelContextInputs,
-  model1mSupport: Model1mSupport,
-): ModelContextInputs {
-  let nextInputs = inputs
-  for (const slot of MODEL_SLOTS) {
-    nextInputs = apply1mSupportToContextInput(nextInputs, slot, model1mSupport[slot])
-  }
-  return nextInputs
 }
 
 function normalizeModelMapping(models: ModelMapping): ModelMapping {
@@ -1335,7 +1309,23 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   const [settingsJson, setSettingsJson] = useState('')
   const [settingsJsonError, setSettingsJsonError] = useState<string | null>(null)
   const jsonPastedRef = useRef(false)
+  const settingsJsonUserEditedRef = useRef(false)
   const providerProxyBaseUrl = useMemo(() => getProviderProxyBaseUrl(), [])
+  const currentProviderSettings = {
+    selectedPreset,
+    baseUrl,
+    apiFormat,
+    authStrategy,
+    apiKey,
+    models,
+    model1mSupport,
+    modelContextInputs,
+    autoCompactWindow,
+    toolSearchEnabled,
+    disableExperimentalBetas,
+  }
+  const providerSettingsRef = useRef(currentProviderSettings)
+  providerSettingsRef.current = currentProviderSettings
 
   // Load current settings.json and merge provider env vars
   useEffect(() => {
@@ -1344,8 +1334,24 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
       jsonPastedRef.current = false
       return
     }
+    let cancelled = false
     import('../api/providers').then(({ providersApi }) => {
+      if (cancelled) return
       providersApi.getSettings().then((settings) => {
+        if (cancelled || settingsJsonUserEditedRef.current) return
+        const {
+          selectedPreset,
+          baseUrl,
+          apiFormat,
+          authStrategy,
+          apiKey,
+          models,
+          model1mSupport,
+          modelContextInputs,
+          autoCompactWindow,
+          toolSearchEnabled,
+          disableExperimentalBetas,
+        } = providerSettingsRef.current
         const needsProxy = apiFormat !== 'anthropic'
         const autoCompactWindowEnv = autoCompactWindow.trim()
         const modelContextWindows = buildModelContextWindows(models, modelContextInputs)
@@ -1377,9 +1383,14 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
         }
         setSettingsJson(JSON.stringify(merged, null, 2))
       }).catch(() => {
-        setSettingsJson(JSON.stringify({}, null, 2))
+        if (!cancelled && !settingsJsonUserEditedRef.current) {
+          setSettingsJson((current) => current.trim() ? current : JSON.stringify({}, null, 2))
+        }
       })
     })
+    return () => {
+      cancelled = true
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPreset.id, providerProxyBaseUrl])
 
@@ -1398,6 +1409,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   }, [baseUrl, apiKey])
 
   const handlePresetChange = (preset: ProviderPreset) => {
+    settingsJsonUserEditedRef.current = false
     setSelectedPreset(preset)
     setName(preset.name)
     setBaseUrl(preset.baseUrl)
@@ -1424,11 +1436,35 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   const autoCompactWindowErrorKey = getAutoCompactWindowErrorKey(autoCompactWindow)
   const modelContextWindowErrorSlots = MODEL_SLOTS.filter((slot) => getModelContextWindowErrorKey(modelContextInputs[slot]))
   const canSubmit = name.trim() && baseUrl.trim() && (mode === 'edit' || !requiresApiKey || apiKey.trim()) && models.main.trim() && !settingsJsonError && !autoCompactWindowErrorKey && modelContextWindowErrorSlots.length === 0
-  const apiKeyUrl = selectedPreset.apiKeyUrl?.trim()
-  const promoText = selectedPreset.promoText?.trim()
+  const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl)
+  const isPresetDefaultEndpoint = normalizedBaseUrl === normalizeProviderBaseUrl(selectedPreset.baseUrl)
+  const apiKeyUrl = isPresetDefaultEndpoint ? selectedPreset.apiKeyUrl?.trim() : undefined
+  const promoText = isPresetDefaultEndpoint ? selectedPreset.promoText?.trim() : undefined
   const displayedSettingsJson = showApiKey
     ? settingsJson
     : maskSettingsJsonSecrets(settingsJson)
+  const regionalEndpointItems = (selectedPreset.regionalEndpoints ?? []).map((endpoint) => ({
+    value: endpoint.baseUrl,
+    label: endpoint.region === 'cn_zh'
+      ? t('settings.providers.regionChina')
+      : endpoint.region === 'global_en'
+        ? t('settings.providers.regionGlobal')
+        : endpoint.region,
+    description: endpoint.baseUrl,
+    icon: (
+      <span className="material-symbols-outlined text-[17px]">
+        {endpoint.region === 'cn_zh' ? 'location_on' : endpoint.region === 'global_en' ? 'public' : 'link'}
+      </span>
+    ),
+  }))
+  const selectedRegionalEndpointUrl = regionalEndpointItems.find(
+    (option) => normalizeProviderBaseUrl(option.value) === normalizedBaseUrl,
+  )?.value ?? ''
+  // A hand-typed or pasted baseUrl may match no regional endpoint; the old
+  // native select went blank there, but the Dropdown trigger needs real text.
+  const selectedRegionalEndpointLabel = regionalEndpointItems.find(
+    (item) => item.value === selectedRegionalEndpointUrl,
+  )?.label ?? t('settings.providers.regionCustom')
   const apiFormatItems = [
     {
       value: 'anthropic' as const,
@@ -1541,6 +1577,9 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
       nextInputs,
       slot,
       nextModel1mSupport[slot],
+      // The field was just re-derived for the new model id, so there is nothing
+      // left over from a previous 1M tick to revert.
+      nextInputs[slot],
     )
     setModels(nextModels)
     setModel1mSupport(nextModel1mSupport)
@@ -1552,7 +1591,15 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   }
   const handleModel1mSupportChange = (slot: ModelSlot, enabled: boolean) => {
     const nextModel1mSupport = { ...model1mSupport, [slot]: enabled }
-    const nextInputs = apply1mSupportToContextInput(modelContextInputs, slot, enabled)
+    // Rolls back to the preset window rather than the saved provider one: a
+    // provider saved while the box was ticked already holds the 1,000,000 the
+    // user is now taking back.
+    const nextInputs = apply1mSupportToContextInput(
+      modelContextInputs,
+      slot,
+      enabled,
+      getPresetContextInputValue(models[slot], selectedPreset),
+    )
     setModel1mSupport(nextModel1mSupport)
     setModelContextInputs(nextInputs)
     setSettingsJson((current) => updateSettingsJsonModelContextWindows(
@@ -1770,6 +1817,26 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
         <Input label={t('settings.providers.name')} required value={name} onChange={(e) => setName(e.target.value)} placeholder={t('settings.providers.namePlaceholder')} />
 
         <Input label={t('settings.providers.notes')} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('settings.providers.notesPlaceholder')} />
+
+        {regionalEndpointItems.length > 1 && (
+          <div>
+            <label className="text-sm font-medium text-[var(--color-text-primary)] mb-1 block">{t('settings.providers.endpointRegion')}</label>
+            <Dropdown<string>
+              items={regionalEndpointItems}
+              value={selectedRegionalEndpointUrl}
+              onChange={handleBaseUrlChange}
+              label={t('settings.providers.endpointRegion')}
+              width="100%"
+              className="block w-full"
+              trigger={
+                <Button variant="secondary" size="md" block className="h-10 gap-3">
+                  <span className="min-w-0 flex-1 truncate text-left">{selectedRegionalEndpointLabel}</span>
+                  <span className="material-symbols-outlined flex-shrink-0 text-[18px] text-[var(--color-text-secondary)]">expand_more</span>
+                </Button>
+              }
+            />
+          </div>
+        )}
 
         <Input label={t('settings.providers.baseUrl')} required value={baseUrl} onChange={(e) => handleBaseUrlChange(e.target.value)} placeholder={t('settings.providers.baseUrlPlaceholder')} className="font-mono text-[13px]" />
 
@@ -1991,20 +2058,25 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
                       />
                     )}
                   </div>
-                  <label className="mt-1 inline-flex h-6 w-fit cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-1 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]">
-                    <input
-                      type="checkbox"
-                      checked={model1mSupport[slot]}
-                      onChange={(e) => handleModel1mSupportChange(slot, e.target.checked)}
-                      aria-label={`1M support: ${slot}`}
-                      className="h-3.5 w-3.5 rounded border-[var(--color-border)] text-[var(--color-brand)] accent-[var(--color-brand)] focus:ring-[var(--color-brand)]"
-                    />
-                    <span>{t('settings.providers.model1mSupportShort')}</span>
-                  </label>
+                  <Tooltip content={t('settings.providers.model1mSupportTooltip')} placement="bottom-start">
+                    <label className="mt-1 inline-flex h-6 w-fit cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-1 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]">
+                      <input
+                        type="checkbox"
+                        checked={model1mSupport[slot]}
+                        onChange={(e) => handleModel1mSupportChange(slot, e.target.checked)}
+                        aria-label={`1M support: ${slot}`}
+                        className="h-3.5 w-3.5 rounded border-[var(--color-border)] text-[var(--color-brand)] accent-[var(--color-brand)] focus:ring-[var(--color-brand)]"
+                      />
+                      <span>{t('settings.providers.model1mSupportShort')}</span>
+                    </label>
+                  </Tooltip>
                 </div>
               )
             })}
           </div>
+          <p className="mt-2 text-[11px] leading-5 text-[var(--color-text-tertiary)]">
+            {t('settings.providers.model1mSupportHint')}
+          </p>
         </div>
 
         <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
@@ -2126,6 +2198,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
           <textarea
             value={displayedSettingsJson}
             onChange={(e) => {
+              settingsJsonUserEditedRef.current = true
               const raw = e.target.value
               try {
                 const parsed = restoreSettingsJsonSecrets(JSON.parse(raw), settingsJson, apiKey)
@@ -2134,11 +2207,14 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
                 // Auto-fill form fields from parsed JSON env
                 const env = parsed.env as Record<string, string> | undefined
                 if (env) {
-                  if (env.ANTHROPIC_BASE_URL) {
-                    setBaseUrl(env.ANTHROPIC_BASE_URL)
+                  const baseUrl = env.ANTHROPIC_BASE_URL
+                  if (baseUrl) {
+                    setBaseUrl(baseUrl)
                     // Auto-switch to matching preset or Custom
                     if (mode === 'create') {
-                      const matchedPreset = selectablePresets.find((p) => p.id !== 'custom' && p.baseUrl === env.ANTHROPIC_BASE_URL)
+                      const matchedPreset = selectablePresets.find(
+                        (preset) => preset.id !== 'custom' && presetMatchesBaseUrl(preset, baseUrl),
+                      )
                       const targetPreset = requirePreset(
                         matchedPreset ?? selectablePresets.find((p) => p.id === 'custom'),
                       )

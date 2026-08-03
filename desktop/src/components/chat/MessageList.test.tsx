@@ -61,6 +61,19 @@ function makeSessionState(overrides: Partial<PerSessionState> = {}): PerSessionS
   }
 }
 
+function makeConversationNavigationMessages(): UIMessage[] {
+  return [
+    { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
+    { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
+    { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
+    { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
+    { id: 'user-3', type: 'user_text', content: 'Third prompt', timestamp: 5 },
+    { id: 'assistant-3', type: 'assistant_text', content: 'Third answer', timestamp: 6 },
+    { id: 'user-4', type: 'user_text', content: 'Fourth prompt', timestamp: 7 },
+    { id: 'assistant-4', type: 'assistant_text', content: 'Fourth answer', timestamp: 8 },
+  ]
+}
+
 function findTextNodeContaining(container: Element, text: string) {
   const walker = document.createTreeWalker(container, 4)
   let current = walker.nextNode()
@@ -549,18 +562,15 @@ describe('MessageList nested tool calls', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
-          messages: [
-            { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-            { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
-            { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-            { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
-          ],
+          messages: makeConversationNavigationMessages(),
         }),
       },
     })
 
     const { rerender } = render(<MessageList />)
     expect(screen.getByRole('navigation', { name: 'Conversation navigation' })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: /Turn \d of 4/ })).toHaveLength(4)
+    expect(screen.queryByRole('button', { name: /Assistant message/ })).toBeNull()
 
     rerender(<MessageList compact />)
     expect(screen.getByRole('navigation', { name: 'Conversation navigation' })).toBeTruthy()
@@ -588,12 +598,7 @@ describe('MessageList nested tool calls', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
-          messages: [
-            { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-            { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
-            { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-            { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
-          ],
+          messages: makeConversationNavigationMessages(),
         }),
       },
     })
@@ -646,12 +651,41 @@ describe('MessageList nested tool calls', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
-          messages: [
-            { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-            { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
-            { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-            { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
-          ],
+          messages: makeConversationNavigationMessages(),
+        }),
+      },
+    })
+
+    const { container } = render(<MessageList />)
+    const scroller = container.querySelector('.chat-scroll-area') as HTMLElement
+    let scrollTop = 2
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 200 })
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 600 })
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => { scrollTop = value },
+    })
+
+    fireEvent.scroll(scroller)
+    expect(screen.getByRole('button', { name: /Turn 1 of 4: First prompt/ }).getAttribute('aria-current')).toBe('location')
+
+    scrollTop = 250
+    fireEvent.scroll(scroller)
+    expect(screen.getByRole('button', { name: /Turn 2 of 4: Second prompt/ }).getAttribute('aria-current')).toBe('location')
+
+    scrollTop = 400
+    fireEvent.scroll(scroller)
+    expect(screen.getAllByRole('button', { name: /Turn \d of 4/ }).every((marker) => (
+      marker.getAttribute('aria-current') === null
+    ))).toBe(true)
+  })
+
+  it('keeps a clicked turn active until user scrolling resumes, then clears it at latest', () => {
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          messages: makeConversationNavigationMessages(),
         }),
       },
     })
@@ -660,19 +694,41 @@ describe('MessageList nested tool calls', () => {
     const scroller = container.querySelector('.chat-scroll-area') as HTMLElement
     let scrollTop = 0
     Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 200 })
-    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 450 })
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 900 })
     Object.defineProperty(scroller, 'scrollTop', {
       configurable: true,
       get: () => scrollTop,
       set: (value: number) => { scrollTop = value },
     })
+    Object.defineProperty(scroller, 'scrollTo', {
+      configurable: true,
+      value: (options: ScrollToOptions) => { scrollTop = options.top ?? 0 },
+    })
 
-    fireEvent.scroll(scroller)
-    expect(screen.getByRole('button', { name: /User message: First prompt/ }).getAttribute('aria-current')).toBe('location')
+    const thirdTurn = screen.getByRole('button', { name: /Turn 3 of 4: Third prompt/ })
+    fireEvent.click(thirdTurn)
 
     scrollTop = 250
     fireEvent.scroll(scroller)
-    expect(screen.getByRole('button', { name: /User message: Second prompt/ }).getAttribute('aria-current')).toBe('location')
+    expect(thirdTurn.getAttribute('aria-current')).toBe('location')
+
+    fireEvent.pointerDown(scroller)
+    expect(thirdTurn.getAttribute('aria-current')).toBe('location')
+    fireEvent.wheel(scroller, { deltaY: -100 })
+    expect(thirdTurn.getAttribute('aria-current')).toBe('location')
+
+    scrollTop = 0
+    fireEvent.scroll(scroller)
+    expect(screen.getByRole('button', { name: /Turn 1 of 4: First prompt/ }).getAttribute('aria-current')).toBe('location')
+
+    fireEvent.click(thirdTurn)
+    expect(thirdTurn.getAttribute('aria-current')).toBe('location')
+    fireEvent.wheel(scroller, { deltaY: 100 })
+    scrollTop = 700
+    fireEvent.scroll(scroller)
+    expect(screen.getAllByRole('button', { name: /Turn \d of 4/ }).every((marker) => (
+      marker.getAttribute('aria-current') === null
+    ))).toBe(true)
   })
 
   it('mounts and highlights a far virtualized message selected from the navigator', async () => {
@@ -699,20 +755,15 @@ describe('MessageList nested tool calls', () => {
       set: (value: number) => { scrollTop = value },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /User message: Prompt 0/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Turn 1 of 110: Prompt 0/ }))
 
     await waitFor(() => expect(screen.getByText('Prompt 0')).toBeTruthy())
     expect(scrollTop).toBe(0)
     expect(container.querySelector('[data-chat-render-item-key="user-0"]')?.className).toContain('chat-render-item--navigation-target')
   })
 
-  it('resumes following new output after navigating to the latest message', async () => {
-    const messages: UIMessage[] = [
-      { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-      { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
-      { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-      { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
-    ]
+  it('keeps streaming output out of the user-turn navigator after a prompt jump', async () => {
+    const messages = makeConversationNavigationMessages()
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({ messages }),
@@ -722,19 +773,20 @@ describe('MessageList nested tool calls', () => {
     const { container } = render(<MessageList />)
     const scroller = container.querySelector('.chat-scroll-area') as HTMLElement
     let scrollTop = 100
-    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 })
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1400 })
     Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 })
     Object.defineProperty(scroller, 'scrollTop', {
       configurable: true,
       get: () => scrollTop,
-      set: (value: number) => { scrollTop = value >= 1_000_000_000 ? 600 : value },
+      set: (value: number) => { scrollTop = value >= 1_000_000_000 ? 1000 : value },
     })
     Object.defineProperty(scroller, 'scrollTo', {
       configurable: true,
       value: (options: ScrollToOptions) => { scroller.scrollTop = options.top ?? 0 },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /Assistant message: Second answer/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Turn 4 of 4: Fourth prompt/ }))
+    const promptScrollTop = scrollTop
     act(() => {
       useChatStore.setState({
         sessions: {
@@ -747,7 +799,12 @@ describe('MessageList nested tool calls', () => {
       })
     })
 
-    await waitFor(() => expect(scrollTop).toBe(600))
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /Turn \d of 4/ })).toHaveLength(4)
+    })
+    expect(screen.queryByRole('button', { name: /More output from the latest reply/ })).toBeNull()
+    expect(scrollTop).toBe(promptScrollTop)
+    expect(scrollTop).not.toBe(1000)
   })
 
   // #1149 — end-to-end pin for the tool duration badge. Injecting `durationMs`
@@ -794,17 +851,14 @@ describe('MessageList nested tool calls', () => {
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
           messages: [
-            { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-            { id: 'assistant-1', type: 'assistant_text', content: 'First answer', timestamp: 2 },
-            { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-            { id: 'assistant-2', type: 'assistant_text', content: 'Second answer', timestamp: 4 },
+            ...makeConversationNavigationMessages(),
             {
               id: 'tool-tail',
               type: 'tool_use',
               toolName: 'Read',
               toolUseId: 'tool-tail-use',
               input: { file_path: '/tmp/example.txt' },
-              timestamp: 5,
+              timestamp: 9,
             },
           ],
         }),
@@ -822,7 +876,7 @@ describe('MessageList nested tool calls', () => {
       set: (value: number) => { scrollTop = value >= 1_000_000_000 ? 600 : value },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /Assistant message: Second answer/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Turn 4 of 4: Fourth prompt/ }))
 
     expect(scrollTop).not.toBe(600)
   })
@@ -1441,6 +1495,63 @@ describe('MessageList nested tool calls', () => {
     fireEvent.click(screen.getByRole('button', { name: /dispatched an agent/i }))
     expect(screen.getByText(/Read .*example\.ts.*done/i)).toBeTruthy()
     expect(container.textContent).toContain('Agent')
+  })
+
+  it('keeps parallel agent rows running while the shared chat state crosses tool boundaries', async () => {
+    const agentMessages: Array<Extract<UIMessage, { type: 'tool_use' }>> = Array.from({ length: 4 }, (_, index) => ({
+      id: `tool-agent-${index}`,
+      type: 'tool_use',
+      toolName: 'Agent',
+      toolUseId: `agent-${index}`,
+      input: { description: `Review area ${index}` },
+      timestamp: index + 1,
+    }))
+    const backgroundAgentTasks = Object.fromEntries(
+      agentMessages.map((message, index) => {
+        return [
+          `task-${index}`,
+          {
+            taskId: `task-${index}`,
+            toolUseId: message.toolUseId,
+            status: 'running' as const,
+            taskType: 'local_agent',
+            description: `Review area ${index}`,
+            startedAt: index + 1,
+            updatedAt: index + 1,
+          },
+        ]
+      }),
+    )
+    const setChatState = (chatState: PerSessionState['chatState']) => {
+      useChatStore.setState({
+        sessions: {
+          [ACTIVE_TAB]: makeSessionState({
+            chatState,
+            messages: agentMessages,
+            backgroundAgentTasks,
+          }),
+        },
+      })
+    }
+
+    setChatState('thinking')
+    render(<MessageList />)
+    fireEvent.click(screen.getByRole('button', { name: /dispatched 4 agents/i }))
+
+    expect(screen.queryByText('Starting')).toBeNull()
+    expect(screen.getAllByText('Running')).toHaveLength(5)
+
+    act(() => setChatState('tool_executing'))
+    await waitFor(() => {
+      expect(screen.queryByText('Starting')).toBeNull()
+      expect(screen.getAllByText('Running')).toHaveLength(5)
+    })
+
+    act(() => setChatState('thinking'))
+    await waitFor(() => {
+      expect(screen.queryByText('Starting')).toBeNull()
+      expect(screen.getAllByText('Running')).toHaveLength(5)
+    })
   })
 
   it('shows a dedicated compacting status indicator', () => {
@@ -5215,7 +5326,7 @@ describe('MessageList nested tool calls', () => {
     expect(await screen.findByText('blank-response.ts')).toBeTruthy()
   })
 
-  it('keeps historical turn change cards visible while the next turn is running', async () => {
+  it('keeps checkpoint evidence while hiding change cards for a running background task', async () => {
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
       checkpoints: [
         {
@@ -5244,7 +5355,7 @@ describe('MessageList nested tool calls', () => {
       {
         id: 'assistant-1',
         type: 'assistant_text',
-        content: 'done',
+        content: '我正准备查看 test123.md',
         timestamp: 2,
       },
     ]
@@ -5258,6 +5369,7 @@ describe('MessageList nested tool calls', () => {
     render(<MessageList />)
 
     expect(await screen.findByText('first.ts')).toBeTruthy()
+    expect(screen.queryByText('Markdown')).toBeNull()
 
     act(() => {
       useChatStore.setState({
@@ -5283,6 +5395,7 @@ describe('MessageList nested tool calls', () => {
     await waitFor(() => {
       expect(screen.queryByText('first.ts')).toBeNull()
     })
+    expect(screen.queryByText('Markdown')).toBeNull()
 
     act(() => {
       useChatStore.setState({
@@ -5308,6 +5421,7 @@ describe('MessageList nested tool calls', () => {
     await waitFor(() => {
       expect(screen.getByText('first.ts')).toBeTruthy()
     })
+    expect(screen.queryByText('Markdown')).toBeNull()
   })
 
   it('does not load turn change cards while background tasks are still running', async () => {
@@ -5565,7 +5679,7 @@ describe('MessageList nested tool calls', () => {
             {
               id: 'assistant-2',
               type: 'assistant_text',
-              content: 'second done',
+              content: '我正准备查看 test123.md',
               timestamp: 4,
             },
           ],
@@ -5579,6 +5693,65 @@ describe('MessageList nested tool calls', () => {
     expect(cards).toHaveLength(1)
     expect(screen.getByText('first.ts')).toBeTruthy()
     expect(screen.queryByText('second.ts')).toBeNull()
+    await waitFor(() => {
+      expect(screen.queryByText('Markdown')).toBeNull()
+    })
+  })
+
+  it('keeps an inline absolute image when the turn checkpoint recorded no tracked changes', async () => {
+    // Regression: Bash-written files (e.g. a PIL render at /tmp/result.png) are
+    // invisible to the checkpoint, so filesChanged=[] must NOT hide the image.
+    vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
+      checkpoints: [
+        {
+          target: {
+            targetUserMessageId: 'user-1',
+            userMessageIndex: 0,
+            userMessageCount: 1,
+          },
+          code: {
+            available: true,
+            filesChanged: [],
+            insertions: 0,
+            deletions: 0,
+          },
+        },
+      ],
+    })
+
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          messages: [
+            {
+              id: 'user-1',
+              type: 'user_text',
+              content: '在 /tmp 生成一张图',
+              timestamp: 1,
+            },
+            {
+              id: 'assistant-1',
+              type: 'assistant_text',
+              content: '已生成，保存到 /tmp/result.png（1280×800）。',
+              timestamp: 2,
+            },
+          ],
+        }),
+      },
+    })
+
+    render(<MessageList />)
+
+    // Wait for the checkpoint fetch to resolve and its state update to flush —
+    // the bug only hid the image AFTER the empty checkpoint arrived.
+    await waitFor(() => {
+      expect(sessionsApi.getTurnCheckpoints).toHaveBeenCalled()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(screen.getByRole('img', { name: 'result.png' })).toBeTruthy()
   })
 
   it('shows raw startup details under translated CLI startup errors', () => {
@@ -5856,9 +6029,9 @@ describe('conversation navigation layout', () => {
     { signature: 'c', contentWeight: 1, estimatedHeight: 300 },
   ]
   const items: ConversationNavigationItem[] = [
-    { id: 'a', renderItemKey: 'a', renderIndex: 0, role: 'user', preview: 'A', attachmentCount: 0 },
-    { id: 'b', renderItemKey: 'b', renderIndex: 1, role: 'assistant', preview: 'B', attachmentCount: 0 },
-    { id: 'c', renderItemKey: 'c', renderIndex: 2, role: 'user', preview: 'C', attachmentCount: 0 },
+    { id: 'a', renderItemKey: 'a', renderIndex: 0, turnNumber: 1, preview: 'A', attachmentCount: 0 },
+    { id: 'b', renderItemKey: 'b', renderIndex: 1, turnNumber: 2, preview: 'B', attachmentCount: 0 },
+    { id: 'c', renderItemKey: 'c', renderIndex: 2, turnNumber: 3, preview: 'C', attachmentCount: 0 },
   ]
 
   it('uses measured heights when calculating transcript offsets', () => {
@@ -5891,12 +6064,7 @@ describe('conversation navigation layout', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
-          messages: [
-            { id: 'user-1', type: 'user_text', content: 'First prompt', timestamp: 1 },
-            { id: 'assistant-1', type: 'assistant_text', content: 'First reply', timestamp: 2 },
-            { id: 'user-2', type: 'user_text', content: 'Second prompt', timestamp: 3 },
-            { id: 'assistant-2', type: 'assistant_text', content: 'Second reply', timestamp: 4 },
-          ],
+          messages: makeConversationNavigationMessages(),
         }),
       },
     })

@@ -40,6 +40,7 @@ import {
   resolveSlashUiAction,
 } from './composerUtils'
 import { useMobileViewport } from '../../hooks/useMobileViewport'
+import { useElementWidth } from '../../hooks/useElementWidth'
 import { isDesktopRuntime } from '../../lib/desktopRuntime'
 import {
   filesToComposerAttachments,
@@ -51,6 +52,7 @@ import { useComposerFileDrop } from './useComposerFileDrop'
 import { shouldSubmitOnEnter } from './sendShortcut'
 import type { PermissionMode } from '../../types/settings'
 import { getSessionWorkspaceState } from '../../lib/sessionWorkspace'
+import { hasRunningSubagentTasks } from '../../lib/backgroundTasks'
 
 type GitInfo = SessionGitInfo
 
@@ -62,6 +64,26 @@ type ChatInputProps = {
 }
 
 const EMPTY_WORKSPACE_REFERENCES: WorkspaceChatReference[] = []
+
+/**
+ * Both thresholds are the composer column's own width, never "is the workspace
+ * panel open". The panel is resizable and the window is not fixed, so its open
+ * state says nothing about the width the composer actually got — a maximised
+ * window with the panel open leaves the composer wider than a small window
+ * with no panel at all, yet the panel-keyed rule sent the wide one to the
+ * narrow layout and kept the narrow one wide.
+ *
+ * The number comes off the shipped toolbar with the longest mode label
+ * ("Ask permissions" / 询问权限): the leading group measures 193px and the
+ * trailing cluster 361px, which with the 32px round send button needs a 530px
+ * column.
+ *
+ * There used to be a second, wider threshold here that dropped the send
+ * button's label before the location went. The send button has no label to
+ * drop any more — it is the same 32px circle at every width — so the location
+ * is the only thing left that degrades.
+ */
+const TOOLBAR_LOCATION_MIN_WIDTH = 530
 
 function workspaceReferenceToAttachment(reference: WorkspaceChatReference): Attachment {
   return {
@@ -97,6 +119,10 @@ function insertComposerTokenAtRange(value: string, start: number, end: number, t
 export function ChatInput({ variant = 'default', compact = false }: ChatInputProps) {
   const t = useTranslation()
   const isMobileComposer = useMobileViewport() && !isDesktopRuntime()
+  // The shell, not the panel inside it: the panel's own `max-w` changes with
+  // the layout this measurement picks, which would make the observer chase
+  // itself across the threshold. The shell just fills the chat column.
+  const [shellRef, shellWidth] = useElementWidth<HTMLDivElement>()
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
@@ -195,14 +221,26 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
 
   const isMemberSession = !!memberInfo
   const isActive = chatState !== 'idle'
+  const hasRunningSubagents = hasRunningSubagentTasks(sessionState?.backgroundAgentTasks)
   const workspaceState = getSessionWorkspaceState(activeSession)
   const isWorkspaceMissing = workspaceState !== 'available'
   const hasWorkspaceReferences = !isMemberSession && workspaceReferences.length > 0
   const isHeroComposer = variant === 'hero' && !isMemberSession && !compact
   const resolvedWorkDir = activeSession?.workDir || gitInfo?.workDir || undefined
   const showLaunchControls = !isMemberSession && messageCount === 0
-  const useCompactControls = compact || isMobileComposer
-  const iconOnlyAction = compact || isMobileComposer
+  // Two different questions, and they used to share one answer.
+  //
+  // `useCompactChrome` is about context: the shell's padding, its top divider
+  // and the toolbar's edge-to-edge band belong to the panel-beside-the-composer
+  // and mobile layouts regardless of how much room those layouts got.
+  //
+  // `useCompactControls` is about room, so it asks the column how wide it is.
+  // Until a measurement lands (jsdom, first paint) it defers to the caller's
+  // `compact`, which keeps the pre-measurement frame from flashing the wrong
+  // layout.
+  const useCompactChrome = compact || isMobileComposer
+  const fitsAtLeast = (minWidth: number) => shellWidth === null ? !compact : shellWidth >= minWidth
+  const useCompactControls = isMobileComposer || !fitsAtLeast(TOOLBAR_LOCATION_MIN_WIDTH)
   const activeLaunchWorkDir = showLaunchControls ? (launchWorkDir || resolvedWorkDir || '') : (resolvedWorkDir || '')
   // The run location lives in the toolbar on the wide desktop composer, and it
   // stays there for the whole session: editable while the session is still a
@@ -213,7 +251,10 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   // hero variant while the session is empty, so keying on it moved the location
   // out of the toolbar at the exact moment it was supposed to stay put — the
   // first message swaps the variant and the draft state in the same render.
-  // The condition is the composer's width, not its variant.
+  // The condition is the composer's width, not its variant — and now literally
+  // so. It used to read `compact`, which ActiveSession wires to "is the
+  // workspace panel open", so opening the panel dropped the location to a
+  // second line on columns with hundreds of pixels to spare.
   const showLocationInToolbar = !useCompactControls && !isMemberSession
   const embedLaunchControlsInToolbar = showLocationInToolbar && showLaunchControls
   const pendingSlashUiAction = !isMemberSession && input.trim().startsWith('/')
@@ -954,6 +995,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
 
   return (
     <div
+      ref={shellRef}
       data-testid="chat-input-shell"
       data-session-id={activeTabId ?? undefined}
       className={
@@ -1239,7 +1281,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
               // its flex row; this one is a plain block child and was sitting
               // 18px above the divider where the hero sits 12px.
               className={`block w-full resize-none bg-transparent text-sm leading-relaxed text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] disabled:opacity-50 ${
-                useCompactControls ? 'py-1.5' : 'py-2'
+                useCompactChrome ? 'py-1.5' : 'py-2'
               }`}
             />
           )}
@@ -1255,11 +1297,14 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
             live panel does not have, so that one repeats here as `mt-3`.
             The narrow layouts keep the band: `p-3` leaves too little room to
             spend on inset, and they never swap variants mid-session anyway.
+            The band is keyed to the chrome, not to the control layout — its
+            `-mx-3` has to cancel the panel's `p-3` exactly, and the panel is
+            padded by the same chrome rule.
           */}
           <div data-testid="chat-input-toolbar" className={`flex items-center justify-between border-t border-[var(--color-border-separator)] ${
             isHeroComposer
               ? 'pt-3'
-              : useCompactControls
+              : useCompactChrome
                 ? `mt-2 -mx-3 -mb-3 px-2.5 py-2 ${isMobileComposer ? 'gap-1' : 'gap-2'}`
                 : 'mt-3 pt-3'
           }`}>
@@ -1350,7 +1395,10 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                   runtimeSelectionKey={runtimeSelectionKey}
                   fallbackModelLabel={runtimeModelLabel}
                   compact={useCompactControls}
-                  refreshNonce={sessionState?.compactCount ?? 0}
+                  refreshNonce={
+                    (sessionState?.compactCount ?? 0) +
+                    (sessionState?.runtimeConfigReadyCount ?? 0)
+                  }
                 />
               )}
               {!isMemberSession && activeTabId && (
@@ -1362,37 +1410,58 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                   fluid={isMobileComposer}
                 />
               )}
-              {/* Same component and same icon placement as EmptySession's run
-                  button. The two rendered mirror images of each other until it
-                  was spotted in a walkthrough — the arrow led here and trailed
-                  there, on what is the same button to the user. */}
+              {!isMemberSession && !isActive && hasRunningSubagents ? (
+                <Button
+                  variant="danger"
+                  size="base"
+                  shape="circle"
+                  onClick={() => stopGeneration(activeTabId!)}
+                  aria-label={t('common.stop')}
+                  title={t('chat.stopTitle')}
+                  className={`shrink-0 ${isMobileComposer ? 'h-11 w-11' : ''}`}
+                  icon={(
+                    <span className="material-symbols-outlined text-[18px]">
+                      stop
+                    </span>
+                  )}
+                />
+              ) : null}
+              {/* Same component, shape and icon as EmptySession's send button.
+                  The two rendered mirror images of each other until it was
+                  spotted in a walkthrough — the arrow led here and trailed
+                  there, on what is the same button to the user.
+
+                  A round icon-only target rather than a labelled pill: the
+                  label said "run" while every other composer control on the row
+                  is already icon-only, and the width it cost was the widest
+                  fixed block in a toolbar that has to fit a model picker and a
+                  location chip. The arrow points *up* — into the transcript the
+                  message is being sent to — which is also what makes it read as
+                  send without a word next to it. Dropping the label is why the
+                  name now lives only in `aria-label`, on both breakpoints. */}
               <Button
                 variant={!isMemberSession && isActive ? 'danger' : 'primary'}
                 size="base"
+                shape="circle"
                 onClick={!isMemberSession && isActive ? () => stopGeneration(activeTabId!) : handleSubmit}
                 disabled={!isMemberSession && isActive ? false : !canSubmit}
                 aria-label={!isMemberSession && isActive ? t('common.stop') : isMemberSession ? t('common.send') : t('common.run')}
                 title={
                   !isMemberSession && isActive
                     ? t('chat.stopTitle')
-                    : iconOnlyAction
-                      ? isMemberSession
-                        ? t('common.send')
-                        : t('common.run')
-                      : undefined
+                    : isMemberSession
+                      ? t('common.send')
+                      : t('common.run')
                 }
-                className={`shrink-0 ${
-                  iconOnlyAction ? (isMobileComposer ? 'h-11 w-11' : 'w-8') : 'w-[112px]'
-                }`}
+                // 44px on touch is the platform minimum for a primary target;
+                // the desktop circle stays at the size's own 32px.
+                className={`shrink-0 ${isMobileComposer ? 'h-11 w-11' : ''}`}
                 icon={(
-                  <span className="material-symbols-outlined text-[14px]">
-                    {!isMemberSession && isActive ? 'stop' : 'arrow_forward'}
+                  <span className="material-symbols-outlined text-[18px]">
+                    {!isMemberSession && isActive ? 'stop' : 'arrow_upward'}
                   </span>
                 )}
-                iconPosition="end"
-              >
-                {!iconOnlyAction && (!isMemberSession && isActive ? t('common.stop') : isMemberSession ? t('common.send') : t('common.run'))}
-              </Button>
+              />
             </div>
           </div>
 

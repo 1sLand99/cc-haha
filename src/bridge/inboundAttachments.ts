@@ -150,14 +150,15 @@ async function resolveOne(
     return undefined
   }
 
-  // uuid-prefix makes collisions impossible across messages and within one
-  // (same filename, different files). 8 chars is enough — this isn't security.
+  // Keep a readable UUID prefix for diagnostics, but add a fresh suffix for
+  // every delivery. The same cloud attachment may be intentionally resent in
+  // one session, and staging must neither overwrite nor silently drop it.
   const safeName = sanitizeFileName(att.file_name)
   const prefix = (
     att.file_uuid.slice(0, 8) || randomUUID().slice(0, 8)
   ).replace(/[^a-zA-Z0-9_-]/g, '_')
   const dir = uploadsDir()
-  const outPath = join(dir, `${prefix}-${safeName}`)
+  const outPath = join(dir, `${prefix}-${randomUUID()}-${safeName}`)
 
   try {
     await mkdir(dir, { recursive: true, mode: 0o700 })

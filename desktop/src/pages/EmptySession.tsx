@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { ApiError } from '../api/client'
 import { agentsApi } from '../api/agents'
+import { providersApi } from '../api/providers'
 import { skillsApi } from '../api/skills'
 import { useTranslation } from '../i18n'
 import { useSessionStore } from '../stores/sessionStore'
@@ -307,6 +308,13 @@ export function EmptySession() {
 
     setIsSubmitting(true)
     try {
+      const authStatus = await providersApi.authStatus()
+      if (!authStatus.hasAuth) {
+        useUIStore.getState().setPendingSettingsTab('providers')
+        useTabStore.getState().openTab(SETTINGS_TAB_ID, t('sidebar.settings'), 'settings')
+        return
+      }
+
       const runtimeStore = useSessionRuntimeStore.getState()
       const explicitDraftSelection = runtimeStore.selections[DRAFT_RUNTIME_SELECTION_KEY]
       const defaultActiveProviderSelection = explicitDraftSelection
@@ -780,19 +788,20 @@ export function EmptySession() {
                     compact={isMobileComposer}
                   />
                   <ModelSelector ref={modelSelectorRef} runtimeKey={DRAFT_RUNTIME_SELECTION_KEY} disabled={isSubmitting} compact={isMobileComposer} />
+                  {/* Kept identical to ChatInput's send button — same
+                      component, shape, size and icon. See the note there for
+                      why the label went away. */}
                   <Button
                     variant="primary"
                     size="base"
+                    shape="circle"
                     onClick={handleSubmit}
                     disabled={!canSubmit}
                     aria-label={t('common.run')}
-                    title={isMobileComposer ? t('common.run') : undefined}
-                    className={`shrink-0 ${isMobileComposer ? 'h-11 w-11' : 'w-[112px]'}`}
-                    icon={<span className="material-symbols-outlined text-[14px]">arrow_forward</span>}
-                    iconPosition="end"
-                  >
-                    {!isMobileComposer && t('common.run')}
-                  </Button>
+                    title={t('common.run')}
+                    className={`shrink-0 ${isMobileComposer ? 'h-11 w-11' : ''}`}
+                    icon={<span className="material-symbols-outlined text-[18px]">arrow_upward</span>}
+                  />
                 </div>
               </div>
             </div>

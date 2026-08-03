@@ -32,6 +32,9 @@ function classify(target: string): PendingUpload['source'] | null {
   if (target.startsWith('file://')) {
     return { kind: 'path', path: target.slice('file://'.length) }
   }
+  if (target.startsWith('http://') || target.startsWith('https://')) {
+    return { kind: 'url', url: target }
+  }
   if (target.startsWith('/')) {
     return { kind: 'path', path: target }
   }
