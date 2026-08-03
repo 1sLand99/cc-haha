@@ -1528,7 +1528,7 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
       const composer = Array.from(
         document.querySelectorAll<HTMLElement>('[data-testid="chat-input-shell"]'),
       ).find((element) => element.dataset.sessionId === sessionId)
-      composer?.querySelector<HTMLTextAreaElement>('textarea:not([disabled])')?.focus()
+      composer?.querySelector<HTMLElement>('[data-composer-editor]')?.focus()
     })
   }
 

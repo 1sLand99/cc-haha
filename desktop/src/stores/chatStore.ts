@@ -17,6 +17,7 @@ import {
 import { hasRunningBackgroundTasks, hasRunningSubagentTasks } from '../lib/backgroundTasks'
 import { AGENT_LIFECYCLE_TYPES } from '../types/team'
 import type { ComposerAttachment } from '../lib/composerAttachments'
+import type { ComposerMention } from '../lib/composerMentions'
 import type { MessageEntry } from '../types/session'
 import type { PermissionMode } from '../types/settings'
 import type { RuntimeSelection } from '../types/runtime'
@@ -52,6 +53,8 @@ type CompactSummaryMessage = Extract<UIMessage, { type: 'compact_summary' }>
 export type ComposerDraftState = {
   input: string
   attachments: ComposerAttachment[]
+  /** Inline @-mention pills in the draft, in document order. */
+  mentions?: ComposerMention[]
 }
 
 export type QueuedUserMessage = {
