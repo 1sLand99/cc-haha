@@ -121,6 +121,7 @@ const sessionStopRequested = new Set<string>()
 const sessionTitleState = new Map<string, {
   userMessageCount: number
   hasCustomTitle: boolean
+  hasExistingTranscript: boolean
   firstUserMessage: string
   completedTurns: TitleConversationTurn[]
   activeTurn?: TitleConversationTurn & { count: number }
@@ -886,10 +887,14 @@ async function handleUserMessage(
   let titleState = sessionTitleState.get(sessionId)
   if (!titleState) {
     const hasCustomTitle = !!(await sessionService.getCustomTitle(sessionId))
+    const launchInfo = hasCustomTitle
+      ? null
+      : await sessionService.getSessionLaunchInfo(sessionId)
     if (activeUserTurns.get(sessionId) !== activeTurn || activeTurn.cancelled) return
     titleState = {
       userMessageCount: 0,
       hasCustomTitle,
+      hasExistingTranscript: (launchInfo?.transcriptMessageCount ?? 0) > 0,
       firstUserMessage: '',
       completedTurns: [],
       startedGenerationKeys: new Set<string>(),
@@ -2392,7 +2397,7 @@ function triggerTitleGeneration(
   completedTurnCount?: number,
 ): void {
   const state = sessionTitleState.get(sessionId)
-  if (!state || state.hasCustomTitle) return
+  if (!state || state.hasCustomTitle || state.hasExistingTranscript) return
 
   const count = phase === 'turn-complete'
     ? completedTurnCount ?? state.userMessageCount
@@ -3907,6 +3912,7 @@ function getTitleInputForUserMessage(
   content: string,
   command: ReturnType<typeof parseSlashCommand>,
 ): string | null {
+  if (command?.commandName === 'compact') return null
   if (command?.commandName !== 'goal') return content
 
   const args = command.args.trim()
