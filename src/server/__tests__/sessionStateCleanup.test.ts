@@ -16,7 +16,16 @@ import { fileURLToPath } from 'node:url'
  * future reader can evaluate instead of re-deriving.
  */
 
-const HANDLER_PATH = fileURLToPath(new URL('../ws/handler.ts', import.meta.url))
+/**
+ * Sources that together own per-session state. `handler.ts` is being split, so the
+ * cleanup closure now spans files: `clearAgentRuntimeState` and the six agent/task
+ * containers live in `agentTaskState.ts` while `cleanupSessionRuntimeState` still
+ * calls it from `handler.ts`. Add a file here when a further cut moves state out.
+ */
+const SOURCE_PATHS = [
+  fileURLToPath(new URL('../ws/handler.ts', import.meta.url)),
+  fileURLToPath(new URL('../ws/agentTaskState.ts', import.meta.url)),
+]
 const CLEANUP_ENTRY = 'cleanupSessionRuntimeState'
 
 type Classification =
@@ -101,19 +110,28 @@ const CONTAINERS: Record<string, Classification> = {
   },
 }
 
-const source = readFileSync(HANDLER_PATH, 'utf8')
+const sources = SOURCE_PATHS.map((path) => readFileSync(path, 'utf8'))
+const source = sources.join('\n')
 
 function declaredContainers(): string[] {
-  return [...source.matchAll(/^const ([a-zA-Z][a-zA-Z0-9]*) = new (?:Map|Set|WeakMap|WeakSet)\b/gm)]
+  return sources
+    .flatMap((text) => [
+      ...text.matchAll(/^(?:export )?const ([a-zA-Z][a-zA-Z0-9]*) = new (?:Map|Set|WeakMap|WeakSet)\b/gm),
+    ])
     .map((match) => match[1])
     .sort()
 }
 
 function functionBody(name: string): string | null {
-  const start = source.search(new RegExp(`^(?:export )?(?:async )?function ${name}\\b`, 'm'))
-  if (start === -1) return null
-  const end = source.indexOf('\n}', start)
-  return end === -1 ? source.slice(start) : source.slice(start, end)
+  // Searched per file: concatenating first would let a slice run past the end of one
+  // file into the next, silently widening the closure.
+  for (const text of sources) {
+    const start = text.search(new RegExp(`^(?:export )?(?:async )?function ${name}\\b`, 'm'))
+    if (start === -1) continue
+    const end = text.indexOf('\n}', start)
+    return end === -1 ? text.slice(start) : text.slice(start, end)
+  }
+  return null
 }
 
 /**
@@ -123,7 +141,7 @@ function functionBody(name: string): string | null {
  */
 function clearedByCleanupClosure(): Set<string> {
   const entry = functionBody(CLEANUP_ENTRY)
-  if (!entry) throw new Error(`${CLEANUP_ENTRY} not found in handler.ts`)
+  if (!entry) throw new Error(`${CLEANUP_ENTRY} not found in any registered source`)
 
   const bodies = [entry]
   for (const call of new Set([...entry.matchAll(/^\s{2}([a-zA-Z][a-zA-Z0-9]*)\(/gm)].map((m) => m[1]))) {
@@ -153,6 +171,9 @@ describe('handler session-state cleanup', () => {
     // A classification left behind after its container is gone is dead weight.
     expect(classified.filter((name) => !declared.includes(name))).toEqual([])
     expect(declared.length).toBeGreaterThan(30)
+    // Guards the split itself: the agent/task containers must stay findable after
+    // they moved out of handler.ts.
+    expect(declared).toContain('activeAgentTasks')
   })
 
   test('releases every container classified as cleared', () => {
