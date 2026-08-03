@@ -459,7 +459,11 @@ describe('Settings > General tab', () => {
     expect(activeItem).toHaveAttribute('aria-current', 'page')
 
     const rail = activeItem.parentElement?.parentElement
-    expect(rail?.className).toContain('w-[220px]')
+    expect(rail?.className).toContain('w-[195px]')
+    expect(rail?.className).toContain('pl-3')
+    expect(rail?.className).toContain('pr-1')
+    expect(activeItem.className).toContain('pl-3')
+    expect(activeItem.className).toContain('pr-2')
   })
 
   it('marks the pure white appearance theme as selected', () => {
