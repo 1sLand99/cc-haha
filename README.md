@@ -22,7 +22,7 @@
 
 </div>
 
-Claude Code Haha is a **desktop Claude Code workspace** for macOS, Windows, and Linux: sessions, projects, branch / Worktree launch, workspace changes and diff review, permission approval, model setup, Computer Use, H5 remote access, IM integration, and scheduled tasks in one app.
+Claude Code Haha is a **desktop Claude Code workspace** for macOS, Windows, and Linux: multi-session workspaces, global search, branch / Worktree launch, diff review, built-in browser preview, GUI permission approval, any model — Claude, ChatGPT, Grok, presets, or local endpoints — image generation, visual MCP & SubAgent managers, model trace, Computer Use, skill marketplace, colour themes, desktop pets, H5 remote access, IM integration, and scheduled tasks, all in one app.
 
 <p align="center">
   <a href="#desktop-preview">Desktop Preview</a> · <a href="#install-the-desktop-app">Install</a> · <a href="#desktop-highlights">Highlights</a> · <a href="#more-documentation">More Docs</a> · <a href="#sponsorship--partnership">Sponsorship</a> · <a href="#user-group">User Group</a>
@@ -133,13 +133,19 @@ See [environment variables](docs/en/cli/env.md) and [CLI setup](docs/en/cli/inde
 ## Desktop Highlights
 
 - **Multi-session workspace**: tabs, project switching, terminal entry, and session history in one place, with a resizable sidebar.
+- **Global search**: press Cmd+K to search across every session and jump to the match.
 - **Branch / Worktree launch**: choose a repository branch and decide whether to use the current working tree or an isolated Worktree.
 - **Review edits file by file**: the workspace lists this turn's changes; open any file for a syntax-highlighted diff, or undo the whole turn.
+- **Built-in browser preview**: the page your agent just edited renders right inside the app, cookies and login state included.
 - **Five permission modes**: from "ask every time" to "skip permissions" — risky commands, tool calls, and follow-up questions are all approved in the GUI.
 - **Bring your own model**: sign in to Claude, ChatGPT, or Grok; use presets for DeepSeek, Kimi, Zhipu GLM and others; or point it at LM Studio and Ollama running locally.
+- **Image generation**: generate and edit images right in the chat — sign in with ChatGPT or Grok for instant use, or plug in any OpenAI-compatible Images API.
+- **Visual MCP manager**: add and edit MCP servers in a GUI — STDIO / Streamable HTTP / SSE, with project, shared, or global scope.
 - **Six colour themes**: white, paper, warm classic, celadon, ink night, and ink blue — optionally following your system's light/dark setting.
 - **Skill marketplace**: discover, preview, and install third-party skills from ClawHub / SkillHub, with source and safety status shown up front.
 - **Session activity panel**: track task progress, background tasks, SubAgents, and sources in one side panel.
+- **Visual SubAgent manager**: create and tune SubAgents in a GUI — model, tools, and permission mode.
+- **Model trace**: every model request is logged locally with status and timing — search and filter to diagnose stuck or failed calls.
 - **Computer Use**: let the agent take screenshots, click, type, and control desktop apps after authorization.
 - **Desktop pets**: Dada, Huhu, Bubu, and Huihui change what they do with the task at hand — or raise one of your own (off by default).
 - **H5 remote access**: scan a QR code to continue the session in your phone browser; locking the screen won't kill a running task.
