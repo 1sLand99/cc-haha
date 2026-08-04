@@ -3237,7 +3237,8 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
         if (
           cliMsg.task_type === 'dream' ||
           sessionStopRequested.has(sessionId) ||
-          agentStopRequestedSessions.has(sessionId)
+          agentStopRequestedSessions.has(sessionId) ||
+          !hasLiveUserTurnForClient(sessionId)
         ) {
           return [notification]
         }
@@ -3251,13 +3252,15 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
         ]
       }
       if (subtype === 'task_progress') {
+        const notification: ServerMessage = {
+          type: 'system_notification',
+          subtype: 'task_progress',
+          message: cliMsg.message || cliMsg.summary || cliMsg.description || 'Task in progress',
+          data: cliMsg,
+        }
+        if (!hasLiveUserTurnForClient(sessionId)) return [notification]
         return [
-          {
-            type: 'system_notification',
-            subtype: 'task_progress',
-            message: cliMsg.message || cliMsg.summary || cliMsg.description || 'Task in progress',
-            data: cliMsg,
-          },
+          notification,
           {
             type: 'status',
             state: 'tool_executing',

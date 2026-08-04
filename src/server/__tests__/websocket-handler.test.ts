@@ -794,6 +794,79 @@ describe('WebSocket handler session isolation', () => {
     expect(stopSession).not.toHaveBeenCalled()
   })
 
+  it('does not turn background task lifecycle into foreground activity after the user turn ends', () => {
+    const sessionId = `background-task-foreground-state-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+    const outputCallbacks: Array<(cliMsg: any) => void> = []
+    spyOn(conversationService, 'hasSession').mockReturnValue(true)
+    spyOn(conversationService, 'onOutput').mockImplementation((_sid, callback) => {
+      outputCallbacks.push(callback)
+    })
+    spyOn(conversationService, 'removeOutputCallback').mockImplementation(() => {})
+
+    handleWebSocket.open(ws)
+    ws.sent.length = 0
+
+    outputCallbacks[0]?.({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 'agent-task-1',
+      tool_use_id: 'agent-tool-1',
+      description: 'Verify the todo app',
+      task_type: 'local_agent',
+    })
+    outputCallbacks[0]?.({
+      type: 'system',
+      subtype: 'task_progress',
+      task_id: 'agent-task-1',
+      tool_use_id: 'agent-tool-1',
+      summary: 'Running Playwright checks',
+      task_type: 'local_agent',
+    })
+
+    const idleMessages = ws.sent.map((payload) => JSON.parse(payload))
+    expect(idleMessages).toContainEqual(expect.objectContaining({
+      type: 'system_notification',
+      subtype: 'task_started',
+    }))
+    expect(idleMessages).toContainEqual(expect.objectContaining({
+      type: 'system_notification',
+      subtype: 'task_progress',
+    }))
+    expect(idleMessages).not.toContainEqual(expect.objectContaining({
+      type: 'status',
+      state: 'tool_executing',
+    }))
+
+    handleWebSocket.message(ws, JSON.stringify({ type: 'sync_state' }))
+    expect(ws.sent.map((payload) => JSON.parse(payload))).toContainEqual({
+      type: 'session_state',
+      turnState: 'idle',
+    })
+
+    __markActiveTurnForTests(sessionId)
+    ws.sent.length = 0
+    outputCallbacks[0]?.({
+      type: 'system',
+      subtype: 'task_progress',
+      task_id: 'agent-task-1',
+      tool_use_id: 'agent-tool-1',
+      summary: 'Foreground turn is waiting for the task',
+      task_type: 'local_agent',
+    })
+
+    expect(ws.sent.map((payload) => JSON.parse(payload))).toContainEqual({
+      type: 'status',
+      state: 'tool_executing',
+      verb: 'Foreground turn is waiting for the task',
+    })
+    handleWebSocket.message(ws, JSON.stringify({ type: 'sync_state' }))
+    expect(ws.sent.map((payload) => JSON.parse(payload))).toContainEqual({
+      type: 'session_state',
+      turnState: 'running',
+    })
+  })
+
   it('stops every active Agent task when generation is stopped', async () => {
     const sessionId = `stop-agent-fanout-${crypto.randomUUID()}`
     const ws = makeClientSocket(sessionId)

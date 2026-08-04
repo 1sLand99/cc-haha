@@ -2598,6 +2598,7 @@ describe('chatStore history mapping', () => {
         parentToolUseId: 'agent-1',
       },
     ])
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.chatState).toBe('idle')
   })
 
   it('retains live parent linkage when only content_start carries the parent id', () => {
