@@ -1526,8 +1526,8 @@ button, input, textarea, select, a, [role="button"] {
 
 /* Inline @-mention pill (an atom node in the document). */
 .composer-mention {
-  color: var(--color-success);
-  background: var(--color-success-container);
+  color: var(--color-on-brand-soft);
+  background: var(--color-brand-soft);
   border-radius: var(--radius-md);
   padding: 0 4px;
   margin: 0 1px;

@@ -101,7 +101,7 @@ vi.mock('../controls/ModelSelector', async () => {
 })
 
 import { ChatInput } from './ChatInput'
-import { getComposerElement, getComposerText, setComposerSelection, setComposerText } from './composerTestUtils'
+import { getComposerElement, getComposerText, setComposerText } from './composerTestUtils'
 import { useChatStore } from '../../stores/chatStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -1643,18 +1643,19 @@ describe('ChatInput file mentions', () => {
       expect(getComposerText()).toBe('看下 @backend/ 这个目录')
     })
 
-    // Caret directly after the atom: one Backspace removes the whole pill —
-    // it can never be half-deleted character by character.
-    setComposerSelection('看下 @backend/'.length)
+    // Keep the caret exactly where the real picker transition placed it:
+    // after the separator space that insertion adds behind the atom. One
+    // Backspace must remove that insertion unit, not consume the invisible
+    // separator first and make the user press Backspace a second time.
     fireEvent.keyDown(getComposerElement(), { key: 'Backspace' })
-    expect(getComposerText()).toBe('看下  这个目录')
+    expect(getComposerText()).toBe('看下 这个目录')
     expect(document.querySelector('.composer-mention')).not.toBeInTheDocument()
 
     // Nothing to serialize any more: the path is gone from the model text too.
     fireEvent.keyDown(getComposerElement(), { key: 'Enter' })
     expect(mocks.wsSend).toHaveBeenCalledWith(sessionId, {
       type: 'user_message',
-      content: '看下  这个目录',
+      content: '看下 这个目录',
       attachments: [],
     })
   })
