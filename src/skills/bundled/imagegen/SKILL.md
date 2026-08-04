@@ -19,7 +19,7 @@ Use the built-in `ImageGen` tool. Provider authentication, model routing, output
 - For multi-turn editing, use the latest selected output as the next turn's `edit_target`. Repeat all identity, layout, text, and unchanged-region constraints on every turn so edits do not drift.
 - To edit several images independently, make one call per image. Put multiple images in one call only when the user wants them combined or used together as references. A single call accepts at most three source images.
 - Prefer a useful default composition when the user leaves details open. Do not invent branding, logos, or people they did not request.
-- Respect an explicitly requested provider model by passing `model`; otherwise omit it so the configured default is used.
+- Respect an explicitly requested concrete provider model ID by passing `model`; otherwise omit the field so the configured model is used. Never pass `default` or another placeholder model name.
 - If the provider or tool returns an error, do not retry `ImageGen` automatically. Explain the failure and let the user decide whether to retry or change providers.
 
 ## Build the prompt

@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
+import { OPENAI_CODEX_OAUTH_FILE_ENV_KEY } from '../../services/openaiAuth/storage.js'
 import type { ImageGenerationRuntimeConfig } from '../../services/imageGeneration/config.js'
 import {
   buildChatGPTRequestBody,
@@ -266,6 +267,80 @@ describe('ImageGen backend', () => {
     ])
     expect(result.operation).toBe('generate')
     expect(result.inputImageCount).toBe(0)
+  })
+
+  test('uses the configured image model for a model-supplied default placeholder', async () => {
+    outputDir = await mkdtemp(join(tmpdir(), 'imagegen-output-'))
+    let requestBody: Record<string, unknown> | undefined
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body))
+      return Response.json({
+        data: [{ b64_json: PNG_BYTES.toString('base64') }],
+      })
+    }
+
+    const result = await generateImages({
+      prompt: 'A paper-cut fox poster',
+      count: 1,
+      model: 'default',
+    }, customConfig, { fetchImpl, outputDir })
+
+    expect(requestBody).toMatchObject({ model: 'relay-image-model' })
+    expect(result.model).toBe('relay-image-model')
+  })
+
+  test('uses the configured ChatGPT OAuth image model for a default placeholder', async () => {
+    outputDir = await mkdtemp(join(tmpdir(), 'imagegen-openai-oauth-'))
+    const tokenPath = join(outputDir, 'openai-oauth.json')
+    const previousTokenPath = process.env[OPENAI_CODEX_OAUTH_FILE_ENV_KEY]
+    await writeFile(tokenPath, JSON.stringify({
+      accessToken: 'test-openai-access-token',
+      refreshToken: 'test-openai-refresh-token',
+      expiresAt: 4_100_000_000_000,
+      accountId: 'test-openai-account',
+    }))
+    process.env[OPENAI_CODEX_OAUTH_FILE_ENV_KEY] = tokenPath
+
+    let requestBody: Record<string, any> | undefined
+    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body))
+      const event = {
+        type: 'response.output_item.done',
+        item: {
+          type: 'image_generation_call',
+          result: PNG_BYTES.toString('base64'),
+        },
+      }
+      return new Response(`data: ${JSON.stringify(event)}\n\ndata: [DONE]\n\n`)
+    }
+
+    try {
+      const result = await generateImages({
+        prompt: 'A paper-cut fox poster',
+        count: 1,
+        model: 'default',
+      }, {
+        kind: 'openai_oauth',
+        providerId: 'openai-official',
+        model: 'gpt-image-2',
+      }, { fetchImpl, outputDir })
+
+      expect(requestBody?.tools?.[0]).toMatchObject({
+        type: 'image_generation',
+        model: 'gpt-image-2',
+      })
+      expect(result).toMatchObject({
+        providerId: 'openai-official',
+        providerKind: 'openai_oauth',
+        model: 'gpt-image-2',
+      })
+    } finally {
+      if (previousTokenPath === undefined) {
+        delete process.env[OPENAI_CODEX_OAUTH_FILE_ENV_KEY]
+      } else {
+        process.env[OPENAI_CODEX_OAUTH_FILE_ENV_KEY] = previousTokenPath
+      }
+    }
   })
 
   test('rejects edit paths outside the session upload and generated-image roots', async () => {

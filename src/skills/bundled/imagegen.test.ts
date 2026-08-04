@@ -59,6 +59,8 @@ describe('bundled imagegen skill', () => {
     expect(text).toContain('one call per image')
     expect(text).toContain('omit <code>input_images</code> entirely')
     expect(text).toContain('Never pass <code>/dev/null</code>')
+    expect(text).toContain('otherwise omit the field')
+    expect(text).toContain('Never pass <code>default</code>')
     expect(text).not.toContain('CC_HAHA_IMAGE_API_KEY')
   })
 })

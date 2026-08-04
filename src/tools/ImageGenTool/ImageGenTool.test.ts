@@ -97,5 +97,7 @@ describe('ImageGenTool', () => {
     )
     expect(prompt).toContain('omit input_images entirely')
     expect(prompt).toContain('never pass /dev/null')
+    expect(prompt).toContain('Omit model unless')
+    expect(prompt).toContain('never pass "default"')
   })
 })

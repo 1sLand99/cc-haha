@@ -1426,8 +1426,8 @@ async function handleSetRuntimeConfig(
   message: Extract<ClientMessage, { type: 'set_runtime_config' }>
 ) {
   const { sessionId } = ws.data
-  let modelId = typeof message.modelId === 'string' ? message.modelId.trim() : ''
-  if (!modelId) {
+  const requestedModelId = typeof message.modelId === 'string' ? message.modelId.trim() : ''
+  if (!requestedModelId) {
     sendMessage(ws, {
       type: 'error',
       message: 'Runtime model selection is invalid.',
@@ -1435,70 +1435,73 @@ async function handleSetRuntimeConfig(
     })
     return
   }
-  if (isGrokOfficialProviderId(message.providerId)) {
-    modelId = (await getGrokReasoningEfforts(modelId)).modelId
-  }
-  const effortLevel =
+  const requestedEffort =
     typeof message.effortLevel === 'string' ? message.effortLevel.trim() : undefined
-  const effortResolution = effortLevel === undefined
-    ? { valid: true, effort: undefined }
-    : await resolveRuntimeEffort(message.providerId, modelId, effortLevel)
-  if (!effortResolution.valid) {
-    sendMessage(ws, {
-      type: 'error',
-      message: 'Runtime effort selection is invalid.',
-      code: 'RUNTIME_CONFIG_INVALID',
-    })
-    return
-  }
 
-  const nextOverride = {
-    providerId: message.providerId ?? null,
-    modelId,
-    ...(effortResolution.effort ? { effort: effortResolution.effort } : {}),
-  }
-  const prevOverride = runtimeOverrides.get(sessionId)
-  if (
-    prevOverride &&
-    prevOverride.providerId === nextOverride.providerId &&
-    prevOverride.modelId === nextOverride.modelId &&
-    prevOverride.effort === nextOverride.effort
-  ) {
-    return
-  }
-
-  runtimeOverrides.set(sessionId, nextOverride)
-  runtimeOverrideVersions.set(
-    sessionId,
-    (runtimeOverrideVersions.get(sessionId) ?? 0) + 1,
-  )
-
-  if (shouldDeferRuntimeRestartForActiveTurn(sessionId)) {
-    deferredRuntimeRestarts.set(sessionId, nextOverride)
-    await persistSessionRuntimeConfig(sessionId, nextOverride)
-    return
-  }
-
-  if (conversationService.hasSession(sessionId)) {
-    await enqueueRuntimeTransition(sessionId, async () => {
-      await persistSessionRuntimeConfig(sessionId, nextOverride)
-      await restartSessionWithRuntimeConfig(ws, sessionId)
-    })
-    return
-  }
-
-  const pendingStartup = sessionStartupPromises.get(sessionId)
-  if (pendingStartup) {
-    const startupRuntimeVersion = sessionStartupRuntimeVersions.get(sessionId) ?? 0
-    const currentRuntimeVersion = runtimeOverrideVersions.get(sessionId) ?? 0
-    if (startupRuntimeVersion >= currentRuntimeVersion) {
-      await persistSessionRuntimeConfig(sessionId, nextOverride)
-      await pendingStartup
-      broadcastAppliedRuntimeConfig(sessionId)
+  // Register the transition before remote model-catalog or provider validation.
+  // A user message arriving in that async admission window must wait for the
+  // selected runtime instead of entering the previous provider's CLI process.
+  await enqueueRuntimeTransition(sessionId, async () => {
+    let modelId = requestedModelId
+    if (isGrokOfficialProviderId(message.providerId)) {
+      modelId = (await getGrokReasoningEfforts(modelId)).modelId
+    }
+    const effortResolution = requestedEffort === undefined
+      ? { valid: true, effort: undefined }
+      : await resolveRuntimeEffort(message.providerId, modelId, requestedEffort)
+    if (!effortResolution.valid) {
+      sendMessage(ws, {
+        type: 'error',
+        message: 'Runtime effort selection is invalid.',
+        code: 'RUNTIME_CONFIG_INVALID',
+      })
       return
     }
 
-    await enqueueRuntimeTransition(sessionId, async () => {
+    const nextOverride = {
+      providerId: message.providerId ?? null,
+      modelId,
+      ...(effortResolution.effort ? { effort: effortResolution.effort } : {}),
+    }
+    const prevOverride = runtimeOverrides.get(sessionId)
+    if (
+      prevOverride &&
+      prevOverride.providerId === nextOverride.providerId &&
+      prevOverride.modelId === nextOverride.modelId &&
+      prevOverride.effort === nextOverride.effort
+    ) {
+      return
+    }
+
+    runtimeOverrides.set(sessionId, nextOverride)
+    runtimeOverrideVersions.set(
+      sessionId,
+      (runtimeOverrideVersions.get(sessionId) ?? 0) + 1,
+    )
+
+    if (shouldDeferRuntimeRestartForActiveTurn(sessionId)) {
+      deferredRuntimeRestarts.set(sessionId, nextOverride)
+      await persistSessionRuntimeConfig(sessionId, nextOverride)
+      return
+    }
+
+    if (conversationService.hasSession(sessionId)) {
+      await persistSessionRuntimeConfig(sessionId, nextOverride)
+      await restartSessionWithRuntimeConfig(ws, sessionId)
+      return
+    }
+
+    const pendingStartup = sessionStartupPromises.get(sessionId)
+    if (pendingStartup) {
+      const startupRuntimeVersion = sessionStartupRuntimeVersions.get(sessionId) ?? 0
+      const currentRuntimeVersion = runtimeOverrideVersions.get(sessionId) ?? 0
+      if (startupRuntimeVersion >= currentRuntimeVersion) {
+        await persistSessionRuntimeConfig(sessionId, nextOverride)
+        await pendingStartup
+        broadcastAppliedRuntimeConfig(sessionId)
+        return
+      }
+
       await persistSessionRuntimeConfig(sessionId, nextOverride)
       await pendingStartup.catch(() => undefined)
       const currentOverride = runtimeOverrides.get(sessionId)
@@ -1511,12 +1514,12 @@ async function handleSetRuntimeConfig(
         return
       }
       await restartSessionWithRuntimeConfig(ws, sessionId)
-    })
-    return
-  }
+      return
+    }
 
-  await persistSessionRuntimeConfig(sessionId, nextOverride)
-  broadcastAppliedRuntimeConfig(sessionId)
+    await persistSessionRuntimeConfig(sessionId, nextOverride)
+    broadcastAppliedRuntimeConfig(sessionId)
+  })
 }
 
 async function restartSessionWithPermissionMode(

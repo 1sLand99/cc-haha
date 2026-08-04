@@ -94,7 +94,11 @@ export async function generateImages(
   options: GenerateOptions = {},
 ): Promise<ImageGenerationOutput> {
   const startedAt = Date.now()
-  const model = input.model?.trim() || config.model
+  const requestedModel = input.model?.trim()
+  // Some tool-calling models use "default" to mean no model override.
+  const model = requestedModel && requestedModel.toLowerCase() !== 'default'
+    ? requestedModel
+    : config.model
   const fetchImpl = options.fetchImpl ?? fetch
   const { signal, cleanup } = createCombinedAbortSignal(options.signal, {
     timeoutMs: IMAGE_REQUEST_TIMEOUT_MS,
