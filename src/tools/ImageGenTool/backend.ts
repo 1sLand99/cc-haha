@@ -30,7 +30,6 @@ export type ImageGenerationInput = {
     path: string
     role: 'edit_target' | 'reference' | 'style_reference' | 'composite_source'
   }>
-  model?: string
   aspect_ratio?: string
   resolution?: '1k' | '2k'
   size?: 'auto' | '1024x1024' | '1024x1536' | '1536x1024'
@@ -94,11 +93,7 @@ export async function generateImages(
   options: GenerateOptions = {},
 ): Promise<ImageGenerationOutput> {
   const startedAt = Date.now()
-  const requestedModel = input.model?.trim()
-  // Some tool-calling models use "default" to mean no model override.
-  const model = requestedModel && requestedModel.toLowerCase() !== 'default'
-    ? requestedModel
-    : config.model
+  const model = config.model
   const fetchImpl = options.fetchImpl ?? fetch
   const { signal, cleanup } = createCombinedAbortSignal(options.signal, {
     timeoutMs: IMAGE_REQUEST_TIMEOUT_MS,
@@ -611,10 +606,7 @@ async function prepareInputImages(
   input: ImageGenerationInput,
   overrideRootDirs?: string[],
 ): Promise<PreparedInputImage[]> {
-  // Some tool-calling models use the POSIX null device to mean "no image".
-  const requested = (input.input_images ?? []).filter(
-    ({ path: inputPath }) => inputPath.trim() !== '/dev/null',
-  )
+  const requested = input.input_images ?? []
   if (requested.length === 0) return []
   if (requested.length > 3) {
     throw new Error('Image editing supports at most 3 input images per call.')

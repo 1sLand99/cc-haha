@@ -7,6 +7,7 @@ import {
   IMAGE_GENERATION_PROVIDER_ID_ENV_KEY,
   IMAGE_GENERATION_PROVIDER_KIND_ENV_KEY,
 } from '../../services/imageGeneration/config.js'
+import { zodToJsonSchema } from '../../utils/zodToJsonSchema.js'
 import { ImageGenTool } from './ImageGenTool.js'
 
 const ENV_KEYS = [
@@ -45,10 +46,18 @@ describe('ImageGenTool', () => {
   })
 
   test('defaults to one slot and preserves the structured result for the desktop', () => {
+    expect(ImageGenTool.strict).toBe(false)
+    const jsonSchema = zodToJsonSchema(ImageGenTool.inputSchema)
+    expect(jsonSchema.required).toEqual(['prompt', 'count'])
+    expect(jsonSchema.properties).not.toHaveProperty('model')
     expect(ImageGenTool.inputSchema.parse({ prompt: 'A paper-cut fox' })).toEqual({
       prompt: 'A paper-cut fox',
       count: 1,
     })
+    expect(() => ImageGenTool.inputSchema.parse({
+      prompt: 'A paper-cut fox',
+      model: 'default',
+    })).toThrow()
 
     const output = {
       type: 'image_generation_result' as const,
@@ -96,8 +105,7 @@ describe('ImageGenTool', () => {
       'do not retry ImageGen automatically',
     )
     expect(prompt).toContain('omit input_images entirely')
-    expect(prompt).toContain('never pass /dev/null')
-    expect(prompt).toContain('Omit model unless')
-    expect(prompt).toContain('never pass "default"')
+    expect(prompt).toContain('Provider and image model selection')
+    expect(prompt).toContain('are not tool arguments')
   })
 })

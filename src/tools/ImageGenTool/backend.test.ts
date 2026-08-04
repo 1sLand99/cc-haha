@@ -246,50 +246,7 @@ describe('ImageGen backend', () => {
     expect(result.images).toHaveLength(2)
   })
 
-  test('treats a model-supplied /dev/null image placeholder as generation', async () => {
-    outputDir = await mkdtemp(join(tmpdir(), 'imagegen-output-'))
-    const calls: string[] = []
-    const fetchImpl = async (input: string | URL | Request) => {
-      calls.push(String(input))
-      return Response.json({
-        data: [{ b64_json: PNG_BYTES.toString('base64') }],
-      })
-    }
-
-    const result = await generateImages({
-      prompt: 'A paper-cut fox poster',
-      count: 1,
-      input_images: [{ path: '/dev/null', role: 'reference' }],
-    }, customConfig, { fetchImpl, outputDir })
-
-    expect(calls).toEqual([
-      'https://relay.example.test/v1/images/generations',
-    ])
-    expect(result.operation).toBe('generate')
-    expect(result.inputImageCount).toBe(0)
-  })
-
-  test('uses the configured image model for a model-supplied default placeholder', async () => {
-    outputDir = await mkdtemp(join(tmpdir(), 'imagegen-output-'))
-    let requestBody: Record<string, unknown> | undefined
-    const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
-      requestBody = JSON.parse(String(init?.body))
-      return Response.json({
-        data: [{ b64_json: PNG_BYTES.toString('base64') }],
-      })
-    }
-
-    const result = await generateImages({
-      prompt: 'A paper-cut fox poster',
-      count: 1,
-      model: 'default',
-    }, customConfig, { fetchImpl, outputDir })
-
-    expect(requestBody).toMatchObject({ model: 'relay-image-model' })
-    expect(result.model).toBe('relay-image-model')
-  })
-
-  test('uses the configured ChatGPT OAuth image model for a default placeholder', async () => {
+  test('uses the configured ChatGPT OAuth image model', async () => {
     outputDir = await mkdtemp(join(tmpdir(), 'imagegen-openai-oauth-'))
     const tokenPath = join(outputDir, 'openai-oauth.json')
     const previousTokenPath = process.env[OPENAI_CODEX_OAUTH_FILE_ENV_KEY]
@@ -318,7 +275,6 @@ describe('ImageGen backend', () => {
       const result = await generateImages({
         prompt: 'A paper-cut fox poster',
         count: 1,
-        model: 'default',
       }, {
         kind: 'openai_oauth',
         providerId: 'openai-official',

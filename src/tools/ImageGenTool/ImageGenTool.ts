@@ -46,7 +46,7 @@ const inputSchema = lazySchema(() =>
         path: z
           .string()
           .min(1)
-          .describe('Absolute path from an [Image source: ...] attachment or a prior ImageGen result; omit input_images entirely for new generation and never use /dev/null as a placeholder'),
+          .describe('Absolute path from an [Image source: ...] attachment or a prior ImageGen result; omit input_images entirely for new generation'),
         role: z
           .enum(['edit_target', 'reference', 'style_reference', 'composite_source'])
           .describe('How this ordered image should influence the edit'),
@@ -55,11 +55,6 @@ const inputSchema = lazySchema(() =>
       .max(3)
       .optional()
       .describe('Ordered source images for editing, compositing, or visual reference'),
-    model: z
-      .string()
-      .min(1)
-      .optional()
-      .describe('Concrete image model ID to override the configured model only when the user explicitly asks; otherwise omit this field and never use "default" as a placeholder'),
     aspect_ratio: z
       .enum(ASPECT_RATIOS)
       .optional()
@@ -104,13 +99,13 @@ export const ImageGenTool = buildTool({
   name: IMAGE_GEN_TOOL_NAME,
   searchHint: 'generate images or artwork from a visual prompt',
   maxResultSizeChars: 100_000,
-  strict: true,
+  strict: false,
   shouldDefer: true,
   async description() {
     return 'Generate one or more images with the image provider configured for this desktop session.'
   },
   async prompt() {
-    return `Use this tool when the user asks to generate or edit an image. For a brand-new image, omit input_images entirely; never pass /dev/null or another placeholder path. Omit model unless the user explicitly requests a concrete image model ID; never pass "default" as a placeholder. For edits, pass ordered input_images using only paths surfaced by [Image source: ...] in the current conversation or returned by a prior ImageGen call; repeat preservation constraints in every edit prompt. One call represents one distinct prompt; use count only for variations of that same prompt. The tool saves finished raster images locally and returns their absolute paths. If a provider call fails, do not retry ImageGen automatically; explain the error and wait for the user to decide.`
+    return `Use this tool when the user asks to generate or edit an image. For a brand-new image, omit input_images entirely. For edits, pass ordered input_images using only paths surfaced by [Image source: ...] in the current conversation or returned by a prior ImageGen call; repeat preservation constraints in every edit prompt. Provider and image model selection come from the current desktop session and are not tool arguments. One call represents one distinct prompt; use count only for variations of that same prompt. The tool saves finished raster images locally and returns their absolute paths. If a provider call fails, do not retry ImageGen automatically; explain the error and wait for the user to decide.`
   },
   get inputSchema(): InputSchema {
     return inputSchema()
