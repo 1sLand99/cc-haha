@@ -15,6 +15,7 @@ async function fixture(name: string): Promise<string> {
 type FetchStub = (url: string) => { status?: number; body: string; contentType?: string } | undefined
 
 let requestedUrls: string[] = []
+let originalNonEssentialTrafficEnv: string | undefined
 const originalFetch = globalThis.fetch
 
 function stubFetch(handler: FetchStub) {
@@ -35,11 +36,20 @@ beforeEach(() => {
   resetMarketCacheForTests()
   resetClawhubOwnerCacheForTests()
   delete process.env.HAHA_MARKET_DISABLE_PROVIDERS
+  // These tests stub upstreams and must not inherit the developer shell's
+  // essential-traffic env (which would block the market providers entirely).
+  originalNonEssentialTrafficEnv = process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+  delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
 })
 
 afterEach(() => {
   globalThis.fetch = originalFetch
   delete process.env.HAHA_MARKET_DISABLE_PROVIDERS
+  if (originalNonEssentialTrafficEnv === undefined) {
+    delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+  } else {
+    process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = originalNonEssentialTrafficEnv
+  }
 })
 
 describe('clawhubProvider', () => {
