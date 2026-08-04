@@ -1687,6 +1687,56 @@ describe('TabBar', () => {
     expect(useTabStore.getState().tabs.map((tab) => tab.sessionId)).toEqual(['tab-2', 'tab-1'])
   })
 
+  // Regression: the click-suppression flag set at drag start was only ever cleared
+  // inside handleTabClick, which is reachable only from a tab's own onClick. Release
+  // the drag away from any tab — below the strip, or outside the window — and nothing
+  // consumes it, so the flag survives and eats the user's next tab click. finalizeDrag
+  // clears every other drag ref but not this one.
+  it('still activates a tab clicked after a drag that ended off the strip', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+
+    const setActiveTab = vi.fn()
+    useTabStore.setState({
+      tabs: [
+        { sessionId: 'tab-1', title: 'First Session', type: 'session', status: 'idle' },
+        { sessionId: 'tab-2', title: 'Second Session', type: 'session', status: 'idle' },
+      ],
+      activeTabId: 'tab-1',
+      setActiveTab,
+    } as Partial<ReturnType<typeof useTabStore.getState>>)
+    useChatStore.setState({
+      sessions: {},
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    const firstTab = screen.getByText('First Session').closest('.tab-bar-interactive')
+    const secondTab = screen.getByText('Second Session').closest('.tab-bar-interactive')
+    for (const [element, left] of [[firstTab, 0], [secondTab, 180]] as const) {
+      Object.defineProperty(element!, 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({ left, width: 180 }),
+      })
+    }
+
+    // Drag the first tab and let go well below the strip, so the browser dispatches
+    // no click on any tab — exactly the case that used to strand the flag.
+    fireEvent.mouseDown(firstTab!, { button: 0, clientX: 20, clientY: 10 })
+    fireEvent.mouseMove(window, { clientX: 40, clientY: 400 })
+    fireEvent.mouseUp(window)
+
+    setActiveTab.mockClear()
+    fireEvent.mouseDown(secondTab!, { button: 0, clientX: 200, clientY: 10 })
+    fireEvent.click(secondTab!)
+
+    expect(setActiveTab).toHaveBeenCalledWith('tab-2')
+  })
+
   it('does not reorder on a simple click without dragging', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')

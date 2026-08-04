@@ -477,6 +477,14 @@ export function TabBar() {
 
   const handleTabMouseDown = (event: React.MouseEvent, index: number) => {
     if (event.button !== 0) return
+    // Arm the suppression fresh for this gesture. handleTabClick is the only reader,
+    // and it is only reachable from a tab's own onClick — so a drag that releases
+    // away from any tab (below the strip, or outside the window) leaves the flag set
+    // with nothing to consume it, and the user's next tab click gets swallowed.
+    // Clearing here rather than in finalizeDrag is deliberate: `click` fires after
+    // `mouseup`, so clearing at the end of the drag would defeat the suppression it
+    // exists for.
+    suppressClickRef.current = false
     pendingDragRef.current = { index, startX: event.clientX, startY: event.clientY }
   }
 
