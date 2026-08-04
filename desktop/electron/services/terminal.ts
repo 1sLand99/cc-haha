@@ -6,6 +6,8 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { ELECTRON_EVENT_CHANNELS } from '../ipc/channels'
+import { isDocumentReplacingNavigation } from './rendererNavigation'
+import type { NavigationDetails } from './rendererNavigation'
 
 const TERMINAL_CONFIG_FILE = 'terminal-config.json'
 const MIN_TERMINAL_COLS = 20
@@ -67,7 +69,29 @@ export type TerminalWebContentsLike = {
   isDestroyed(): boolean
   once(event: 'destroyed', listener: () => void): unknown
   removeListener(event: 'destroyed', listener: () => void): unknown
+  /**
+   * A reload does not emit `destroyed`, so `destroyed` alone leaks every PTY on the
+   * paths that reload the renderer deliberately: render-process-gone and sustained
+   * unresponsive recovery in rendererLifecycle.ts, plus the reload buttons in
+   * ErrorBoundary and StartupErrorView. Session bookkeeping lives in renderer module
+   * state and is wiped by the reload, so kill() can never be called for those shells
+   * again — they and their children survive until before-quit.
+   */
+  on(event: 'did-start-navigation', listener: TerminalNavigationListener): unknown
+  /**
+   * `off`, not a second `removeListener` overload: a target type with two call
+   * signatures is not structurally assignable from Electron's overloaded
+   * `removeListener`, so adding one there rejects the real `WebContents`.
+   */
+  off(event: 'did-start-navigation', listener: TerminalNavigationListener): unknown
 }
+
+type TerminalNavigationListener = (
+  details: NavigationDetails,
+  url?: string,
+  isInPlace?: boolean,
+  isMainFrame?: boolean,
+) => void
 
 export type ElectronTerminalServiceOptions = {
   app?: TerminalAppLike
@@ -94,6 +118,7 @@ type TerminalSession = {
   pty: TerminalPtyProcess
   owner: TerminalWebContentsLike
   onOwnerDestroyed: () => void
+  onOwnerNavigated: TerminalNavigationListener
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -616,7 +641,14 @@ export class ElectronTerminalService {
       this.detachOwnerListener(active)
       disposePty()
     }
+    // Same teardown, second trigger: the renderer replacing its document discards the
+    // session ids this PTY can only be reached through, so it is as final as destroy.
+    const onOwnerNavigated: TerminalNavigationListener = (details, _url, isInPlace, isMainFrame) => {
+      if (!isDocumentReplacingNavigation(details, isInPlace, isMainFrame)) return
+      onOwnerDestroyed()
+    }
     webContents.once('destroyed', onOwnerDestroyed)
+    webContents.on('did-start-navigation', onOwnerNavigated)
 
     try {
       const ptyFactory = await resolvePtyFactory(this.ptyFactory, this.nodePtySourceDir, this.nodePtyCacheDir)
@@ -648,6 +680,7 @@ export class ElectronTerminalService {
         pty: activePty,
         owner: webContents,
         onOwnerDestroyed,
+        onOwnerNavigated,
       })
 
       activePty.onData(data => {
@@ -685,6 +718,7 @@ export class ElectronTerminalService {
         if (active) disposePty()
       }
       webContents.removeListener('destroyed', onOwnerDestroyed)
+      webContents.off('did-start-navigation', onOwnerNavigated)
       throw error
     }
   }
@@ -728,6 +762,7 @@ export class ElectronTerminalService {
 
   private detachOwnerListener(session: TerminalSession): void {
     session.owner.removeListener('destroyed', session.onOwnerDestroyed)
+    session.owner.off('did-start-navigation', session.onOwnerNavigated)
   }
 
   private removeSession(sessionId: number, expectedPty: TerminalPtyProcess): TerminalSession | null {
