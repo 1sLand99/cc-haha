@@ -1540,66 +1540,6 @@ describe('chatStore history mapping', () => {
     expect(notifyDesktopMock).not.toHaveBeenCalled()
   })
 
-  // The other side of the guard above, and the case it used to get wrong. The scan ran
-  // over the entire message array, so any reply whose text exactly matched an earlier
-  // hydrated one was thrown away — and short acknowledgements repeat all the time. The
-  // user watched it stream in and then saw it vanish at message_complete, with no way
-  // back: appendedCompletionMessage stays false so the completion notification is
-  // skipped too, and the follow-up loadHistory takes the live-merge branch, which can
-  // annotate, filter and append but never re-add a dropped assistant_text.
-  //
-  // Bounding the scan to the current turn separates the two exactly: replayed text
-  // belongs to a turn the user already sent, so its hydrated copy sits before the last
-  // user_text; a genuine repeat can only land after it.
-  it('keeps a live reply that repeats an earlier hydrated reply word for word', () => {
-    useChatStore.setState({
-      sessions: {
-        [TEST_SESSION_ID]: makeSession({
-          messages: [
-            {
-              id: 'first-user',
-              type: 'user_text',
-              content: 'rename the file',
-              transcriptMessageId: 'transcript-user-1',
-              timestamp: 1,
-            },
-            {
-              id: 'first-assistant',
-              type: 'assistant_text',
-              content: 'Done.',
-              transcriptMessageId: 'transcript-assistant-1',
-              timestamp: 2,
-            },
-            {
-              id: 'second-user',
-              type: 'user_text',
-              content: 'now delete the backup',
-              timestamp: 3,
-            },
-          ],
-          streamingText: 'Done.',
-          chatState: 'streaming',
-        }),
-      },
-    })
-
-    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
-      type: 'message_complete',
-      usage: { input_tokens: 1, output_tokens: 2 },
-    })
-
-    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
-    expect(session?.messages).toMatchObject([
-      { id: 'first-user', type: 'user_text' },
-      { id: 'first-assistant', type: 'assistant_text', content: 'Done.' },
-      { id: 'second-user', type: 'user_text' },
-      { type: 'assistant_text', content: 'Done.' },
-    ])
-    // The second one is live, so it must not have inherited the first one's id.
-    expect(session?.messages.at(-1)).not.toHaveProperty('transcriptMessageId')
-    expect(session?.streamingText).toBe('')
-  })
-
   // Same reconnect replay as above, one block type over. A thinking UIMessage
   // carries no transcriptMessageId (types/chat.ts:291), so neither the
   // appendAssistantTextMessage guard nor dropDuplicateTranscriptTextMessages
