@@ -1,4 +1,4 @@
-import { forwardRef, useMemo, useRef, useState, useEffect, useCallback } from 'react'
+import { forwardRef, useMemo, useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   SCHEDULED_TAB_ID,
@@ -52,6 +52,7 @@ const REVEAL_ACTIVE_TAB: ScrollIntoViewOptions = {
 // whose edges land on fractional pixels reports the tab as clipped on every
 // single resize and re-scrolls forever.
 const TAB_VISIBILITY_TOLERANCE = 1
+const SETTINGS_TAB_OFFSET_PROPERTY = '--settings-tab-offset'
 // One glyph per *non-chat* tab kind: the glyph says "this tab is not a
 // conversation". Chat tabs deliberately have none — a bubble on every tab in a
 // strip that is mostly chats is pure noise, and the slot it occupied is worth
@@ -180,6 +181,7 @@ export function TabBar() {
   const showActivityButton = activeTabId && activityState.hasVisibleActivity && !isWorkbenchOpen
 
   const moveTab = useTabStore((s) => s.moveTab)
+  const barRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   // Set the moment the user drives the strip themselves, cleared when they
   // switch tabs. See `realignActiveTab`.
@@ -207,6 +209,35 @@ export function TabBar() {
     }
     return ids
   }, [activeChatSessionIds, tabs])
+
+  const syncSettingsTabOffset = useCallback(() => {
+    const bar = barRef.current
+    const contentArea = bar?.parentElement
+    if (!bar || !contentArea) return
+
+    const { activeTabId: currentActiveTabId, tabs: currentTabs } = useTabStore.getState()
+    const currentActiveTab = currentTabs.find((tab) => tab.sessionId === currentActiveTabId)
+    if (!currentActiveTabId || currentActiveTab?.type !== 'settings') {
+      contentArea.style.removeProperty(SETTINGS_TAB_OFFSET_PROPERTY)
+      return
+    }
+
+    const settingsTab = tabRefs.current.get(currentActiveTabId)
+    if (!settingsTab) {
+      contentArea.style.removeProperty(SETTINGS_TAB_OFFSET_PROPERTY)
+      return
+    }
+
+    const barRect = bar.getBoundingClientRect()
+    const tabRect = settingsTab.getBoundingClientRect()
+    // CSS fallback zoom scales client rects but not layout lengths. Convert the
+    // visual delta back to a CSS length before handing it to Settings; native
+    // Electron zoom reports a scale of one here.
+    const measuredScale = bar.offsetWidth > 0 ? barRect.width / bar.offsetWidth : 1
+    const scale = Number.isFinite(measuredScale) && measuredScale > 0 ? measuredScale : 1
+    const offset = (tabRect.left - barRect.left) / scale
+    contentArea.style.setProperty(SETTINGS_TAB_OFFSET_PROPERTY, `${offset}px`)
+  }, [])
 
   const updateScrollState = useCallback(() => {
     const el = scrollRef.current
@@ -259,20 +290,36 @@ export function TabBar() {
   }, [])
 
   useEffect(() => {
-    updateScrollState()
+    const syncStripLayout = () => {
+      updateScrollState()
+      syncSettingsTabOffset()
+    }
+
+    syncStripLayout()
     const el = scrollRef.current
     if (!el) return
-    el.addEventListener('scroll', updateScrollState)
+    el.addEventListener('scroll', syncStripLayout)
     const ro = new ResizeObserver(() => {
-      updateScrollState()
+      syncStripLayout()
       realignActiveTab()
     })
     ro.observe(el)
     return () => {
-      el.removeEventListener('scroll', updateScrollState)
+      el.removeEventListener('scroll', syncStripLayout)
       ro.disconnect()
     }
-  }, [realignActiveTab, updateScrollState, tabs.length])
+  }, [realignActiveTab, syncSettingsTabOffset, updateScrollState, tabs.length])
+
+  useLayoutEffect(() => {
+    syncSettingsTabOffset()
+  }, [activeTabId, syncSettingsTabOffset, tabs])
+
+  useEffect(() => {
+    const contentArea = barRef.current?.parentElement
+    return () => {
+      contentArea?.style.removeProperty(SETTINGS_TAB_OFFSET_PROPERTY)
+    }
+  }, [])
 
   useEffect(() => {
     if (!activeTabId) return
@@ -286,9 +333,12 @@ export function TabBar() {
     // has to come on screen even from completely outside the strip.
     activeTabEl.scrollIntoView(REVEAL_ACTIVE_TAB)
 
-    const frame = window.requestAnimationFrame(updateScrollState)
+    const frame = window.requestAnimationFrame(() => {
+      updateScrollState()
+      syncSettingsTabOffset()
+    })
     return () => window.cancelAnimationFrame(frame)
-  }, [activeTabId, tabs.length, updateScrollState])
+  }, [activeTabId, syncSettingsTabOffset, tabs.length, updateScrollState])
 
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
 
@@ -490,6 +540,7 @@ export function TabBar() {
 
   return (
     <div
+      ref={barRef}
       data-testid="tab-bar"
       data-desktop-drag-region={isDesktopRuntime ? true : undefined}
       /*

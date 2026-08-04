@@ -1014,6 +1014,7 @@
   /* Layout dimensions */
   --sidebar-width: 280px;
   --sidebar-rail-width: 72px;
+  --settings-tab-offset: 0px;
   --titlebar-height: 52px;
   --statusbar-height: 36px;
   --motion-sidebar-duration: 280ms;

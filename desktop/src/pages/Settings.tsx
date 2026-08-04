@@ -242,11 +242,12 @@ export function Settings() {
     <div className="flex-1 flex flex-col overflow-hidden bg-[var(--color-surface)]">
       <div className="flex-1 flex overflow-hidden">
         {/* Tab navigation */}
-        {/* The 195px handoff puts the rail's divider on the Settings tab's left
-            edge instead of leaving the two seams visibly offset. Its trailing
-            gutter is deliberately tighter than its leading gutter; together
-            with TabButton's tighter trailing padding, that keeps the Japanese
-            "コンピューター操作" clear without moving the row contents left.
+        {/* The rail shares the Settings tab's 195px width. TabBar publishes that
+            tab's live horizontal offset on their common content-area parent, so
+            the whole rail follows the tab when users reorder or scroll tabs and
+            both edges stay aligned. Its tighter trailing gutter keeps the
+            Japanese "コンピューター操作" clear at this width without moving
+            the row contents left.
 
             Paper, separated by the rule, the way every other secondary panel
             in the app is (the workbench, the diff split). It used to be
@@ -256,7 +257,11 @@ export function Settings() {
             paper fill met a different colour at its bottom edge. It read as a
             white card stranded on a grey panel. Nothing else changed to fix
             it: the tab is right, this was the odd one out. */}
-        <div className="w-[195px] flex-shrink-0 flex flex-col overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface)] py-4 pl-3 pr-1">
+        <div
+          data-testid="settings-navigation"
+          className="w-[195px] flex-shrink-0 flex flex-col overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface)] py-4 pl-3 pr-1"
+          style={{ marginLeft: 'var(--settings-tab-offset, 0px)' }}
+        >
           <div className="flex-1 flex flex-col gap-0.5">
             <TabButton icon="dns" label={t('settings.tab.providers')} active={activeTab === 'providers'} onClick={() => setActiveTab('providers')} />
             <TabButton icon="tune" label={t('settings.tab.general')} active={activeTab === 'general'} onClick={() => setActiveTab('general')} />
