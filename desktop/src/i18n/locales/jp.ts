@@ -764,6 +764,7 @@ export const jp: Record<TranslationKey, string> = {
   'settings.providers.fetchModelsApiKeyHint': 'モデル一覧を取得するには API キーを入力してください。',
   'settings.providers.fetchModelsSupportHint': '上流プロバイダーがモデル一覧エンドポイントを公開している場合のみ取得できます。',
   'settings.providers.fetchModelsLoaded': 'モデル一覧を取得しました（{count} 件）。選択しても、手入力を続けても構いません。',
+  'settings.providers.fetchModelsToast': 'モデル一覧を取得しました。ドロップダウンからモデルを選択できます。',
   'settings.providers.fetchModelsEmpty': 'モデルが見つかりません。モデル ID を手入力してください。',
   'settings.providers.fetchModelsPick': '取得したリストから{label}を選択',
   'settings.providers.fetchModelsGroupOther': 'その他',

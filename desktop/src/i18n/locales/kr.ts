@@ -764,6 +764,7 @@ export const kr: Record<TranslationKey, string> = {
   'settings.providers.fetchModelsApiKeyHint': '모델 목록을 가져오려면 API 키를 입력하세요.',
   'settings.providers.fetchModelsSupportHint': '상위 공급자가 모델 목록 엔드포인트를 제공하는 경우에만 가져올 수 있습니다.',
   'settings.providers.fetchModelsLoaded': '모델 목록을 가져왔습니다({count}개). 선택하거나 직접 입력해도 됩니다.',
+  'settings.providers.fetchModelsToast': '모델 목록을 가져왔습니다. 이제 드롭다운에서 모델을 선택할 수 있습니다.',
   'settings.providers.fetchModelsEmpty': '모델을 찾지 못했습니다. 모델 ID를 직접 입력하세요.',
   'settings.providers.fetchModelsPick': '가져온 목록에서 {label} 선택',
   'settings.providers.fetchModelsGroupOther': '기타',

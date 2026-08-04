@@ -763,6 +763,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.providers.fetchModelsApiKeyHint': '要填寫 API Key 才能取得模型清單',
   'settings.providers.fetchModelsSupportHint': '僅當上游服務商提供模型清單端點時才能取得。',
   'settings.providers.fetchModelsLoaded': '已取得模型清單（{count} 個），可直接選擇，也可繼續手動輸入。',
+  'settings.providers.fetchModelsToast': '已取得模型清單，現在可以在下拉框中選擇模型了。',
   'settings.providers.fetchModelsEmpty': '沒有找到模型，請手動填寫模型 ID。',
   'settings.providers.fetchModelsPick': '從已取得的清單中選擇{label}',
   'settings.providers.fetchModelsGroupOther': '其他',

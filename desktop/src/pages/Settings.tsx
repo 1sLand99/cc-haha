@@ -1254,6 +1254,7 @@ function openExternalUrl(url: string) {
 function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderFormProps) {
   const { createProvider, updateProvider, testConfig, fetchModels } = useProviderStore()
   const fetchSettings = useSettingsStore((s) => s.fetchAll)
+  const addToast = useUIStore((s) => s.addToast)
   const t = useTranslation()
   const baseUrlInputId = useId()
 
@@ -1638,6 +1639,14 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
       if (modelsRequestRef.current !== requestId) return
       if (result.ok) {
         setFetchedModels(result.models)
+        // The picker that just appeared is easy to miss below the button, so
+        // point the user at it. Empty lists already render an inline notice.
+        if (result.models.length > 0) {
+          addToast({
+            type: 'success',
+            message: t('settings.providers.fetchModelsToast'),
+          })
+        }
       } else {
         setFetchedModels(null)
         setModelsErrorCode(result.errorCode)

@@ -762,6 +762,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'settings.providers.fetchModelsApiKeyHint': 'Enter an API key to fetch the model list.',
   'settings.providers.fetchModelsSupportHint': 'This works only when the upstream provider publishes a model list endpoint.',
   'settings.providers.fetchModelsLoaded': 'Model list loaded ({count}). Pick one or keep typing the ID.',
+  'settings.providers.fetchModelsToast': 'Model list loaded. Pick a model from the dropdown now.',
   'settings.providers.fetchModelsEmpty': 'No models found. Enter the model ID manually.',
   'settings.providers.fetchModelsPick': 'Choose {label} from the fetched list',
   'settings.providers.fetchModelsGroupOther': 'Other',

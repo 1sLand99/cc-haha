@@ -2593,6 +2593,41 @@ describe('Settings > Providers tab', () => {
     expect(noMatches).toHaveAttribute('aria-disabled', 'true')
   })
 
+  it('toasts that the fetched list is now pickable from the dropdown', async () => {
+    const dialog = await openProviderFormWithModels({
+      ok: true,
+      endpoint: 'https://api.example.com/v1/models',
+      models: [
+        { id: 'gpt-5-mini', ownedBy: 'openai' },
+        { id: 'claude-sonnet-4-6', ownedBy: 'anthropic' },
+      ],
+    })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /Fetch models|获取模型/i }))
+
+    await waitFor(() => {
+      expect(useUIStore.getState().toasts[useUIStore.getState().toasts.length - 1]).toMatchObject({
+        type: 'success',
+        message: 'Model list loaded. Pick a model from the dropdown now.',
+      })
+    })
+  })
+
+  it('does not toast when the fetched model list is empty', async () => {
+    const dialog = await openProviderFormWithModels({
+      ok: true,
+      endpoint: 'https://api.example.com/v1/models',
+      models: [],
+    })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /Fetch models|获取模型/i }))
+
+    await waitFor(() => {
+      expect(providerStoreState.fetchModels).toHaveBeenCalled()
+    })
+    expect(useUIStore.getState().toasts).toHaveLength(0)
+  })
+
   it('routes a picked model through the shared model change handler', async () => {
     const dialog = await openProviderFormWithModels({
       ok: true,
