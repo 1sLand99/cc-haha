@@ -1891,7 +1891,7 @@ describe('Settings > Providers tab', () => {
       await waitFor(() => expect(settleSettings).toBeTypeOf('function'))
       expect(within(dialog).queryByRole('combobox')).not.toBeInTheDocument()
       const regionTrigger = within(dialog).getByRole('button', { name: /China mainland/ })
-      const baseUrlInput = within(dialog).getByLabelText(/Base URL/i)
+      const baseUrlInput = within(dialog).getByRole('textbox', { name: /Base URL/i })
       expect(baseUrlInput).toHaveValue('https://open.bigmodel.cn/api/anthropic')
       expect(within(dialog).getByRole('button', { name: /Get API Key/i })).toBeInTheDocument()
       expect(within(dialog).getByText('Mainland China promotion')).toBeInTheDocument()
@@ -1937,7 +1937,7 @@ describe('Settings > Providers tab', () => {
     })
 
     expect(within(dialog).getByRole('button', { name: /Global/ })).toBeInTheDocument()
-    expect(within(dialog).getByLabelText(/Base URL/i)).toHaveValue('https://api.z.ai/api/anthropic')
+    expect(within(dialog).getByRole('textbox', { name: /Base URL/i })).toHaveValue('https://api.z.ai/api/anthropic')
     await act(async () => resolveSettings?.())
     await waitFor(() => {
       expect(JSON.parse(settingsTextarea.value)).toMatchObject({
@@ -2817,7 +2817,7 @@ describe('Settings > Providers tab', () => {
       expect(providerStoreState.fetchModels).toHaveBeenCalledTimes(1)
     })
 
-    fireEvent.change(within(dialog).getByLabelText(/Base URL|接口地址/i), {
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /Base URL|接口地址/i }), {
       target: { value: 'https://other.example.com/anthropic' },
     })
 
@@ -2852,7 +2852,7 @@ describe('Settings > Providers tab', () => {
       expect(providerStoreState.fetchModels).toHaveBeenCalledTimes(1)
     })
 
-    fireEvent.change(within(dialog).getByLabelText(/Base URL|接口地址/i), {
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /Base URL|接口地址/i }), {
       target: { value: 'https://other.example.com/anthropic' },
     })
 
@@ -2894,7 +2894,7 @@ describe('Settings > Providers tab', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /Fetch models|获取模型/i }))
     expect(await within(dialog).findByText(/Model list loaded \(1\)/i)).toBeInTheDocument()
 
-    fireEvent.change(within(dialog).getByLabelText(/Base URL|接口地址/i), {
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /Base URL|接口地址/i }), {
       target: { value: 'https://other.example.com/anthropic' },
     })
 
