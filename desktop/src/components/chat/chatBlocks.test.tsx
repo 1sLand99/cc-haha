@@ -167,11 +167,81 @@ describe('chat blocks', () => {
     expect(screen.queryByRole('status')).toBeNull()
 
     const block = screen.getByTestId('image-generation-block')
-    expect(block.getAttribute('data-layout')).toBe('media-first')
+    expect(block.getAttribute('data-layout')).toBe('thumbnail-rail')
     expect(block.className).not.toContain('border')
     expect(screen.queryByText('ImageGen')).toBeNull()
     expect(screen.queryByText('grok-imagine-image-quality')).toBeNull()
     expect(screen.queryByText('grok-official')).toBeNull()
+  })
+
+  it('keeps concurrent image calls in one thumbnail rail and opens the completed set as one gallery', () => {
+    const toolCalls: Array<Extract<UIMessage, { type: 'tool_use' }>> = Array.from(
+      { length: 4 },
+      (_, index) => ({
+        id: `image-use-${index + 1}`,
+        type: 'tool_use' as const,
+        toolName: 'ImageGen',
+        toolUseId: `image-${index + 1}`,
+        input: { prompt: `Fox poster ${index + 1}`, count: 1 },
+        timestamp: index + 1,
+        isPending: true,
+      }),
+    )
+    const childToolCallsByParent = new Map<
+      string,
+      Extract<UIMessage, { type: 'tool_use' }>[]
+    >()
+    const { rerender } = render(
+      <ToolCallGroup
+        toolCalls={toolCalls}
+        resultMap={new Map()}
+        childToolCallsByParent={childToolCallsByParent}
+        agentTaskNotifications={{}}
+        isStreaming
+      />,
+    )
+
+    const rail = screen.getByTestId('image-generation-rail')
+    expect(rail.firstElementChild?.className).toContain('grid-flow-col')
+    expect(screen.getAllByTestId('image-generation-slot')).toHaveLength(4)
+    expect(screen.getAllByText('Generating 4 images')).toHaveLength(2)
+
+    const resultMap = new Map<string, Extract<UIMessage, { type: 'tool_result' }>>(
+      toolCalls.map((toolCall, index) => [
+        toolCall.toolUseId,
+        {
+          id: `image-result-${index + 1}`,
+          type: 'tool_result' as const,
+          toolUseId: toolCall.toolUseId,
+          content: JSON.stringify({
+            type: 'image_generation_result',
+            providerId: 'openai-official',
+            providerKind: 'openai_oauth',
+            model: 'gpt-image-2',
+            prompt: `Fox poster ${index + 1}`,
+            durationMs: 1200 + index,
+            images: [{ path: `/tmp/generated-${index + 1}.png`, mimeType: 'image/png' }],
+          }),
+          isError: false,
+          timestamp: 20 + index,
+        },
+      ]),
+    )
+
+    rerender(
+      <ToolCallGroup
+        toolCalls={toolCalls.map((toolCall) => ({ ...toolCall, isPending: false }))}
+        resultMap={resultMap}
+        childToolCallsByParent={childToolCallsByParent}
+        agentTaskNotifications={{}}
+      />,
+    )
+
+    const completedImages = screen.getAllByRole('img')
+    expect(completedImages).toHaveLength(4)
+    expect(screen.getAllByTestId('image-generation-slot')).toHaveLength(4)
+    fireEvent.click(completedImages[2]!)
+    expect(screen.getByText('3 / 4')).toBeTruthy()
   })
 
   it('keeps every requested slot visible when image generation fails', () => {
