@@ -39,12 +39,13 @@ export function Settings() {
     <div className="flex-1 flex flex-col overflow-hidden bg-[var(--color-surface)]">
       <div className="flex-1 flex overflow-hidden">
         {/* Tab navigation */}
-        {/* The rail shares the Settings tab's 195px width. TabBar publishes that
-            tab's live horizontal offset on their common content-area parent, so
-            the whole rail follows the tab when users reorder or scroll tabs and
-            both edges stay aligned. Its tighter trailing gutter keeps the
-            Japanese "コンピューター操作" clear at this width without moving
-            the row contents left.
+        {/* The rail keeps the Settings tab's 195px width for a same-width paper
+            handoff when that tab sits at the leading edge of the strip. It does
+            *not* chase the tab's live horizontal offset: the rail is page chrome,
+            not a geometric extension of a scrollable tab chip, so following
+            reorder/scroll lefts shoved the whole navigation mid-panel. Its
+            tighter trailing gutter keeps the Japanese "コンピューター操作"
+            clear at this width without moving the row contents left.
 
             Paper, separated by the rule, the way every other secondary panel
             in the app is (the workbench, the diff split). It used to be
@@ -57,7 +58,6 @@ export function Settings() {
         <div
           data-testid="settings-navigation"
           className="w-[195px] flex-shrink-0 flex flex-col overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface)] py-4 pl-3 pr-1"
-          style={{ marginLeft: 'var(--settings-tab-offset, 0px)' }}
         >
           <div className="flex-1 flex flex-col gap-0.5">
             <TabButton icon="dns" label={t('settings.tab.providers')} active={activeTab === 'providers'} onClick={() => setActiveTab('providers')} />

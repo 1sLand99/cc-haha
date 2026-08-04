@@ -1014,7 +1014,6 @@
   /* Layout dimensions */
   --sidebar-width: 280px;
   --sidebar-rail-width: 72px;
-  --settings-tab-offset: 0px;
   --titlebar-height: 52px;
   --motion-sidebar-duration: 280ms;
   --motion-sidebar-easing: cubic-bezier(0.22, 1, 0.36, 1);
