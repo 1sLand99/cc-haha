@@ -91,8 +91,11 @@ describe('ImageGenTool', () => {
   })
 
   test('tells the agent not to retry provider failures automatically', async () => {
-    expect(await ImageGenTool.prompt()).toContain(
+    const prompt = await ImageGenTool.prompt()
+    expect(prompt).toContain(
       'do not retry ImageGen automatically',
     )
+    expect(prompt).toContain('omit input_images entirely')
+    expect(prompt).toContain('never pass /dev/null')
   })
 })

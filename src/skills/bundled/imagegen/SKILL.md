@@ -11,6 +11,7 @@ Use the built-in `ImageGen` tool. Provider authentication, model routing, output
 ## Decide the request shape
 
 - Treat a brand-new visual as generation. Treat a request that preserves or changes an existing visual as an edit.
+- For generation, omit `input_images` entirely. Never pass `/dev/null`, an empty string, or any other placeholder path to represent no input image.
 - One distinct prompt equals one tool call.
 - Use `count` only for multiple variations of the same prompt. For different concepts, make separate calls.
 - For an edit, populate `input_images` with ordered paths surfaced by `[Image source: ...]` in a user attachment or returned by an earlier `ImageGen` call. Never invent, search for, or substitute another filesystem path.

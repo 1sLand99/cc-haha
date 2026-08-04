@@ -46,7 +46,7 @@ const inputSchema = lazySchema(() =>
         path: z
           .string()
           .min(1)
-          .describe('Absolute path from an [Image source: ...] attachment or a prior ImageGen result'),
+          .describe('Absolute path from an [Image source: ...] attachment or a prior ImageGen result; omit input_images entirely for new generation and never use /dev/null as a placeholder'),
         role: z
           .enum(['edit_target', 'reference', 'style_reference', 'composite_source'])
           .describe('How this ordered image should influence the edit'),
@@ -110,7 +110,7 @@ export const ImageGenTool = buildTool({
     return 'Generate one or more images with the image provider configured for this desktop session.'
   },
   async prompt() {
-    return `Use this tool when the user asks to generate or edit an image. For edits, pass ordered input_images using only paths surfaced by [Image source: ...] in the current conversation or returned by a prior ImageGen call; repeat preservation constraints in every edit prompt. One call represents one distinct prompt; use count only for variations of that same prompt. The tool saves finished raster images locally and returns their absolute paths. If a provider call fails, do not retry ImageGen automatically; explain the error and wait for the user to decide.`
+    return `Use this tool when the user asks to generate or edit an image. For a brand-new image, omit input_images entirely; never pass /dev/null or another placeholder path. For edits, pass ordered input_images using only paths surfaced by [Image source: ...] in the current conversation or returned by a prior ImageGen call; repeat preservation constraints in every edit prompt. One call represents one distinct prompt; use count only for variations of that same prompt. The tool saves finished raster images locally and returns their absolute paths. If a provider call fails, do not retry ImageGen automatically; explain the error and wait for the user to decide.`
   },
   get inputSchema(): InputSchema {
     return inputSchema()

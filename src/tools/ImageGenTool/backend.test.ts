@@ -245,6 +245,29 @@ describe('ImageGen backend', () => {
     expect(result.images).toHaveLength(2)
   })
 
+  test('treats a model-supplied /dev/null image placeholder as generation', async () => {
+    outputDir = await mkdtemp(join(tmpdir(), 'imagegen-output-'))
+    const calls: string[] = []
+    const fetchImpl = async (input: string | URL | Request) => {
+      calls.push(String(input))
+      return Response.json({
+        data: [{ b64_json: PNG_BYTES.toString('base64') }],
+      })
+    }
+
+    const result = await generateImages({
+      prompt: 'A paper-cut fox poster',
+      count: 1,
+      input_images: [{ path: '/dev/null', role: 'reference' }],
+    }, customConfig, { fetchImpl, outputDir })
+
+    expect(calls).toEqual([
+      'https://relay.example.test/v1/images/generations',
+    ])
+    expect(result.operation).toBe('generate')
+    expect(result.inputImageCount).toBe(0)
+  })
+
   test('rejects edit paths outside the session upload and generated-image roots', async () => {
     outputDir = await mkdtemp(join(tmpdir(), 'imagegen-edit-root-'))
     const outsideDir = await mkdtemp(join(tmpdir(), 'imagegen-edit-outside-'))

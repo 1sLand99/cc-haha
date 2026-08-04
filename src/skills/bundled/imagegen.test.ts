@@ -57,6 +57,8 @@ describe('bundled imagegen skill', () => {
     expect(text).toContain('do not repeat, link, or embed the returned local paths')
     expect(text).toContain('latest selected output as the next turn')
     expect(text).toContain('one call per image')
+    expect(text).toContain('omit <code>input_images</code> entirely')
+    expect(text).toContain('Never pass <code>/dev/null</code>')
     expect(text).not.toContain('CC_HAHA_IMAGE_API_KEY')
   })
 })

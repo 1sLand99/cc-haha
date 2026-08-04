@@ -607,7 +607,10 @@ async function prepareInputImages(
   input: ImageGenerationInput,
   overrideRootDirs?: string[],
 ): Promise<PreparedInputImage[]> {
-  const requested = input.input_images ?? []
+  // Some tool-calling models use the POSIX null device to mean "no image".
+  const requested = (input.input_images ?? []).filter(
+    ({ path: inputPath }) => inputPath.trim() !== '/dev/null',
+  )
   if (requested.length === 0) return []
   if (requested.length > 3) {
     throw new Error('Image editing supports at most 3 input images per call.')
