@@ -68,6 +68,28 @@ export const goldenScenarios: GoldenScenario[] = [
     ],
   },
   {
+    id: 'whole-thinking-blocks',
+    description: 'A non-streamed assistant message carrying two finished thinking blocks.',
+    // The streaming case above covers thinking_delta. This is the other emit site,
+    // where the CLI hands over an already-finished block — the client has to tell the
+    // two apart to know whether to concatenate or separate them, so `complete` must
+    // survive translation. Nothing pinned this path before, and dropping the flag left
+    // every check green.
+    messages: [
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_whole_thinking',
+          content: [
+            { type: 'thinking', thinking: 'plan the fix carefully' },
+            { type: 'thinking', thinking: 'then run tests' },
+            { type: 'text', text: 'Starting now.' },
+          ],
+        },
+      },
+    ],
+  },
+  {
     id: 'tool-use-lifecycle',
     description: 'Streamed tool_use block, accumulated input JSON, then the tool_result frame.',
     messages: [

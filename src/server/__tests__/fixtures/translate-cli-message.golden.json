@@ -115,6 +115,31 @@
       "out": []
     }
   ],
+  "whole-thinking-blocks": [
+    {
+      "in": "assistant",
+      "out": [
+        {
+          "type": "thinking",
+          "text": "plan the fix carefully",
+          "complete": true
+        },
+        {
+          "type": "thinking",
+          "text": "then run tests",
+          "complete": true
+        },
+        {
+          "type": "content_start",
+          "blockType": "text"
+        },
+        {
+          "type": "content_delta",
+          "text": "Starting now."
+        }
+      ]
+    }
+  ],
   "tool-use-lifecycle": [
     {
       "in": "stream_event/message_start",

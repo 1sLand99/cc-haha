@@ -2623,7 +2623,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           const last = lastIndex >= 0 ? base[lastIndex] : undefined
           if (last && last.type === 'thinking') {
             const updated = [...base]
-            updated[lastIndex] = { ...last, content: last.content + msg.text }
+            updated[lastIndex] = {
+              ...last,
+              content: joinThinkingContent(last.content, msg.text, msg.complete === true),
+            }
             return {
               messages: updated,
               chatState: 'thinking',
@@ -4149,6 +4152,25 @@ function pushAssistantHistoryText(
   })
 }
 
+/**
+ * Joins a thinking block onto the one before it.
+ *
+ * Two granularities arrive under the same `thinking` message: stream fragments, which
+ * must be concatenated raw to rebuild one thought, and finished blocks, which are
+ * separate thoughts and need a break between them. Gluing the second kind produced
+ * "plan the fix carefullythen run tests" — and the test that shipped with it copied
+ * that string into its expectation, so the run-together words became the pinned
+ * behaviour rather than the bug they were.
+ *
+ * Merging adjacent blocks into one bubble is deliberate (see the history-mapping
+ * test); only the missing separator was not.
+ */
+export function joinThinkingContent(previous: string, next: string, nextIsWholeBlock: boolean): string {
+  if (!nextIsWholeBlock) return previous + next
+  if (!previous) return next
+  return `${previous}\n\n${next}`
+}
+
 function pushAssistantHistoryThinking(
   messages: UIMessage[],
   id: string,
@@ -4168,7 +4190,7 @@ function pushAssistantHistoryThinking(
       last.content = content
       return
     }
-    last.content += content
+    last.content = joinThinkingContent(last.content, content, true)
     return
   }
 

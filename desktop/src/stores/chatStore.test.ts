@@ -542,7 +542,10 @@ describe('chatStore history mapping', () => {
     expect(mapped.map((message) => message.type)).toEqual(['thinking', 'tool_use', 'thinking'])
     expect(mapped[0]).toMatchObject({
       id: 'assistant-snap-1-block-0',
-      content: 'plan the fix carefullythen run tests',
+      // Two finished thoughts merge into one bubble, but they are still two thoughts:
+      // the original expectation here was 'carefullythen', which pinned the missing
+      // separator as correct rather than reading it as the bug it was.
+      content: 'plan the fix carefully\n\nthen run tests',
     })
     expect(mapped[2]).toMatchObject({ id: 'assistant-final-block-0', content: 'tests pass' })
   })
@@ -1601,6 +1604,37 @@ describe('chatStore history mapping', () => {
       },
     ])
     expect(notifyDesktopMock).not.toHaveBeenCalled()
+  })
+
+  // Both directions of the thinking merge, because one `thinking` message carries two
+  // granularities: handler.ts:2956 forwards a `thinking_delta` fragment, handler.ts:2787
+  // forwards a finished block. Concatenating the first is required; concatenating the
+  // second glued words together on screen.
+  describe('thinking blocks merge by granularity, not by content', () => {
+    it('concatenates stream fragments with nothing between them', () => {
+      useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({}) } })
+      const store = useChatStore.getState()
+      store.handleServerMessage(TEST_SESSION_ID, { type: 'thinking', text: 'plan the ' })
+      store.handleServerMessage(TEST_SESSION_ID, { type: 'thinking', text: 'fix' })
+
+      const thinking = useChatStore.getState().sessions[TEST_SESSION_ID]?.messages
+        .filter((message) => message.type === 'thinking')
+      expect(thinking).toHaveLength(1)
+      expect(thinking?.[0]).toMatchObject({ content: 'plan the fix' })
+    })
+
+    it('separates two finished blocks so their words do not run together', () => {
+      useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({}) } })
+      const store = useChatStore.getState()
+      store.handleServerMessage(TEST_SESSION_ID, { type: 'thinking', text: 'plan the fix carefully', complete: true })
+      store.handleServerMessage(TEST_SESSION_ID, { type: 'thinking', text: 'then run tests', complete: true })
+
+      const thinking = useChatStore.getState().sessions[TEST_SESSION_ID]?.messages
+        .filter((message) => message.type === 'thinking')
+      expect(thinking).toHaveLength(1)
+      expect(thinking?.[0]).toMatchObject({ content: 'plan the fix carefully\n\nthen run tests' })
+      expect(thinking?.[0]?.content).not.toContain('carefullythen')
+    })
   })
 
   // The bug this guard causes, as a test rather than a commit message. A turn can

@@ -2784,7 +2784,7 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
               parentToolUseId,
             })
           } else if (!parentToolUseId && block.type === 'thinking' && block.thinking) {
-            messages.push({ type: 'thinking', text: block.thinking })
+            messages.push({ type: 'thinking', text: block.thinking, complete: true })
           } else if (!parentToolUseId && block.type === 'text' && block.text) {
             messages.push({ type: 'content_start', blockType: 'text' })
             messages.push({ type: 'content_delta', text: block.text })
