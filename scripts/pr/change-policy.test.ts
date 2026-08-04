@@ -126,14 +126,19 @@ describe('evaluateChangePolicy', () => {
     expect(result.checks.persistence).toBe(true)
   })
 
-  test('routes a ws-only change to the policy lane that owns its dead-import check', () => {
-    // scripts/pr/dead-imports.test.ts reads src/server/ws rather than importing it,
-    // so the import graph cannot pull the policy lane in. Without the prefix the
+  test('routes every source root the dead-import check owns to the policy lane', () => {
+    // scripts/pr/dead-imports.test.ts reads these roots rather than importing them,
+    // so the import graph cannot pull the policy lane in. Without the prefixes the
     // check exists and never runs on the diffs it was written for.
-    const result = evaluateChangePolicy(['src/server/ws/handler.ts'])
-
-    expect(result.checks.server).toBe(true)
-    expect(result.checks.policy).toBe(true)
+    expect(evaluateChangePolicy(['src/server/ws/handler.ts']).checks.policy).toBe(true)
+    expect(evaluateChangePolicy(['src/utils/attachments.ts']).checks.policy).toBe(true)
+    expect(evaluateChangePolicy(['adapters/feishu/index.ts']).checks.policy).toBe(true)
+    expect(evaluateChangePolicy(['scripts/perf/local-index-benchmark.ts']).checks.policy).toBe(true)
+    // Surfaces still route to their own lanes; policy is additive, not a takeover.
+    expect(evaluateChangePolicy(['src/server/ws/handler.ts']).checks.server).toBe(true)
+    expect(evaluateChangePolicy(['adapters/feishu/index.ts']).checks.adapters).toBe(true)
+    // desktop/ is checked by its own tsconfig, so it must not select this lane.
+    expect(evaluateChangePolicy(['desktop/src/pages/Settings.tsx']).checks.policy).toBe(false)
   })
 
   test('keeps quality ownership and contributor contracts on the policy lane', () => {
@@ -341,7 +346,7 @@ describe('evaluateChangePolicy dependent-file widening', () => {
     expect(result.blocked).toBe(false)
   })
 
-  test('does not widen docs, policy, or coverage lanes', () => {
+  test('does not widen docs or coverage lanes', () => {
     const result = evaluateChangePolicy(
       ['src/server/services/providerService.ts', 'src/server/__tests__/provider.test.ts'],
       [],
@@ -349,9 +354,21 @@ describe('evaluateChangePolicy dependent-file widening', () => {
     )
 
     expect(result.checks.docs).toBe(false)
-    expect(result.checks.policy).toBe(false)
     // Coverage still reflects the diff, which already contains executable sources.
     expect(result.checks.coverage).toBe(true)
+  })
+
+  test('does not widen the policy lane', () => {
+    // Split out of the case above once `src/` became a policy prefix: that fixture
+    // selects the lane through its own changed files now, so it can no longer show
+    // what this asserts — a dependent the import graph added must never select it.
+    const result = evaluateChangePolicy(
+      ['desktop/src/pages/Settings.tsx'],
+      [],
+      ['scripts/pr/check-pr.ts', 'src/utils/attachments.ts', 'adapters/feishu/index.ts'],
+    )
+
+    expect(result.checks.policy).toBe(false)
   })
 
   test('selects the agent flow for protocol clients the import graph cannot reach', () => {

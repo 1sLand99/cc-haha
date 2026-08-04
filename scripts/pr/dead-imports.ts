@@ -14,17 +14,24 @@ import { join, relative, sep } from 'node:path'
  * it adds 646 unused-symbol diagnostics to a baseline of 3225 that already fails, so
  * it would have to land disabled and would never go green.
  *
- * This is deliberately narrower than `noUnusedLocals` — imports only, one directory —
- * because that is the part that was actually unowned, and a check nobody can keep
- * green gets switched off.
+ * This is deliberately narrower than `noUnusedLocals` — imports only — because that
+ * is the part that was actually unowned, and a check nobody can keep green gets
+ * switched off. It found 27 more dead imports than the handler.ts split left, all
+ * removed before it landed.
  *
  * The analysis is lexical, like `module-graph.ts`: an import whose binding appears
  * nowhere else in its own file is dead regardless of what it resolves to, and that is
  * decidable from the file alone without a compiler or a per-run install.
  */
 
-/** Directories this check owns. Grow it only alongside a run that comes back clean. */
-export const DEAD_IMPORT_ROOTS = ['src/server/ws'] as const
+/**
+ * Directories this check owns: every source root no compiler checks.
+ *
+ * `desktop/` is absent because `desktop/tsconfig.json` already sets
+ * `noUnusedLocals`, which is strictly stronger. Running this scan over it finds
+ * nothing, which is the cross-check that the analysis agrees with a real compiler.
+ */
+export const DEAD_IMPORT_ROOTS = ['src', 'scripts', 'adapters'] as const
 
 /**
  * Imports kept despite having no reference in their own file, keyed by
@@ -49,8 +56,7 @@ export type DeadImport = {
  * Characters after which a `/` opens a regular expression rather than dividing.
  *
  * `)` and `}` are absent on purpose: `(a + b) / 2` is ordinary and a regex directly
- * after a closing bracket is not. `!` is present for `!/re/.test(x)` and costs the
- * postfix case, `input! / 10`, which `blankingIsSound` catches instead.
+ * after a closing bracket is not.
  */
 const REGEX_MAY_FOLLOW = new Set(
   ['', '(', '[', '{', ',', ';', ':', '=', '!', '&', '|', '?', '+', '-', '*', '%', '^', '~', '<', '>'],
@@ -60,6 +66,24 @@ const REGEX_MAY_FOLLOW = new Set(
 const REGEX_MAY_FOLLOW_KEYWORD = new Set(
   ['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await'],
 )
+
+/**
+ * Whether the `!` before a slash ends an expression instead of negating one.
+ *
+ * `!` is the one character that reaches the slash from both sides: `!/re/.test(x)`
+ * negates a regex test, and `estimates[i]! / total` is a TypeScript non-null
+ * assertion followed by a division. What precedes the `!` settles it — an operand
+ * ends with an identifier, a closing bracket or a literal.
+ */
+function endsExpressionBeforeSlash(blanked: readonly string[], slashIndex: number): boolean {
+  let cursor = slashIndex - 1
+  while (cursor >= 0 && /\s/.test(blanked[cursor]!)) cursor -= 1
+  if (cursor < 0 || blanked[cursor] !== '!') return false
+  cursor -= 1
+  while (cursor >= 0 && /\s/.test(blanked[cursor]!)) cursor -= 1
+  if (cursor < 0) return false
+  return /[\w$)\]'"`]/.test(blanked[cursor]!)
+}
 
 /**
  * Blanks comments and literal text so an identifier scan sees code only.
@@ -83,6 +107,15 @@ export function blankNonCode(source: string): string {
   let braceDepth = 0
   /** Last significant code character, which decides `/` division vs regex. */
   let previous = ''
+  /**
+   * The last identifier token, empty if the last token was not one. Accumulated
+   * from code only — reading it back out of the raw source let a preceding
+   * comment's last word decide, which is how `// …correction tone` made the regex
+   * on the next line lex as a division.
+   */
+  let word = ''
+  /** Whether the cursor is inside that identifier, so `return false` stays two. */
+  let inWord = false
   let index = 0
 
   /** Blanks a template's literal run; returns the index after it. */
@@ -98,6 +131,8 @@ export function blankNonCode(source: string): string {
       cursor += 1
     }
     blankTo(from, cursor)
+    word = ''
+    inWord = false
     if (source[cursor] === '`') {
       templateStack.pop()
       previous = '`'
@@ -112,10 +147,13 @@ export function blankNonCode(source: string): string {
     const char = source[index]!
     const next = source[index + 1]
 
+    // A comment is whitespace to the grammar, so it leaves `previous` and `word`
+    // exactly as the code before it left them.
     if (char === '/' && next === '/') {
       let end = source.indexOf('\n', index)
       if (end === -1) end = source.length
       blankTo(index, end)
+      inWord = false
       index = end
       continue
     }
@@ -124,17 +162,19 @@ export function blankNonCode(source: string): string {
       const closing = source.indexOf('*/', index + 2)
       const end = closing === -1 ? source.length : closing + 2
       blankTo(index, end)
+      inWord = false
       index = end
       continue
     }
 
     if (char === '/') {
-      const wordBefore = source.slice(0, index).match(/([A-Za-z_$][\w$]*)\s*$/)
-      const startsRegex = wordBefore
-        ? REGEX_MAY_FOLLOW_KEYWORD.has(wordBefore[1]!)
-        : REGEX_MAY_FOLLOW.has(previous)
+      const startsRegex = word
+        ? REGEX_MAY_FOLLOW_KEYWORD.has(word)
+        : REGEX_MAY_FOLLOW.has(previous) && !endsExpressionBeforeSlash(out, index)
       if (!startsRegex) {
         previous = '/'
+        word = ''
+        inWord = false
         index += 1
         continue
       }
@@ -153,6 +193,8 @@ export function blankNonCode(source: string): string {
       }
       blankTo(index + 1, cursor)
       previous = '/'
+      word = ''
+      inWord = false
       index = cursor + 1
       continue
     }
@@ -166,6 +208,8 @@ export function blankNonCode(source: string): string {
       }
       blankTo(index + 1, cursor)
       previous = char
+      word = ''
+      inWord = false
       index = cursor + 1
       continue
     }
@@ -179,6 +223,8 @@ export function blankNonCode(source: string): string {
     if (char === '{') {
       braceDepth += 1
       previous = '{'
+      word = ''
+      inWord = false
       index += 1
       continue
     }
@@ -186,6 +232,8 @@ export function blankNonCode(source: string): string {
     if (char === '}') {
       braceDepth -= 1
       previous = '}'
+      word = ''
+      inWord = false
       index += 1
       if (templateStack.length > 0 && templateStack[templateStack.length - 1] === braceDepth) {
         index = consumeTemplateText(index)
@@ -193,9 +241,20 @@ export function blankNonCode(source: string): string {
       continue
     }
 
-    // Whitespace leaves `previous` alone, so a line break does not look like a
-    // fresh statement to the `/` decision above.
-    if (!/\s/.test(char)) previous = char
+    // Whitespace leaves both alone, so a line break does not look like a fresh
+    // statement to the `/` decision above, and `return\n  /re/` still lexes.
+    if (/[\w$]/.test(char)) {
+      word = inWord ? word + char : char
+      inWord = true
+      previous = char
+    } else if (!/\s/.test(char)) {
+      word = ''
+      inWord = false
+      previous = char
+    } else {
+      // Whitespace ends the token but keeps it, so `return\n  /re/` still lexes.
+      inWord = false
+    }
     index += 1
   }
 
@@ -274,17 +333,15 @@ function parses(source: string): boolean {
  * Blanking only ever replaces comment and literal text with spaces, so the result
  * must still parse. When it does not, the lexer mistook code for a literal — and a
  * blanked reference reads as an unused import. This is the guard that makes a
- * lexical analysis safe to fail a build on. 6 of 2149 files in this repository
- * desync today — regular expressions holding a quote, and `input! / 10`, where the
- * `!` of a non-null assertion looks like the `!` of a negated regex test — and every
- * one of them is reported rather than silently mis-analysed. None are under
- * `DEAD_IMPORT_ROOTS`; widening those roots means teaching the lexer first.
+ * lexical analysis safe to fail a build on, and it caught every desync this checker
+ * has had: a regular expression holding a quote, `input! / 10` reading as a negated
+ * regex test, `return false` accumulating into a single token, and a comment's last
+ * word deciding how the next line lexed. All four are fixed; the guard stays.
  *
- * A file the transpiler cannot parse at all is degraded too: there is nothing to
- * compare against.
+ * A file that never parsed is degraded too and needs no separate check, because
+ * blanking cannot repair a syntax error.
  */
 export function blankingIsSound(source: string): boolean {
-  if (!parses(source)) return false
   return parses(blankNonCode(source))
 }
 

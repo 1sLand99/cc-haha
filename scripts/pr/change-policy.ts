@@ -154,13 +154,14 @@ const persistencePrefixes = [
 
 const policyPrefixes = [
   '.github/workflows/',
-  'scripts/git-hooks/',
-  'scripts/pr/',
-  'scripts/quality-gate/',
-  // scripts/pr/dead-imports.ts owns this directory. The lane is selected by prefix,
-  // and that check reads its files rather than importing them, so the import graph
-  // cannot route a ws-only diff here on its own.
-  'src/server/ws/',
+  // `scripts/pr/dead-imports.ts` owns these three source roots — every root no
+  // compiler checks for unreferenced imports. The lane is selected by prefix, and
+  // that check reads its files rather than importing them, so the import graph
+  // cannot route a diff here on its own. `scripts/` also covers the git hooks, the
+  // PR tooling and the quality gate, which selected this lane before.
+  'adapters/',
+  'scripts/',
+  'src/',
 ]
 
 const policyExactPaths = new Set([

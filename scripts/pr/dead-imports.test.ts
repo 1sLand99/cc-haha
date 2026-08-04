@@ -198,6 +198,60 @@ describe('findDeadImports', () => {
     expect(findDeadImports(source)).toEqual([])
   })
 
+  // Each of the three below places the import's only reference *after* the tricky
+  // construct on the same line. A desync blanks to the end of that line, so the
+  // import goes dead — put the reference on a later line and the assertion holds
+  // even while the lexer is broken.
+
+  it('does not let a comment decide how the next line lexes', () => {
+    // A comment is whitespace to the grammar. Reading the last word out of the raw
+    // source made `tone` the token before the slash, so the regex lexed as a
+    // division and its apostrophe opened a string that ate the rest of the line —
+    // src/hooks/useIssueFlagBanner.ts, verbatim.
+    // The comment has to sit between the last code token and the slash, which is
+    // where the array of patterns in that file puts it.
+    const source = [
+      "import { match } from './x.js'",
+      'export const value =',
+      '  // comma or exclamation implies correction tone',
+      "  /\\bthat'?s (wrong|incorrect)\\b/i.test(match)",
+      '',
+    ].join('\n')
+
+    expect(blankingIsSound(source)).toBe(true)
+    expect(findDeadImports(source)).toEqual([])
+  })
+
+  it('does not run two keywords together into one token', () => {
+    // `return false` accumulated as `returnfalse`, so the next `return /re/` no
+    // longer looked like a keyword and its character class swallowed the line.
+    const source = [
+      "import { probe } from './x.js'",
+      'export function guard(value: string): boolean {',
+      '  if (!value) return false',
+      "  return /[\\w$)\\]'\"`]/.test(probe(value))",
+      '}',
+      '',
+    ].join('\n')
+
+    expect(blankingIsSound(source)).toBe(true)
+    expect(findDeadImports(source)).toEqual([])
+  })
+
+  it('tells a non-null assertion apart from a negated regex test', () => {
+    // `estimates[i]! / total` divides; `!/re/.test(x)` negates. Both put `!`
+    // immediately before the slash.
+    const source = [
+      "import { share, guard } from './x.js'",
+      'export const ratio = (parts: number[], total: number) => parts[0]! / share(total)',
+      'export const clean = (value: string) => !/[<>]/.test(guard(value))',
+      '',
+    ].join('\n')
+
+    expect(blankingIsSound(source)).toBe(true)
+    expect(findDeadImports(source)).toEqual([])
+  })
+
   it('does not mistake division for a regular expression', () => {
     // `(a) / 2 ... /` would swallow the code between two divisions.
     const source = [
@@ -227,11 +281,16 @@ describe('blankNonCode', () => {
 describe('dead imports in owned source', () => {
   const { dead, scannedFiles, degradedFiles } = scanDeadImports(ROOT)
 
-  it('scans the directory it claims to own', () => {
+  it('scans the directories it claims to own', () => {
     // An empty or mis-rooted scan passes every other assertion in this file.
-    expect(DEAD_IMPORT_ROOTS).toEqual(['src/server/ws'])
+    expect(DEAD_IMPORT_ROOTS).toEqual(['src', 'scripts', 'adapters'])
     expect(scannedFiles).toContain('src/server/ws/handler.ts')
-    expect(scannedFiles.length).toBeGreaterThanOrEqual(5)
+    expect(scannedFiles).toContain('scripts/pr/dead-imports.ts')
+    expect(scannedFiles).toContain('adapters/feishu/index.ts')
+    expect(scannedFiles.length).toBeGreaterThan(1_000)
+    // desktop/ is out of scope on purpose — its tsconfig already sets
+    // noUnusedLocals — so a root list that swept it in would be a mistake.
+    expect(scannedFiles.some((file) => file.startsWith('desktop/'))).toBe(false)
   })
 
   it('analysed every file it scanned', () => {
