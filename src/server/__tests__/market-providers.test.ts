@@ -285,3 +285,29 @@ describe('skillhubProvider', () => {
     expect(page.items[1]!.securityStatus).toBe('unknown')
   })
 })
+
+describe('non-essential traffic gate', () => {
+  const NON_ESSENTIAL_TRAFFIC_ENV = 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'
+  let originalEnv: string | undefined
+
+  beforeEach(() => {
+    originalEnv = process.env[NON_ESSENTIAL_TRAFFIC_ENV]
+    process.env[NON_ESSENTIAL_TRAFFIC_ENV] = '1'
+  })
+
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env[NON_ESSENTIAL_TRAFFIC_ENV]
+    else process.env[NON_ESSENTIAL_TRAFFIC_ENV] = originalEnv
+  })
+
+  it('blocks upstream requests and records a source failure when essential-traffic is on', async () => {
+    stubFetch(() => {
+      throw new Error('must not be reached')
+    })
+
+    await expect(clawhubProvider.list({ limit: 3 })).rejects.toThrow(
+      /disabled by non-essential traffic setting/,
+    )
+    expect(requestedUrls).toEqual([])
+  })
+})

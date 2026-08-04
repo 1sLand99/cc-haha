@@ -94,5 +94,6 @@ describe('Settings section navigation', () => {
     // The rule is what separates the rail from the section beside it now, so
     // it is load-bearing rather than trim.
     expect(rail?.className).toContain('border-r')
+    expect((rail as HTMLElement).style.marginLeft).toBe('var(--settings-tab-offset, 0px)')
   })
 })

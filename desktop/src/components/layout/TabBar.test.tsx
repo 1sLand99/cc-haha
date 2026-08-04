@@ -622,6 +622,51 @@ describe('TabBar', () => {
     expect(chatTab?.className).not.toContain('min-w-[195px]')
   })
 
+  it('publishes the non-leading settings tab offset for its navigation rail', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { SETTINGS_TAB_ID, useTabStore } = await import('../../stores/tabStore')
+
+    useTabStore.setState({
+      tabs: [
+        { sessionId: 'session-1', title: 'Chat', type: 'session', status: 'idle' },
+        { sessionId: SETTINGS_TAB_ID, title: 'Settings', type: 'settings', status: 'idle' },
+      ],
+      activeTabId: SETTINGS_TAB_ID,
+    })
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    const bar = screen.getByTestId('tab-bar')
+    const strip = screen.getByTestId('tab-bar-scroll-region')
+    const settingsTab = screen.getByText('Localized Settings').closest('.tab-strip-item') as HTMLElement
+    const contentArea = bar.parentElement as HTMLElement
+
+    // Model 200% CSS zoom: the Settings tab begins 394 visual pixels after the
+    // bar, which is 197 layout pixels — exactly one preceding tab plus its gap.
+    stubRect(bar, 100, 1700)
+    stubRect(strip, 100, 1700)
+    stubRect(settingsTab, 494, 884)
+    Object.defineProperty(bar, 'offsetWidth', { configurable: true, get: () => 800 })
+
+    fireStripResize()
+
+    expect(contentArea.style.getPropertyValue('--settings-tab-offset')).toBe('197px')
+    expect(197 + 195).toBe((884 - 100) / 2)
+
+    // Manual strip movement updates the rail rather than pulling the tabs back,
+    // including when the tab is partly clipped left of the content area.
+    stubRect(settingsTab, -100, 290)
+    fireEvent.scroll(strip)
+    expect(contentArea.style.getPropertyValue('--settings-tab-offset')).toBe('-100px')
+
+    await act(async () => {
+      useTabStore.getState().setActiveTab('session-1')
+    })
+    expect(contentArea.style.getPropertyValue('--settings-tab-offset')).toBe('')
+  })
+
   it('shows current-session CLI tasks without a numeric activity badge', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')

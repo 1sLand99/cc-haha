@@ -29,6 +29,7 @@ import { handleOpenTargetsApi } from './api/open-targets.js'
 import { handleMemoryApi } from './api/memory.js'
 import { handleDesktopUiApi } from './api/desktop-ui.js'
 import { handleTracesApi } from './api/traces.js'
+import { handlePrivacyApi } from './api/privacy.js'
 
 export async function handleApiRequest(req: Request, url: URL): Promise<Response> {
   const path = url.pathname
@@ -131,6 +132,9 @@ export async function handleApiRequest(req: Request, url: URL): Promise<Response
 
     case 'traces':
       return handleTracesApi(req, url, segments)
+
+    case 'privacy':
+      return handlePrivacyApi(req, url, segments)
 
     case 'filesystem':
       return handleFilesystemRoute(url.pathname, url)

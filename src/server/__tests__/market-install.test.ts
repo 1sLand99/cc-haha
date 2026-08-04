@@ -14,6 +14,7 @@ import { MARKET_LIMITS } from '../services/market/types.js'
 
 let tmpHome: string
 let originalClaudeConfigDir: string | undefined
+let originalNonEssentialTrafficEnv: string | undefined
 const originalFetch = globalThis.fetch
 
 const SKILL_MD = '---\nname: demo\n---\n# Demo skill'
@@ -73,12 +74,21 @@ beforeEach(async () => {
   tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'market-install-test-'))
   originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
   process.env.CLAUDE_CONFIG_DIR = path.join(tmpHome, '.claude')
+  // These tests stub upstreams and must not inherit the developer shell's
+  // essential-traffic env (which would block the market providers entirely).
+  originalNonEssentialTrafficEnv = process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+  delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
 })
 
 afterEach(async () => {
   globalThis.fetch = originalFetch
   if (originalClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
   else process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir
+  if (originalNonEssentialTrafficEnv === undefined) {
+    delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+  } else {
+    process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = originalNonEssentialTrafficEnv
+  }
   await fs.rm(tmpHome, { recursive: true, force: true })
 })
 

@@ -18,6 +18,7 @@ const FIXTURES = path.join(import.meta.dir, 'fixtures', 'market')
 
 let tmpHome: string
 let originalClaudeConfigDir: string | undefined
+let originalNonEssentialTrafficEnv: string | undefined
 let requested: string[] = []
 const originalFetch = globalThis.fetch
 
@@ -70,6 +71,10 @@ beforeEach(async () => {
   tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'market-service-test-'))
   originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
   process.env.CLAUDE_CONFIG_DIR = path.join(tmpHome, '.claude')
+  // These tests stub upstreams and must not inherit the developer shell's
+  // essential-traffic env (which would block the market providers entirely).
+  originalNonEssentialTrafficEnv = process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+  delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
   delete process.env.HAHA_MARKET_DISABLE_PROVIDERS
 })
 
@@ -77,6 +82,11 @@ afterEach(async () => {
   globalThis.fetch = originalFetch
   if (originalClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
   else process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir
+  if (originalNonEssentialTrafficEnv === undefined) {
+    delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+  } else {
+    process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = originalNonEssentialTrafficEnv
+  }
   delete process.env.HAHA_MARKET_DISABLE_PROVIDERS
   await fs.rm(tmpHome, { recursive: true, force: true })
 })

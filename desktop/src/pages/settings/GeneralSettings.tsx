@@ -78,6 +78,8 @@ export function GeneralSettings() {
     setNetwork,
     traceCapture,
     setTraceCaptureEnabled,
+    nonEssentialTrafficDisabled,
+    setNonEssentialTrafficDisabled,
     responseLanguage,
     setResponseLanguage,
     appMode,
@@ -882,6 +884,31 @@ export function GeneralSettings() {
                 {traceCapture.storageDir}
               </div>
             )}
+          </div>
+        </label>
+      </div>
+
+      <div className="mt-8">
+        <h2 className="text-[16.5px] font-semibold leading-tight text-[var(--color-text-primary)] mb-1" style={{ fontFamily: 'var(--font-headline)' }}>{t('settings.general.nonEssentialTrafficTitle')}</h2>
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-3">{t('settings.general.nonEssentialTrafficDescription')}</p>
+        <label className="relative flex items-start gap-3 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3 cursor-pointer hover:border-[var(--color-border-focus)] transition-colors">
+          <input
+            type="checkbox"
+            aria-label={t('settings.general.nonEssentialTrafficEnabled')}
+            checked={nonEssentialTrafficDisabled}
+            onChange={(e) => void setNonEssentialTrafficDisabled(e.target.checked)}
+            className={SETTINGS_CHECKBOX_INPUT_CLASS}
+          />
+          <SettingsCheckboxMark checked={nonEssentialTrafficDisabled} />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">
+              {t('settings.general.nonEssentialTrafficEnabled')}
+            </div>
+            <div className="text-xs text-[var(--color-text-tertiary)] mt-1 leading-5">
+              {nonEssentialTrafficDisabled
+                ? t('settings.general.nonEssentialTrafficHintOn')
+                : t('settings.general.nonEssentialTrafficHintOff')}
+            </div>
           </div>
         </label>
       </div>
