@@ -2719,10 +2719,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           return {
             messages,
             ...(stoppedTask ? { backgroundAgentTasks } : {}),
-            chatState: hasPendingPermissionRequests(s)
-              ? 'permission_pending'
-              : 'thinking',
-            activeThinkingId: null,
+            chatState: parentToolUseId
+              ? s.chatState
+              : hasPendingPermissionRequests(s)
+                ? 'permission_pending'
+                : 'thinking',
+            activeThinkingId: parentToolUseId ? s.activeThinkingId : null,
           }
         })
         if (consumePendingTaskToolUseId(sessionId, msg.toolUseId)) {
