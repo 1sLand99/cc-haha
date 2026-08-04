@@ -910,7 +910,9 @@ function isSessionTurnCheckpoint(value: unknown): value is SessionTurnCheckpoint
     typeof checkpoint.target?.userMessageIndex === 'number' &&
     Boolean(checkpoint.code) &&
     typeof checkpoint.code?.available === 'boolean' &&
-    Array.isArray(checkpoint.code?.filesChanged)
+    Array.isArray(checkpoint.code?.filesChanged) &&
+    (checkpoint.restoreAvailable === undefined ||
+      typeof checkpoint.restoreAvailable === 'boolean')
   )
 }
 

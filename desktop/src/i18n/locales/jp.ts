@@ -1846,6 +1846,8 @@ export const jp: Record<TranslationKey, string> = {
   'chat.turnChangesLatestSubtitle': '現在のターンのチェックポイント',
   'chat.turnChangesHistoricalSubtitle': '保存済みターンのチェックポイント',
   'chat.turnChangesCurrentWorkspaceDiff': '現在のワークスペース差分',
+  'chat.turnChangesPreviewOnlySubtitle': 'ファイルのチェックポイントが不完全です。プレビューのみで、安全に元に戻せません',
+  'chat.turnChangesRestoreUnavailable': '完全には元に戻せません',
   'chat.turnChangesLatestUndo': '現在のターンを元に戻す',
   'chat.turnChangesHistoricalUndo': 'このターンの前まで巻き戻す',
   'chat.turnChangesUndoing': '元に戻しています...',

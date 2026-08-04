@@ -1845,6 +1845,8 @@ export const zh: Record<TranslationKey, string> = {
   'chat.turnChangesLatestSubtitle': '当前轮次检查点',
   'chat.turnChangesHistoricalSubtitle': '历史轮次检查点',
   'chat.turnChangesCurrentWorkspaceDiff': '当前工作区差异',
+  'chat.turnChangesPreviewOnlySubtitle': '文件记录不完整，仅供查看，无法安全撤销',
+  'chat.turnChangesRestoreUnavailable': '无法完整撤销',
   'chat.turnChangesLatestUndo': '撤销当前轮次',
   'chat.turnChangesHistoricalUndo': '回滚到这一轮之前',
   'chat.turnChangesUndoing': '正在撤销...',

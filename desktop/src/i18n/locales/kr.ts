@@ -1846,6 +1846,8 @@ export const kr: Record<TranslationKey, string> = {
   'chat.turnChangesLatestSubtitle': '현재 턴 체크포인트',
   'chat.turnChangesHistoricalSubtitle': '저장된 턴 체크포인트',
   'chat.turnChangesCurrentWorkspaceDiff': '현재 워크스페이스 변경 사항',
+  'chat.turnChangesPreviewOnlySubtitle': '파일 체크포인트가 불완전하여 미리보기만 가능하며 안전하게 실행 취소할 수 없습니다',
+  'chat.turnChangesRestoreUnavailable': '완전히 실행 취소할 수 없음',
   'chat.turnChangesLatestUndo': '현재 턴 실행 취소',
   'chat.turnChangesHistoricalUndo': '이 턴 이전으로 되감기',
   'chat.turnChangesUndoing': '실행 취소 중...',

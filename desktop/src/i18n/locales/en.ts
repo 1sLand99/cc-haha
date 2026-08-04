@@ -1844,6 +1844,8 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'chat.turnChangesLatestSubtitle': 'Current turn checkpoint',
   'chat.turnChangesHistoricalSubtitle': 'Saved turn checkpoint',
   'chat.turnChangesCurrentWorkspaceDiff': 'Current workspace diff',
+  'chat.turnChangesPreviewOnlySubtitle': 'Incomplete file checkpoint; preview only and cannot be safely undone',
+  'chat.turnChangesRestoreUnavailable': 'Cannot fully undo',
   'chat.turnChangesLatestUndo': 'Undo current turn',
   'chat.turnChangesHistoricalUndo': 'Rewind to before this turn',
   'chat.turnChangesUndoing': 'Undoing...',
