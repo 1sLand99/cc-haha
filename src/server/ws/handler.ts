@@ -11,7 +11,6 @@ import type {
   ClientMessage,
   PermissionMode,
   ServerMessage,
-  StreamingFallbackCause,
   TokenUsage,
 } from './events.js'
 import { RUNTIME_CONFIG_APPLIED_EVENT } from './events.js'
@@ -23,7 +22,6 @@ import {
 import { computerUseApprovalService } from '../services/computerUseApprovalService.js'
 import {
   sessionService,
-  type SessionTaskNotification,
 } from '../services/sessionService.js'
 import { SettingsService } from '../services/settingsService.js'
 import { ProviderService } from '../services/providerService.js'
@@ -55,15 +53,6 @@ import {
 } from '../services/titleService.js'
 import { parseSlashCommand } from '../../utils/slashCommandParsing.js'
 import { archiveRemoteSession } from '../../utils/teleport/api.js'
-import {
-  COMMAND_NAME_TAG,
-  LOCAL_COMMAND_STDERR_TAG,
-  LOCAL_COMMAND_STDOUT_TAG,
-} from '../../constants/xml.js'
-import {
-  getCommandMetadataDisplayText,
-  shouldHideCommandMetadataContent,
-} from '../../utils/commandMetadata.js'
 import { shouldCreateWorktreeForSessionLaunch } from '../services/repositoryLaunchService.js'
 import { getDisconnectGraceMs } from './disconnectGraceConfig.js'
 import {
@@ -87,8 +76,6 @@ import {
   markActiveAgentsStopping,
 } from './agentTaskState.js'
 import type {
-  AgentTaskType,
-  ActiveNonAgentTaskState,
   ActiveAgentTaskState,
   CliBackgroundTaskLifecycle,
 } from './agentTaskState.js'
