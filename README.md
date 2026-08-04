@@ -44,16 +44,14 @@ Every screenshot below comes from the real desktop app in Pure White at 100% UI 
 
 <table>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/en/session-new.webp" alt="Empty desktop session before the first task"><br><b>Start with a clear, empty session</b><br><sub>Project, permissions and GPT-5.6-Luna stay visible</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/en/session-main.webp" alt="Real task running with the Activity panel open"><br><b>Follow the task as it runs</b><br><sub>Tool calls and stage-by-stage progress stay in view</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/en/session-new.webp" alt="Empty desktop session before the first task"><br><b>Start with a clear, empty session</b><br><sub>Project, permissions and GPT-5.6-Luna stay visible</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/en/session-main.webp" alt="Real task running with the Activity panel open"><br><b>Follow the task as it runs</b><br><sub>Tool calls and stage-by-stage progress stay in view</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/en/workspace-diff.webp" alt="Workspace diff review"><br><b>See exactly what changed</b><br><sub>A focused, full-width syntax-highlighted diff</sub></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/en/workspace-diff.webp" alt="Workspace diff review"><br><b>See exactly what changed</b><br><sub>A focused, full-width syntax-highlighted diff</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/en/workspace-preview.webp" alt="Built-in browser previewing the page that was just changed"><br><b>Verify on the spot</b><br><sub>The real edited page in the built-in browser</sub></td>
-  </tr>
-  <tr>
-    <td align="center" width="50%"><img src="docs/images/app/en/model-picker.webp" alt="Model picker showing ChatGPT Official and GPT-5.6-Luna"><br><b>Choose the exact model</b><br><sub>ChatGPT Official with GPT-5.6-Luna in a real session</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/en/skill-market.webp" alt="Skill marketplace"><br><b>Missing a trick? Install it</b><br><sub>Source and safety status shown up front</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/en/workspace-preview.webp" alt="Built-in browser previewing the page that was just changed"><br><b>Verify on the spot</b><br><sub>The real edited page in the built-in browser</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/en/model-picker.webp" alt="Model picker showing ChatGPT Official and GPT-5.6-Luna"><br><b>Choose the exact model</b><br><sub>ChatGPT Official with GPT-5.6-Luna in a real session</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/en/skill-market.webp" alt="Skill marketplace"><br><b>Missing a trick? Install it</b><br><sub>Source and safety status shown up front</sub></td>
   </tr>
 </table>
 

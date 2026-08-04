@@ -44,16 +44,14 @@ Claude Code Haha 的桌面端把会话、多项目、分支 / Worktree、代码�
 
 <table>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/session-new.webp" alt="第一次任务前的空会话"><br><b>从清爽的空会话开始</b><br><sub>项目、权限和 GPT-5.6-Luna 都在首屏</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/session-main.webp" alt="打开活动面板的真实执行中任务"><br><b>跟着任务一步步往前</b><br><sub>工具调用与阶段进度都留在眼前</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/session-new.webp" alt="第一次任务前的空会话"><br><b>从清爽的空会话开始</b><br><sub>项目、权限和 GPT-5.6-Luna 都在首屏</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/session-main.webp" alt="打开活动面板的真实执行中任务"><br><b>跟着任务一步步往前</b><br><sub>工具调用与阶段进度都留在眼前</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/workspace-diff.webp" alt="工作区 Diff 评审"><br><b>改了什么，逐行看清楚</b><br><sub>放大的高亮 Diff，文字和代码更清楚</sub></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/workspace-diff.webp" alt="工作区 Diff 评审"><br><b>改了什么，逐行看清楚</b><br><sub>放大的高亮 Diff，文字和代码更清楚</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/workspace-preview.webp" alt="内置浏览器预览刚改完的页面"><br><b>改完当场验证</b><br><sub>内置浏览器打开真实本地页面</sub></td>
-  </tr>
-  <tr>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/model-picker.webp" alt="显示 ChatGPT 官方和 GPT-5.6-Luna 的模型选择器"><br><b>每条会话自选模型</b><br><sub>ChatGPT 官方服务商与 GPT-5.6-Luna</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/skill-market.webp" alt="技能市场"><br><b>缺什么手艺装什么</b><br><sub>来源和安全状态摆在明处</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/workspace-preview.webp" alt="内置浏览器预览刚改完的页面"><br><b>改完当场验证</b><br><sub>内置浏览器打开真实本地页面</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/model-picker.webp" alt="显示 ChatGPT 官方和 GPT-5.6-Luna 的模型选择器"><br><b>每条会话自选模型</b><br><sub>ChatGPT 官方服务商与 GPT-5.6-Luna</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/skill-market.webp" alt="技能市场"><br><b>缺什么手艺装什么</b><br><sub>来源和安全状态摆在明处</sub></td>
   </tr>
 </table>
 
