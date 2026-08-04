@@ -1634,6 +1634,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const addToast = useUIStore((s) => s.addToast)
   const messages = sessionState?.messages ?? EMPTY_MESSAGES
   const chatState = sessionState?.chatState ?? 'idle'
+  const historyMutationEpoch = sessionState?.historyMutationEpoch ?? 0
   const streamingText = sessionState?.streamingText ?? ''
   const streamingToolInput = sessionState?.streamingToolInput ?? ''
   const activeThinkingId = sessionState?.activeThinkingId ?? null
@@ -2257,7 +2258,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     return () => {
       cancelled = true
     }
-  }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, isMemberSession, latestCompletedTurnId, resolvedSessionId])
+  }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, historyMutationEpoch, isMemberSession, latestCompletedTurnId, resolvedSessionId])
 
   const handleUndoCurrentTurn = useCallback(async () => {
     if (!resolvedSessionId || !confirmTurnCard || rewindingTurnId || hasRunningBackgroundTasks) return

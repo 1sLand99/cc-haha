@@ -5366,6 +5366,74 @@ describe('MessageList nested tool calls', () => {
     })
   })
 
+  it('reloads live turn checkpoints when the completed transcript mutation is committed', async () => {
+    const getTurnCheckpoints = vi.spyOn(sessionsApi, 'getTurnCheckpoints')
+      .mockResolvedValueOnce({ checkpoints: [] })
+      .mockResolvedValue({
+        checkpoints: [
+          {
+            target: {
+              targetUserMessageId: 'transcript-user-1',
+              userMessageIndex: 0,
+              userMessageCount: 1,
+            },
+            code: {
+              available: true,
+              filesChanged: ['/private/tmp/generated/src/App.jsx'],
+              insertions: 12,
+              deletions: 3,
+            },
+            workDir: '/private/tmp',
+          },
+        ],
+      })
+
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          chatState: 'idle',
+          historyMutationEpoch: 1,
+          messages: [
+            {
+              id: 'local-user-1',
+              type: 'user_text',
+              content: '在 /tmp 下创建项目',
+              timestamp: 1,
+            },
+            {
+              id: 'assistant-1',
+              type: 'assistant_text',
+              content: '完成。',
+              timestamp: 2,
+            },
+          ],
+        }),
+      },
+    })
+
+    render(<MessageList />)
+
+    await waitFor(() => {
+      expect(getTurnCheckpoints).toHaveBeenCalledTimes(1)
+    })
+    expect(screen.queryByText('App.jsx')).toBeNull()
+
+    act(() => {
+      useChatStore.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [ACTIVE_TAB]: {
+            ...state.sessions[ACTIVE_TAB]!,
+            historyMutationEpoch: 2,
+          },
+        },
+      }))
+    })
+
+    expect(await screen.findByText('App.jsx')).toBeTruthy()
+    expect(getTurnCheckpoints).toHaveBeenCalledTimes(2)
+  })
+
   it('rewinds a live turn with the authoritative checkpoint id when the local UI id differs', async () => {
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
       checkpoints: [
