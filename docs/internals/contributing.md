@@ -39,12 +39,12 @@ bun install
 | --- | --- | --- | --- |
 | 本地迭代 | 手动 | 最窄的相关测试；`bun run check:impact` 选中的命令 | 秒级反馈 |
 | PR（必过） | `pull_request` | impact 选中的确定性 lane，含 `check:agent-flow` | 无模型、无 provider、无 secret、fork 可跑 |
-| Nightly | `schedule` + 手动 | 全部确定性 lane（不做路径选择）+ 模块图健康度 + `check:desktop-ui-smoke` | 仍然无模型、无 secret |
-| Release | 维护者手动 `bun run quality:release`（**不是** `release-desktop.yml`） | PR + Nightly 全部内容 + native/打包 smoke + 维护者授权的真实 provider baseline | 真实模型只在此层，且需显式授权 |
+| 全量 | 维护者手动触发（`workflow_dispatch`） | 全部确定性 lane（不做路径选择）+ 模块图健康度 + `check:desktop-ui-smoke` | 仍然无模型、无 secret |
+| Release | 维护者手动 `bun run quality:release`（**不是** `release-desktop.yml`） | PR + 全量层全部内容 + native/打包 smoke + 维护者授权的真实 provider baseline | 真实模型只在此层，且需显式授权 |
 
-注意：`release-desktop.yml` 按设计**不跑任何质量门禁**——打 tag 不应被 `bun run verify` 阻塞，`scripts/pr/release-workflow.test.ts` 有守卫测试锁定这一点。因此发版前的质量证据来自「合并进来的那些 PR」+ Nightly + 维护者手动执行的 `quality:release`。这意味着 Nightly 不是可选项：它是 tag 与门禁之间唯一的定期兜底。
+注意：`release-desktop.yml` 按设计**不跑任何质量门禁**——打 tag 不应被 `bun run verify` 阻塞，`scripts/pr/release-workflow.test.ts` 有守卫测试锁定这一点。因此发版前的质量证据来自「合并进来的那些 PR」+ 维护者手动跑的全量层 + `quality:release`。全量层刻意不设定时：跑不跑、什么时候跑由维护者决定，`pr-quality-workflow.test.ts` 会拦住重新加回 `schedule:` 的改动。
 
-分层原则：**PR 只跑改动能影响到的范围**，因此它天然无法覆盖"没有 PR 碰过的检查"和"只有全套一起跑才暴露的问题"——这两个盲区交给 Nightly；**真实模型/额度只出现在 Release 与维护者手动 smoke**，任何贡献者在没有 provider 的情况下都必须能跑通 PR 层的全部门禁。
+分层原则：**PR 只跑改动能影响到的范围**，因此它天然无法覆盖"没有 PR 碰过的检查"和"只有全套一起跑才暴露的问题"——这两个盲区交给手动触发的全量层；**真实模型/额度只出现在 Release 与维护者手动 smoke**，任何贡献者在没有 provider 的情况下都必须能跑通 PR 层的全部门禁。
 
 ## 普通 PR 的影响面检查
 

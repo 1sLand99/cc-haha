@@ -39,12 +39,12 @@ Do not commit local artifacts such as `artifacts/quality-runs/`, `node_modules/`
 | --- | --- | --- | --- |
 | Local | manual | The narrowest relevant tests, then whatever `bun run check:impact` selects | seconds |
 | PR (required) | `pull_request` | The deterministic lanes the impact report selects, including `check:agent-flow` | no model, no provider, no secret, runs on an untrusted fork |
-| Nightly | `schedule` + manual | Every deterministic lane with no path selection, plus module-graph health and `check:desktop-ui-smoke` | still no model, no secret |
+| Full sweep | Maintainer-triggered (`workflow_dispatch`) | Every deterministic lane with no path selection, plus module-graph health and `check:desktop-ui-smoke` | still no model, no secret |
 | Release | maintainer-run `bun run quality:release` (**not** `release-desktop.yml`) | Everything above, plus native/packaging smoke and maintainer-authorized live provider baselines | live models only here, only with explicit authorization |
 
-Note: `release-desktop.yml` deliberately runs no quality gate — tagging must not be blocked by `bun run verify`, and `scripts/pr/release-workflow.test.ts` guards that decision. Release-time evidence therefore comes from the PRs that were merged, plus nightly, plus the maintainer's manual `quality:release`. That makes nightly load-bearing rather than optional: it is the only recurring check between a merge and a tag.
+Note: `release-desktop.yml` deliberately runs no quality gate — tagging must not be blocked by `bun run verify`, and `scripts/pr/release-workflow.test.ts` guards that decision. Release-time evidence therefore comes from the PRs that were merged, plus whatever full sweeps the maintainer ran, plus the manual `quality:release`. The full sweep is deliberately not scheduled: spending ~90 minutes of CI is a decision, not a default, and `pr-quality-workflow.test.ts` fails if a `schedule:` is added back.
 
-The split follows from what each tier can prove. A per-PR gate only ever covers what the diff reaches, so it is structurally blind to checks no recent PR selected and to failures that only appear when the whole suite runs together — nightly closes both. Live model quota is spent only at release time, so every contributor can pass the required gate with no provider at all.
+The split follows from what each tier can prove. A per-PR gate only ever covers what the diff reaches, so it is structurally blind to checks no recent PR selected and to failures that only appear when the whole suite runs together — the full sweep closes both, when the maintainer asks for it. Live model quota is spent only at release time, so every contributor can pass the required gate with no provider at all.
 
 ## Path-Aware PR Checks
 

@@ -134,14 +134,18 @@ describe('PR quality workflow', () => {
   })
 })
 
-describe('nightly quality workflow', () => {
-  test('runs every deterministic lane on a schedule without secrets or live providers', () => {
+describe('full quality workflow', () => {
+  test('runs every deterministic lane on demand without secrets or live providers', () => {
     const workflow = readFileSync('.github/workflows/nightly-quality.yml', 'utf8')
     const jobs = workflowJobs(workflow)
     const runs = (jobs['full-deterministic'].steps ?? []).map((step) => step.run ?? '')
 
-    expect(workflow).toContain('schedule:')
     expect(workflow).toContain('workflow_dispatch:')
+    // Manual only, and it stays that way. This sweep costs about ninety minutes of
+    // CI; when to spend that is the maintainer's decision, so a schedule must not
+    // reappear here without one.
+    expect(workflow).not.toContain('schedule:')
+    expect(workflow).not.toContain('cron:')
     for (const command of [
       'bun run check:policy',
       'bun run check:agent-flow',
@@ -155,7 +159,7 @@ describe('nightly quality workflow', () => {
       'bun run check:quarantine',
       'bun run check:coverage',
     ]) {
-      expect(runs, `nightly must run ${command}`).toContain(command)
+      expect(runs, `full sweep must run ${command}`).toContain(command)
     }
 
     expect(workflow).not.toContain('--allow-live')

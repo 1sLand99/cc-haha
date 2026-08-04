@@ -1,15 +1,16 @@
-name: Nightly Quality
+name: Full Quality
 
 # The PR gate is intentionally scoped: it runs only the surfaces a diff can reach.
 # That leaves two blind spots no per-PR run can close — regressions that only appear
 # when the whole suite runs together, and drift in checks no recent PR happened to
-# select. This workflow closes them on a schedule, off the contributor's critical
-# path, and still without any model, provider, or repository secret.
+# select. This workflow closes them, without any model, provider, or repository
+# secret.
+#
+# Manual only, on purpose. It is here so the full sweep is one click away, not so
+# it runs on its own — deciding when to spend an hour and a half of CI is the
+# maintainer's call, not this file's.
 
 on:
-  schedule:
-    # 18:00 UTC = 02:00 Asia/Shanghai, after the working day.
-    - cron: '0 18 * * *'
   workflow_dispatch:
     inputs:
       skip_coverage:
