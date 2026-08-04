@@ -25,6 +25,7 @@ import { ClaudeOfficialLogin } from '../../components/settings/ClaudeOfficialLog
 import { ChatGPTOfficialLogin } from '../../components/settings/ChatGPTOfficialLogin'
 import { GrokOfficialLogin } from '../../components/settings/GrokOfficialLogin'
 import { CcSwitchImportModal } from '../../components/settings/CcSwitchImportModal'
+import { ModelIdCombobox } from '../../components/settings/ModelIdCombobox'
 import { BUILT_IN_PROVIDER_IDS, CLAUDE_OFFICIAL_PROVIDER_ID, OPENAI_OFFICIAL_PROVIDER_ID } from '../../constants/openaiOfficialProvider'
 import { GROK_OFFICIAL_PROVIDER_ID } from '../../constants/grokOfficialProvider'
 import { getBaseUrl } from '../../api/client'
@@ -1323,7 +1324,9 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
       buildModelContextWindows(models, nextInputs),
     ))
   }
-  const canFetchModels = Boolean(baseUrl.trim() && apiKey.trim())
+  const hasModelsBaseUrl = Boolean(baseUrl.trim())
+  const hasModelsApiKey = Boolean(apiKey.trim())
+  const canFetchModels = hasModelsBaseUrl && hasModelsApiKey
   const handleFetchModels = async () => {
     if (!canFetchModels || isFetchingModels) return
     const requestId = modelsRequestRef.current + 1
@@ -1364,15 +1367,11 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   const modelsErrorUpstream = modelsErrorMessage && modelsErrorMessage !== modelsErrorText
     ? modelsErrorMessage
     : null
-  const modelPickerItems = useMemo(
+  const modelPickerGroups = useMemo(
     () => groupProviderModels(
       fetchedModels ?? [],
       t('settings.providers.fetchModelsGroupOther'),
-    ).flatMap((group) => group.models.map((model) => ({
-      value: model.id,
-      label: model.id,
-      description: group.group,
-    }))),
+    ),
     [fetchedModels, t],
   )
   const renderPresetButton = (preset: ProviderPreset) => (
@@ -1713,7 +1712,9 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
               {t('settings.providers.fetchModels')}
             </Button>
           </div>
-          {!canFetchModels ? (
+          {!hasModelsApiKey ? (
+            <p className="mb-2 text-[11px] text-[var(--color-text-tertiary)]">{t('settings.providers.fetchModelsApiKeyHint')}</p>
+          ) : !hasModelsBaseUrl ? (
             <p className="mb-2 text-[11px] text-[var(--color-text-tertiary)]">{t('settings.providers.fetchModelsHint')}</p>
           ) : modelsErrorCode ? (
             <div role="alert" className="mb-2 flex flex-col gap-0.5">
@@ -1730,7 +1731,9 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
             <p className="mb-2 text-[11px] text-[var(--color-text-secondary)]">
               {t('settings.providers.fetchModelsLoaded', { count: fetchedModels.length })}
             </p>
-          ) : null}
+          ) : (
+            <p className="mb-2 text-[11px] text-[var(--color-text-tertiary)]">{t('settings.providers.fetchModelsSupportHint')}</p>
+          )}
           <div className="grid grid-cols-2 gap-2">
             {MODEL_SLOTS.map((slot) => {
               const labelKey = slot === 'main'
@@ -1744,28 +1747,17 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
               const pickLabel = t('settings.providers.fetchModelsPick', { label })
               return (
                 <div key={slot} className="min-w-0">
-                  <div className="flex items-end gap-1.5">
-                    <Input
-                      containerClassName="min-w-0 flex-1"
-                      label={label}
-                      required={slot === 'main'}
-                      value={models[slot]}
-                      onChange={(e) => handleModelChange(slot, e.target.value)}
-                      placeholder={slot === 'main' ? t('settings.providers.modelIdPlaceholder') : t('settings.providers.sameAsMain')}
-                    />
-                    {/* The picker only supplements the field — the id stays typeable. */}
-                    {modelPickerItems.length > 0 && (
-                      <Dropdown<string>
-                        items={modelPickerItems}
-                        value={models[slot]}
-                        onChange={(value) => handleModelChange(slot, value)}
-                        label={pickLabel}
-                        align="right"
-                        maxHeight={260}
-                        trigger={<IconButton icon="expand_more" label={pickLabel} size="xl" tone="secondary" bordered />}
-                      />
-                    )}
-                  </div>
+                  <ModelIdCombobox
+                    label={label}
+                    required={slot === 'main'}
+                    value={models[slot]}
+                    onChange={(value) => handleModelChange(slot, value)}
+                    placeholder={slot === 'main' ? t('settings.providers.modelIdPlaceholder') : t('settings.providers.sameAsMain')}
+                    groups={modelPickerGroups}
+                    pickerLabel={pickLabel}
+                    noMatchesLabel={t('model.noMatches')}
+                    moreResultsLabel={t('settings.providers.fetchModelsMoreResults')}
+                  />
                   <Tooltip content={t('settings.providers.model1mSupportTooltip')} placement="bottom-start">
                     <label className="mt-1 inline-flex h-6 w-fit cursor-pointer items-center gap-1.5 rounded-[var(--radius-sm)] px-1 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]">
                       <input

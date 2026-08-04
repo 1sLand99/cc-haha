@@ -32,30 +32,61 @@ Claude Code Haha 是一个**桌面端 Claude Code 工作台**：把会话、多�
 
 ## 桌面端预览
 
-Claude Code Haha 的桌面端把会话、多项目、分支 / Worktree、代码改动、Diff 评审、权限确认、模型配置和远程入口收进一个图形化工作台，适合不想长期停留在终端里的日常开发。
-
-下面所有截图都来自真实桌面 App，统一使用纯白主题和 100% 界面缩放。任务在真实 `launch-board` 测试项目中执行，服务商为 ChatGPT 官方，模型为 GPT-5.6-Luna。
-
 <p align="center">
   <a href="https://github.com/NanmiCoder/cc-haha/releases"><img src="https://img.shields.io/badge/⬇_下载桌面端-macOS_%7C_Windows_%7C_Linux-FF7A00?style=for-the-badge" alt="下载桌面端"></a>
-  &nbsp;
-  <a href="docs/start/install.md"><img src="https://img.shields.io/badge/📖_安装指南-Guide-gray?style=for-the-badge" alt="安装指南"></a>
 </p>
 
 <table>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/session-new.webp" alt="第一次任务前的空会话"><br><b>从清爽的空会话开始</b><br><sub>项目、权限和 GPT-5.6-Luna 都在首屏</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/session-main.webp" alt="打开活动面板的真实执行中任务"><br><b>跟着任务一步步往前</b><br><sub>工具调用与阶段进度都留在眼前</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/session-new.webp" alt="第一次任务前的空会话"><br><b>从清爽的空会话开始</b><br><sub>项目和权限都在首屏</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/session-main.webp" alt="打开活动面板的真实执行中任务"><br><b>跟着任务一步步往前</b><br><sub>工具调用与阶段进度都留在眼前</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/workspace-diff.webp" alt="工作区 Diff 评审"><br><b>改了什么，逐行看清楚</b><br><sub>放大的高亮 Diff，文字和代码更清楚</sub></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/workspace-diff.webp" alt="工作区 Diff 评审"><br><b>改了什么，逐行看清楚</b><br><sub>放大的高亮 Diff，文字和代码更清楚</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/workspace-preview.webp" alt="内置浏览器预览刚改完的页面"><br><b>改完当场验证</b><br><sub>内置浏览器打开真实本地页面</sub></td>
-  </tr>
-  <tr>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/model-picker.webp" alt="显示 ChatGPT 官方和 GPT-5.6-Luna 的模型选择器"><br><b>每条会话自选模型</b><br><sub>ChatGPT 官方服务商与 GPT-5.6-Luna</sub></td>
-    <td align="center" width="50%"><img src="docs/images/app/zh-CN/skill-market.webp" alt="技能市场"><br><b>缺什么手艺装什么</b><br><sub>来源和安全状态摆在明处</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/workspace-preview.webp" alt="内置浏览器预览刚改完的页面"><br><b>改完当场验证</b><br><sub>内置浏览器打开真实本地页面</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/model-picker.webp" alt="显示服务商、预设和本地端点的模型选择器"><br><b>每条会话自选模型</b><br><sub>自己的服务商、预设和本地端点都在一个列表里</sub></td>
+    <td align="center" width="33.33%"><img src="docs/images/app/zh-CN/skill-market.webp" alt="技能市场"><br><b>缺什么手艺装什么</b><br><sub>来源和安全状态摆在明处</sub></td>
   </tr>
 </table>
+
+---
+
+## 赞助与合作
+
+本项目由个人利用业余时间维护，欢迎企业或个人赞助支持持续开发，也可洽谈定制、集成或商务合作。
+
+<table>
+  <thead>
+    <tr>
+      <th width="220">赞助商</th>
+      <th align="left">介绍</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center" valign="middle">
+        <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">
+          <img src="docs/images/sponsors/teamorouter-logo.svg" width="180" alt="TeamoRouter">
+        </a>
+      </td>
+      <td valign="middle">
+        感谢 <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">TeamoRouter</a> 赞助本项目！TeamoRouter 是面向开发者、AI 团队与企业的企业级 Agentic LLM 网关：无需订阅，通过一个统一 API 即可使用 Claude Code、Codex、Gemini CLI 等热门 AI Agent，价格最高可享 90% 折扣。平台聚合 OpenAI、Anthropic、Vertex、Azure、AWS Bedrock 等数百家官方模型提供商，全部经过 Agent 协议兼容验证，官方直连、非逆向，提供接近官方的 TTFT、99.6% SLA 与行业领先的缓存命中率；同时支持集中账单、团队管理、BYOK、用量分析，并可用 Teamo Desktop 一键接入。新用户通过 <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">专属链接</a> 注册，首次充值可享 10% 折扣。
+      </td>
+    </tr>
+    <tr>
+      <td align="center" valign="middle">
+        <a href="https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA">
+          <img src="docs/images/sponsors/xuanshuapi-logo.svg" width="120" alt="玄枢API">
+        </a>
+      </td>
+      <td valign="middle">
+        感谢 <a href="https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA">玄枢API</a> 赞助本项目！玄枢API 是一站式企业级 AI 网关，通过一个统一 API 即可接入 Claude Code、Codex、Gemini CLI 等热门 AI 编程工具，调用全球顶尖模型。平台以稳定为前提，通过多账号池调度与自动故障切换屏蔽上游账号波动；模型调用低至官方定价 2.5 折，余额充值再享约 8 折优惠且不设有效期。新用户通过 <a href="https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA">专属链接</a> 注册即赠 5 美元额度。
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+📧 **联系邮箱**：relakkes@gmail.com
 
 ---
 
@@ -108,45 +139,6 @@ cp .env.example .env
 | **IM 接入** | [总览与配对流程](docs/im/index.md) · [飞书](docs/im/feishu.md) · [Telegram](docs/im/telegram.md) · [微信](docs/im/wechat.md) · [钉钉](docs/im/dingtalk.md) · [WhatsApp](docs/im/whatsapp.md) |
 | **命令行** | [安装与启动](docs/cli/index.md) · [命令参考](docs/cli/reference.md) · [环境变量](docs/cli/env.md) |
 | **深入原理** | [桌面端架构](docs/internals/desktop.md) · [多 Agent 系统](docs/internals/agent.md) · [Skills 系统](docs/internals/skills.md) · [记忆系统](docs/internals/memory.md) · [Computer Use 架构](docs/internals/computer-use.md) · [本地 Server 与 API](docs/internals/server.md) · [Channel 系统](docs/internals/channel.md) · [项目结构](docs/internals/structure.md) · [参与贡献与质量门禁](docs/internals/contributing.md) |
-
----
-
-## 赞助与合作
-
-本项目由个人利用业余时间维护，欢迎企业或个人赞助支持持续开发，也可洽谈定制、集成或商务合作。
-
-<table>
-  <thead>
-    <tr>
-      <th width="220">赞助商</th>
-      <th align="left">介绍</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center" valign="middle">
-        <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">
-          <img src="docs/images/sponsors/teamorouter-logo.svg" width="180" alt="TeamoRouter">
-        </a>
-      </td>
-      <td valign="middle">
-        感谢 <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">TeamoRouter</a> 赞助本项目！TeamoRouter 是面向开发者、AI 团队与企业的企业级 Agentic LLM 网关，无需任何订阅即可通过统一 API 使用 Claude Code、Codex、Gemini CLI 等热门 AI Agent，API 价格最高可享 90% 折扣。平台聚合 OpenAI、Anthropic、Vertex、Azure、AWS Bedrock 等数百家官方模型提供商与可信基础设施，全部经过 100% Agent 协议兼容、缓存性能与请求可追踪性验证，官方直连、非逆向，提供接近官方的 TTFT、99.6% SLA、最高 5,000 QPM 吞吐与行业领先的缓存命中率；同时支持集中账单、团队管理、BYOK、智能路由、用量分析与专属支持，并可通过 Teamo Desktop 一键使用各类 AI Agent。新用户通过 <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">专属链接</a> 注册，首次充值可享 10% 折扣。
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="middle">
-        <a href="https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA">
-          <img src="docs/images/sponsors/xuanshuapi-logo.svg" width="120" alt="玄枢API">
-        </a>
-      </td>
-      <td valign="middle">
-        感谢 <a href="https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA">玄枢API</a> 赞助本项目！玄枢API 是一站式企业级 AI 网关，通过一个统一 API 即可接入 Claude Code、Codex、Gemini CLI 等热门 AI 编程工具，调用全球顶尖模型。平台以稳定为前提，通过多账号池调度与自动故障切换屏蔽上游账号波动；模型调用低至官方定价 2.5 折，余额充值再享约 8 折优惠且不设有效期。新用户通过 <a href="https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA">专属链接</a> 注册即赠 5 美元额度。
-      </td>
-    </tr>
-  </tbody>
-</table>
-
-📧 **联系邮箱**：relakkes@gmail.com
 
 ---
 
