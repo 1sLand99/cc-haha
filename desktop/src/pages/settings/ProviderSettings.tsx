@@ -27,6 +27,7 @@ import { ChatGPTOfficialLogin } from '../../components/settings/ChatGPTOfficialL
 import { GrokOfficialLogin } from '../../components/settings/GrokOfficialLogin'
 import { CcSwitchImportModal } from '../../components/settings/CcSwitchImportModal'
 import { ModelIdCombobox } from '../../components/settings/ModelIdCombobox'
+import { ProviderImageGenerationFields, type ImageGenerationFormValue } from '../../components/settings/ProviderImageGenerationFields'
 import { BUILT_IN_PROVIDER_IDS, CLAUDE_OFFICIAL_PROVIDER_ID, OPENAI_OFFICIAL_PROVIDER_ID } from '../../constants/openaiOfficialProvider'
 import { GROK_OFFICIAL_PROVIDER_ID } from '../../constants/grokOfficialProvider'
 import { getBaseUrl } from '../../api/client'
@@ -1009,6 +1010,12 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   )
   const [toolSearchEnabled, setToolSearchEnabled] = useState(provider?.toolSearchEnabled ?? true)
   const [disableExperimentalBetas, setDisableExperimentalBetas] = useState(provider?.disableExperimentalBetas ?? false)
+  const [imageGeneration, setImageGeneration] = useState<ImageGenerationFormValue>({
+    enabled: Boolean(provider?.imageGeneration),
+    model: provider?.imageGeneration?.model ?? '',
+    baseUrl: provider?.imageGeneration?.baseUrl ?? '',
+    apiKey: provider?.imageGeneration?.apiKey ?? '',
+  })
   const [showContextSettings, setShowContextSettings] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [testResult, setTestResult] = useState<ProviderTestResult | null>(null)
@@ -1147,7 +1154,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   const requiresApiKey = selectedPreset.needsApiKey !== false
   const autoCompactWindowErrorKey = getAutoCompactWindowErrorKey(autoCompactWindow)
   const modelContextWindowErrorSlots = MODEL_SLOTS.filter((slot) => getModelContextWindowErrorKey(modelContextInputs[slot]))
-  const canSubmit = name.trim() && baseUrl.trim() && (mode === 'edit' || !requiresApiKey || apiKey.trim()) && models.main.trim() && !settingsJsonError && !autoCompactWindowErrorKey && modelContextWindowErrorSlots.length === 0
+  const canSubmit = name.trim() && baseUrl.trim() && (mode === 'edit' || !requiresApiKey || apiKey.trim()) && models.main.trim() && (!imageGeneration.enabled || imageGeneration.model.trim()) && !settingsJsonError && !autoCompactWindowErrorKey && modelContextWindowErrorSlots.length === 0
   const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl)
   const isPresetDefaultEndpoint = normalizedBaseUrl === normalizeProviderBaseUrl(selectedPreset.baseUrl)
   const apiKeyUrl = isPresetDefaultEndpoint ? selectedPreset.apiKeyUrl?.trim() : undefined
@@ -1404,6 +1411,13 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
     const storedModel1mSupport = hasAnyModel1mSupport(model1mSupport)
       ? model1mSupport
       : undefined
+    const storedImageGeneration = imageGeneration.enabled
+      ? {
+          model: imageGeneration.model.trim(),
+          ...(imageGeneration.baseUrl.trim() ? { baseUrl: imageGeneration.baseUrl.trim() } : {}),
+          ...(imageGeneration.apiKey.trim() ? { apiKey: imageGeneration.apiKey.trim() } : {}),
+        }
+      : undefined
     setIsSubmitting(true)
     try {
       // Write the edited cc-haha settings.json first so provider-specific model
@@ -1432,6 +1446,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
           ...(Object.keys(parsedModelContextWindows).length > 0 && { modelContextWindows: parsedModelContextWindows }),
           toolSearchEnabled,
           ...(disableExperimentalBetas && { disableExperimentalBetas }),
+          ...(storedImageGeneration !== undefined && { imageGeneration: storedImageGeneration }),
           notes: notes.trim() || undefined,
         })
       } else if (provider) {
@@ -1448,6 +1463,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
             : null,
           toolSearchEnabled,
           disableExperimentalBetas,
+          imageGeneration: storedImageGeneration ?? null,
           notes: notes.trim() || undefined,
         }
         if (apiKey.trim()) input.apiKey = apiKey.trim()
@@ -1725,6 +1741,11 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
             )}
           </div>
         )}
+
+        <ProviderImageGenerationFields
+          value={imageGeneration}
+          onChange={setImageGeneration}
+        />
 
         {/* Model Mapping */}
         <div>

@@ -2765,6 +2765,47 @@ describe('chatStore history mapping', () => {
     vi.useRealTimers()
   })
 
+  it('exposes complete nested tool input while the tool result is still pending', () => {
+    vi.useFakeTimers()
+
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession(),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_start',
+      blockType: 'tool_use',
+      toolName: 'ImageGen',
+      toolUseId: 'imagegen-1',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_delta',
+      toolInput: JSON.stringify({
+        prompt: 'change only the color',
+        count: 1,
+        input_images: [{ path: '/tmp/upload.png', role: 'edit_target' }],
+      }),
+    })
+    vi.advanceTimersByTime(60)
+
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages[0]).toMatchObject({
+      type: 'tool_use',
+      toolName: 'ImageGen',
+      toolUseId: 'imagegen-1',
+      isPending: true,
+      input: {
+        prompt: 'change only the color',
+        count: 1,
+        input_images: [{ path: '/tmp/upload.png', role: 'edit_target' }],
+      },
+    })
+
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+  })
+
   it('marks pending tool input as stopped when generation is stopped', () => {
     vi.useFakeTimers()
 

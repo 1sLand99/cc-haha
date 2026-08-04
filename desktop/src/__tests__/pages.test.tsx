@@ -1302,7 +1302,7 @@ describe('Chat attachments', () => {
     )
 
     fireEvent.click(screen.getByRole('button'))
-    expect(screen.getByText('diagram.png')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'diagram.png' })).toBeInTheDocument()
   })
 })
 

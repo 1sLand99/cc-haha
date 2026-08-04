@@ -203,6 +203,55 @@ function ToolCallGroupContent({
   showOpenRun = true,
   isStreaming,
 }: Props) {
+  const hasImageGeneration = toolCalls.some((toolCall) => toolCall.toolName === 'ImageGen')
+  if (hasImageGeneration && !toolCalls.every((toolCall) => toolCall.toolName === 'ImageGen')) {
+    const segments: Array<
+      | { kind: 'image'; toolCall: ToolCall }
+      | { kind: 'regular'; toolCalls: ToolCall[] }
+    > = []
+    let regularToolCalls: ToolCall[] = []
+    const flushRegularCalls = () => {
+      if (regularToolCalls.length === 0) return
+      segments.push({ kind: 'regular', toolCalls: regularToolCalls })
+      regularToolCalls = []
+    }
+
+    for (const toolCall of toolCalls) {
+      if (toolCall.toolName === 'ImageGen') {
+        flushRegularCalls()
+        segments.push({ kind: 'image', toolCall })
+      } else {
+        regularToolCalls.push(toolCall)
+      }
+    }
+    flushRegularCalls()
+
+    return (
+      <div className="space-y-2">
+        {segments.map((segment, index) => segment.kind === 'image' ? (
+          <ToolCallTree
+            key={segment.toolCall.id}
+            toolCall={segment.toolCall}
+            resultMap={resultMap}
+            childToolCallsByParent={childToolCallsByParent}
+          />
+        ) : (
+          <ToolCallGroupContent
+            key={`regular-${index}`}
+            sessionId={sessionId}
+            toolCalls={segment.toolCalls}
+            resultMap={resultMap}
+            childToolCallsByParent={childToolCallsByParent}
+            agentTaskNotifications={agentTaskNotifications}
+            agentTaskStatuses={agentTaskStatuses}
+            showOpenRun={showOpenRun}
+            isStreaming={isStreaming}
+          />
+        ))}
+      </div>
+    )
+  }
+
   const allAgents = toolCalls.every((toolCall) => toolCall.toolName === 'Agent')
 
   if (allAgents) {
@@ -216,6 +265,22 @@ function ToolCallGroupContent({
         agentTaskStatuses={agentTaskStatuses}
         showOpenRun={showOpenRun}
       />
+    )
+  }
+
+  const allImageGeneration = toolCalls.length > 0 && toolCalls.every((toolCall) => toolCall.toolName === 'ImageGen')
+  if (allImageGeneration) {
+    return (
+      <div className="space-y-2">
+        {toolCalls.map((toolCall) => (
+          <ToolCallTree
+            key={toolCall.id}
+            toolCall={toolCall}
+            resultMap={resultMap}
+            childToolCallsByParent={childToolCallsByParent}
+          />
+        ))}
+      </div>
     )
   }
 

@@ -7,6 +7,7 @@ import { CopyButton } from '@/components/ui/CopyButton'
 import { useTranslation } from '../../i18n'
 import type { TranslationKey } from '../../i18n'
 import { InlineImageGallery } from './InlineImageGallery'
+import { ImageGenerationBlock } from './ImageGenerationBlock'
 import type { AgentTaskNotification } from '../../types/chat'
 import {
   PlanPreviewCard,
@@ -182,6 +183,18 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
         isPending={isPending}
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
+      />
+    )
+  }
+
+  if (toolName === 'ImageGen') {
+    return (
+      <ImageGenerationBlock
+        input={input}
+        result={result}
+        compact={compact}
+        isPending={isPending}
+        durationMs={durationMs}
       />
     )
   }

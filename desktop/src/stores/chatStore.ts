@@ -476,6 +476,16 @@ function buildPartialToolInputPreview(
   previousInput: unknown,
 ): Record<string, unknown> {
   const previous = isRecord(previousInput) ? previousInput : {}
+
+  try {
+    const complete = JSON.parse(partialInput) as unknown
+    if (isRecord(complete)) {
+      return { ...previous, ...complete }
+    }
+  } catch {
+    // Keep exposing useful scalar fields while the JSON object is incomplete.
+  }
+
   const preview: Record<string, unknown> = { ...previous }
   for (const field of ['file_path', 'filePath', 'path', 'command', 'pattern', 'url', 'query', 'description']) {
     const value = extractPartialJsonStringField(partialInput, field)
