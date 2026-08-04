@@ -72,9 +72,9 @@ describe('ImageGen backend', () => {
       prompt: 'Put a red scarf on the fox; keep everything else unchanged',
       count: 1,
       model: 'gpt-image-2',
-      input_images: [
-        { path: '/allowed/fox.png', role: 'edit_target' },
-        { path: '/allowed/scarf.jpg', role: 'reference' },
+      referenced_image_paths: [
+        '/allowed/fox.png',
+        '/allowed/scarf.jpg',
       ],
     }, [
       { dataUrl: 'data:image/png;base64,Zm94', fileName: 'fox.png', mimeType: 'image/png', bytes: Buffer.from('fox') },
@@ -125,9 +125,9 @@ describe('ImageGen backend', () => {
       prompt: 'Place both subjects together',
       count: 1,
       model: 'grok-imagine-image-quality',
-      input_images: [
-        { path: '/allowed/first.png', role: 'edit_target' },
-        { path: '/allowed/second.png', role: 'composite_source' },
+      referenced_image_paths: [
+        '/allowed/first.png',
+        '/allowed/second.png',
       ],
       aspect_ratio: '3:2',
     }, [
@@ -222,7 +222,7 @@ describe('ImageGen backend', () => {
     const result = await generateImages({
       prompt: 'Make the sky purple; preserve the subject and framing',
       count: 2,
-      input_images: [{ path: sourcePath, role: 'edit_target' }],
+      referenced_image_paths: [sourcePath],
       quality: 'high',
     }, customConfig, {
       fetchImpl,
@@ -308,7 +308,7 @@ describe('ImageGen backend', () => {
       await expect(generateImages({
         prompt: 'Edit this image',
         count: 1,
-        input_images: [{ path: outsidePath, role: 'edit_target' }],
+        referenced_image_paths: [outsidePath],
       }, customConfig, {
         outputDir,
         inputRootDirs: [outputDir],

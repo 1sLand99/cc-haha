@@ -8,6 +8,7 @@ import { useTranslation } from '../../i18n'
 import type { TranslationKey } from '../../i18n'
 import { InlineImageGallery } from './InlineImageGallery'
 import { ImageGenerationBlock } from './ImageGenerationBlock'
+import { isImageGenerationToolName } from './imageGenerationTools'
 import type { AgentTaskNotification } from '../../types/chat'
 import {
   PlanPreviewCard,
@@ -187,7 +188,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
     )
   }
 
-  if (toolName === 'ImageGen') {
+  if (isImageGenerationToolName(toolName)) {
     return (
       <ImageGenerationBlock
         input={input}

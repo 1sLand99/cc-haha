@@ -39,7 +39,7 @@ describe('bundled imagegen skill', () => {
 
     const skill = getBundledSkills().find((command) => command.name === 'imagegen')
     expect(skill).toBeDefined()
-    expect(skill?.allowedTools).toEqual(['ImageGen'])
+    expect(skill?.allowedTools).toEqual(['ImageGen', 'ImageEdit'])
     expect(skill?.isEnabled?.()).toBe(true)
 
     if (!skill || skill.type !== 'prompt') return
@@ -53,12 +53,15 @@ describe('bundled imagegen skill', () => {
       .join('\n')
     expect(text).toContain('Create two poster variants')
     expect(text).toContain('ImageGen')
-    expect(text).toContain('do not retry <code>ImageGen</code> automatically')
+    expect(text).toContain('ImageEdit')
+    expect(text).toContain('do not retry the image tool automatically')
     expect(text).toContain('do not repeat, link, or embed the returned local paths')
     expect(text).toContain('latest selected output as the next turn')
     expect(text).toContain('one call per image')
-    expect(text).toContain('omit <code>input_images</code> entirely')
-    expect(text).toContain('Never invent a path')
+    expect(text).toContain('schema intentionally has no image-path argument')
+    expect(text).toContain('<code>ImageEdit</code> requires <code>referenced_image_paths</code>')
+    expect(text).toContain('Never invent, search for, or substitute another filesystem path')
+    expect(text).toContain('Preserve all relevant user-specified detail')
     expect(text).toContain('Provider and image model selection come from')
     expect(text).toContain('do not add either to the tool arguments')
     expect(text).not.toContain('CC_HAHA_IMAGE_API_KEY')

@@ -48,6 +48,9 @@ export function ImageGenerationBlock({
   const slotCount = requestedCount ?? parsedResult?.images.length ?? 1
   const prompt = stringValue(inputRecord.prompt) ?? parsedResult?.prompt ?? ''
   const isEdit = (
+    Array.isArray(inputRecord.referenced_image_paths) && inputRecord.referenced_image_paths.length > 0
+  ) || (
+    // Persisted calls from before the official imagegen argument alignment.
     Array.isArray(inputRecord.input_images) && inputRecord.input_images.length > 0
   ) || parsedResult?.operation === 'edit'
   const isWaiting = !result

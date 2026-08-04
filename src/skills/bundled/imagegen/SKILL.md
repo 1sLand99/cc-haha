@@ -1,30 +1,29 @@
 ---
 name: imagegen
 description: Generate original images, artwork, product visuals, diagrams, or other raster assets with the desktop's configured image provider. Use whenever the user asks to create or generate an image.
-allowed-tools: ImageGen
+allowed-tools: ImageGen, ImageEdit
 ---
 
 # Image generation
 
-Use the built-in `ImageGen` tool. Provider authentication, model routing, output storage, and secrets are managed by the desktop host; never ask the user to put an API key in this skill or in the prompt.
+Use the built-in `ImageGen` and `ImageEdit` tools. Provider authentication, model routing, output storage, and secrets are managed by the desktop host; never ask the user to put an API key in this skill or in the prompt.
 
 ## Decide the request shape
 
-- Treat a brand-new visual as generation. Treat a request that preserves or changes an existing visual as an edit.
-- For generation, omit `input_images` entirely. Never invent a path to represent the absence of an input image.
+- Treat a brand-new visual as generation and call `ImageGen`. Its schema intentionally has no image-path argument.
+- Treat a request that preserves, combines, or changes an existing visual as an edit and call `ImageEdit`.
 - One distinct prompt equals one tool call.
 - Use `count` only for multiple variations of the same prompt. For different concepts, make separate calls.
-- For an edit, populate `input_images` with ordered paths surfaced by `[Image source: ...]` in a user attachment or returned by an earlier `ImageGen` call. Never invent, search for, or substitute another filesystem path.
-- Label every input image with its role: `edit_target`, `reference`, `style_reference`, or `composite_source`. The first image is the primary canvas unless the user says otherwise.
+- `ImageEdit` requires `referenced_image_paths`: populate it with ordered, exact paths surfaced by `[Image source: ...]` in a user attachment or returned by an earlier `ImageGen` call. Never invent, search for, or substitute another filesystem path. The first image is the primary canvas unless the user says otherwise.
 - For multi-turn editing, use the latest selected output as the next turn's `edit_target`. Repeat all identity, layout, text, and unchanged-region constraints on every turn so edits do not drift.
 - To edit several images independently, make one call per image. Put multiple images in one call only when the user wants them combined or used together as references. A single call accepts at most three source images.
 - Prefer a useful default composition when the user leaves details open. Do not invent branding, logos, or people they did not request.
 - Provider and image model selection come from the current desktop session; do not add either to the tool arguments.
-- If the provider or tool returns an error, do not retry `ImageGen` automatically. Explain the failure and let the user decide whether to retry or change providers.
+- If the provider returns an error, do not retry the image tool automatically. Explain the failure and let the user decide whether to retry or change providers.
 
 ## Build the prompt
 
-Turn the request into a compact art-direction brief. Include only relevant fields:
+Turn the request into a complete art-direction brief. Preserve all relevant user-specified detail.
 
 - use case and image type
 - subject, action, and important attributes

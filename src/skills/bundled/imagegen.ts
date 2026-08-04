@@ -14,7 +14,7 @@ export function registerImagegenSkill(): void {
   registerBundledSkill({
     name: 'imagegen',
     description: DESCRIPTION,
-    allowedTools: ['ImageGen'],
+    allowedTools: ['ImageGen', 'ImageEdit'],
     userInvocable: true,
     isEnabled: () => getImageGenerationRuntimeConfig() !== null,
     async getPromptForCommand(args) {

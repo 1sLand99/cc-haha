@@ -47,14 +47,14 @@ describe('chat blocks', () => {
     expect(screen.getAllByText('Generating 2 images')).toHaveLength(2)
   })
 
-  it('labels an input-image turn as editing while keeping output placeholders', () => {
+  it('labels a referenced-image turn as editing while keeping output placeholders', () => {
     render(
       <ToolCallBlock
-        toolName="ImageGen"
+        toolName="ImageEdit"
         input={{
           prompt: 'Change only the scarf color',
           count: 2,
-          input_images: [{ path: '/staged/fox.png', role: 'edit_target' }],
+          referenced_image_paths: ['/staged/fox.png'],
         }}
         isPending
       />,
@@ -97,6 +97,45 @@ describe('chat blocks', () => {
 
     expect(screen.getAllByTestId('image-generation-slot')).toHaveLength(2)
     expect(screen.queryByRole('button', { name: /ToolSearch \(1\), ImageGen \(1\)/ })).toBeNull()
+  })
+
+  it('keeps image editing outside a mixed deferred-tool summary', () => {
+    const toolCalls: Array<Extract<UIMessage, { type: 'tool_use' }>> = [
+      {
+        id: 'search-use',
+        type: 'tool_use',
+        toolName: 'ToolSearch',
+        toolUseId: 'search-1',
+        input: { query: 'image editing' },
+        timestamp: 1,
+      },
+      {
+        id: 'edit-use',
+        type: 'tool_use',
+        toolName: 'ImageEdit',
+        toolUseId: 'edit-1',
+        input: {
+          prompt: 'Change only the scarf color',
+          count: 1,
+          referenced_image_paths: ['/staged/fox.png'],
+        },
+        timestamp: 2,
+        isPending: true,
+      },
+    ]
+
+    render(
+      <ToolCallGroup
+        toolCalls={toolCalls}
+        resultMap={new Map()}
+        childToolCallsByParent={new Map()}
+        agentTaskNotifications={{}}
+        isStreaming
+      />,
+    )
+
+    expect(screen.getAllByTestId('image-generation-slot')).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: /ToolSearch \(1\), ImageEdit \(1\)/ })).toBeNull()
   })
 
   it('replaces every image placeholder with the saved tool result', () => {

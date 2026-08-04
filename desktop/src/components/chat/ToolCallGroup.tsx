@@ -1,6 +1,7 @@
 import { memo, useCallback, useState } from 'react'
 import { BookMarked, ChevronDown, ChevronRight, CircleCheck, Settings } from 'lucide-react'
 import { ToolCallBlock } from './ToolCallBlock'
+import { isImageGenerationToolName } from './imageGenerationTools'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 import { Badge, StatusDot, type Tone } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -203,8 +204,8 @@ function ToolCallGroupContent({
   showOpenRun = true,
   isStreaming,
 }: Props) {
-  const hasImageGeneration = toolCalls.some((toolCall) => toolCall.toolName === 'ImageGen')
-  if (hasImageGeneration && !toolCalls.every((toolCall) => toolCall.toolName === 'ImageGen')) {
+  const hasImageGeneration = toolCalls.some((toolCall) => isImageGenerationToolName(toolCall.toolName))
+  if (hasImageGeneration && !toolCalls.every((toolCall) => isImageGenerationToolName(toolCall.toolName))) {
     const segments: Array<
       | { kind: 'image'; toolCall: ToolCall }
       | { kind: 'regular'; toolCalls: ToolCall[] }
@@ -217,7 +218,7 @@ function ToolCallGroupContent({
     }
 
     for (const toolCall of toolCalls) {
-      if (toolCall.toolName === 'ImageGen') {
+      if (isImageGenerationToolName(toolCall.toolName)) {
         flushRegularCalls()
         segments.push({ kind: 'image', toolCall })
       } else {
@@ -268,7 +269,7 @@ function ToolCallGroupContent({
     )
   }
 
-  const allImageGeneration = toolCalls.length > 0 && toolCalls.every((toolCall) => toolCall.toolName === 'ImageGen')
+  const allImageGeneration = toolCalls.length > 0 && toolCalls.every((toolCall) => isImageGenerationToolName(toolCall.toolName))
   if (allImageGeneration) {
     return (
       <div className="space-y-2">

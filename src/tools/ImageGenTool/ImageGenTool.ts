@@ -9,7 +9,10 @@ import {
   generateImages,
   type ImageGenerationOutput,
 } from './backend.js'
-import { IMAGE_GEN_TOOL_NAME } from './constants.js'
+import {
+  IMAGE_EDIT_TOOL_NAME,
+  IMAGE_GEN_TOOL_NAME,
+} from './constants.js'
 
 const ASPECT_RATIOS = [
   'auto',
@@ -28,12 +31,12 @@ const ASPECT_RATIOS = [
   '9:20',
 ] as const
 
-const inputSchema = lazySchema(() =>
-  z.strictObject({
+function commonInputShape() {
+  return {
     prompt: z
       .string()
       .min(1)
-      .describe('A complete visual prompt describing the image to generate'),
+      .describe('A complete visual prompt preserving all relevant user-specified detail'),
     count: z
       .number()
       .int()
@@ -41,20 +44,6 @@ const inputSchema = lazySchema(() =>
       .max(4)
       .default(1)
       .describe('Number of variations for this exact prompt, from 1 to 4'),
-    input_images: z
-      .array(z.strictObject({
-        path: z
-          .string()
-          .min(1)
-          .describe('Absolute path from an [Image source: ...] attachment or a prior ImageGen result; omit input_images entirely for new generation'),
-        role: z
-          .enum(['edit_target', 'reference', 'style_reference', 'composite_source'])
-          .describe('How this ordered image should influence the edit'),
-      }))
-      .min(1)
-      .max(3)
-      .optional()
-      .describe('Ordered source images for editing, compositing, or visual reference'),
     aspect_ratio: z
       .enum(ASPECT_RATIOS)
       .optional()
@@ -70,9 +59,28 @@ const inputSchema = lazySchema(() =>
     quality: z.enum(['auto', 'low', 'medium', 'high']).optional(),
     background: z.enum(['auto', 'opaque', 'transparent']).optional(),
     output_format: z.enum(['png', 'jpeg', 'webp']).optional(),
+  }
+}
+
+const generationInputSchema = lazySchema(() =>
+  z.strictObject(commonInputShape()),
+)
+type GenerationInputSchema = ReturnType<typeof generationInputSchema>
+
+const editInputSchema = lazySchema(() =>
+  z.strictObject({
+    ...commonInputShape(),
+    referenced_image_paths: z
+      .array(z
+        .string()
+        .min(1)
+        .describe('Exact absolute path from an [Image source: ...] attachment or a prior ImageGen result'))
+      .min(1)
+      .max(3)
+      .describe('Ordered source images to edit or use as visual references'),
   }),
 )
-type InputSchema = ReturnType<typeof inputSchema>
+type EditInputSchema = ReturnType<typeof editInputSchema>
 
 const generatedImageSchema = z.object({
   path: z.string(),
@@ -102,13 +110,13 @@ export const ImageGenTool = buildTool({
   strict: false,
   shouldDefer: true,
   async description() {
-    return 'Generate one or more images with the image provider configured for this desktop session.'
+    return 'Generate brand-new images from a text prompt with the image provider configured for this desktop session. This tool does not accept source-image paths; use ImageEdit for edits.'
   },
   async prompt() {
-    return `Use this tool when the user asks to generate or edit an image. For a brand-new image, omit input_images entirely. For edits, pass ordered input_images using only paths surfaced by [Image source: ...] in the current conversation or returned by a prior ImageGen call; repeat preservation constraints in every edit prompt. Provider and image model selection come from the current desktop session and are not tool arguments. One call represents one distinct prompt; use count only for variations of that same prompt. The tool saves finished raster images locally and returns their absolute paths. If a provider call fails, do not retry ImageGen automatically; explain the error and wait for the user to decide.`
+    return 'Use this tool only for a brand-new image. It has no source-image argument; never invent or pass a placeholder path. Preserve the full relevant user specification. Provider and image model selection come from the current desktop session and are not tool arguments. One call represents one distinct prompt; use count only for variations of that same prompt. The tool saves finished raster images locally and returns their absolute paths. If a provider call fails, do not retry ImageGen automatically; explain the error and wait for the user to decide.'
   },
-  get inputSchema(): InputSchema {
-    return inputSchema()
+  get inputSchema(): GenerationInputSchema {
+    return generationInputSchema()
   },
   get outputSchema(): OutputSchema {
     return outputSchema()
@@ -132,11 +140,6 @@ export const ImageGenTool = buildTool({
     return input?.prompt?.trim() || null
   },
   getActivityDescription(input) {
-    if (input?.input_images?.length) {
-      return input.count && input.count > 1
-        ? `Editing ${input.count} image variations`
-        : 'Editing image'
-    }
     return input?.count && input.count > 1
       ? `Generating ${input.count} images`
       : 'Generating image'
@@ -164,4 +167,70 @@ export const ImageGenTool = buildTool({
       content: JSON.stringify(output),
     }
   },
-} satisfies ToolDef<InputSchema, ImageGenerationOutput>)
+} satisfies ToolDef<GenerationInputSchema, ImageGenerationOutput>)
+
+export const ImageEditTool = buildTool({
+  name: IMAGE_EDIT_TOOL_NAME,
+  searchHint: 'edit or transform an attached or previously generated image',
+  maxResultSizeChars: 100_000,
+  strict: false,
+  shouldDefer: true,
+  async description() {
+    return 'Edit images using exact source paths from user attachments or earlier ImageGen results.'
+  },
+  async prompt() {
+    return 'Use this tool only when the user wants to edit, combine, or visually reference existing images. referenced_image_paths is required and may contain only exact paths surfaced by [Image source: ...] in the current conversation or returned by a prior ImageGen call; never invent, search for, or substitute a path. Preserve the full relevant user specification and repeat preservation constraints in every edit prompt. Provider and image model selection come from the current desktop session and are not tool arguments. One call represents one distinct prompt; use count only for variations of that same edit. If a provider call fails, do not retry ImageEdit automatically; explain the error and wait for the user to decide.'
+  },
+  get inputSchema(): EditInputSchema {
+    return editInputSchema()
+  },
+  get outputSchema(): OutputSchema {
+    return outputSchema()
+  },
+  isEnabled() {
+    return getImageGenerationRuntimeConfig() !== null
+  },
+  isConcurrencySafe() {
+    return true
+  },
+  isReadOnly() {
+    return false
+  },
+  toAutoClassifierInput(input) {
+    return `${input.count} image edit(s): ${input.prompt}`
+  },
+  async checkPermissions(input) {
+    return { behavior: 'allow', updatedInput: input }
+  },
+  getToolUseSummary(input) {
+    return input?.prompt?.trim() || null
+  },
+  getActivityDescription(input) {
+    return input?.count && input.count > 1
+      ? `Editing ${input.count} image variations`
+      : 'Editing image'
+  },
+  renderToolUseMessage() {
+    return null
+  },
+  async call(input, context) {
+    const config = getImageGenerationRuntimeConfig()
+    if (!config) {
+      throw new Error(
+        'Image generation is not configured for the current provider. Enable it in provider settings.',
+      )
+    }
+    return {
+      data: await generateImages(input, config, {
+        signal: context.abortController.signal,
+      }),
+    }
+  },
+  mapToolResultToToolResultBlockParam(output, toolUseID) {
+    return {
+      tool_use_id: toolUseID,
+      type: 'tool_result',
+      content: JSON.stringify(output),
+    }
+  },
+} satisfies ToolDef<EditInputSchema, ImageGenerationOutput>)

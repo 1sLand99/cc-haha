@@ -26,10 +26,7 @@ import { getProxyFetchOptions } from '../../utils/proxy.js'
 export type ImageGenerationInput = {
   prompt: string
   count: number
-  input_images?: Array<{
-    path: string
-    role: 'edit_target' | 'reference' | 'style_reference' | 'composite_source'
-  }>
+  referenced_image_paths?: string[]
   aspect_ratio?: string
   resolution?: '1k' | '2k'
   size?: 'auto' | '1024x1024' | '1024x1536' | '1536x1024'
@@ -606,7 +603,7 @@ async function prepareInputImages(
   input: ImageGenerationInput,
   overrideRootDirs?: string[],
 ): Promise<PreparedInputImage[]> {
-  const requested = input.input_images ?? []
+  const requested = input.referenced_image_paths ?? []
   if (requested.length === 0) return []
   if (requested.length > 3) {
     throw new Error('Image editing supports at most 3 input images per call.')
@@ -617,7 +614,7 @@ async function prepareInputImages(
     rootDirs.map(async (rootDir) => realpath(rootDir).catch(() => resolve(rootDir))),
   )
 
-  return Promise.all(requested.map(async ({ path: inputPath }) => {
+  return Promise.all(requested.map(async (inputPath) => {
     const resolvedPath = await realpath(inputPath).catch(() => null)
     if (
       !resolvedPath ||
