@@ -157,6 +157,10 @@ const policyPrefixes = [
   'scripts/git-hooks/',
   'scripts/pr/',
   'scripts/quality-gate/',
+  // scripts/pr/dead-imports.ts owns this directory. The lane is selected by prefix,
+  // and that check reads its files rather than importing them, so the import graph
+  // cannot route a ws-only diff here on its own.
+  'src/server/ws/',
 ]
 
 const policyExactPaths = new Set([

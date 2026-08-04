@@ -126,6 +126,16 @@ describe('evaluateChangePolicy', () => {
     expect(result.checks.persistence).toBe(true)
   })
 
+  test('routes a ws-only change to the policy lane that owns its dead-import check', () => {
+    // scripts/pr/dead-imports.test.ts reads src/server/ws rather than importing it,
+    // so the import graph cannot pull the policy lane in. Without the prefix the
+    // check exists and never runs on the diffs it was written for.
+    const result = evaluateChangePolicy(['src/server/ws/handler.ts'])
+
+    expect(result.checks.server).toBe(true)
+    expect(result.checks.policy).toBe(true)
+  })
+
   test('keeps quality ownership and contributor contracts on the policy lane', () => {
     const result = evaluateChangePolicy([
       '.github/CODEOWNERS',
