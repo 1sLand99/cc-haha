@@ -443,38 +443,18 @@ describe('Electron terminal service', () => {
     })
     await service.spawn({ cols: 80, rows: 24, cwd: dir }, owner)
 
-    // Same-document and subframe navigation must not touch a live shell: an in-page
-    // route change keeps the session map intact.
-    owner.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true })
-    owner.emit('did-start-navigation', { isMainFrame: false, isSameDocument: false })
+    // A navigation that starts but never commits must not touch a live shell.
+    // installMainWindowNavigationGuards cancels external http(s) in `will-navigate`,
+    // and Chromium dispatches DidStartNavigation before that throttle runs — so the
+    // start event fires for navigation the user never actually goes through with.
+    owner.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false })
     expect(pty.killed).toBe(false)
 
-    owner.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false })
+    owner.emit('did-navigate', {}, 'app://index.html', 200)
 
     expect(pty.killed).toBe(true)
     expect(owner.isDestroyed()).toBe(false)
     expect(() => service.write(1, 'after reload', owner)).toThrow('terminal session is not running')
-  })
-
-  // The older positional form of the event. Electron has shipped both, and reading only
-  // the details object silently disables the cleanup above on whichever build uses it.
-  it('accepts the deprecated positional navigation arguments', async () => {
-    const dir = tempDir()
-    const pty = new FakePty()
-    const owner = new FakeWebContents()
-    const service = new ElectronTerminalService({
-      env: { HOME: dir, SHELL: '/bin/test-shell' },
-      platform: 'linux',
-      ptyFactory: { spawn: vi.fn(() => pty) },
-    })
-    await service.spawn({ cols: 80, rows: 24, cwd: dir }, owner)
-
-    // details = {}, url, isInPlace = true (same document) -> still live
-    owner.emit('did-start-navigation', {}, 'app://index.html', true, true)
-    expect(pty.killed).toBe(false)
-
-    owner.emit('did-start-navigation', {}, 'app://index.html', false, true)
-    expect(pty.killed).toBe(true)
   })
 
   it('stops watching navigation once the session is killed normally', async () => {
@@ -491,7 +471,7 @@ describe('Electron terminal service', () => {
 
     // Both listeners have to come off together, or a long-lived renderer accumulates
     // one navigation handler per terminal it ever opened.
-    expect(owner.listenerCount('did-start-navigation')).toBe(0)
+    expect(owner.listenerCount('did-navigate')).toBe(0)
     expect(owner.listenerCount('destroyed')).toBe(0)
   })
 

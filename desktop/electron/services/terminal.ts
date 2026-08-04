@@ -6,8 +6,6 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { ELECTRON_EVENT_CHANNELS } from '../ipc/channels'
-import { isDocumentReplacingNavigation } from './rendererNavigation'
-import type { NavigationDetails } from './rendererNavigation'
 
 const TERMINAL_CONFIG_FILE = 'terminal-config.json'
 const MIN_TERMINAL_COLS = 20
@@ -76,22 +74,30 @@ export type TerminalWebContentsLike = {
    * ErrorBoundary and StartupErrorView. Session bookkeeping lives in renderer module
    * state and is wiped by the reload, so kill() can never be called for those shells
    * again — they and their children survive until before-quit.
+   *
+   * `did-navigate`, not `did-start-navigation`: killing a shell is destructive and
+   * must be gated on the navigation actually committing. installMainWindowNavigationGuards
+   * cancels external http(s) navigation in `will-navigate` and hands it to the system
+   * browser — but Chromium dispatches DidStartNavigation before the throttle that
+   * cancellation runs in, so a *blocked* navigation still emits the start event. Dropping
+   * a URL onto the window would then have killed every running shell while the renderer
+   * stayed exactly where it was. A cancelled navigation never commits, so it never
+   * reaches this one. Electron also does not emit it for in-page navigation, which is
+   * why no same-document predicate is needed.
    */
-  on(event: 'did-start-navigation', listener: TerminalNavigationListener): unknown
+  on(event: 'did-navigate', listener: TerminalNavigationListener): unknown
   /**
    * `off`, not a second `removeListener` overload: a target type with two call
    * signatures is not structurally assignable from Electron's overloaded
    * `removeListener`, so adding one there rejects the real `WebContents`.
    */
-  off(event: 'did-start-navigation', listener: TerminalNavigationListener): unknown
+  off(event: 'did-navigate', listener: TerminalNavigationListener): unknown
 }
 
-type TerminalNavigationListener = (
-  details: NavigationDetails,
-  url?: string,
-  isInPlace?: boolean,
-  isMainFrame?: boolean,
-) => void
+// Zero-arg on purpose: the handler ignores every argument, and a narrower parameter
+// list is what keeps this structurally assignable from both Electron's overloaded
+// `on` and a plain EventEmitter in the tests.
+type TerminalNavigationListener = () => void
 
 export type ElectronTerminalServiceOptions = {
   app?: TerminalAppLike
@@ -641,14 +647,13 @@ export class ElectronTerminalService {
       this.detachOwnerListener(active)
       disposePty()
     }
-    // Same teardown, second trigger: the renderer replacing its document discards the
-    // session ids this PTY can only be reached through, so it is as final as destroy.
-    const onOwnerNavigated: TerminalNavigationListener = (details, _url, isInPlace, isMainFrame) => {
-      if (!isDocumentReplacingNavigation(details, isInPlace, isMainFrame)) return
+    // Same teardown, second trigger: the renderer having replaced its document discards
+    // the session ids this PTY can only be reached through, so it is as final as destroy.
+    const onOwnerNavigated: TerminalNavigationListener = () => {
       onOwnerDestroyed()
     }
     webContents.once('destroyed', onOwnerDestroyed)
-    webContents.on('did-start-navigation', onOwnerNavigated)
+    webContents.on('did-navigate', onOwnerNavigated)
 
     try {
       const ptyFactory = await resolvePtyFactory(this.ptyFactory, this.nodePtySourceDir, this.nodePtyCacheDir)
@@ -718,7 +723,7 @@ export class ElectronTerminalService {
         if (active) disposePty()
       }
       webContents.removeListener('destroyed', onOwnerDestroyed)
-      webContents.off('did-start-navigation', onOwnerNavigated)
+      webContents.off('did-navigate', onOwnerNavigated)
       throw error
     }
   }
@@ -762,7 +767,7 @@ export class ElectronTerminalService {
 
   private detachOwnerListener(session: TerminalSession): void {
     session.owner.removeListener('destroyed', session.onOwnerDestroyed)
-    session.owner.off('did-start-navigation', session.onOwnerNavigated)
+    session.owner.off('did-navigate', session.onOwnerNavigated)
   }
 
   private removeSession(sessionId: number, expectedPty: TerminalPtyProcess): TerminalSession | null {
