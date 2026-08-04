@@ -629,22 +629,21 @@ function appendAssistantTextMessage(
   ) {
     return messages
   }
-  // 上面那道只在尾部仍是那条 hydrated 消息时才够得着。整轮重放时，正文到达前
-  // 尾部早被 thinking / tool_result 顶掉了，于是重复的回复照样追加进来。
-  // 这里比的是"逐字相同"而不是子串：整段重发的正文会与某条 hydrated 回复完全一致，
-  // 而正常流式送来的是碎片（碎片几乎必然是某条历史回复的子串，用子串判定会误伤）。
-  if (
-    !transcriptMessageId &&
-    messages.some(
-      (message) =>
-        message.type === 'assistant_text' &&
-        message.transcriptMessageId &&
-        message.content.trim() === trimmedContent,
-    )
-  ) {
-    return messages
-  }
-
+  // 这里曾经还有一道守卫：扫描整个 messages，只要某条 hydrated 回复与来文逐字相同
+  // 就丢弃。它必须去掉 —— 内容相等原理上区分不了「重放」和「模型真的又答了一遍同样
+  // 的话」。一轮里出现两次「好的」、两次「完成了」、两次同样的一行命令输出毫不稀奇，
+  // 而 mergeRestoredTranscriptMessageIds 会按逐字相同把 transcript id 回填到 live
+  // 消息上，于是第一条就成了第二条的毒药。用户眼看着流式输出完的回复会在
+  // message_complete 时凭空消失，且没有任何路径能找回来。
+  //
+  // d39e82b62 试过把扫描限定在当前轮次，被 3a630db11 回退：同轮重复照样丢，而且
+  // 尾部只要有一条 user_text 就让守卫彻底失效。换任何扫描边界都不成立。
+  //
+  // 真正挡住重放的是服务端按 uuid 去重（conversationService.isReplayedSdkMessage，
+  // 与这道守卫同一个提交 de52656bb 加入）。那里的容量是 2000 条 uuid，而 de52656bb
+  // 记录的最坏情况是 858 条消息重放 31 次 —— 858 < 2000，整个重放窗口都在集合里，
+  // 逐条按身份挡掉。上面那道尾部子串守卫保留：它只在尾部仍是那条 hydrated 消息时
+  // 才生效，够不到一轮之内被工具调用隔开的重复。
   const canMergeIntoLast =
     last?.type === 'assistant_text' &&
     (

@@ -1540,6 +1540,53 @@ describe('chatStore history mapping', () => {
     expect(notifyDesktopMock).not.toHaveBeenCalled()
   })
 
+  // The bug this guard causes, as a test rather than a commit message. A turn can
+  // legitimately produce the same short text twice — "Done.", "好的", a one-line
+  // command result — and a mid-turn loadHistory back-fills a transcriptMessageId onto
+  // the first one by exact content match (mergeRestoredTranscriptMessageIds). The
+  // second then looks identical to a replay and is dropped at message_complete, with
+  // no recovery: appendedCompletionMessage stays false so the notification is skipped,
+  // and loadHistory's live-merge branch can annotate and filter but never re-add.
+  //
+  // d39e82b62 tried to fix this by bounding the scan to the current turn and was
+  // reverted in 3a630db11: it still dropped same-turn repeats and disarmed the guard
+  // whenever a user_text sat at the tail. Content equality cannot separate a replay
+  // from a repeat at all — the distinguishing signal is identity, which the server
+  // already computes and does not forward.
+  it('keeps a reply the agent genuinely produced twice in one turn', () => {
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          messages: [
+            { id: 'u1', type: 'user_text', content: 'rename it then delete the backup', timestamp: 1 },
+            {
+              id: 'a1',
+              type: 'assistant_text',
+              content: 'Done.',
+              timestamp: 2,
+              transcriptMessageId: 'transcript-a1',
+            },
+            { id: 't1', type: 'tool_use', toolName: 'Bash', toolUseId: 'tool-1', input: {}, timestamp: 3 },
+          ],
+          streamingText: 'Done.',
+          chatState: 'streaming',
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'message_complete',
+      usage: { input_tokens: 1, output_tokens: 2 },
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    const replies = session?.messages.filter(
+      (message) => message.type === 'assistant_text' && message.content.trim() === 'Done.',
+    )
+    expect(replies).toHaveLength(2)
+    expect(session?.streamingText).toBe('')
+  })
+
   // Same reconnect replay as above, one block type over. A thinking UIMessage
   // carries no transcriptMessageId (types/chat.ts:291), so neither the
   // appendAssistantTextMessage guard nor dropDuplicateTranscriptTextMessages
@@ -8214,11 +8261,26 @@ describe('chatStore wake replay of a finished thinking turn', () => {
     })
   })
 
-  // Secondary gap. The reported screenshot has no reply text between the
-  // bubbles, so the observed replay carries thinking only — but the existing
-  // appendAssistantTextMessage guard would not have held either: it only
-  // matches while the tail still is the hydrated assistant message.
-  it('does not re-append replayed reply text once the tail moves past the hydrated message', () => {
+  // Reply text is deliberately NOT deduped here any more, and this test records why.
+  //
+  // de52656bb added two defences at once: uuid dedup on the server, and a content-
+  // equality scan in this store. Only the first can be correct — the second cannot
+  // tell a replay from a reply the model genuinely produced twice, and it dropped the
+  // second one with no way to get it back (see 'keeps a reply the agent genuinely
+  // produced twice in one turn'). d39e82b62 tried to bound the scan and was reverted
+  // in 3a630db11.
+  //
+  // Removing it is safe because a whole-turn replay cannot reach this store: the SDK
+  // channel has exactly one ingress, handler.ts:583 -> handleSdkPayload, which drops
+  // every already-seen uuid at conversationService.ts:1047 before parsing goes any
+  // further. Its 2000-uuid window covers the worst case de52656bb measured, 858
+  // messages replayed 31 times.
+  //
+  // So this asserts what the store is actually responsible for: replayed text arrives
+  // as normal text and is appended: the identity check belongs upstream. The thinking
+  // case above still dedupes, because a thinking block carries no id at all — that
+  // guard has no identity-based alternative to defer to.
+  it('appends replayed reply text, leaving replay identity to the server', () => {
     const assistantTextOf = () => (useChatStore.getState().sessions[TEST_SESSION_ID]?.messages ?? [])
       .filter((message) => message.type === 'assistant_text')
       .map((message) => message.content)
@@ -8226,7 +8288,7 @@ describe('chatStore wake replay of a finished thinking turn', () => {
 
     replayFinishedTurn({ withText: true })
 
-    expect(assistantTextOf()).toEqual(before)
+    expect(assistantTextOf().length).toBeGreaterThan(before.length)
   })
 })
 
