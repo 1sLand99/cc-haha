@@ -16,7 +16,7 @@ import { anthropicToOpenaiChat } from '../proxy/transform/anthropicToOpenaiChat.
 import { anthropicToOpenaiResponses } from '../proxy/transform/anthropicToOpenaiResponses.js'
 import { openaiChatToAnthropic } from '../proxy/transform/openaiChatToAnthropic.js'
 import { openaiResponsesToAnthropic } from '../proxy/transform/openaiResponsesToAnthropic.js'
-import type { AnthropicRequest, AnthropicResponse } from '../proxy/transform/types.js'
+import type { AnthropicRequest } from '../proxy/transform/types.js'
 import {
   OPENAI_OFFICIAL_PROVIDER,
   isOpenAIOfficialProviderId,
