@@ -26,7 +26,7 @@ export type AgentFlowScenarioResult = {
   covers: string[]
 }
 
-function getPort() {
+export function getPort() {
   return new Promise<number>((resolvePort, reject) => {
     const server = createServer()
     server.once('error', reject)
@@ -38,7 +38,7 @@ function getPort() {
   })
 }
 
-async function waitForHttp(url: string, timeoutMs: number) {
+export async function waitForHttp(url: string, timeoutMs: number) {
   const deadline = Date.now() + timeoutMs
   let lastError = ''
   while (Date.now() < deadline) {
@@ -54,7 +54,7 @@ async function waitForHttp(url: string, timeoutMs: number) {
   throw new Error(`Timed out waiting for ${url}${lastError ? ` (${lastError})` : ''}`)
 }
 
-async function pipeToFile(stream: ReadableStream<Uint8Array> | null, path: string) {
+export async function pipeToFile(stream: ReadableStream<Uint8Array> | null, path: string) {
   if (!stream) return
   const reader = stream.getReader()
   const decoder = new TextDecoder()
@@ -66,10 +66,15 @@ async function pipeToFile(stream: ReadableStream<Uint8Array> | null, path: strin
 }
 
 /**
+ * Exported for `live.ts`, which drives the same protocol against a real provider.
+ * The transport, the ordering assertions and the turn loop are identical there —
+ * only the runtime behind the CLI and the assertions' tolerance differ — so the two
+ * runners share this rather than growing a second, drifting copy.
+ *
  * Thin client over the real session WebSocket. It records every frame so a scenario
  * can assert on ordering after the fact instead of racing the stream.
  */
-class SessionSocket {
+export class SessionSocket {
   readonly messages: ProtocolMessage[] = []
   private ws: WebSocket | null = null
 
@@ -135,7 +140,7 @@ type ScenarioContext = {
   openSocket(sessionId: string): Promise<SessionSocket>
 }
 
-function assertOrder(messages: readonly ProtocolMessage[], types: readonly string[]) {
+export function assertOrder(messages: readonly ProtocolMessage[], types: readonly string[]) {
   const ordered = findOrderedTypes(messages, types)
   if (!ordered.ok) {
     throw new Error(`expected ${types.join(' -> ')} but ${ordered.missing} never arrived; saw ${ordered.seen.join(', ')}`)
@@ -143,7 +148,7 @@ function assertOrder(messages: readonly ProtocolMessage[], types: readonly strin
 }
 
 /** Drives one prompt to completion and returns the frames observed for that turn. */
-async function runTurn(socket: SessionSocket, prompt: string, timeoutMs = DEFAULT_STEP_TIMEOUT_MS) {
+export async function runTurn(socket: SessionSocket, prompt: string, timeoutMs = DEFAULT_STEP_TIMEOUT_MS) {
   const start = socket.messages.length
   socket.send({ type: 'user_message', content: prompt })
   await socket.waitFor((message) => message.type === 'message_complete', timeoutMs, 'message_complete', start)
