@@ -28,7 +28,7 @@ import * as lockfile from './lockfile.js'
 import { logError } from './log.js'
 import type { MemoryType } from './memory/types.js'
 import { normalizePathForConfigKey } from './path.js'
-import { getEssentialTrafficOnlyReason } from './privacyLevel.js'
+import { getEssentialTrafficOnlyReason, isEssentialTrafficOnly } from './privacyLevel.js'
 import { getManagedFilePath } from './settings/managedPath.js'
 import type { ThemeSetting } from './theme.js'
 
@@ -1715,11 +1715,14 @@ export function isAutoUpdaterDisabled(): boolean {
  * This checks if the auto-updater is disabled AND the FORCE_AUTOUPDATE_PLUGINS
  * env var is not set to 'true'. The env var allows forcing plugin autoupdate
  * even when the auto-updater is otherwise disabled.
+ * Non-essential traffic is always skipped (marketplace refresh hits
+ * github.com / downloads.claude.ai).
  */
 export function shouldSkipPluginAutoupdate(): boolean {
   return (
-    isAutoUpdaterDisabled() &&
-    !isEnvTruthy(process.env.FORCE_AUTOUPDATE_PLUGINS)
+    isEssentialTrafficOnly() ||
+    (isAutoUpdaterDisabled() &&
+      !isEnvTruthy(process.env.FORCE_AUTOUPDATE_PLUGINS))
   )
 }
 
