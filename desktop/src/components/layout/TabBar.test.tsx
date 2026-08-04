@@ -1713,6 +1713,57 @@ describe('TabBar', () => {
     expect(useTabStore.getState().tabs.map((tab) => tab.sessionId)).toEqual(['tab-2', 'tab-1'])
   })
 
+  it('reorders the settings tab when its transformed drag preview follows the pointer', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { SETTINGS_TAB_ID, useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+
+    useTabStore.setState({
+      tabs: [
+        { sessionId: 'tab-1', title: 'First Session', type: 'session', status: 'idle' },
+        { sessionId: SETTINGS_TAB_ID, title: 'Settings', type: 'settings', status: 'idle' },
+        { sessionId: 'tab-2', title: 'Second Session', type: 'session', status: 'idle' },
+      ],
+      activeTabId: SETTINGS_TAB_ID,
+    })
+    useChatStore.setState({
+      sessions: {},
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    const firstTab = screen.getByText('First Session').closest('.tab-bar-interactive') as HTMLElement
+    const settingsTab = screen.getByText('Localized Settings').closest('.tab-bar-interactive') as HTMLElement
+    const secondTab = screen.getByText('Second Session').closest('.tab-bar-interactive') as HTMLElement
+
+    stubRect(firstTab, 0, 140)
+    stubRect(secondTab, 339, 479)
+    Object.defineProperty(settingsTab, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => {
+        const translateX = Number(/translateX\(([-\d.]+)px\)/.exec(settingsTab.style.transform)?.[1] ?? 0)
+        const left = 142 + translateX
+        return { left, right: left + 195, width: 195 }
+      },
+    })
+
+    // Grab the left half. Once the preview is transformed, reading its live rect
+    // makes its midpoint chase the pointer and the tab incorrectly targets itself.
+    fireEvent.mouseDown(settingsTab, { button: 0, clientX: 160, clientY: 10 })
+    fireEvent.mouseMove(window, { clientX: 170, clientY: 10 })
+    fireEvent.mouseMove(window, { clientX: 430, clientY: 10 })
+    fireEvent.mouseUp(window)
+
+    expect(useTabStore.getState().tabs.map((tab) => tab.sessionId)).toEqual([
+      'tab-1',
+      'tab-2',
+      SETTINGS_TAB_ID,
+    ])
+  })
+
   // Regression: the click-suppression flag set at drag start was only ever cleared
   // inside handleTabClick, which is reachable only from a tab's own onClick. Release
   // the drag away from any tab — below the strip, or outside the window — and nothing
