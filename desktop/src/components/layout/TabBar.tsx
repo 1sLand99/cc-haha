@@ -743,7 +743,8 @@ const TabItem = forwardRef<HTMLDivElement, {
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
       className={`
-        tab-bar-interactive tab-strip-item group relative flex min-h-[46px] min-w-[140px] max-w-[200px] flex-shrink-0 items-center rounded-t-[8px] border border-b-0 px-3
+        tab-bar-interactive tab-strip-item group relative flex min-h-[46px] flex-shrink-0 items-center rounded-t-[8px] border border-b-0 px-3
+        ${tab.type === 'settings' ? 'min-w-[195px] max-w-[195px]' : 'min-w-[140px] max-w-[200px]'}
         ${isDragging ? 'z-[var(--z-sticky)] cursor-grabbing' : 'cursor-grab'}
         transition-[background-color,border-color,box-shadow,opacity,transform] duration-150 ease-out
         ${isActive || isDragging
