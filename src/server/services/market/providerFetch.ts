@@ -10,7 +10,6 @@ import {
   getNetworkProxyFetchOptions,
   loadNetworkSettings,
 } from '../networkSettings.js'
-import { isEssentialTrafficOnly } from '../../../utils/privacyLevel.js'
 import { recordSourceFailure, recordSourceSuccess } from './cache.js'
 import { MARKET_ERROR_CODES, MarketUpstreamError, type MarketSource } from './types.js'
 
@@ -101,17 +100,6 @@ async function fetchOnce(source: MarketSource, url: string): Promise<Response> {
 }
 
 export async function providerFetch(source: MarketSource, url: string): Promise<Response> {
-  // 禁用非必要外部流量时，Skills 市场不产生任何出站请求。
-  if (isEssentialTrafficOnly()) {
-    const error = new MarketUpstreamError(
-      source,
-      MARKET_ERROR_CODES.upstreamError,
-      `${source} provider disabled by non-essential traffic setting`,
-    )
-    recordSourceFailure(source, error.message)
-    throw error
-  }
-
   if (isProviderDisabled(source)) {
     const error = new MarketUpstreamError(source, MARKET_ERROR_CODES.upstreamError, `${source} provider disabled`)
     recordSourceFailure(source, error.message)

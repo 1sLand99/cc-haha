@@ -132,14 +132,6 @@ describe('settingsStore locale defaults', () => {
     expect(window.localStorage.getItem('cc-haha-locale')).toBe('kr')
   })
 
-  it('defaults to blocking non-essential traffic (disabled=true)', async () => {
-    mockSystemLanguages(['en-US'])
-
-    const { useSettingsStore } = await import('./settingsStore')
-
-    expect(useSettingsStore.getState().nonEssentialTrafficDisabled).toBe(true)
-  })
-
   it('applies a locale event from another desktop window', async () => {
     mockSystemLanguages(['en-US'])
     let emitLocale: ((locale: Locale) => void) | undefined

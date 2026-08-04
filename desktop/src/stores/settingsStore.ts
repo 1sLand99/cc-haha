@@ -4,7 +4,6 @@ import { settingsApi } from '../api/settings'
 import { modelsApi } from '../api/models'
 import { h5AccessApi } from '../api/h5Access'
 import { tracesApi } from '../api/traces'
-import { privacyApi } from '../api/privacy'
 import {
   type AppMode,
   type AppModeConfig,
@@ -78,8 +77,6 @@ type SettingsStore = {
   updateProxy: UpdateProxySettings
   network: NetworkSettings
   traceCapture: TraceCaptureSettings
-  /** true = 禁用非必要外部流量（遥测/更新检查/官方注册表等，默认开启） */
-  nonEssentialTrafficDisabled: boolean
   h5Access: H5AccessSettings
   h5AccessDiagnostics: H5AccessDiagnostics | null
   h5AccessError: string | null
@@ -111,7 +108,6 @@ type SettingsStore = {
   setUpdateProxy: (settings: UpdateProxySettings) => Promise<void>
   setNetwork: (settings: NetworkSettings) => Promise<void>
   setTraceCaptureEnabled: (enabled: boolean) => Promise<void>
-  setNonEssentialTrafficDisabled: (disabled: boolean) => Promise<void>
   enableH5Access: () => Promise<string>
   disableH5Access: () => Promise<void>
   regenerateH5AccessToken: () => Promise<string>
@@ -204,7 +200,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   updateProxy: DEFAULT_UPDATE_PROXY_SETTINGS,
   network: DEFAULT_NETWORK_SETTINGS,
   traceCapture: DEFAULT_TRACE_CAPTURE_SETTINGS,
-  nonEssentialTrafficDisabled: true,
   h5Access: DEFAULT_H5_ACCESS_SETTINGS,
   h5AccessDiagnostics: null,
   h5AccessError: null,
@@ -238,7 +233,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         userSettings,
         h5AccessResult,
         traceCapture,
-        nonEssentialTrafficDisabled,
       ] = await Promise.all([
         settingsApi.getPermissionMode(),
         modelsApi.list(),
@@ -247,7 +241,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         settingsApi.getUser(),
         loadH5AccessSettings(previousH5Access),
         loadTraceCaptureSettings(),
-        loadNonEssentialTrafficSettings(),
       ])
       const desktopTerminal = normalizeDesktopTerminalSettings(userSettings.desktopTerminal)
       lastPersistedDesktopTerminal = desktopTerminal
@@ -273,7 +266,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         updateProxy: normalizeUpdateProxySettings(userSettings.updateProxy),
         network: normalizeNetworkSettings(userSettings.network),
         traceCapture,
-        nonEssentialTrafficDisabled,
         h5Access: h5AccessResult.settings,
         h5AccessDiagnostics: h5AccessResult.diagnostics,
         h5AccessError: h5AccessResult.error,
@@ -533,18 +525,6 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     }
   },
 
-  setNonEssentialTrafficDisabled: async (disabled) => {
-    const prev = get().nonEssentialTrafficDisabled
-    set({ nonEssentialTrafficDisabled: disabled })
-    try {
-      const next = await privacyApi.updateNonEssentialTrafficSettings(disabled)
-      set({ nonEssentialTrafficDisabled: next.disabled })
-    } catch (error) {
-      set({ nonEssentialTrafficDisabled: prev })
-      throw error
-    }
-  },
-
   enableH5Access: async () => {
     set({ h5AccessError: null })
     try {
@@ -773,15 +753,6 @@ async function loadTraceCaptureSettings(): Promise<TraceCaptureSettings> {
     return normalizeTraceCaptureSettings(await tracesApi.getSettings())
   } catch {
     return DEFAULT_TRACE_CAPTURE_SETTINGS
-  }
-}
-
-async function loadNonEssentialTrafficSettings(): Promise<boolean> {
-  try {
-    const { disabled } = await privacyApi.getNonEssentialTrafficSettings()
-    return disabled
-  } catch {
-    return true
   }
 }
 

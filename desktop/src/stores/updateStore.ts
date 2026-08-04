@@ -198,9 +198,6 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
     if (!startupCheckPromise) {
       startupCheckPromise = (async () => {
         await new Promise((resolve) => setTimeout(resolve, 5000))
-        // 禁用非必要外部流量时跳过自动更新检查。延迟到此时才读设置，
-        // 保证 settingsStore.fetchAll 已完成、拿到的是真实开关值。
-        if (useSettingsStore.getState().nonEssentialTrafficDisabled) return
         await get().checkForUpdates({ silent: true })
       })().finally(() => {
         startupCheckPromise = null

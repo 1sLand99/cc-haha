@@ -242,7 +242,6 @@ describe('Settings > General tab', () => {
       skipWebFetchPreflight: true,
       desktopNotificationsEnabled: true,
       traceCapture: { enabled: true, storageDir: '/Users/test/.claude/cc-haha/traces' },
-      nonEssentialTrafficDisabled: true,
       chatSendBehavior: 'enter',
       responseLanguage: '',
       uiZoom: 1,
@@ -303,9 +302,6 @@ describe('Settings > General tab', () => {
       setTraceCaptureEnabled: vi.fn().mockImplementation(async (enabled: boolean) => {
         const current = useSettingsStore.getState().traceCapture
         useSettingsStore.setState({ traceCapture: { ...current, enabled } })
-      }),
-      setNonEssentialTrafficDisabled: vi.fn().mockImplementation(async (disabled: boolean) => {
-        useSettingsStore.setState({ nonEssentialTrafficDisabled: disabled })
       }),
       setChatSendBehavior: vi.fn().mockImplementation(async (chatSendBehavior: ChatSendBehavior) => {
         useSettingsStore.setState({ chatSendBehavior })
@@ -987,7 +983,6 @@ describe('Settings > General tab', () => {
       'Enable thinking mode',
       'Enable Auto-dream',
       'Collect agent traces',
-      'Block non-essential external traffic',
       'Enable system notifications',
       'Skip WebFetch domain preflight',
     ]) {
@@ -1014,21 +1009,6 @@ describe('Settings > General tab', () => {
     expect(screen.getByLabelText('Collect agent traces')).not.toBeChecked()
     expect(screen.getByText('Agent trace')).toBeInTheDocument()
     expect(screen.getByText('Message Sending')).toBeInTheDocument()
-  })
-
-  it('lets the user toggle blocking non-essential external traffic, on by default', async () => {
-    render(<Settings />)
-
-    fireEvent.click(screen.getByText('General'))
-    const toggle = screen.getByLabelText('Block non-essential external traffic')
-    expect(toggle).toBeChecked()
-
-    await act(async () => {
-      fireEvent.click(toggle)
-    })
-
-    expect(useSettingsStore.getState().setNonEssentialTrafficDisabled).toHaveBeenCalledWith(false)
-    expect(screen.getByLabelText('Block non-essential external traffic')).not.toBeChecked()
   })
 
   it('uses the shared dropdown for response language', () => {

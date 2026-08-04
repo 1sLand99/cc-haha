@@ -25,19 +25,12 @@
 
 import { getOauthConfig } from '../constants/oauth.js'
 import { isEnvTruthy } from './envUtils.js'
-import { isEssentialTrafficOnly } from './privacyLevel.js'
 
 let fired = false
 
 export function preconnectAnthropicApi(): void {
   if (fired) return
   fired = true
-
-  // Skip when nonessential traffic is disabled: the preconnect is a bare
-  // handshake to the Anthropic endpoint that enterprise firewalls still log.
-  if (isEssentialTrafficOnly()) {
-    return
-  }
 
   // Skip if using a cloud provider — different endpoint + auth
   if (

@@ -47,45 +47,6 @@ describe('updateStore', () => {
     Reflect.deleteProperty(window, '__TAURI__')
   })
 
-  it('skips the startup update check when non-essential traffic is blocked', async () => {
-    vi.useFakeTimers()
-    try {
-      vi.resetModules()
-      const { useSettingsStore } = await import('./settingsStore')
-      const { useUpdateStore } = await import('./updateStore')
-      useSettingsStore.setState({ nonEssentialTrafficDisabled: true })
-
-      const promise = useUpdateStore.getState().initialize()
-      await vi.advanceTimersByTimeAsync(6000)
-      await promise
-
-      expect(check).not.toHaveBeenCalled()
-      expect(useUpdateStore.getState().status).toBe('idle')
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('runs the startup update check when non-essential traffic is allowed', async () => {
-    vi.useFakeTimers()
-    try {
-      vi.resetModules()
-      const { useSettingsStore } = await import('./settingsStore')
-      const { useUpdateStore } = await import('./updateStore')
-      useSettingsStore.setState({ nonEssentialTrafficDisabled: false })
-      check.mockResolvedValue(null)
-
-      const promise = useUpdateStore.getState().initialize()
-      await vi.advanceTimersByTimeAsync(6000)
-      await promise
-
-      expect(check).toHaveBeenCalledTimes(1)
-      expect(useUpdateStore.getState().status).toBe('up-to-date')
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
   it('stores available update metadata after a successful check', async () => {
     const download = vi.fn(async (onEvent?: (event: unknown) => void) => {
       onEvent?.({ event: 'Started', data: { contentLength: 200 } })

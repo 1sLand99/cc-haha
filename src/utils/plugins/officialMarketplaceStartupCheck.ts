@@ -14,7 +14,6 @@ import { logEvent } from '../../services/analytics/index.js'
 import { getGlobalConfig, saveGlobalConfig } from '../config.js'
 import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
-import { isEssentialTrafficOnly } from '../privacyLevel.js'
 import { toError } from '../errors.js'
 import { logError } from '../log.js'
 import { checkGitAvailable, markGitUnavailable } from './gitAvailability.js'
@@ -147,20 +146,6 @@ export type OfficialMarketplaceCheckResult = {
  */
 export async function checkAndInstallOfficialMarketplace(): Promise<OfficialMarketplaceCheckResult> {
   const config = getGlobalConfig()
-
-  // 禁用非必要外部流量时，不自动拉取官方插件市场（downloads.claude.ai）。
-  if (isEssentialTrafficOnly()) {
-    logForDebugging(
-      'Official marketplace auto-install skipped: non-essential traffic disabled',
-    )
-    saveGlobalConfig(current => ({
-      ...current,
-      officialMarketplaceAutoInstallAttempted: true,
-      officialMarketplaceAutoInstalled: false,
-      officialMarketplaceAutoInstallFailReason: 'policy_blocked',
-    }))
-    return { installed: false, skipped: true, reason: 'policy_blocked' }
-  }
 
   // Check if we should retry installation
   if (!shouldRetryInstallation(config)) {

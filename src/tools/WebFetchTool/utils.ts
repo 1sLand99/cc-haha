@@ -7,7 +7,6 @@ import {
 import { queryHaiku } from '../../services/api/claude.js'
 import { AbortError } from '../../utils/errors.js'
 import { getWebFetchUserAgent } from '../../utils/http.js'
-import { isEssentialTrafficOnly } from '../../utils/privacyLevel.js'
 import { logError } from '../../utils/log.js'
 import {
   isBinaryContentType,
@@ -191,11 +190,6 @@ export async function checkDomainBlocklist(
   domain: string,
 ): Promise<DomainCheckResult> {
   if (DOMAIN_CHECK_CACHE.has(domain)) {
-    return { status: 'allowed' }
-  }
-  // 禁用非必要外部流量时不查询 Anthropic 的 domain_info（api.anthropic.com），
-  // 与 skipWebFetchPreflight=true 的企业语义一致：视为允许。
-  if (isEssentialTrafficOnly()) {
     return { status: 'allowed' }
   }
   try {

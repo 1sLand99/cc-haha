@@ -15,7 +15,6 @@ async function fixture(name: string): Promise<string> {
 type FetchStub = (url: string) => { status?: number; body: string; contentType?: string } | undefined
 
 let requestedUrls: string[] = []
-let originalNonEssentialTrafficEnv: string | undefined
 let originalDisableProvidersEnv: string | undefined
 const originalFetch = globalThis.fetch
 
@@ -38,10 +37,6 @@ beforeEach(() => {
   resetClawhubOwnerCacheForTests()
   originalDisableProvidersEnv = process.env.HAHA_MARKET_DISABLE_PROVIDERS
   delete process.env.HAHA_MARKET_DISABLE_PROVIDERS
-  // These tests stub upstreams and must not inherit the developer shell's
-  // essential-traffic env (which would block the market providers entirely).
-  originalNonEssentialTrafficEnv = process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
-  delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
 })
 
 afterEach(() => {
@@ -51,11 +46,6 @@ afterEach(() => {
     delete process.env.HAHA_MARKET_DISABLE_PROVIDERS
   } else {
     process.env.HAHA_MARKET_DISABLE_PROVIDERS = originalDisableProvidersEnv
-  }
-  if (originalNonEssentialTrafficEnv === undefined) {
-    delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
-  } else {
-    process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = originalNonEssentialTrafficEnv
   }
 })
 
@@ -300,31 +290,5 @@ describe('skillhubProvider', () => {
 
     expect(page.items[0]!.securityStatus).toBe('verified')
     expect(page.items[1]!.securityStatus).toBe('unknown')
-  })
-})
-
-describe('non-essential traffic gate', () => {
-  const NON_ESSENTIAL_TRAFFIC_ENV = 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'
-  let originalEnv: string | undefined
-
-  beforeEach(() => {
-    originalEnv = process.env[NON_ESSENTIAL_TRAFFIC_ENV]
-    process.env[NON_ESSENTIAL_TRAFFIC_ENV] = '1'
-  })
-
-  afterEach(() => {
-    if (originalEnv === undefined) delete process.env[NON_ESSENTIAL_TRAFFIC_ENV]
-    else process.env[NON_ESSENTIAL_TRAFFIC_ENV] = originalEnv
-  })
-
-  it('blocks upstream requests and records a source failure when essential-traffic is on', async () => {
-    stubFetch(() => {
-      throw new Error('must not be reached')
-    })
-
-    await expect(clawhubProvider.list({ limit: 3 })).rejects.toThrow(
-      /disabled by non-essential traffic setting/,
-    )
-    expect(requestedUrls).toEqual([])
   })
 })
