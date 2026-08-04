@@ -594,6 +594,20 @@ function findStreamMergeTargetIndex(messages: UIMessage[]): number {
   return -1
 }
 
+/**
+ * Index just past the newest user message — where the current turn begins.
+ *
+ * Used to bound the replay guard below. Derived from `messages` rather than threaded
+ * in from `streamAttemptStartIndex`, which is session state that none of
+ * appendAssistantTextMessage's twelve call sites currently pass.
+ */
+function currentTurnStartIndex(messages: UIMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.type === 'user_text') return index + 1
+  }
+  return 0
+}
+
 function appendAssistantTextMessage(
   messages: UIMessage[],
   content: string,
@@ -620,10 +634,23 @@ function appendAssistantTextMessage(
   // 尾部早被 thinking / tool_result 顶掉了，于是重复的回复照样追加进来。
   // 这里比的是"逐字相同"而不是子串：整段重发的正文会与某条 hydrated 回复完全一致，
   // 而正常流式送来的是碎片（碎片几乎必然是某条历史回复的子串，用子串判定会误伤）。
+  //
+  // 只扫当前轮次。重放送来的正文属于用户早就发过的那一轮，它的 hydrated 副本必然落在
+  // 最后一条 user_text 之前；而"这次真的又答了一遍同样的话"只可能落在它之后 —— 一句
+  // 「好的」、「完成了」或一行命令输出，重复得毫不稀奇。
+  //
+  // 之前扫的是整个 messages，两者区分不开：用户刚看着流式输出完的回复会在
+  // message_complete 时凭空消失，而且找不回来 —— appendedCompletionMessage 为 false
+  // 会连完成通知一起跳过，随后的 loadHistory 走 live-merge 分支，那条链路只做标注、
+  // 去重、补父级工具消息和追加 goal_event，没有任何一步能把丢掉的 assistant_text 加回来。
+  // 更糟的是 mergeRestoredTranscriptMessageIds 会按逐字相同把 transcript id 回填到
+  // live 消息上，所以同一次会话里出现两条相同回复就够了，不必是打开旧会话。
+  const turnStartIndex = currentTurnStartIndex(messages)
   if (
     !transcriptMessageId &&
     messages.some(
-      (message) =>
+      (message, index) =>
+        index >= turnStartIndex &&
         message.type === 'assistant_text' &&
         message.transcriptMessageId &&
         message.content.trim() === trimmedContent,
