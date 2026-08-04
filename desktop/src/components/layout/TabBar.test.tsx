@@ -596,6 +596,32 @@ describe('TabBar', () => {
     expect(screen.queryByText('设置')).not.toBeInTheDocument()
   })
 
+  it('matches only the settings tab to the settings rail width', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { SETTINGS_TAB_ID, useTabStore } = await import('../../stores/tabStore')
+
+    useTabStore.setState({
+      tabs: [
+        { sessionId: SETTINGS_TAB_ID, title: 'Settings', type: 'settings', status: 'idle' },
+        { sessionId: 'session-1', title: 'Chat', type: 'session', status: 'idle' },
+      ],
+      activeTabId: SETTINGS_TAB_ID,
+    })
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    const settingsTab = screen.getByText('Localized Settings').closest('.tab-strip-item')
+    const chatTab = screen.getByText('Chat').closest('.tab-strip-item')
+
+    expect(settingsTab?.className).toContain('min-w-[195px]')
+    expect(settingsTab?.className).toContain('max-w-[195px]')
+    expect(chatTab?.className).toContain('min-w-[140px]')
+    expect(chatTab?.className).toContain('max-w-[200px]')
+    expect(chatTab?.className).not.toContain('min-w-[195px]')
+  })
+
   it('shows current-session CLI tasks without a numeric activity badge', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')

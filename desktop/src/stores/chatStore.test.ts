@@ -484,6 +484,69 @@ describe('chatStore history mapping', () => {
     expect(mapped[3]).toMatchObject({ parentToolUseId: 'agent-1' })
   })
 
+  it('collapses replayed and blank thinking blocks from history mapping', () => {
+    const messages: MessageEntry[] = [
+      {
+        id: 'assistant-snap-1',
+        type: 'assistant',
+        timestamp: '2026-04-06T00:00:00.000Z',
+        content: [{ type: 'thinking', thinking: 'plan the fix' }],
+      },
+      // 流式快照整块重发：逐字相同，应丢弃
+      {
+        id: 'assistant-snap-2',
+        type: 'assistant',
+        timestamp: '2026-04-06T00:00:01.000Z',
+        content: [{ type: 'thinking', thinking: 'plan the fix' }],
+      },
+      // 流式快照前缀增长：应替换为更全的新块而非追加
+      {
+        id: 'assistant-snap-3',
+        type: 'assistant',
+        timestamp: '2026-04-06T00:00:02.000Z',
+        content: [{ type: 'thinking', thinking: 'plan the fix carefully' }],
+      },
+      // 纯空白块：不应产生空壳气泡
+      {
+        id: 'assistant-blank',
+        type: 'assistant',
+        timestamp: '2026-04-06T00:00:03.000Z',
+        content: [{ type: 'thinking', thinking: '   \n  ' }],
+      },
+      // 相邻但内容无关的思考：合并为一个气泡
+      {
+        id: 'assistant-more',
+        type: 'assistant',
+        timestamp: '2026-04-06T00:00:04.000Z',
+        content: [{ type: 'thinking', thinking: 'then run tests' }],
+      },
+      // 被工具打断后的新思考：保持独立
+      {
+        id: 'assistant-tools',
+        type: 'assistant',
+        timestamp: '2026-04-06T00:00:05.000Z',
+        content: [
+          { type: 'tool_use', name: 'Bash', id: 'bash-1', input: { command: 'pwd' } },
+        ],
+      },
+      {
+        id: 'assistant-final',
+        type: 'assistant',
+        timestamp: '2026-04-06T00:00:06.000Z',
+        content: [{ type: 'thinking', thinking: 'tests pass' }],
+      },
+    ]
+
+    const mapped = mapHistoryMessagesToUiMessages(messages)
+
+    expect(mapped.map((message) => message.type)).toEqual(['thinking', 'tool_use', 'thinking'])
+    expect(mapped[0]).toMatchObject({
+      id: 'assistant-snap-1-block-0',
+      content: 'plan the fix carefullythen run tests',
+    })
+    expect(mapped[2]).toMatchObject({ id: 'assistant-final-block-0', content: 'tests pass' })
+  })
+
   it('maps AskUserQuestion transcript answers from toolUseResult metadata', () => {
     const messages: MessageEntry[] = [
       {

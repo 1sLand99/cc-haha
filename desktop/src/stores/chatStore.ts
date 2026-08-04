@@ -4149,6 +4149,32 @@ function pushAssistantHistoryText(
   })
 }
 
+function pushAssistantHistoryThinking(
+  messages: UIMessage[],
+  id: string,
+  content: string,
+  timestamp: number,
+): void {
+  // 与流式路径（case 'thinking'）保持同等防护：纯空白块不产生空壳气泡。
+  if (!content.trim()) return
+
+  const last = messages[messages.length - 1]
+  if (last?.type === 'thinking') {
+    // 流式落盘的快照会让同一段思考在 jsonl 里以"整块重发"或"前缀增长"的
+    // 形态重复出现，逐字相同直接丢弃，前缀包含则用更全的新块替换旧块。
+    // 合并时保留首个块的确定性 id，保证轮询重映射时 React key 稳定。
+    if (last.content === content) return
+    if (content.startsWith(last.content)) {
+      last.content = content
+      return
+    }
+    last.content += content
+    return
+  }
+
+  messages.push({ id, type: 'thinking', content, timestamp })
+}
+
 type HistoryMappingOptions = {
   includeTeammateMessages?: boolean
 }
@@ -4766,7 +4792,7 @@ export function mapHistoryMessagesToUiMessages(
     }
     if ((msg.type === 'assistant' || msg.type === 'tool_use') && Array.isArray(msg.content)) {
       for (const [blockIndex, block] of (msg.content as AssistantHistoryBlock[]).entries()) {
-        if (block.type === 'thinking' && block.thinking) uiMessages.push({ id: `${msg.id}-block-${blockIndex}`, type: 'thinking', content: block.thinking, timestamp })
+        if (block.type === 'thinking' && block.thinking) pushAssistantHistoryThinking(uiMessages, `${msg.id}-block-${blockIndex}`, block.thinking, timestamp)
         else if (block.type === 'text' && block.text) {
           pushAssistantHistoryText(uiMessages, block.text, timestamp, msg.model, msg.id || undefined)
         }
