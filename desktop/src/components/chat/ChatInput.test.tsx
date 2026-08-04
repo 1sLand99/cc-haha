@@ -1272,6 +1272,103 @@ describe('ChatInput file mentions', () => {
       .toBe('/repo/.claude/worktrees/desktop-feature-a-12345678')
   })
 
+  it('keeps an isolated worktree choice scoped to its empty session across tab switches and remounts', async () => {
+    const otherSessionId = 'other-empty-session'
+    const baseChatState = useChatStore.getState().sessions[sessionId]!
+    useTabStore.setState({
+      activeTabId: sessionId,
+      tabs: [
+        { sessionId, title: 'Repo A', type: 'session', status: 'idle' },
+        { sessionId: otherSessionId, title: 'Repo B', type: 'session', status: 'idle' },
+      ],
+    })
+    useSessionStore.setState({
+      sessions: [
+        {
+          id: sessionId,
+          title: 'Repo A',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          modifiedAt: '2026-05-01T00:00:00.000Z',
+          messageCount: 0,
+          projectPath: '/repo-a',
+          workDir: '/repo-a',
+          workDirExists: true,
+        },
+        {
+          id: otherSessionId,
+          title: 'Repo B',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          modifiedAt: '2026-05-01T00:00:00.000Z',
+          messageCount: 0,
+          projectPath: '/repo-b',
+          workDir: '/repo-b',
+          workDirExists: true,
+        },
+      ],
+      activeSessionId: sessionId,
+    })
+    useChatStore.setState({
+      sessions: {
+        [sessionId]: { ...baseChatState, messages: [] },
+        [otherSessionId]: { ...baseChatState, messages: [] },
+      },
+    })
+    mocks.getGitInfo.mockImplementation(async (activeSessionId: string) => {
+      const workDir = activeSessionId === otherSessionId ? '/repo-b' : '/repo-a'
+      return {
+        branch: 'main',
+        repoName: workDir.slice(1),
+        workDir,
+        changedFiles: 0,
+      }
+    })
+    mocks.getRepositoryContext.mockImplementation(async (workDir: string) => ({
+      ...okRepositoryContext(),
+      workDir,
+      repoRoot: workDir,
+      repoName: workDir.slice(1),
+    }))
+    mocks.create.mockResolvedValueOnce({
+      sessionId: 'created-restored-worktree',
+      workDir: '/repo-a/.claude/worktrees/desktop-main-restored',
+    })
+
+    const view = render(<ChatInput variant="hero" />)
+
+    await openLocationMenu()
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /Isolated worktree/ }))
+    expect(await screen.findByText('Isolated')).toBeInTheDocument()
+
+    act(() => {
+      useTabStore.setState({ activeTabId: otherSessionId })
+    })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Location: repo-b/ })).toBeInTheDocument()
+    })
+    expect(screen.queryByText('Isolated')).not.toBeInTheDocument()
+
+    act(() => {
+      useTabStore.setState({ activeTabId: sessionId })
+    })
+    expect(await screen.findByText('Isolated')).toBeInTheDocument()
+    expect(useChatStore.getState().sessions[sessionId]?.repositoryLaunchDraft?.useWorktree).toBe(true)
+    expect(useChatStore.getState().sessions[otherSessionId]?.repositoryLaunchDraft?.useWorktree).toBe(false)
+
+    view.unmount()
+    render(<ChatInput variant="hero" />)
+    expect(await screen.findByText('Isolated')).toBeInTheDocument()
+
+    setComposerText('keep the isolated worktree', 26)
+    fireEvent.keyDown(getComposerElement(), { key: 'Enter' })
+
+    await waitFor(() => {
+      expect(mocks.create).toHaveBeenCalledWith({
+        workDir: '/repo-a',
+        repository: { branch: 'main', worktree: true },
+      })
+    })
+  })
+
   it('keeps mention pills in the unsent draft across session tab switches', async () => {
     mocks.search.mockResolvedValueOnce({
       currentPath: '/repo',

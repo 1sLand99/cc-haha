@@ -57,6 +57,12 @@ export type ComposerDraftState = {
   mentions?: ComposerMention[]
 }
 
+export type RepositoryLaunchDraftState = {
+  workDir: string
+  branch: string | null
+  useWorktree: boolean
+}
+
 export type QueuedUserMessage = {
   id: string
   content: string
@@ -160,6 +166,7 @@ export type PerSessionState = {
   } | null
   composerInsertion?: ComposerReferenceInsertion | null
   composerDraft?: ComposerDraftState | null
+  repositoryLaunchDraft?: RepositoryLaunchDraftState | null
   queuedUserMessages?: QueuedUserMessage[]
 }
 
@@ -201,6 +208,7 @@ const DEFAULT_SESSION_STATE: PerSessionState = {
   composerPrefill: null,
   composerInsertion: null,
   composerDraft: null,
+  repositoryLaunchDraft: null,
   queuedUserMessages: [],
 }
 
@@ -339,6 +347,8 @@ type ChatStore = {
   clearComposerInsertion: (sessionId: string, nonce?: number) => void
   setComposerDraft: (sessionId: string, draft: ComposerDraftState) => void
   clearComposerDraft: (sessionId: string) => void
+  setRepositoryLaunchDraft: (sessionId: string, draft: RepositoryLaunchDraftState) => void
+  clearRepositoryLaunchDraft: (sessionId: string) => void
   queueUserMessage: (
     sessionId: string,
     message: Omit<QueuedUserMessage, 'id' | 'createdAt'>,
@@ -1340,6 +1350,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           messages: existing?.messages ?? [],
           activeGoal: existing?.activeGoal ?? null,
           composerDraft: existing?.composerDraft ?? null,
+          repositoryLaunchDraft: existing?.repositoryLaunchDraft ?? null,
           queuedUserMessages: existing?.queuedUserMessages ?? [],
           backgroundAgentTasks: existing?.backgroundAgentTasks ?? {},
           agentTaskNotifications: existing?.agentTaskNotifications ?? {},
@@ -2001,6 +2012,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((state) => ({
       sessions: updateSessionIn(state.sessions, sessionId, () => ({
         composerDraft: null,
+      })),
+    }))
+  },
+
+  setRepositoryLaunchDraft: (sessionId, draft) => {
+    set((state) => {
+      const session = state.sessions[sessionId] ?? createDefaultSessionState()
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: {
+            ...session,
+            repositoryLaunchDraft: draft,
+          },
+        },
+      }
+    })
+  },
+
+  clearRepositoryLaunchDraft: (sessionId) => {
+    set((state) => ({
+      sessions: updateSessionIn(state.sessions, sessionId, () => ({
+        repositoryLaunchDraft: null,
       })),
     }))
   },

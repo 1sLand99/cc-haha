@@ -3,7 +3,7 @@ import { useDismissable } from '@/hooks/useDismissable'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { useTranslation } from '../../i18n'
-import { useChatStore } from '../../stores/chatStore'
+import { useChatStore, type RepositoryLaunchDraftState } from '../../stores/chatStore'
 import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSessionStore } from '../../stores/sessionStore'
@@ -141,9 +141,6 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const [slashFilter, setSlashFilter] = useState('')
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [agentSlashCommands, setAgentSlashCommands] = useState<ReturnType<typeof buildAgentSlashCommands>>([])
-  const [launchWorkDir, setLaunchWorkDir] = useState('')
-  const [launchBranch, setLaunchBranch] = useState<string | null>(null)
-  const [launchUseWorktree, setLaunchUseWorktree] = useState(false)
   const [launchReady, setLaunchReady] = useState(true)
   const [launchTransitioning, setLaunchTransitioning] = useState(false)
   const [editingQueuedMessageId, setEditingQueuedMessageId] = useState<string | null>(null)
@@ -191,6 +188,10 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   } = useChatStore()
   const activeTabId = useTabStore((s) => s.activeTabId)
   const sessionState = useChatStore((s) => activeTabId ? s.sessions[activeTabId] : undefined)
+  const repositoryLaunchDraft = sessionState?.repositoryLaunchDraft
+  const launchWorkDir = repositoryLaunchDraft?.workDir ?? ''
+  const launchBranch = repositoryLaunchDraft?.branch ?? null
+  const launchUseWorktree = repositoryLaunchDraft?.useWorktree ?? false
   const chatState = sessionState?.chatState ?? 'idle'
   const slashCommands = sessionState?.slashCommands ?? []
   const composerPrefill = sessionState?.composerPrefill ?? null
@@ -216,6 +217,24 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const addWorkspaceReference = useWorkspaceChatContextStore((s) => s.addReference)
   const removeWorkspaceReference = useWorkspaceChatContextStore((s) => s.removeReference)
   const clearWorkspaceReferences = useWorkspaceChatContextStore((s) => s.clearReferences)
+  const updateRepositoryLaunchDraft = useCallback((
+    update: (current: RepositoryLaunchDraftState) => RepositoryLaunchDraftState,
+  ) => {
+    if (!activeTabId) return
+    const chatStore = useChatStore.getState()
+    const current = chatStore.sessions[activeTabId]?.repositoryLaunchDraft ?? {
+      workDir: '',
+      branch: null,
+      useWorktree: false,
+    }
+    chatStore.setRepositoryLaunchDraft(activeTabId, update(current))
+  }, [activeTabId])
+  const setLaunchBranch = useCallback((branch: string | null) => {
+    updateRepositoryLaunchDraft((current) => ({ ...current, branch }))
+  }, [updateRepositoryLaunchDraft])
+  const setLaunchUseWorktree = useCallback((useWorktree: boolean) => {
+    updateRepositoryLaunchDraft((current) => ({ ...current, useWorktree }))
+  }, [updateRepositoryLaunchDraft])
   const saveComposerDraft = useCallback((sessionId: string) => {
     const draft = {
       input: inputRef.current,
@@ -461,15 +480,17 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   }, [isMemberSession, resolvedWorkDir])
 
   useEffect(() => {
-    if (!showLaunchControls) return
+    if (!activeTabId || !showLaunchControls) return
     const nextWorkDir = activeSession?.workDir || gitInfo?.workDir || ''
-    setLaunchWorkDir((current) => {
-      if (current === nextWorkDir) return current
-      setLaunchBranch(null)
-      setLaunchUseWorktree(false)
-      setLaunchReady(!nextWorkDir)
-      return nextWorkDir
+    const chatStore = useChatStore.getState()
+    const current = chatStore.sessions[activeTabId]?.repositoryLaunchDraft
+    if (current?.workDir === nextWorkDir) return
+    chatStore.setRepositoryLaunchDraft(activeTabId, {
+      workDir: nextWorkDir,
+      branch: null,
+      useWorktree: false,
     })
+    setLaunchReady(!nextWorkDir)
   }, [activeSession?.workDir, activeTabId, gitInfo?.workDir, showLaunchControls])
 
   useDismissable({
@@ -617,7 +638,14 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
     const sessionStore = useSessionStore.getState()
     const { createSession, deleteSession } = sessionStore
     const { replaceTabSession } = useTabStore.getState()
-    const { disconnectSession, connectToSession, setComposerDraft } = useChatStore.getState()
+    const chatStore = useChatStore.getState()
+    const {
+      disconnectSession,
+      connectToSession,
+      setComposerDraft,
+      setRepositoryLaunchDraft,
+    } = chatStore
+    const repositoryLaunchDraft = chatStore.sessions[oldId]?.repositoryLaunchDraft
     const permissionMode = sessionStore.sessions.find((session) => session.id === oldId)
       ?.permissionMode as PermissionMode | undefined
     const createOptions = repository || permissionMode
@@ -636,6 +664,9 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
         attachments: attachmentsRef.current,
       })
     }
+    if (repositoryLaunchDraft) {
+      setRepositoryLaunchDraft(newId, repositoryLaunchDraft)
+    }
     useSessionRuntimeStore.getState().moveSelection(oldId, newId)
     disconnectSession(oldId)
     replaceTabSession(oldId, newId)
@@ -645,9 +676,11 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   }, [activeTabId])
 
   const handleLaunchWorkDirChange = useCallback(async (newWorkDir: string) => {
-    setLaunchWorkDir(newWorkDir)
-    setLaunchBranch(null)
-    setLaunchUseWorktree(false)
+    updateRepositoryLaunchDraft(() => ({
+      workDir: newWorkDir,
+      branch: null,
+      useWorktree: false,
+    }))
     setLaunchReady(!newWorkDir)
     if (!activeTabId) return
 
@@ -662,7 +695,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
     } finally {
       setLaunchTransitioning(false)
     }
-  }, [activeTabId, replaceEmptySession, t])
+  }, [activeTabId, replaceEmptySession, t, updateRepositoryLaunchDraft])
 
   const handleSubmit = async () => {
     const text = input.trim()
@@ -793,8 +826,13 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
     invalidatePendingPastes()
     setComposerInput('', [])
     setComposerAttachments([])
-    useChatStore.getState().clearComposerDraft(activeTabId!)
-    if (targetSessionId !== activeTabId) useChatStore.getState().clearComposerDraft(targetSessionId)
+    const chatStore = useChatStore.getState()
+    chatStore.clearComposerDraft(activeTabId!)
+    chatStore.clearRepositoryLaunchDraft(activeTabId!)
+    if (targetSessionId !== activeTabId) {
+      chatStore.clearComposerDraft(targetSessionId)
+      chatStore.clearRepositoryLaunchDraft(targetSessionId)
+    }
     if (!isMemberSession) {
       clearWorkspaceReferences(activeTabId!)
       if (targetSessionId !== activeTabId) clearWorkspaceReferences(targetSessionId)
