@@ -1,4 +1,4 @@
-import { buildComputerUseTools } from '../../vendor/computer-use-mcp/index.js'
+import { buildPlatformComputerUseTools } from '../../vendor/computer-use-mcp/index.js'
 import { join } from 'path'
 import { fileURLToPath } from 'url'
 import { buildMcpToolName } from '../../services/mcp/mcpStringUtils.js'
@@ -27,7 +27,7 @@ export function setupComputerUseMCP(): {
   mcpConfig: Record<string, ScopedMcpServerConfig>
   allowedTools: string[]
 } {
-  const allowedTools = buildComputerUseTools(
+  const allowedTools = buildPlatformComputerUseTools(
     getCliComputerUseCapabilities(),
     getChicagoCoordinateMode(),
   ).map(t => buildMcpToolName(COMPUTER_USE_MCP_SERVER_NAME, t.name))

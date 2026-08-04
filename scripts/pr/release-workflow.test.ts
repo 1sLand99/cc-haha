@@ -532,9 +532,15 @@ describe('release desktop workflow', () => {
     expect(desktopPackage.build.mac?.notarize).toBe(true)
     expect(desktopPackage.build.mac?.entitlements).toBe('build/entitlements.mac.plist')
     expect(desktopPackage.build.mac?.entitlementsInherit).toBe('build/entitlements.mac.inherit.plist')
+    // The Computer Use helper is excluded on purpose. `native/cu-helper/build.sh`
+    // already signed it under the stable identity `dev.cchaha.cu-helper`, and
+    // macOS ties the user's Accessibility and Screen Recording grants to that
+    // signing identity — re-signing it here would rotate the identity and
+    // silently drop both permissions on every update.
     expect(desktopPackage.build.mac?.signIgnore).toEqual([
       '/Contents/Frameworks/.+\\.(?:pak|bin|dat|nib)$',
       '/Contents/Resources/.+\\.(?:asar|pak|bin|dat|icns|png|jpg|jpeg|gif|svg|ttf|woff|woff2)$',
+      'cc-haha-computer-use\\.app',
     ])
   })
 

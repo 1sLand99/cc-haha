@@ -3,6 +3,7 @@ import type { TranslationKey } from './en'
 export const zh: Record<TranslationKey, string> = {
   // ─── Common ──────────────────────────────────────
   'common.cancel': '取消',
+  'common.close': '關閉',
   'common.save': '儲存',
   'common.delete': '刪除',
   'common.add': '新增',
@@ -1376,6 +1377,27 @@ export const zh: Record<TranslationKey, string> = {
   'settings.computerUse.permRestartHint': '授權後需重啟 App 才能生效。',
   'settings.computerUse.flagClipboard': '剪貼簿訪問',
   'settings.computerUse.flagSystemKeys': '系統快捷鍵',
+  // Computer Use — 原生 (cu-helper) Codex 風格頁面
+  'settings.computerUse.controlTitle': '電腦操控',
+  'settings.computerUse.controlSubtitle': '管理 Claude 如何使用你電腦上的其他應用程式',
+  'settings.computerUse.sectionControl': '控制',
+  'settings.computerUse.anyApp': '任意應用',
+  'settings.computerUse.anyAppDesc': '允許 Claude 控制你電腦上的應用',
+  'settings.computerUse.osPermTitle': '系統許可權',
+  'settings.computerUse.osPermHint': '開啟後，Claude 才能在你的電腦上點選、輸入和截圖。你的真實滑鼠不會被佔用。',
+  'settings.computerUse.openCard': '重新開啟授權卡片',
+  'settings.computerUse.openingCard': '正在開啟授權卡片…',
+  'settings.computerUse.openCardFailed': '無法開啟授權卡片，請稍後重試。',
+  'settings.computerUse.permNeeded': '待授權',
+  'settings.computerUse.permChecking': '檢測中…',
+  'settings.computerUse.allowedAppsTitle': '始終允許的應用',
+  'settings.computerUse.allowedAppsDesc': '這些應用已獲授權，Claude 可直接控制，無需每次確認。',
+  'settings.computerUse.allowedAppsEmpty': '還沒有始終允許的應用。點選「新增應用」來授權第一個。',
+  'settings.computerUse.addApp': '新增應用',
+  'settings.computerUse.addAppTitle': '選擇要授權的應用',
+  'settings.computerUse.removeApp': '移除',
+  'settings.computerUse.appsPickerEmpty': '未找到可新增的應用。',
+  'settings.computerUse.appsPickerLoading': '正在載入已安裝的應用…',
 
   // Settings > General - Storage
   'settings.general.modeSwitchTitle': '切換資料儲存位置？',

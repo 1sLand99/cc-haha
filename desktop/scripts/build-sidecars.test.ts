@@ -653,3 +653,37 @@ describe.skipIf(!compiledSidecarSmokeEnabled)('compiled sidecar local-index smok
     expect(await stat(rootDir).then(() => true, () => false)).toBe(false)
   }, Math.max(90_000, compiledSidecarSmokeStarts * 10_000))
 })
+
+describe('build-sidecars cu-helper macOS gating', () => {
+  it('guards the cu-helper build behind a darwin platform check so Windows/Linux skip it', () => {
+    const source = readBuildScript()
+    // The cu-helper build entrypoint must be wrapped in a `process.platform === 'darwin'`
+    // guard, so non-macOS sidecar builds keep using the Python helper instead of
+    // attempting a macOS-only Swift build.
+    const guarded = source.match(
+      /if \(process\.platform === 'darwin'\) \{\s*await buildCuHelper\(\)\s*\}/,
+    )
+    expect(guarded).not.toBeNull()
+  })
+
+  it('invokes native/cu-helper/build.sh from the cu-helper build step', () => {
+    const source = readBuildScript()
+    expect(source).toMatch(/'native',\s*'cu-helper',\s*'build\.sh'/)
+  })
+
+  it('copies the cu-helper binary and its resource bundle into the binaries dir', () => {
+    const source = readBuildScript()
+    // Both the bare binary AND the SwiftPM resource bundle must be copied, or the
+    // LensSequence overlay assets fail to load at runtime via Bundle.module.
+    expect(source).toContain('cu-helper_cc-haha-computer-use.bundle')
+    expect(source).toMatch(/binariesDir,\s*'cc-haha-computer-use'/)
+  })
+
+  it('does NOT ad-hoc re-sign cu-helper (would rotate its stable TCC identity)', () => {
+    const source = readBuildScript()
+    // adHocSignMacBinary must only be applied to the bun-compiled sidecar, never
+    // to cu-helper (build.sh already signs it with a stable hardened-runtime identity).
+    const buildCuHelperBody = source.slice(source.indexOf('async function buildCuHelper()'))
+    expect(buildCuHelperBody).not.toContain('adHocSignMacBinary')
+  })
+})

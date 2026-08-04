@@ -3,6 +3,7 @@ import type { TranslationKey } from './en'
 export const zh: Record<TranslationKey, string> = {
   // ─── Common ──────────────────────────────────────
   'common.cancel': '取消',
+  'common.close': '关闭',
   'common.save': '保存',
   'common.delete': '删除',
   'common.add': '添加',
@@ -1376,6 +1377,27 @@ export const zh: Record<TranslationKey, string> = {
   'settings.computerUse.permRestartHint': '授权后需重启 App 才能生效。',
   'settings.computerUse.flagClipboard': '剪贴板访问',
   'settings.computerUse.flagSystemKeys': '系统快捷键',
+  // Computer Use — 原生 (cu-helper) Codex 风格页面
+  'settings.computerUse.controlTitle': '电脑操控',
+  'settings.computerUse.controlSubtitle': '管理 Claude 如何使用你电脑上的其他应用程序',
+  'settings.computerUse.sectionControl': '控制',
+  'settings.computerUse.anyApp': '任意应用',
+  'settings.computerUse.anyAppDesc': '允许 Claude 控制你电脑上的应用',
+  'settings.computerUse.osPermTitle': '系统权限',
+  'settings.computerUse.osPermHint': '开启后，Claude 才能在你的电脑上点击、输入和截图。你的真实鼠标不会被占用。',
+  'settings.computerUse.openCard': '重新打开授权卡片',
+  'settings.computerUse.openingCard': '正在打开授权卡片…',
+  'settings.computerUse.openCardFailed': '无法打开授权卡片，请稍后重试。',
+  'settings.computerUse.permNeeded': '待授权',
+  'settings.computerUse.permChecking': '检测中…',
+  'settings.computerUse.allowedAppsTitle': '始终允许的应用',
+  'settings.computerUse.allowedAppsDesc': '这些应用已获授权，Claude 可直接控制，无需每次确认。',
+  'settings.computerUse.allowedAppsEmpty': '还没有始终允许的应用。点击「添加应用」来授权第一个。',
+  'settings.computerUse.addApp': '添加应用',
+  'settings.computerUse.addAppTitle': '选择要授权的应用',
+  'settings.computerUse.removeApp': '移除',
+  'settings.computerUse.appsPickerEmpty': '未找到可添加的应用。',
+  'settings.computerUse.appsPickerLoading': '正在加载已安装的应用…',
 
   // Settings > General - Storage
   'settings.general.modeSwitchTitle': '切换数据存储位置？',

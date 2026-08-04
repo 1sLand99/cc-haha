@@ -13,6 +13,7 @@ const computerUseApiMock = vi.hoisted(() => ({
   setAuthorizedApps: vi.fn(),
   runSetup: vi.fn(),
   openSettings: vi.fn(),
+  openPermissionCard: vi.fn(),
 }))
 
 vi.mock('../api/computerUse', () => ({
@@ -22,6 +23,7 @@ vi.mock('../api/computerUse', () => ({
 const readyStatus = {
   platform: 'darwin',
   supported: true,
+  cuHelper: { available: false },
   python: {
     installed: true,
     version: '3.12.0',
@@ -71,11 +73,17 @@ describe('ComputerUseSettings', () => {
     computerUseApiMock.setAuthorizedApps.mockReset()
     computerUseApiMock.runSetup.mockReset()
     computerUseApiMock.openSettings.mockReset()
+    computerUseApiMock.openPermissionCard.mockReset()
     Reflect.deleteProperty(window, 'desktopHost')
 
     computerUseApiMock.getStatus.mockResolvedValue(readyStatus)
     computerUseApiMock.getAuthorizedApps.mockResolvedValue(enabledConfig)
     computerUseApiMock.setAuthorizedApps.mockResolvedValue({ ok: true })
+    computerUseApiMock.openPermissionCard.mockResolvedValue({
+      ok: true,
+      accessibility: true,
+      screenRecording: true,
+    })
   })
 
   it('renders the stored disabled state with the MCP exposure hint', async () => {
@@ -292,6 +300,154 @@ describe('ComputerUseSettings', () => {
         clipboardWrite: false,
         systemKeyCombos: true,
       },
+    })
+  })
+
+  describe('native cu-helper branch', () => {
+    const nativeStatus = {
+      ...readyStatus,
+      cuHelper: { available: true },
+      permissions: {
+        accessibility: false,
+        screenRecording: true,
+      },
+    }
+
+    it('pops the native permission card when enabling Any App with missing permissions', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
+      computerUseApiMock.getAuthorizedApps.mockResolvedValue({
+        ...enabledConfig,
+        enabled: false,
+      })
+
+      render(<ComputerUseSettings />)
+
+      const toggle = await screen.findByLabelText('Any App')
+      await waitFor(() => expect(toggle).not.toBeChecked())
+
+      await act(async () => {
+        fireEvent.click(toggle)
+        await Promise.resolve()
+      })
+
+      expect(computerUseApiMock.setAuthorizedApps).toHaveBeenCalledWith({ enabled: true })
+      expect(computerUseApiMock.openPermissionCard).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not pop the card when enabling with all permissions granted', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue({
+        ...nativeStatus,
+        permissions: { accessibility: true, screenRecording: true },
+      })
+      computerUseApiMock.getAuthorizedApps.mockResolvedValue({
+        ...enabledConfig,
+        enabled: false,
+      })
+
+      render(<ComputerUseSettings />)
+
+      const toggle = await screen.findByLabelText('Any App')
+      await waitFor(() => expect(toggle).not.toBeChecked())
+
+      await act(async () => {
+        fireEvent.click(toggle)
+        await Promise.resolve()
+      })
+
+      expect(computerUseApiMock.setAuthorizedApps).toHaveBeenCalledWith({ enabled: true })
+      expect(computerUseApiMock.openPermissionCard).not.toHaveBeenCalled()
+    })
+
+    it('reopens the native card from the permission section button', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
+
+      render(<ComputerUseSettings />)
+
+      const button = await screen.findByText('Reopen authorization card')
+
+      await act(async () => {
+        fireEvent.click(button)
+        await Promise.resolve()
+      })
+
+      expect(computerUseApiMock.openPermissionCard).toHaveBeenCalledTimes(1)
+    })
+
+    it('removes an always-allowed app via the trash button', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
+      computerUseApiMock.getAuthorizedApps.mockResolvedValue({
+        ...enabledConfig,
+        authorizedApps: [
+          {
+            bundleId: 'com.example.Preview',
+            displayName: 'Preview',
+            authorizedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      })
+
+      render(<ComputerUseSettings />)
+
+      const remove = await screen.findByLabelText('Remove Preview')
+
+      await act(async () => {
+        fireEvent.click(remove)
+        await Promise.resolve()
+      })
+
+      expect(computerUseApiMock.setAuthorizedApps).toHaveBeenCalledWith({
+        authorizedApps: [],
+        grantFlags: {
+          clipboardRead: true,
+          clipboardWrite: true,
+          systemKeyCombos: true,
+        },
+      })
+    })
+
+    it('adds an app from the picker fed by getInstalledApps', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
+      computerUseApiMock.getInstalledApps.mockResolvedValue({
+        apps: [
+          {
+            bundleId: 'com.example.Notes',
+            displayName: 'Notes',
+            path: '/Applications/Notes.app',
+          },
+        ],
+      })
+
+      render(<ComputerUseSettings />)
+
+      const addButton = await screen.findByText('Add App')
+
+      await act(async () => {
+        fireEvent.click(addButton)
+        await Promise.resolve()
+      })
+
+      await waitFor(() => expect(computerUseApiMock.getInstalledApps).toHaveBeenCalled())
+
+      const notesEntry = await screen.findByText('Notes')
+
+      await act(async () => {
+        fireEvent.click(notesEntry)
+        await Promise.resolve()
+      })
+
+      expect(computerUseApiMock.setAuthorizedApps).toHaveBeenCalledWith({
+        authorizedApps: [
+          expect.objectContaining({
+            bundleId: 'com.example.Notes',
+            displayName: 'Notes',
+          }),
+        ],
+        grantFlags: {
+          clipboardRead: true,
+          clipboardWrite: true,
+          systemKeyCombos: true,
+        },
+      })
     })
   })
 })

@@ -3,6 +3,7 @@ import type { TranslationKey } from './en'
 export const jp: Record<TranslationKey, string> = {
   // ─── Common ──────────────────────────────────────
   'common.cancel': 'キャンセル',
+  'common.close': '閉じる',
   'common.save': '保存',
   'common.delete': '削除',
   'common.add': '追加',
@@ -1377,6 +1378,27 @@ export const jp: Record<TranslationKey, string> = {
   'settings.computerUse.permRestartHint': '許可後、有効にするためにアプリを再起動してください。',
   'settings.computerUse.flagClipboard': 'クリップボードアクセス',
   'settings.computerUse.flagSystemKeys': 'システムキーの組み合わせ',
+  // Computer Use — ネイティブ (cu-helper) Codex スタイルのページ
+  'settings.computerUse.controlTitle': 'コンピューター操作',
+  'settings.computerUse.controlSubtitle': 'Claude がコンピューター上の他のアプリケーションをどのように使用するかを管理します',
+  'settings.computerUse.sectionControl': '操作',
+  'settings.computerUse.anyApp': '任意のアプリ',
+  'settings.computerUse.anyAppDesc': 'Claude がコンピューター上のアプリを操作できるようにします',
+  'settings.computerUse.osPermTitle': 'システム権限',
+  'settings.computerUse.osPermHint': '有効にすると、Claude がコンピューター上でクリック、入力、スクリーンショットを実行できます。実際のマウスは占有されません。',
+  'settings.computerUse.openCard': '認証カードを再度開く',
+  'settings.computerUse.openingCard': '認証カードを開いています…',
+  'settings.computerUse.openCardFailed': '認証カードを開けませんでした。しばらくしてからもう一度お試しください。',
+  'settings.computerUse.permNeeded': '認証が必要',
+  'settings.computerUse.permChecking': '確認中…',
+  'settings.computerUse.allowedAppsTitle': '常に許可するアプリ',
+  'settings.computerUse.allowedAppsDesc': 'これらのアプリは認証済みで、Claude は毎回確認することなく直接操作できます。',
+  'settings.computerUse.allowedAppsEmpty': '常に許可するアプリはまだありません。「アプリを追加」をクリックして最初のアプリを認証してください。',
+  'settings.computerUse.addApp': 'アプリを追加',
+  'settings.computerUse.addAppTitle': '認証するアプリを選択',
+  'settings.computerUse.removeApp': '削除',
+  'settings.computerUse.appsPickerEmpty': '追加できるアプリが見つかりません。',
+  'settings.computerUse.appsPickerLoading': 'インストール済みアプリを読み込んでいます…',
 
   // Settings > General - Storage
   'settings.general.modeSwitchTitle': 'データ保存場所を切り替えますか？',

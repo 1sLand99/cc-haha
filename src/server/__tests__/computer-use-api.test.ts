@@ -353,3 +353,110 @@ describe('runPipInstallWithFallback', () => {
     ).toEqual({ ok: false, message: 'Unsupported platform' })
   })
 })
+
+describe('computeRuntimeGrantAdditions', () => {
+  it('maps new grants to AuthorizedApp entries with ISO authorizedAt', async () => {
+    const { computeRuntimeGrantAdditions } = await importComputerUseApi()
+    const grantedAt = Date.UTC(2026, 0, 2, 3, 4, 5)
+
+    const additions = computeRuntimeGrantAdditions(
+      [],
+      [{ bundleId: 'com.apple.Notes', displayName: 'Notes', grantedAt }],
+    )
+
+    expect(additions).toEqual([
+      {
+        bundleId: 'com.apple.Notes',
+        displayName: 'Notes',
+        authorizedAt: new Date(grantedAt).toISOString(),
+      },
+    ])
+  })
+
+  it('dedupes grants already present in the stored config by bundleId', async () => {
+    const { computeRuntimeGrantAdditions } = await importComputerUseApi()
+
+    const additions = computeRuntimeGrantAdditions(
+      [{ bundleId: 'com.apple.Notes', displayName: 'Notes' }],
+      [
+        { bundleId: 'com.apple.Notes', displayName: 'Notes', grantedAt: 1 },
+        { bundleId: 'com.apple.Safari', displayName: 'Safari', grantedAt: 2 },
+      ],
+    )
+
+    expect(additions.map((a) => a.bundleId)).toEqual(['com.apple.Safari'])
+  })
+
+  it('dedupes duplicate bundleIds within the same grant batch', async () => {
+    const { computeRuntimeGrantAdditions } = await importComputerUseApi()
+
+    const additions = computeRuntimeGrantAdditions(
+      [],
+      [
+        { bundleId: 'com.apple.Safari', displayName: 'Safari', grantedAt: 1 },
+        { bundleId: 'com.apple.Safari', displayName: 'Safari (dup)', grantedAt: 2 },
+      ],
+    )
+
+    expect(additions).toHaveLength(1)
+    expect(additions[0]).toMatchObject({ bundleId: 'com.apple.Safari', displayName: 'Safari' })
+  })
+
+  it('skips grants without a bundleId and returns [] for an empty batch', async () => {
+    const { computeRuntimeGrantAdditions } = await importComputerUseApi()
+
+    expect(computeRuntimeGrantAdditions([], [])).toEqual([])
+    expect(
+      computeRuntimeGrantAdditions([], [
+        { bundleId: '', displayName: 'No Bundle', grantedAt: 1 },
+      ]),
+    ).toEqual([])
+  })
+})
+
+describe('parsePermissionSnapshot', () => {
+  it('extracts accessibility / screenRecording from the cu-helper envelope', async () => {
+    const { parsePermissionSnapshot } = await importComputerUseApi()
+
+    expect(
+      parsePermissionSnapshot('{"ok":true,"result":{"accessibility":true,"screenRecording":false}}'),
+    ).toEqual({ accessibility: true, screenRecording: false })
+  })
+
+  it('scans backwards past incidental log lines to the last JSON envelope', async () => {
+    const { parsePermissionSnapshot } = await importComputerUseApi()
+
+    const stdout = [
+      'some startup chatter',
+      '{"ok":true,"result":{"accessibility":false,"screenRecording":false}}',
+      '{"ok":true,"result":{"accessibility":true,"screenRecording":true}}',
+    ].join('\n')
+
+    expect(parsePermissionSnapshot(stdout)).toEqual({
+      accessibility: true,
+      screenRecording: true,
+    })
+  })
+
+  it('returns nulls when no parseable envelope is present', async () => {
+    const { parsePermissionSnapshot } = await importComputerUseApi()
+
+    expect(parsePermissionSnapshot('not json at all')).toEqual({
+      accessibility: null,
+      screenRecording: null,
+    })
+    expect(parsePermissionSnapshot('')).toEqual({
+      accessibility: null,
+      screenRecording: null,
+    })
+  })
+
+  it('coerces a missing field in the result to null', async () => {
+    const { parsePermissionSnapshot } = await importComputerUseApi()
+
+    expect(parsePermissionSnapshot('{"ok":true,"result":{"accessibility":true}}')).toEqual({
+      accessibility: true,
+      screenRecording: null,
+    })
+  })
+})

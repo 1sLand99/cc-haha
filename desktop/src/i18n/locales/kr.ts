@@ -3,6 +3,7 @@ import type { TranslationKey } from './en'
 export const kr: Record<TranslationKey, string> = {
   // ─── Common ──────────────────────────────────────
   'common.cancel': '취소',
+  'common.close': '닫기',
   'common.save': '저장',
   'common.delete': '삭제',
   'common.add': '추가',
@@ -1377,6 +1378,27 @@ export const kr: Record<TranslationKey, string> = {
   'settings.computerUse.permRestartHint': '허용한 후 적용하려면 앱을 다시 시작하세요.',
   'settings.computerUse.flagClipboard': '클립보드 액세스',
   'settings.computerUse.flagSystemKeys': '시스템 키 조합',
+  // Computer Use — 네이티브 (cu-helper) Codex 스타일 페이지
+  'settings.computerUse.controlTitle': '컴퓨터 제어',
+  'settings.computerUse.controlSubtitle': 'Claude가 컴퓨터의 다른 애플리케이션을 어떻게 사용하는지 관리합니다',
+  'settings.computerUse.sectionControl': '제어',
+  'settings.computerUse.anyApp': '모든 앱',
+  'settings.computerUse.anyAppDesc': 'Claude가 컴퓨터의 앱을 제어하도록 허용합니다',
+  'settings.computerUse.osPermTitle': '시스템 권한',
+  'settings.computerUse.osPermHint': '활성화하면 Claude가 컴퓨터에서 클릭, 입력, 스크린샷을 할 수 있습니다. 실제 마우스는 점유되지 않습니다.',
+  'settings.computerUse.openCard': '인증 카드 다시 열기',
+  'settings.computerUse.openingCard': '인증 카드를 여는 중…',
+  'settings.computerUse.openCardFailed': '인증 카드를 열 수 없습니다. 나중에 다시 시도하세요.',
+  'settings.computerUse.permNeeded': '인증 필요',
+  'settings.computerUse.permChecking': '확인 중…',
+  'settings.computerUse.allowedAppsTitle': '항상 허용된 앱',
+  'settings.computerUse.allowedAppsDesc': '이 앱들은 인증되어 Claude가 매번 확인 없이 직접 제어할 수 있습니다.',
+  'settings.computerUse.allowedAppsEmpty': '항상 허용된 앱이 아직 없습니다. “앱 추가”를 클릭하여 첫 번째 앱을 인증하세요.',
+  'settings.computerUse.addApp': '앱 추가',
+  'settings.computerUse.addAppTitle': '인증할 앱 선택',
+  'settings.computerUse.removeApp': '제거',
+  'settings.computerUse.appsPickerEmpty': '추가할 수 있는 앱이 없습니다.',
+  'settings.computerUse.appsPickerLoading': '설치된 앱을 불러오는 중…',
 
   // Settings > General - Storage
   'settings.general.modeSwitchTitle': '데이터 저장 위치를 전환하시겠습니까?',

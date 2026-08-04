@@ -1,6 +1,7 @@
 export const en = {
   // ─── Common ──────────────────────────────────────
   'common.cancel': 'Cancel',
+  'common.close': 'Close',
   'common.save': 'Save',
   'common.delete': 'Delete',
   'common.add': 'Add',
@@ -1375,6 +1376,27 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'settings.computerUse.permRestartHint': 'After granting, restart the app for it to take effect.',
   'settings.computerUse.flagClipboard': 'Clipboard Access',
   'settings.computerUse.flagSystemKeys': 'System Key Combos',
+  // Computer Use — native (cu-helper) Codex-style page
+  'settings.computerUse.controlTitle': 'Computer Control',
+  'settings.computerUse.controlSubtitle': 'Manage how Claude uses other applications on your computer',
+  'settings.computerUse.sectionControl': 'Control',
+  'settings.computerUse.anyApp': 'Any App',
+  'settings.computerUse.anyAppDesc': 'Allow Claude to control apps on your computer',
+  'settings.computerUse.osPermTitle': 'System Permissions',
+  'settings.computerUse.osPermHint': 'Once enabled, Claude can click, type, and take screenshots on your computer. Your real mouse will not be taken over.',
+  'settings.computerUse.openCard': 'Reopen authorization card',
+  'settings.computerUse.openingCard': 'Opening authorization card…',
+  'settings.computerUse.openCardFailed': 'Could not open the authorization card. Please try again later.',
+  'settings.computerUse.permNeeded': 'Needs authorization',
+  'settings.computerUse.permChecking': 'Checking…',
+  'settings.computerUse.allowedAppsTitle': 'Always-Allowed Apps',
+  'settings.computerUse.allowedAppsDesc': 'These apps are authorized — Claude can control them directly without confirming each time.',
+  'settings.computerUse.allowedAppsEmpty': 'No always-allowed apps yet. Click “Add App” to authorize your first one.',
+  'settings.computerUse.addApp': 'Add App',
+  'settings.computerUse.addAppTitle': 'Choose an app to authorize',
+  'settings.computerUse.removeApp': 'Remove',
+  'settings.computerUse.appsPickerEmpty': 'No apps available to add.',
+  'settings.computerUse.appsPickerLoading': 'Loading installed apps…',
 
   // Settings > General - Storage
   'settings.general.modeSwitchTitle': 'Switch data storage location?',

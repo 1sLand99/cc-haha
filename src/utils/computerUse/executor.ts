@@ -7,13 +7,19 @@
  */
 
 import type {
+  AppStateResult,
+  AppTarget,
+  CodexComputerEngine,
+  CodexMouseButton,
   ComputerExecutor,
   DisplayGeometry,
   FrontmostApp,
   InstalledApp,
+  ResolvedAppTarget,
   ResolvePrepareCaptureResult,
   RunningApp,
   ScreenshotResult,
+  SetValueResult,
 } from '../../vendor/computer-use-mcp/index.js'
 import { API_RESIZE_PARAMS, targetImageSize } from '../../vendor/computer-use-mcp/index.js'
 import { sleep } from '../sleep.js'
@@ -22,7 +28,9 @@ import {
   getCliComputerUseCapabilities,
   isComputerUseSupportedPlatform,
 } from './common.js'
-import { callPythonHelper } from './pythonBridge.js'
+// Platform-routed helper: macOS → native cu-helper (no cursor steal),
+// Windows → Python helper. Aliased so the 20+ call sites below stay unchanged.
+import { callHelper as callPythonHelper } from './helperBridge.js'
 
 const SCREENSHOT_JPEG_QUALITY = 0.75
 const MOVE_SETTLE_MS = 50
@@ -78,6 +86,208 @@ async function writeClipboard(text: string): Promise<void> {
   await writeClipboardViaPbcopy(text)
 }
 
+// ----------------------------------------------------------------------------
+// Codex semantic engine (blueprint §4–§7)
+//
+// Maps the ten `CodexComputerEngine` methods onto `callHelper(<cmd>, payload)`
+// round-trips against the native daemon's `CommandRouter`. Each command's
+// payload key names mirror what `CommandRouter` decodes (see CommandRouter.swift):
+//   - target: `pid` | `bundleId` | `app`  (resolveTargetPid precedence)
+//   - click:  `index` (string|int), `x`, `y`, `click_count`, `button`
+//   - set_value: `index`, `value`        → returns `{before, after}`
+//   - perform_secondary_action: `index`, `action`
+//   - scroll: `index?`, `x?`, `y?`, `direction`, `pages`
+//   - drag:   `from{x,y}`, `to{x,y}`, `button`
+//   - press_key: `key` ; type_text: `text`
+//
+// `list_apps` is the one shape that needs reconciliation: the daemon returns a
+// structured `AppRef[]` (`{bundleId, displayName}`), but the MCP tool face
+// (toolCalls.handleListApps) expects the rendered text block. We format it here.
+// ----------------------------------------------------------------------------
+
+/** A daemon `list_apps` row — `Apps.AppRef` (Geometry.swift). */
+interface DaemonAppRef {
+  bundleId: string
+  displayName: string
+}
+
+/**
+ * Spread an `AppTarget` into the daemon payload keys `CommandRouter` resolves
+ * (pid → bundleId → app → frontmost). Exactly one of the three is set by the
+ * tool face; an empty target ({}) means "frontmost", so we send no keys.
+ */
+function appTargetPayload(target: AppTarget): Record<string, unknown> {
+  // The lifetime identity rides along with whichever selector is used: the
+  // daemon re-checks it before acting, so a pid that was recycled since we
+  // resolved it is rejected rather than acted on.
+  const identity =
+    target.expectedProcessIdentity === undefined
+      ? {}
+      : { expectedProcessIdentity: target.expectedProcessIdentity }
+  if (target.pid !== undefined) return { pid: target.pid, ...identity }
+  if (target.bundleId !== undefined) return { bundleId: target.bundleId, ...identity }
+  if (target.app !== undefined) return { app: target.app, ...identity }
+  return { ...identity }
+}
+
+/**
+ * Render the daemon's `AppRef[]` into the `list_apps` text block the tool face
+ * surfaces verbatim. The native daemon does not track last-used / use-count, so
+ * we emit the stable subset: "<Display Name> — <bundle.id>", most-recent-first
+ * ordering being whatever the daemon returned (it sorts by display name).
+ */
+function formatAppList(apps: readonly DaemonAppRef[]): string {
+  if (apps.length === 0) {
+    return 'No running applications are available to control.'
+  }
+  return apps
+    .map(a => `${a.displayName} — ${a.bundleId}`)
+    .join('\n')
+}
+
+/**
+ * The Codex semantic engine over the native daemon.
+ *
+ * Exported so the tool face can be exercised against a mocked `helperBridge`
+ * without standing up a full executor (which refuses to construct on
+ * unsupported platforms).
+ */
+export function createCodexEngine(): CodexComputerEngine {
+  return {
+    async listApps(): Promise<string> {
+      const apps = await callPythonHelper<DaemonAppRef[]>('list_apps', {})
+      return formatAppList(apps)
+    },
+
+    async resolveTarget(target: AppTarget): Promise<ResolvedAppTarget> {
+      // Sent as-is: the daemon owns the selector→process mapping, and it must
+      // never launch anything to satisfy a match.
+      return callPythonHelper<ResolvedAppTarget>('resolve_app_target', target)
+    },
+
+    async getAppState(
+      target: AppTarget,
+      opts?: { disableDiff?: boolean },
+    ): Promise<AppStateResult> {
+      return callPythonHelper<AppStateResult>('get_app_state', {
+        ...appTargetPayload(target),
+        ...(opts?.disableDiff === undefined ? {} : { disableDiff: opts.disableDiff }),
+      })
+    },
+
+    async click(args: {
+      target: AppTarget
+      index?: string
+      x?: number
+      y?: number
+      clickCount?: number
+      button?: CodexMouseButton
+    }): Promise<void> {
+      await callPythonHelper('click', {
+        ...appTargetPayload(args.target),
+        index: args.index,
+        x: args.x,
+        y: args.y,
+        click_count: args.clickCount,
+        button: args.button,
+      })
+    },
+
+    async setValue(args: {
+      target: AppTarget
+      index: string
+      value: string
+    }): Promise<SetValueResult> {
+      return callPythonHelper<SetValueResult>('set_value', {
+        ...appTargetPayload(args.target),
+        index: args.index,
+        value: args.value,
+      })
+    },
+
+    async selectText(args: {
+      target: AppTarget
+      index: string
+      text: string
+      prefix?: string
+      suffix?: string
+      selection?: 'text' | 'cursor_before' | 'cursor_after'
+    }): Promise<void> {
+      await callPythonHelper('select_text', {
+        ...appTargetPayload(args.target),
+        index: args.index,
+        text: args.text,
+        prefix: args.prefix,
+        suffix: args.suffix,
+        selection: args.selection,
+      })
+    },
+
+    async performSecondaryAction(args: {
+      target: AppTarget
+      index: string
+      action: string
+    }): Promise<void> {
+      await callPythonHelper('perform_secondary_action', {
+        ...appTargetPayload(args.target),
+        index: args.index,
+        action: args.action,
+      })
+    },
+
+    async scroll(args: {
+      target: AppTarget
+      index?: string
+      x?: number
+      y?: number
+      direction: 'up' | 'down' | 'left' | 'right'
+      pages?: number
+    }): Promise<void> {
+      await callPythonHelper('scroll', {
+        ...appTargetPayload(args.target),
+        index: args.index,
+        x: args.x,
+        y: args.y,
+        direction: args.direction,
+        pages: args.pages,
+      })
+    },
+
+    async drag(args: {
+      target: AppTarget
+      from: { x: number; y: number }
+      to: { x: number; y: number }
+      button?: CodexMouseButton
+    }): Promise<void> {
+      await callPythonHelper('drag', {
+        ...appTargetPayload(args.target),
+        from: args.from,
+        to: args.to,
+        button: args.button,
+      })
+    },
+
+    async pressKey(args: {
+      target: AppTarget
+      key: string
+      systemKeyCombos: boolean
+    }): Promise<void> {
+      await callPythonHelper('press_key', {
+        ...appTargetPayload(args.target),
+        key: args.key,
+        systemKeyCombos: args.systemKeyCombos,
+      })
+    },
+
+    async typeText(args: { target: AppTarget; text: string }): Promise<void> {
+      await callPythonHelper('type_text', {
+        ...appTargetPayload(args.target),
+        text: args.text,
+      })
+    },
+  }
+}
+
 async function typeViaClipboard(text: string): Promise<void> {
   let saved: string | undefined
   try {
@@ -123,6 +333,12 @@ export function createCliExecutor(_opts: {
       ...getCliComputerUseCapabilities(),
       hostBundleId,
     },
+
+    // The Codex semantic AX engine is the native macOS path (cu-helper daemon →
+    // AXTree/AXAction). On Windows the Python helper has no get_app_state/click-
+    // by-index surface, so we leave `engine` undefined there and the ten Codex
+    // tools cleanly return `feature_unavailable` (toolCalls.ts gate 5).
+    engine: process.platform === 'darwin' ? createCodexEngine() : undefined,
 
     async prepareForAction(_allowlistBundleIds, _displayId): Promise<string[]> {
       return callPythonHelper('prepare_for_action', {})

@@ -12,8 +12,9 @@ import { access, readFile, mkdir, writeFile, rm } from 'fs/promises'
 import { createHash } from 'crypto'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import type { CuPermissionRequest } from '../../vendor/computer-use-mcp/types.js'
+import type { AppGrant, CuPermissionRequest } from '../../vendor/computer-use-mcp/types.js'
 import { computerUseApprovalService } from '../services/computerUseApprovalService.js'
+import { listInstalledMacApps } from './macInstalledApps.js'
 import { detectPythonRuntime, isPythonVersionAtLeast } from './computer-use-python.js'
 import { buildPipInstallAttempts } from '../../utils/computerUse/pipInstall.js'
 import {
@@ -24,6 +25,11 @@ import {
   normalizePythonPath,
   saveStoredComputerUseConfig,
 } from '../../utils/computerUse/preauthorizedConfig.js'
+import {
+  callCuHelper,
+  resolveCuHelperBinary,
+} from '../../utils/computerUse/cuHelperBridge.js'
+import { ensureInstalledHelper } from '../../utils/computerUse/cuHelperInstall.js'
 // Embed helper scripts at compile time so they're available in bundled mode
 // @ts-ignore — Bun text import
 import MAC_HELPER_CONTENT from '../../../runtime/mac_helper.py' with { type: 'text' }
@@ -163,6 +169,14 @@ async function ensureRuntimeFiles(): Promise<void> {
 type EnvStatus = {
   platform: string
   supported: boolean
+  /**
+   * Native cu-helper engine availability. `available` is true only on macOS
+   * AND when the Swift `cu-helper` binary resolves. The desktop UI branches on
+   * this to drop the Python setup flow in favor of the native permission card.
+   */
+  cuHelper: {
+    available: boolean
+  }
   python: {
     installed: boolean
     version: string | null
@@ -182,6 +196,138 @@ type EnvStatus = {
     accessibility: boolean | null
     screenRecording: boolean | null
   }
+}
+
+/**
+ * macOS permission snapshot result shape from `cu-helper check_permissions`
+ * (Permissions.snapshot()). Booleans only — `screenRecording` may be reported
+ * as a boolean by the snapshot; we coerce anything missing to null.
+ */
+type CuHelperPermissions = {
+  accessibility?: boolean
+  screenRecording?: boolean
+}
+
+/**
+ * True only on macOS AND when the native `cu-helper` binary resolves. Mirrors
+ * isCuHelperAvailable() from cuHelperBridge, re-derived here because the server
+ * is a separate process; resolveCuHelperBinary() applies the identical path
+ * logic and is safe to call from any process.
+ */
+function isCuHelperAvailableForServer(): boolean {
+  return process.platform === 'darwin' && resolveCuHelperBinary() !== null
+}
+
+/**
+ * Read macOS Accessibility / Screen Recording status via the native engine,
+ * with NO Python prerequisite. Returns nulls on any failure so the caller can
+ * surface "unknown" instead of throwing.
+ */
+async function checkCuHelperPermissions(): Promise<{
+  accessibility: boolean | null
+  screenRecording: boolean | null
+}> {
+  try {
+    const result = await callCuHelper<CuHelperPermissions>('check_permissions')
+    return {
+      accessibility: result.accessibility ?? null,
+      screenRecording: result.screenRecording ?? null,
+    }
+  } catch {
+    return { accessibility: null, screenRecording: null }
+  }
+}
+
+/**
+ * List installed macOS apps via the native engine (no Python prerequisite).
+ * Mirrors the Python list_installed_apps shape but drops any icon field so the
+ * picker payload stays small. Returns [] on failure.
+ */
+async function listInstalledAppsViaCuHelper(): Promise<
+  { bundleId: string; displayName: string; path: string }[]
+> {
+  try {
+    const apps = await callCuHelper<
+      { bundleId: string; displayName: string; path: string }[]
+    >('list_installed_apps')
+    if (!Array.isArray(apps)) return []
+    return apps.map((app) => ({
+      bundleId: app.bundleId,
+      displayName: app.displayName,
+      path: app.path,
+    }))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Spawn the native permission card (`cu-helper request-access`) and await the
+ * single stdout snapshot line the card prints when the user closes it
+ * (PermissionCard.swift windowWillClose -> `{ok:true,result:{accessibility,
+ * screenRecording}}`). Unlike the fire-and-forget nativePermissionCard.ts in
+ * the CLI process, the settings page WANTS the post-close snapshot, so we read
+ * stdout here. Resolves only when the window closes (hence the caller uses a
+ * long client timeout). Returns nulls off macOS / when the binary is missing.
+ */
+async function openNativePermissionCard(): Promise<{
+  ok: boolean
+  reason?: string
+  accessibility: boolean | null
+  screenRecording: boolean | null
+}> {
+  if (process.platform !== 'darwin') {
+    return { ok: false, reason: 'unsupported', accessibility: null, screenRecording: null }
+  }
+  // Launch from the standalone-installed helper so the card drags the same `.app`
+  // the daemon runs from (its own Screen Recording subject). See cuHelperInstall.ts.
+  const bin = ensureInstalledHelper()?.binary ?? resolveCuHelperBinary()
+  if (!bin) {
+    return { ok: false, reason: 'helper-missing', accessibility: null, screenRecording: null }
+  }
+
+  // `request-access` is its OWN process mode (not a `--payload` CLI command):
+  // it owns an NSApplication run loop and blocks until the card window closes,
+  // then prints exactly one `{ok,result}` line. runCommand spawns + reads
+  // stdout + awaits exit, which is exactly what we need.
+  const result = await runCommand(bin, ['request-access'])
+
+  // Parse the final snapshot line. The card always exits 0; tolerate trailing
+  // log chatter by scanning lines for the last valid JSON envelope.
+  const perms = parsePermissionSnapshot(result.stdout)
+  return { ok: true, accessibility: perms.accessibility, screenRecording: perms.screenRecording }
+}
+
+/**
+ * Extract `{accessibility, screenRecording}` from the cu-helper card's stdout.
+ * Scans from the LAST line backwards for a parseable `{ok,result}` envelope so
+ * any incidental earlier output is ignored. Returns nulls when none is found.
+ */
+export function parsePermissionSnapshot(stdout: string): {
+  accessibility: boolean | null
+  screenRecording: boolean | null
+} {
+  const lines = stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const parsed = JSON.parse(lines[i]) as {
+        ok?: boolean
+        result?: CuHelperPermissions
+      }
+      if (parsed.ok && parsed.result) {
+        return {
+          accessibility: parsed.result.accessibility ?? null,
+          screenRecording: parsed.result.screenRecording ?? null,
+        }
+      }
+    } catch {
+      // not JSON — keep scanning earlier lines
+    }
+  }
+  return { accessibility: null, screenRecording: null }
 }
 
 async function checkStatus(): Promise<EnvStatus> {
@@ -228,12 +374,23 @@ async function checkStatus(): Promise<EnvStatus> {
     }
   }
 
-  // Check macOS permissions without triggering a system prompt. The helper
-  // uses preflight + visible-window metadata as a passive fallback because
-  // plain preflight can misreport child processes launched by the desktop app.
+  // Check OS permissions without triggering a system prompt.
   let accessibility: boolean | null = null
   let screenRecording: boolean | null = null
-  if (supported && effectiveVenvCreated && depsInstalled) {
+
+  // macOS-native path: when the Swift cu-helper is present, report permissions
+  // straight from its `check_permissions` snapshot, with NO Python prerequisite.
+  // This is what lets the new settings UI show 辅助功能 / 屏幕录制 status even
+  // before (or entirely without) a Python venv.
+  const cuHelperAvailable = isCuHelperAvailableForServer()
+  if (cuHelperAvailable) {
+    const perms = await checkCuHelperPermissions()
+    accessibility = perms.accessibility
+    screenRecording = perms.screenRecording
+  } else if (supported && effectiveVenvCreated && depsInstalled) {
+    // Python path (Windows, or macOS without cu-helper). The helper uses
+    // preflight + visible-window metadata as a passive fallback because plain
+    // preflight can misreport child processes launched by the desktop app.
     try { await ensureRuntimeFiles() } catch {}
     const helperPath = getHelperPath()
     if (await pathExists(helperPath)) {
@@ -253,6 +410,7 @@ async function checkStatus(): Promise<EnvStatus> {
   return {
     platform,
     supported,
+    cuHelper: { available: cuHelperAvailable },
     python: {
       installed: pythonRuntime.installed,
       version: pythonRuntime.version,
@@ -521,6 +679,10 @@ async function loadConfig(): Promise<ComputerUseConfig> {
 
 async function saveConfig(config: ComputerUseConfig): Promise<void> {
   await saveStoredComputerUseConfig(config)
+  // Deliberately no cache invalidation here. This runs in the SERVER process;
+  // the `computer-use` skill's gate and the memoized command list both live in
+  // the CLI child process, so clearing anything from here reaches nothing.
+  // The CLI picks the change up by watching this file — see skillChangeDetector.
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -631,7 +793,71 @@ export async function openComputerUseSettings(
     : { ok: false, message: result.stderr || `Failed to run ${command.cmd}` }
 }
 
+/**
+ * Compute the AuthorizedApp entries to APPEND for a batch of runtime grants,
+ * deduped by bundleId against the already-stored apps. Pure (no I/O) so it can
+ * be unit-tested directly.
+ *
+ * Mapping: AppGrant.grantedAt (epoch ms) -> AuthorizedApp.authorizedAt (ISO
+ * string). NOTE the stored schema (StoredAuthorizedApp) carries no `tier`, so
+ * a runtime read/click-tier grant is reloaded as full-tier next session — a
+ * pre-existing limitation of the stored schema, out of scope here.
+ */
+export function computeRuntimeGrantAdditions(
+  existingApps: AuthorizedApp[],
+  granted: AppGrant[],
+): AuthorizedApp[] {
+  const existing = new Set(existingApps.map((app) => app.bundleId))
+  const additions: AuthorizedApp[] = []
+  // Dedupe against BOTH the stored set and within this batch, so a request
+  // listing the same bundleId twice can't double-append.
+  const seen = new Set(existing)
+  for (const grant of granted) {
+    if (!grant.bundleId || seen.has(grant.bundleId)) continue
+    seen.add(grant.bundleId)
+    additions.push({
+      bundleId: grant.bundleId,
+      displayName: grant.displayName,
+      authorizedAt: new Date(grant.grantedAt).toISOString(),
+    })
+  }
+  return additions
+}
+
+/**
+ * Append newly-granted apps (from a runtime request_access approval) to the
+ * persisted config. Best-effort: any failure is swallowed so it can never tank
+ * the grant response the model is awaiting. Idempotent across repeat calls in a
+ * long session because additions are deduped by bundleId.
+ */
+async function persistRuntimeGrants(granted: AppGrant[]): Promise<void> {
+  if (!granted || granted.length === 0) return
+  try {
+    const config = await loadConfig()
+    const additions = computeRuntimeGrantAdditions(config.authorizedApps, granted)
+    if (additions.length === 0) return
+    config.authorizedApps = [...config.authorizedApps, ...additions]
+    await saveConfig(config)
+  } catch {
+    // best-effort — a config-write failure must NOT fail the grant response
+  }
+}
+
 async function listInstalledApps(): Promise<{ bundleId: string; displayName: string; path: string }[]> {
+  // macOS: enumerate the application roots directly. This needs neither a
+  // Python venv nor a running helper, so the app picker populates on a cold
+  // install — before Computer Use has ever been granted anything.
+  if (process.platform === 'darwin') {
+    const apps = await listInstalledMacApps()
+    if (apps.length > 0) return apps
+  }
+
+  // macOS fallback: ask the Swift cu-helper (still ahead of the Python path,
+  // which additionally gates on venv+helper being installed).
+  if (isCuHelperAvailableForServer()) {
+    return listInstalledAppsViaCuHelper()
+  }
+
   const helperPath = getHelperPath()
   const pythonBin = isWindows
     ? join(venvRoot, 'Scripts', 'python.exe')
@@ -782,6 +1008,19 @@ export async function handleComputerUseApi(
     return Response.json({ ok: true })
   }
 
+  // POST /api/computer-use/permission-card (alias: open-permission-card)
+  // macOS only: pop the native cu-helper authorization card and await its
+  // post-close snapshot. The promise resolves only when the user CLOSES the
+  // card, so the client uses a long timeout. No-op { ok:false, reason } off
+  // darwin or when the binary is missing.
+  if (
+    (action === 'permission-card' || action === 'open-permission-card') &&
+    req.method === 'POST'
+  ) {
+    const result = await openNativePermissionCard()
+    return Response.json(result)
+  }
+
   if (action === 'request-access' && req.method === 'POST') {
     try {
       const body = (await req.json()) as RequestAccessBody
@@ -796,6 +1035,16 @@ export async function handleComputerUseApi(
         body.sessionId,
         body.request,
       )
+
+      // Runtime auto-add: persist apps the user just granted into the stored
+      // config so they appear under "始终允许的应用" in Settings and survive
+      // into the next session. This is the SINGLE server-side runtime-grant
+      // ingress (no teach-access route exists), runs in the process that owns
+      // the config writer, and does NOT touch the per-session allowlist (that
+      // lives in the separate CLI subprocess). Best-effort: a config-write
+      // failure must never fail the grant the model is awaiting.
+      await persistRuntimeGrants(response.granted)
+
       return Response.json(response)
     } catch (error) {
       const message =
