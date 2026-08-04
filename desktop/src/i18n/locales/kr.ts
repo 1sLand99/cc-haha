@@ -692,6 +692,8 @@ export const kr: Record<TranslationKey, string> = {
   'settings.providers.notesPlaceholder': '선택 사항 메모...',
   'settings.providers.baseUrl': '기본 URL',
   'settings.providers.baseUrlPlaceholder': 'https://api.example.com/anthropic',
+  'settings.providers.baseUrlHelp': '기본 URL 입력 도움말',
+  'settings.providers.baseUrlTooltip': '/v1 앞까지의 엔드포인트를 입력하세요. 이후 경로는 자동으로 추가됩니다.',
   'settings.providers.endpointRegion': '서비스 지역',
   'settings.providers.regionChina': '중국 본토',
   'settings.providers.regionGlobal': '글로벌',

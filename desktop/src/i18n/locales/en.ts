@@ -690,6 +690,8 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'settings.providers.notesPlaceholder': 'Optional notes...',
   'settings.providers.baseUrl': 'Base URL',
   'settings.providers.baseUrlPlaceholder': 'https://api.example.com/anthropic',
+  'settings.providers.baseUrlHelp': 'Base URL help',
+  'settings.providers.baseUrlTooltip': 'Enter the endpoint before /v1. The remaining path is added automatically.',
   'settings.providers.endpointRegion': 'Service region',
   'settings.providers.regionChina': 'China mainland',
   'settings.providers.regionGlobal': 'Global',

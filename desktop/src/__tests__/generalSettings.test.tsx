@@ -1834,7 +1834,7 @@ describe('Settings > Providers tab', () => {
     expect(MOCK_DELETE_PROVIDER).toHaveBeenCalledWith('provider-1')
   })
 
-  it('keeps custom provider creation available when presets are unavailable', () => {
+  it('keeps custom provider creation available when presets are unavailable', async () => {
     providerStoreState.presets = []
 
     render(<Settings />)
@@ -1846,7 +1846,11 @@ describe('Settings > Providers tab', () => {
 
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByLabelText(/Name/i)).toHaveValue('Custom')
-    expect(within(dialog).getByLabelText(/Base URL/i)).toBeEnabled()
+    expect(within(dialog).getByRole('textbox', { name: /Base URL/i })).toBeEnabled()
+
+    const baseUrlInfo = within(dialog).getByRole('button', { name: 'Base URL help' })
+    fireEvent.mouseEnter(baseUrlInfo)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Enter the endpoint before /v1. The remaining path is added automatically.')
   })
 
   it.each(['resolves', 'rejects'] as const)(

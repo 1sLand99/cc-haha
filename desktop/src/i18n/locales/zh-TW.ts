@@ -691,6 +691,8 @@ export const zh: Record<TranslationKey, string> = {
   'settings.providers.notesPlaceholder': '可選備註...',
   'settings.providers.baseUrl': '介面地址',
   'settings.providers.baseUrlPlaceholder': 'https://api.example.com/anthropic',
+  'settings.providers.baseUrlHelp': '介面地址填寫說明',
+  'settings.providers.baseUrlTooltip': '請填寫 /v1 之前的介面地址，系統會自動補全後續路徑。',
   'settings.providers.endpointRegion': '服務區域',
   'settings.providers.regionChina': '中國大陸',
   'settings.providers.regionGlobal': '海外',

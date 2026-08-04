@@ -691,6 +691,8 @@ export const zh: Record<TranslationKey, string> = {
   'settings.providers.notesPlaceholder': '可选备注...',
   'settings.providers.baseUrl': '接口地址',
   'settings.providers.baseUrlPlaceholder': 'https://api.example.com/anthropic',
+  'settings.providers.baseUrlHelp': '接口地址填写说明',
+  'settings.providers.baseUrlTooltip': '请填写 /v1 之前的接口地址，系统会自动补全后续路径。',
   'settings.providers.endpointRegion': '服务区域',
   'settings.providers.regionChina': '中国大陆',
   'settings.providers.regionGlobal': '海外',

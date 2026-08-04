@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react'
+import { useState, useEffect, useMemo, useRef, useId, type CSSProperties, type ReactNode } from 'react'
 import QRCode from 'qrcode'
 import {
   closestCenter,
@@ -1255,6 +1255,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   const { createProvider, updateProvider, testConfig, fetchModels } = useProviderStore()
   const fetchSettings = useSettingsStore((s) => s.fetchAll)
   const t = useTranslation()
+  const baseUrlInputId = useId()
 
   const fallbackPreset = buildFallbackPreset(provider)
   const loadedPresets = presets.filter((p) => p.id !== 'official')
@@ -1839,7 +1840,25 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
           </div>
         )}
 
-        <Input label={t('settings.providers.baseUrl')} required value={baseUrl} onChange={(e) => handleBaseUrlChange(e.target.value)} placeholder={t('settings.providers.baseUrlPlaceholder')} className="font-mono text-[13px]" />
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-1">
+            <label htmlFor={baseUrlInputId} className="text-sm font-medium text-[var(--color-text-primary)]">
+              {t('settings.providers.baseUrl')}
+              <span className="ml-0.5 text-[var(--color-error)]">*</span>
+            </label>
+            <Tooltip content={t('settings.providers.baseUrlTooltip')} placement="bottom-start">
+              <IconButton
+                icon="info"
+                label={t('settings.providers.baseUrlHelp')}
+                showTooltip={false}
+                size="2xs"
+                tone="muted"
+                shape="circle"
+              />
+            </Tooltip>
+          </div>
+          <Input id={baseUrlInputId} required value={baseUrl} onChange={(e) => handleBaseUrlChange(e.target.value)} placeholder={t('settings.providers.baseUrlPlaceholder')} className="font-mono text-[13px]" />
+        </div>
 
         {/* API Format */}
         {(isCustom || mode === 'edit') ? (

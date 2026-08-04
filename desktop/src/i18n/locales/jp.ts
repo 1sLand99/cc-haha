@@ -692,6 +692,8 @@ export const jp: Record<TranslationKey, string> = {
   'settings.providers.notesPlaceholder': '任意のメモ...',
   'settings.providers.baseUrl': 'ベース URL',
   'settings.providers.baseUrlPlaceholder': 'https://api.example.com/anthropic',
+  'settings.providers.baseUrlHelp': 'ベース URL の入力説明',
+  'settings.providers.baseUrlTooltip': '/v1 より前のエンドポイントを入力してください。後続のパスは自動的に補完されます。',
   'settings.providers.endpointRegion': 'サービス地域',
   'settings.providers.regionChina': '中国本土',
   'settings.providers.regionGlobal': 'グローバル',
