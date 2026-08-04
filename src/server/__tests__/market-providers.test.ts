@@ -16,6 +16,7 @@ type FetchStub = (url: string) => { status?: number; body: string; contentType?:
 
 let requestedUrls: string[] = []
 let originalNonEssentialTrafficEnv: string | undefined
+let originalDisableProvidersEnv: string | undefined
 const originalFetch = globalThis.fetch
 
 function stubFetch(handler: FetchStub) {
@@ -35,6 +36,7 @@ beforeEach(() => {
   requestedUrls = []
   resetMarketCacheForTests()
   resetClawhubOwnerCacheForTests()
+  originalDisableProvidersEnv = process.env.HAHA_MARKET_DISABLE_PROVIDERS
   delete process.env.HAHA_MARKET_DISABLE_PROVIDERS
   // These tests stub upstreams and must not inherit the developer shell's
   // essential-traffic env (which would block the market providers entirely).
@@ -44,7 +46,12 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch
-  delete process.env.HAHA_MARKET_DISABLE_PROVIDERS
+  // Restore rather than delete: these are the developer's variables, not ours.
+  if (originalDisableProvidersEnv === undefined) {
+    delete process.env.HAHA_MARKET_DISABLE_PROVIDERS
+  } else {
+    process.env.HAHA_MARKET_DISABLE_PROVIDERS = originalDisableProvidersEnv
+  }
   if (originalNonEssentialTrafficEnv === undefined) {
     delete process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
   } else {
