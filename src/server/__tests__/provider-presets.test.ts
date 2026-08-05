@@ -69,6 +69,7 @@ describe('provider presets API', () => {
     const minimax = PROVIDER_PRESETS.find((preset) => preset.id === 'minimax')
     const shengsuanyun = PROVIDER_PRESETS.find((preset) => preset.id === 'shengsuanyun')
     const teamorouter = PROVIDER_PRESETS.find((preset) => preset.id === 'teamorouter')
+    const atlascloud = PROVIDER_PRESETS.find((preset) => preset.id === 'atlascloud')
     const xuanshuapi = PROVIDER_PRESETS.find((preset) => preset.id === 'xuanshuapi')
     const fennoai = PROVIDER_PRESETS.find((preset) => preset.id === 'fennoai')
     const qiniuai = PROVIDER_PRESETS.find((preset) => preset.id === 'qiniuai')
@@ -132,6 +133,15 @@ describe('provider presets API', () => {
     expect(teamorouter?.defaultModels.sonnet).toBe('claude-sonnet-5')
     expect(teamorouter?.defaultModels.opus).toBe('claude-opus-4-8')
     expect(teamorouter?.modelContextWindows?.['claude-opus-4-8']).toBe(1000000)
+    expect(atlascloud?.baseUrl).toBe('https://api.atlascloud.ai')
+    expect(atlascloud?.apiFormat).toBe('openai_chat')
+    expect(atlascloud?.authStrategy).toBe('api_key')
+    expect(atlascloud?.defaultModels).toEqual({
+      main: 'deepseek-ai/deepseek-v4-pro',
+      haiku: 'deepseek-ai/deepseek-v4-pro',
+      sonnet: 'deepseek-ai/deepseek-v4-pro',
+      opus: 'deepseek-ai/deepseek-v4-pro',
+    })
     expect(xuanshuapi?.baseUrl).toBe('https://www.xuanshuapi.com')
     expect(xuanshuapi?.apiFormat).toBe('anthropic')
     expect(xuanshuapi?.authStrategy).toBe('auth_token')
