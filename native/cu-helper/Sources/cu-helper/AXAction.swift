@@ -271,7 +271,41 @@ public enum AXAction {
         let type: CGEventType
         let point: CGPoint
         let button: MouseButton
+        /// Which click of a multi-click this event belongs to: 1, 2, 3… for the
+        /// press/release pairs, and **0 for movement**.
+        ///
+        /// Zero is not a detail. A move or drag event is not part of a click,
+        /// and AppKit says so by reporting `clickCount == 0` for it. We used to
+        /// hand the leading move the same number as the clicks that followed
+        /// (the repeat count, so 1 for a single click and 2 for a double). The
+        /// reference implementation posts no move at all for a click, and gives
+        /// its drag-movement events `clickCount = 0`.
         let clickState: Int
+        /// Ties a press to the release that ends it: both halves of one click
+        /// carry the same number, movement carries its own. See
+        /// `WindowTargetedEvent.makeMouseEvent`.
+        let eventNumber: Int
+    }
+
+    /// The `clickState` an event of `type` gets when it belongs to click number
+    /// `index` of a gesture. Movement is never part of a click, so it reports 0
+    /// no matter which click it precedes or connects.
+    ///
+    /// Extracted so the rule is stated once and can be tested: every burst
+    /// builder used to spell it out per event, and the leading move of a click
+    /// was spelled with the repeat count instead of zero.
+    static func mouseClickState(for type: CGEventType, click index: Int) -> Int {
+        isMovement(type) ? 0 : index
+    }
+
+    /// Movement events: pointer transport, no button transition.
+    static func isMovement(_ type: CGEventType) -> Bool {
+        switch type {
+        case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            return true
+        default:
+            return false
+        }
     }
 
     private struct KeyBurstSpec {
@@ -481,24 +515,32 @@ public enum AXAction {
 
         // Allocate the complete move + click sequence before posting its first
         // event, so allocation failure can never strand a down stroke.
+        // The move carries clickState 0: it delivers the pointer so hover-only
+        // affordances appear, but it is not part of the click that follows.
         var specs = [MouseBurstSpec(
             type: .mouseMoved,
             point: point,
             button: button,
-            clickState: reps
+            clickState: mouseClickState(for: .mouseMoved, click: 1),
+            eventNumber: WindowTargetedEvent.nextEventNumber()
         )]
         for i in 1...reps {
+            // One number per press/release pair: that pairing is what makes the
+            // two events read as a single click rather than two loose halves.
+            let clickNumber = WindowTargetedEvent.nextEventNumber()
             specs.append(MouseBurstSpec(
                 type: button.down,
                 point: point,
                 button: button,
-                clickState: i
+                clickState: mouseClickState(for: button.down, click: i),
+                eventNumber: clickNumber
             ))
             specs.append(MouseBurstSpec(
                 type: button.up,
                 point: point,
                 button: button,
-                clickState: i
+                clickState: mouseClickState(for: button.up, click: i),
+                eventNumber: clickNumber
             ))
         }
         let events: [CGEvent] = try EventBurst.allocateAll(
@@ -973,18 +1015,26 @@ public enum AXAction {
         // drag to a different window.
         let dragWindow = try requireBindableWindow(at: from, pid: pid)
 
+        // Movement carries clickState 0 (both the leading move and every
+        // dragged step); only the press and the release belong to the click.
+        // The press and release bracket one gesture and share a number; every
+        // movement in between shares a second one.
+        let gestureNumber = WindowTargetedEvent.nextEventNumber()
+        let motionNumber = WindowTargetedEvent.nextEventNumber()
         var specs = [
             MouseBurstSpec(
                 type: .mouseMoved,
                 point: from,
                 button: button,
-                clickState: 1
+                clickState: mouseClickState(for: .mouseMoved, click: 1),
+                eventNumber: motionNumber
             ),
             MouseBurstSpec(
                 type: button.down,
                 point: from,
                 button: button,
-                clickState: 1
+                clickState: mouseClickState(for: button.down, click: 1),
+                eventNumber: gestureNumber
             ),
         ]
         for step in 1...10 {
@@ -994,14 +1044,16 @@ public enum AXAction {
                 type: button.dragged,
                 point: p,
                 button: button,
-                clickState: 1
+                clickState: mouseClickState(for: button.dragged, click: 1),
+                eventNumber: motionNumber
             ))
         }
         specs.append(MouseBurstSpec(
             type: button.up,
             point: to,
             button: button,
-            clickState: 1
+            clickState: mouseClickState(for: button.up, click: 1),
+            eventNumber: gestureNumber
         ))
         let events: [CGEvent] = try EventBurst.allocateAll(
             specs: specs
@@ -1352,9 +1404,14 @@ public enum AXAction {
                nsType: nsType,
                point: spec.point,
                button: spec.button,
-               clickCount: max(1, spec.clickState),
+               // Passed through, NOT floored at 1. A `max(1, …)` here used to
+               // silently re-raise movement back to "click 1" after the caller
+               // had deliberately marked it 0. Press and release always supply
+               // 1…N themselves, so nothing needs a floor.
+               clickCount: spec.clickState,
                windowID: window.id,
-               windowBounds: window.bounds
+               windowBounds: window.bounds,
+               eventNumber: spec.eventNumber
            ) {
             bound.setIntegerValueField(
                 .mouseEventClickState,

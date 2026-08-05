@@ -186,7 +186,14 @@ enum WindowTargetedEvent {
         button: MouseButton,
         clickCount: Int,
         windowID: CGWindowID,
-        windowBounds: CGRect?
+        windowBounds: CGRect?,
+        // A press and the release that ends it must carry the SAME number:
+        // that pairing is how AppKit ties two events into one click. Taking a
+        // fresh number per event — which is what this did when the caller
+        // passed nothing — hands the target a press and a release it has no
+        // reason to associate. Callers building a gesture pass the shared
+        // number explicitly; a lone event may still take the next one.
+        eventNumber: Int? = nil
     ) -> CGEvent? {
         guard let nsEvent = NSEvent.mouseEvent(
             with: nsType,
@@ -197,7 +204,7 @@ enum WindowTargetedEvent {
             timestamp: 0,
             windowNumber: Int(windowID),
             context: nil,
-            eventNumber: nextEventNumber(),
+            eventNumber: eventNumber ?? nextEventNumber(),
             clickCount: clickCount,
             // Constant 1.0 for every mouse event, including the up — matching
             // the reference implementation. A 0-pressure release is not what a
