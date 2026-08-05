@@ -741,31 +741,43 @@ type Translate = ReturnType<typeof useTranslation>
  * failure — that is what the letter tile is for.
  */
 function AppIcon({ name, bundleId }: { name: string; bundleId?: string }) {
-  const [failed, setFailed] = useState(false)
+  const [iconUrl, setIconUrl] = useState<string | null>(null)
 
   useEffect(() => {
-    setFailed(false)
+    if (!bundleId) {
+      setIconUrl(null)
+      return
+    }
+    let cancelled = false
+    setIconUrl(null)
+    void computerUseApi.loadAppIcon(bundleId).then(url => {
+      if (!cancelled) setIconUrl(url)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [bundleId])
 
   const tileClass =
     'flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-container-high)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
 
-  if (bundleId && !failed) {
+  if (iconUrl) {
     return (
       <div className={tileClass}>
         <img
-          src={computerUseApi.getAppIconUrl(bundleId)}
+          src={iconUrl}
           alt=""
           aria-hidden="true"
           draggable={false}
-          loading="lazy"
-          onError={() => setFailed(true)}
           className="block h-7 w-7 object-contain"
         />
       </div>
     )
   }
 
+  // Shown both while the icon is in flight and when the bundle has none. The
+  // letter is a stable placeholder rather than a spinner, so a list of
+  // iconless utilities does not read as permanently loading.
   const letter = name.trim().charAt(0).toUpperCase() || '?'
   return (
     <div className={`${tileClass} text-[13px] font-semibold text-[var(--color-text-secondary)]`}>

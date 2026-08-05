@@ -14,7 +14,7 @@ const computerUseApiMock = vi.hoisted(() => ({
   runSetup: vi.fn(),
   openSettings: vi.fn(),
   openPermissionCard: vi.fn(),
-  getAppIconUrl: vi.fn(),
+  loadAppIcon: vi.fn(),
 }))
 
 vi.mock('../api/computerUse', () => ({
@@ -75,10 +75,8 @@ describe('ComputerUseSettings', () => {
     computerUseApiMock.runSetup.mockReset()
     computerUseApiMock.openSettings.mockReset()
     computerUseApiMock.openPermissionCard.mockReset()
-    computerUseApiMock.getAppIconUrl.mockReset()
-    computerUseApiMock.getAppIconUrl.mockImplementation(
-      (bundleId: string) => `/api/computer-use/app-icon?bundleId=${bundleId}`,
-    )
+    computerUseApiMock.loadAppIcon.mockReset()
+    computerUseApiMock.loadAppIcon.mockResolvedValue(null)
     Reflect.deleteProperty(window, 'desktopHost')
 
     computerUseApiMock.getStatus.mockResolvedValue(readyStatus)
@@ -336,43 +334,51 @@ describe('ComputerUseSettings', () => {
         ],
       }
 
-      it('points each row at the icon endpoint for its bundle id', async () => {
+      it('renders the icon it loaded for the row bundle id', async () => {
         computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
         computerUseApiMock.getAuthorizedApps.mockResolvedValue(authorizedConfig)
+        computerUseApiMock.loadAppIcon.mockResolvedValue('blob:icon-preview')
 
         render(<ComputerUseSettings />)
         await screen.findByText('Preview')
 
-        const image = document.querySelector('img[src*="app-icon"]')
-        expect(image).not.toBeNull()
-        expect(image?.getAttribute('src')).toContain('com.example.Preview')
-        // The picker is a long scroller; eager loading would fetch and
-        // rasterise every row that is nowhere near the viewport.
-        expect(image?.getAttribute('loading')).toBe('lazy')
-        expect(computerUseApiMock.getAppIconUrl).toHaveBeenCalledWith(
-          'com.example.Preview',
-        )
+        await waitFor(() => {
+          expect(document.querySelector('img[src="blob:icon-preview"]')).not.toBeNull()
+        })
+        expect(computerUseApiMock.loadAppIcon).toHaveBeenCalledWith('com.example.Preview')
+        // The letter tile is the fallback, so it must be gone once the icon
+        // arrives — otherwise both would render.
+        expect(screen.queryByText('P')).toBeNull()
       })
 
-      it('falls back to the letter tile when the icon fails to load', async () => {
+      it('keeps the letter tile when the bundle has no icon', async () => {
         computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
         computerUseApiMock.getAuthorizedApps.mockResolvedValue(authorizedConfig)
+        // null is the ordinary "this bundle ships no icon" answer.
+        computerUseApiMock.loadAppIcon.mockResolvedValue(null)
 
         render(<ComputerUseSettings />)
         await screen.findByText('Preview')
 
-        const image = document.querySelector('img[src*="app-icon"]')
-        expect(image).not.toBeNull()
-        // A bundle with no icon 404s, which reaches the DOM as an error event.
-        expect(screen.queryByText('P')).toBeNull()
+        await waitFor(() => expect(screen.getByText('P')).toBeInTheDocument())
+        expect(document.querySelector('img')).toBeNull()
+      })
 
-        await act(async () => {
-          fireEvent.error(image as Element)
-          await Promise.resolve()
+      it('never points an img straight at the endpoint', async () => {
+        // The packaged renderer is a file:// page, so a cross-origin <img> to
+        // /api/... is refused by the server and silently shows nothing. Icons
+        // must arrive as blob URLs through the authenticated channel.
+        computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
+        computerUseApiMock.getAuthorizedApps.mockResolvedValue(authorizedConfig)
+        computerUseApiMock.loadAppIcon.mockResolvedValue('blob:icon-preview')
+
+        render(<ComputerUseSettings />)
+        await screen.findByText('Preview')
+        await waitFor(() => {
+          expect(document.querySelector('img[src="blob:icon-preview"]')).not.toBeNull()
         })
 
-        expect(document.querySelector('img[src*="app-icon"]')).toBeNull()
-        expect(screen.getByText('P')).toBeInTheDocument()
+        expect(document.querySelector('img[src*="/api/"]')).toBeNull()
       })
     })
 

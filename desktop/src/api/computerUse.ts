@@ -1,4 +1,75 @@
-import { api, getApiUrl } from './client'
+import { api, apiGetBlob } from './client'
+
+/**
+ * Opening the picker renders every installed application at once. Without a
+ * ceiling that is one request — and one `sips` subprocess on the server — per
+ * row, all at the same instant. Six keeps the list filling visibly while the
+ * machine stays responsive.
+ */
+const ICON_CONCURRENCY = 6
+let activeIconRequests = 0
+const iconWaiters: Array<() => void> = []
+
+async function withIconSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (activeIconRequests >= ICON_CONCURRENCY) {
+    await new Promise<void>(resolve => iconWaiters.push(resolve))
+  }
+  activeIconRequests += 1
+  try {
+    return await task()
+  } finally {
+    activeIconRequests -= 1
+    iconWaiters.shift()?.()
+  }
+}
+
+/** Resolved icons, including the misses — null means "this bundle has none". */
+const iconCache = new Map<string, string | null>()
+const iconRequests = new Map<string, Promise<string | null>>()
+
+function loadAppIconUrl(bundleId: string, size: number): Promise<string | null> {
+  const key = `${bundleId}:${size}`
+  const cached = iconCache.get(key)
+  // `undefined` is "never asked"; `null` is a cached miss and must not retry —
+  // a list that re-renders would otherwise re-request every iconless bundle.
+  if (cached !== undefined) return Promise.resolve(cached)
+
+  const pending = iconRequests.get(key)
+  if (pending) return pending
+
+  const request = withIconSlot(async () => {
+    try {
+      const blob = await apiGetBlob(
+        `/api/computer-use/app-icon?bundleId=${encodeURIComponent(bundleId)}&size=${size}`,
+      )
+      const url = URL.createObjectURL(blob)
+      iconCache.set(key, url)
+      return url
+    } catch {
+      iconCache.set(key, null)
+      return null
+    } finally {
+      iconRequests.delete(key)
+    }
+  })
+  iconRequests.set(key, request)
+  return request
+}
+
+/**
+ * Test hook: forget cached icons and release the concurrency gate.
+ *
+ * The gate counter and its waiter queue have to be reset too. They are module
+ * state that no production path ever rewinds, so a case that leaves a request
+ * in flight would otherwise hand the next case a permanently consumed slot —
+ * and after enough of them, a queue that never drains.
+ */
+export function __resetAppIconCacheForTests(): void {
+  iconCache.clear()
+  iconRequests.clear()
+  activeIconRequests = 0
+  iconWaiters.splice(0).forEach(resume => resume())
+}
 
 export type ComputerUseStatus = {
   platform: string
@@ -111,17 +182,23 @@ export const computerUseApi = {
     return api.post<{ ok: true }>('/api/computer-use/open-settings', { pane })
   },
   /**
-   * URL of an installed app's own icon, for use as an `<img src>`.
+   * A blob URL for an installed app's own icon, or null when it has none.
    *
-   * macOS-only, and 404s when the bundle declares no icon — callers render a
-   * letter placeholder on error rather than treating that as a failure. The
-   * parameter is a bundle id because the server resolves it against the
-   * installed-app list; there is deliberately no way to ask for a path.
+   * Not an `<img src>` pointing at the endpoint: the packaged renderer is a
+   * `file://` page, so that request is a cross-origin subresource the server
+   * refuses (see `apiGetBlob`). The bytes come through the authenticated
+   * channel instead and reach the DOM as a blob.
+   *
+   * macOS-only. A bundle with no icon resolves to null, which is an ordinary
+   * outcome — the caller shows a letter tile.
+   *
+   * Results are cached per (bundle, size) and blob URLs are intentionally not
+   * revoked: the cache hands out the same URL for the lifetime of the window,
+   * so the count is bounded by the number of installed applications rather
+   * than by how many times a list is rendered.
    */
-  getAppIconUrl(bundleId: string, size = 72) {
-    return getApiUrl(
-      `/api/computer-use/app-icon?bundleId=${encodeURIComponent(bundleId)}&size=${size}`,
-    )
+  loadAppIcon(bundleId: string, size = 72): Promise<string | null> {
+    return loadAppIconUrl(bundleId, size)
   },
   /**
    * macOS-only. Spawns the native `cu-helper request-access` permission card and
