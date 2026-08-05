@@ -72,6 +72,8 @@ export type RepositoryBranchInfo = {
   remoteRef?: string
   checkedOut: boolean
   worktreePath?: string
+  /** Commit the branch points at; absent on servers predating the field. */
+  commit?: string
 }
 export type RepositoryWorktreeInfo = {
   path: string
@@ -85,10 +87,23 @@ export type RepositoryContextResult = {
   repoName: string | null
   currentBranch: string | null
   defaultBranch: string | null
+  /** Commit `HEAD` resolves to; absent on servers predating the field. */
+  headCommit?: string | null
   dirty: boolean
   branches: RepositoryBranchInfo[]
   worktrees: RepositoryWorktreeInfo[]
   error?: string
+}
+export type CreateRepositoryBranchRequest = {
+  workDir: string
+  name: string
+  /** Branch the new one starts from, as named in `branches`. Defaults to HEAD. */
+  from?: string | null
+}
+export type CreateRepositoryBranchResult = {
+  branch: string
+  baseRef: string
+  context: RepositoryContextResult
 }
 export type SessionRewindResponse = {
   target: {
@@ -383,6 +398,10 @@ export const sessionsApi = {
   getRepositoryContext(workDir: string) {
     const query = new URLSearchParams({ workDir })
     return api.get<RepositoryContextResult>(`/api/sessions/repository-context?${query.toString()}`)
+  },
+
+  createRepositoryBranch(body: CreateRepositoryBranchRequest) {
+    return api.post<CreateRepositoryBranchResult>('/api/sessions/repository-branch', body)
   },
 
   getGitInfo(sessionId: string) {

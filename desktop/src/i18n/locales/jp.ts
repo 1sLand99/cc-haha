@@ -1643,6 +1643,16 @@ export const jp: Record<TranslationKey, string> = {
   'repoLaunch.dirtyWarningCompact': '未コミットの変更',
   'repoLaunch.checkedOutWarning': '選択したブランチは別の worktree で既にチェックアウトされています。直接起動は Git によってブロックされる場合があります。ディレクトリの変更を避けるには「独立した worktree」を使用してください。',
   'repoLaunch.checkedOutWarningCompact': 'ブランチは使用中',
+  'repoLaunch.newBranch': 'ブランチを作成…',
+  'repoLaunch.newBranchTitle': '新しいブランチ',
+  'repoLaunch.newBranchNameLabel': 'ブランチ名',
+  'repoLaunch.newBranchPlaceholder': 'feature/my-change',
+  'repoLaunch.newBranchFrom': '{branch} から作成',
+  'repoLaunch.newBranchSubmit': '作成',
+  'repoLaunch.newBranchErrorInvalid': 'Git はこのブランチ名を受け付けません。',
+  'repoLaunch.newBranchErrorExists': '同じ名前のブランチが既に存在します。',
+  'repoLaunch.newBranchErrorFailed': 'ブランチを作成できませんでした。',
+  'repoLaunch.newBranchErrorNoCommits': 'このリポジトリにはまだコミットがないため、分岐元がありません。',
 
   // ─── Chat Input ──────────────────────────────────────
   'chat.placeholder': '編集、デバッグ、説明を Claude に依頼...',

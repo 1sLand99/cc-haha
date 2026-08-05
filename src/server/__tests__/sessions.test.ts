@@ -9,6 +9,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { SessionService, sessionService } from '../services/sessionService.js'
 import {
+  createRepositoryBranch,
   getRepositoryContext,
   prepareSessionWorkspace,
 } from '../services/repositoryLaunchService.js'
@@ -2579,6 +2580,232 @@ describe('SessionService', () => {
     expect(context.branches.some((branch) => branch.name.startsWith('worktree-desktop-'))).toBe(false)
   })
 
+  // --------------------------------------------------------------------------
+  // createRepositoryBranch
+  // --------------------------------------------------------------------------
+
+  it('should create a branch at the selected base without moving HEAD', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+
+    const result = await createRepositoryBranch(workDir, {
+      name: 'feature/new-rail',
+      from: 'feature/rail',
+    })
+
+    expect(result.branch).toBe('feature/new-rail')
+    expect(result.baseRef).toBe('feature/rail')
+    expect(git(workDir, 'rev-parse', 'feature/new-rail'))
+      .toBe(git(workDir, 'rev-parse', 'feature/rail'))
+    // Picking a branch in the launch controls has never checked it out on the
+    // spot; the switch happens when the session starts, behind the dirty and
+    // already-checked-out guards. Creating the ref must not jump that queue.
+    expect(git(workDir, 'branch', '--show-current')).toBe('main\n')
+    expect(result.context.branches.some((branch) => (
+      branch.name === 'feature/new-rail' && branch.local && !branch.current
+    ))).toBe(true)
+  })
+
+  it('should start a branch at HEAD when no base is given', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+
+    const result = await createRepositoryBranch(workDir, { name: 'from-head' })
+
+    expect(result.baseRef).toBe('HEAD')
+    expect(git(workDir, 'rev-parse', 'from-head')).toBe(git(workDir, 'rev-parse', 'HEAD'))
+  })
+
+  it('should leave uncommitted work untouched when creating a branch', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+    await fs.writeFile(path.join(workDir, 'README.md'), 'main\nwork in progress\n')
+
+    await createRepositoryBranch(workDir, { name: 'wip', from: 'main' })
+
+    expect(git(workDir, 'status', '--porcelain')).toBe(' M README.md\n')
+    expect(await fs.readFile(path.join(workDir, 'README.md'), 'utf-8'))
+      .toBe('main\nwork in progress\n')
+  })
+
+  it('should report the commit each branch points at alongside HEAD', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+    await createRepositoryBranch(workDir, { name: 'same-commit', from: 'main' })
+
+    const context = await getRepositoryContext(workDir)
+    const head = git(workDir, 'rev-parse', 'HEAD').trim()
+
+    // Without these the UI cannot tell a switch that rewrites files from one
+    // that only moves the ref, and warns about uncommitted changes for both.
+    expect(context.headCommit).toBe(head)
+    expect(context.branches.find((branch) => branch.name === 'same-commit')?.commit).toBe(head)
+    expect(context.branches.find((branch) => branch.name === 'feature/rail')?.commit)
+      .toBe(git(workDir, 'rev-parse', 'feature/rail').trim())
+  })
+
+  it('should reject a branch name that already exists', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+
+    await expect(createRepositoryBranch(workDir, { name: 'feature/rail' }))
+      .rejects.toMatchObject({ code: 'REPOSITORY_BRANCH_EXISTS' })
+  })
+
+  it('should start a branch from a remote-only base at the remote commit', async () => {
+    const originDir = await createCleanGitRepo(tmpDir)
+    const workDir = path.join(tmpDir, `clone-${Date.now()}`)
+    git(tmpDir, 'clone', '--quiet', originDir, workDir)
+    git(workDir, 'config', 'user.email', 'clone@example.com')
+    git(workDir, 'config', 'user.name', 'Clone')
+
+    const result = await createRepositoryBranch(workDir, {
+      name: 'local-rail',
+      from: 'feature/rail',
+    })
+
+    // Resolving the base to its plain name instead of the tracking ref would
+    // silently branch off HEAD, which is a different commit.
+    expect(result.baseRef).toBe('origin/feature/rail')
+    expect(git(workDir, 'rev-parse', 'local-rail'))
+      .toBe(git(workDir, 'rev-parse', 'origin/feature/rail'))
+    expect(git(workDir, 'rev-parse', 'local-rail'))
+      .not.toBe(git(workDir, 'rev-parse', 'HEAD'))
+  })
+
+  it('should refuse to shadow a remote-only branch with a local one', async () => {
+    const originDir = await createCleanGitRepo(tmpDir)
+    const workDir = path.join(tmpDir, `shadow-${Date.now()}`)
+    git(tmpDir, 'clone', '--quiet', originDir, workDir)
+
+    // The picker lists `feature/rail` as a selectable remote branch, and picking
+    // it launches `switch --track -c feature/rail origin/feature/rail`. Creating
+    // a second local branch under that name off `main` wins the name and makes
+    // the launch silently run on main's content instead.
+    await expect(createRepositoryBranch(workDir, { name: 'feature/rail', from: 'main' }))
+      .rejects.toMatchObject({ code: 'REPOSITORY_BRANCH_EXISTS' })
+    expect(git(workDir, 'for-each-ref', '--format=%(refname:short)', 'refs/heads').trim())
+      .toBe('main')
+  })
+
+  it('should not create a hidden desktop worktree branch', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+
+    // `listBranches` filters this prefix out, so such a branch would exist on
+    // disk and appear in no context the app ever renders — unselectable, and
+    // undeletable from the app.
+    await expect(createRepositoryBranch(workDir, { name: 'worktree-desktop-sneaky' }))
+      .rejects.toMatchObject({ code: 'REPOSITORY_BRANCH_NAME_INVALID' })
+    expect(git(workDir, 'for-each-ref', '--format=%(refname:short)', 'refs/heads').trim().split('\n'))
+      .toEqual(['feature/rail', 'main'])
+  })
+
+  it('should reject a branch name past the length cap', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+
+    await expect(createRepositoryBranch(workDir, { name: 'a'.repeat(201) }))
+      .rejects.toMatchObject({ code: 'REPOSITORY_BRANCH_NAME_INVALID' })
+    await expect(createRepositoryBranch(workDir, { name: 'a'.repeat(200) }))
+      .resolves.toMatchObject({ branch: 'a'.repeat(200) })
+  })
+
+  it('should not let a flag-shaped base branch reach git as an option', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+    // `git branch` refuses to create this, but a ref written out of band is
+    // listed like any other and can be picked as the base.
+    git(workDir, 'update-ref', 'refs/heads/-x', 'feature/rail')
+
+    const context = await getRepositoryContext(workDir)
+    expect(context.branches.some((branch) => branch.name === '-x')).toBe(true)
+
+    const result = await createRepositoryBranch(workDir, { name: 'from-dash', from: '-x' })
+    expect(result.baseRef).toBe('-x')
+    expect(git(workDir, 'rev-parse', 'from-dash')).toBe(git(workDir, 'rev-parse', 'feature/rail'))
+  })
+
+  it('should map a case-folded collision onto the already-exists code', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+    const created = await createRepositoryBranch(workDir, { name: 'Main' })
+      .then(() => 'created' as const, (error: { code?: string }) => error.code)
+
+    // macOS and Windows fold the ref path, so git rejects this even though the
+    // branch list has no exact match. Case-sensitive filesystems create it
+    // happily, and both outcomes are correct — a raw English `fatal:` in a form
+    // translated into five locales is not.
+    expect(['created', 'REPOSITORY_BRANCH_EXISTS']).toContain(created)
+  })
+
+  it('should reject branch creation in a repository with no commits', async () => {
+    const workDir = path.join(tmpDir, `unborn-${Date.now()}`)
+    await fs.mkdir(workDir, { recursive: true })
+    git(workDir, 'init')
+    git(workDir, 'checkout', '-b', 'main')
+
+    // The picker renders normally here — `state: 'ok'`, one branch from the
+    // current-branch fallback — so "Create branch…" is offered and used to fail
+    // with untranslated `fatal: not a valid object name`.
+    const context = await getRepositoryContext(workDir)
+    expect(context.state).toBe('ok')
+    expect(context.headCommit).toBeNull()
+
+    await expect(createRepositoryBranch(workDir, { name: 'first', from: 'main' }))
+      .rejects.toMatchObject({ code: 'REPOSITORY_NO_COMMITS' })
+  })
+
+  it('should branch from the picked worktree HEAD, not the main checkout', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+    const linked = path.join(tmpDir, `linked-${Date.now()}`)
+    git(workDir, 'worktree', 'add', linked, 'feature/rail')
+
+    const context = await getRepositoryContext(linked)
+    const result = await createRepositoryBranch(linked, { name: 'from-linked' })
+
+    // `repoRoot` resolves a linked worktree back to the main checkout, where
+    // HEAD is a different commit than the one `headCommit` just reported.
+    expect(result.baseRef).toBe('HEAD')
+    expect(git(linked, 'rev-parse', 'from-linked')).toBe(`${context.headCommit}\n`)
+    expect(git(linked, 'rev-parse', 'from-linked'))
+      .not.toBe(git(workDir, 'rev-parse', 'HEAD'))
+  })
+
+  it.each([
+    ['a space', 'bad name'],
+    ['a double dot', 'bad..name'],
+    ['a trailing slash', 'bad/'],
+    ['a lock suffix', 'bad.lock'],
+    ['nothing at all', '   '],
+  ])('should reject a branch name with %s', async (_label, name) => {
+    const workDir = await createCleanGitRepo(tmpDir)
+
+    await expect(createRepositoryBranch(workDir, { name }))
+      .rejects.toMatchObject({ code: 'REPOSITORY_BRANCH_NAME_INVALID' })
+    expect(git(workDir, 'for-each-ref', '--format=%(refname:short)', 'refs/heads').trim().split('\n'))
+      .toEqual(['feature/rail', 'main'])
+  })
+
+  it('should not let a branch name starting with a dash reach git as a flag', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+
+    // `-D` / `--delete` would be read as "delete a branch" by any call that
+    // interpolates the name before `--`.
+    await expect(createRepositoryBranch(workDir, { name: '--delete' }))
+      .rejects.toMatchObject({ code: 'REPOSITORY_BRANCH_NAME_INVALID' })
+    await expect(createRepositoryBranch(workDir, { name: '-D' }))
+      .rejects.toMatchObject({ code: 'REPOSITORY_BRANCH_NAME_INVALID' })
+    expect(git(workDir, 'for-each-ref', '--format=%(refname:short)', 'refs/heads').trim().split('\n'))
+      .toEqual(['feature/rail', 'main'])
+  })
+
+  it('should reject a base branch the repository does not have', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+
+    await expect(createRepositoryBranch(workDir, { name: 'ok-name', from: 'missing/branch' }))
+      .rejects.toMatchObject({ code: 'REPOSITORY_BRANCH_NOT_FOUND' })
+  })
+
+  it('should reject branch creation outside a Git repository', async () => {
+    const workDir = path.join(tmpDir, `not-git-branch-${Date.now()}`)
+    await fs.mkdir(workDir, { recursive: true })
+
+    await expect(createRepositoryBranch(workDir, { name: 'ok-name' }))
+      .rejects.toMatchObject({ code: 'REPOSITORY_NOT_GIT' })
+  })
+
   it('should keep stale worktree records when their paths cannot be resolved', async () => {
     const workDir = await createCleanGitRepo(tmpDir)
     const staleWorktreeName = `stale-worktree-${Date.now()}`
@@ -3280,6 +3507,42 @@ describe('Sessions API', () => {
     expect(body.branches.some((branch) => branch.name === 'feature/rail' && branch.local)).toBe(true)
     const realWorkDir = await fs.realpath(workDir)
     expect(body.worktrees.some((worktree) => worktree.path === realWorkDir && worktree.current)).toBe(true)
+  })
+
+  it('POST /api/sessions/repository-branch should create a branch and return the refreshed context', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+    const res = await fetch(`${baseUrl}/api/sessions/repository-branch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workDir, name: 'feature/from-api', from: 'feature/rail' }),
+    })
+    expect(res.status).toBe(201)
+
+    const body = (await res.json()) as {
+      branch: string
+      baseRef: string
+      context: { state: string; branches: Array<{ name: string; local: boolean }> }
+    }
+    expect(body.branch).toBe('feature/from-api')
+    expect(body.baseRef).toBe('feature/rail')
+    expect(body.context.state).toBe('ok')
+    expect(body.context.branches.some((branch) => (
+      branch.name === 'feature/from-api' && branch.local
+    ))).toBe(true)
+    expect(git(workDir, 'branch', '--show-current')).toBe('main\n')
+  })
+
+  it('POST /api/sessions/repository-branch should surface a rejected name as a stable error code', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+    const res = await fetch(`${baseUrl}/api/sessions/repository-branch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workDir, name: 'feature/rail' }),
+    })
+    expect(res.status).toBe(400)
+    // The desktop form translates this code; a changed spelling silently
+    // downgrades it to the untranslated generic failure.
+    expect((await res.json()).error).toBe('REPOSITORY_BRANCH_EXISTS')
   })
 
   it('GET /api/sessions/recent-projects should keep pending repository launches on the source project', async () => {

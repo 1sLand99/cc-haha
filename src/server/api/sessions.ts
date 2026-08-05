@@ -26,6 +26,7 @@ import { closeSessionConnection, getSlashCommands } from '../ws/handler.js'
 import { listSkillSlashCommands, type SkillSlashCommand } from './skills.js'
 import { WorkspaceService } from '../services/workspaceService.js'
 import {
+  createRepositoryBranch,
   getRepositoryContext,
   type CreateSessionRepositoryOptions,
 } from '../services/repositoryLaunchService.js'
@@ -109,6 +110,17 @@ export async function handleSessionsApi(
     // Special collection route: /api/sessions/repository-context
     if (sessionId === 'repository-context' && req.method === 'GET') {
       return await getSessionRepositoryContext(url)
+    }
+
+    // Special collection route: /api/sessions/repository-branch
+    if (sessionId === 'repository-branch') {
+      if (req.method !== 'POST') {
+        return Response.json(
+          { error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed` },
+          { status: 405 }
+        )
+      }
+      return await createSessionRepositoryBranch(req)
     }
 
     // -----------------------------------------------------------------------
@@ -461,6 +473,34 @@ async function getSessionRepositoryContext(url: URL): Promise<Response> {
   registerFilesystemAccessRoot(context.workDir)
   registerFilesystemAccessRoot(context.repoRoot)
   return Response.json(context)
+}
+
+async function createSessionRepositoryBranch(req: Request): Promise<Response> {
+  let body: { workDir?: unknown; name?: unknown; from?: unknown }
+  try {
+    body = (await req.json()) as { workDir?: unknown; name?: unknown; from?: unknown }
+  } catch {
+    throw ApiError.badRequest('Invalid JSON body')
+  }
+
+  if (typeof body.workDir !== 'string' || !body.workDir) {
+    throw ApiError.badRequest('workDir is required')
+  }
+  if (typeof body.name !== 'string') {
+    throw ApiError.badRequest('name must be a string')
+  }
+  if (body.from !== undefined && body.from !== null && typeof body.from !== 'string') {
+    throw ApiError.badRequest('from must be a string')
+  }
+
+  // `createRepositoryBranch` goes through `getRepositoryContext`, which registers
+  // the requested path, its resolved form and the repo root itself — repeating
+  // them here would imply a guarantee this handler does not add.
+  const result = await createRepositoryBranch(body.workDir, {
+    name: body.name,
+    from: body.from ?? null,
+  })
+  return Response.json(result, { status: 201 })
 }
 
 async function requireSessionWorkspace(sessionId: string): Promise<string> {

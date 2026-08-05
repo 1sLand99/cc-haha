@@ -1642,6 +1642,16 @@ export const zh: Record<TranslationKey, string> = {
   'repoLaunch.dirtyWarningCompact': '未提交變更',
   'repoLaunch.checkedOutWarning': '選中的分支已在其他工作樹中檢出。直接啟動可能會被 Git 阻止；使用“獨立工作樹”可以避免切換當前目錄。',
   'repoLaunch.checkedOutWarningCompact': '分支已被檢出',
+  'repoLaunch.newBranch': '建立分支…',
+  'repoLaunch.newBranchTitle': '新增分支',
+  'repoLaunch.newBranchNameLabel': '分支名稱',
+  'repoLaunch.newBranchPlaceholder': 'feature/my-change',
+  'repoLaunch.newBranchFrom': '以 {branch} 為基礎建立',
+  'repoLaunch.newBranchSubmit': '建立',
+  'repoLaunch.newBranchErrorInvalid': 'Git 不接受這個分支名稱。',
+  'repoLaunch.newBranchErrorExists': '同名分支已存在。',
+  'repoLaunch.newBranchErrorFailed': '建立分支失敗。',
+  'repoLaunch.newBranchErrorNoCommits': '儲存庫還沒有任何提交，無法以它為基礎建立分支。',
 
   // ─── Chat Input ──────────────────────────────────────
   'chat.placeholder': '讓 Claude 編輯、除錯或解釋程式碼...',

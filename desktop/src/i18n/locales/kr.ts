@@ -1643,6 +1643,16 @@ export const kr: Record<TranslationKey, string> = {
   'repoLaunch.dirtyWarningCompact': '커밋되지 않은 변경',
   'repoLaunch.checkedOutWarning': '선택한 브랜치는 다른 worktree에서 이미 체크아웃되어 있습니다. Git에 의해 직접 시작이 차단될 수 있습니다. 디렉터리 변경을 피하려면 "독립 worktree"를 사용하세요.',
   'repoLaunch.checkedOutWarningCompact': '브랜치 사용 중',
+  'repoLaunch.newBranch': '브랜치 만들기…',
+  'repoLaunch.newBranchTitle': '새 브랜치',
+  'repoLaunch.newBranchNameLabel': '브랜치 이름',
+  'repoLaunch.newBranchPlaceholder': 'feature/my-change',
+  'repoLaunch.newBranchFrom': '{branch} 기준으로 생성',
+  'repoLaunch.newBranchSubmit': '생성',
+  'repoLaunch.newBranchErrorInvalid': 'Git이 이 브랜치 이름을 허용하지 않습니다.',
+  'repoLaunch.newBranchErrorExists': '같은 이름의 브랜치가 이미 있습니다.',
+  'repoLaunch.newBranchErrorFailed': '브랜치를 만들지 못했습니다.',
+  'repoLaunch.newBranchErrorNoCommits': '이 저장소에는 아직 커밋이 없어 기준으로 삼을 것이 없습니다.',
 
   // ─── Chat Input ──────────────────────────────────────
   'chat.placeholder': '편집, 디버그 또는 설명을 Claude에 요청...',

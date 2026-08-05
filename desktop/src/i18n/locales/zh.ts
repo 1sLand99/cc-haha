@@ -1642,6 +1642,16 @@ export const zh: Record<TranslationKey, string> = {
   'repoLaunch.dirtyWarningCompact': '未提交改动',
   'repoLaunch.checkedOutWarning': '选中的分支已在其他工作树中检出。直接启动可能会被 Git 阻止；使用“独立工作树”可以避免切换当前目录。',
   'repoLaunch.checkedOutWarningCompact': '分支已被检出',
+  'repoLaunch.newBranch': '创建分支…',
+  'repoLaunch.newBranchTitle': '新建分支',
+  'repoLaunch.newBranchNameLabel': '分支名',
+  'repoLaunch.newBranchPlaceholder': 'feature/my-change',
+  'repoLaunch.newBranchFrom': '基于 {branch} 创建',
+  'repoLaunch.newBranchSubmit': '创建',
+  'repoLaunch.newBranchErrorInvalid': 'Git 不接受这个分支名。',
+  'repoLaunch.newBranchErrorExists': '同名分支已存在。',
+  'repoLaunch.newBranchErrorFailed': '创建分支失败。',
+  'repoLaunch.newBranchErrorNoCommits': '仓库还没有任何提交，无法基于它创建分支。',
 
   // ─── Chat Input ──────────────────────────────────────
   'chat.placeholder': '让 Claude 编辑、调试或解释代码...',

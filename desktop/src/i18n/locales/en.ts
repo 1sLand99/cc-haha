@@ -1641,6 +1641,16 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'repoLaunch.dirtyWarningCompact': 'Uncommitted changes',
   'repoLaunch.checkedOutWarning': 'Selected branch is already checked out in another worktree. Direct launch may be blocked by Git; use "Isolated worktree" to avoid changing directories.',
   'repoLaunch.checkedOutWarningCompact': 'Branch already checked out',
+  'repoLaunch.newBranch': 'Create branch…',
+  'repoLaunch.newBranchTitle': 'New branch',
+  'repoLaunch.newBranchNameLabel': 'Branch name',
+  'repoLaunch.newBranchPlaceholder': 'feature/my-change',
+  'repoLaunch.newBranchFrom': 'Starts from {branch}',
+  'repoLaunch.newBranchSubmit': 'Create',
+  'repoLaunch.newBranchErrorInvalid': 'Git will not accept this branch name.',
+  'repoLaunch.newBranchErrorExists': 'A branch with this name already exists.',
+  'repoLaunch.newBranchErrorFailed': 'Could not create the branch.',
+  'repoLaunch.newBranchErrorNoCommits': 'This repository has no commits yet, so there is nothing to branch from.',
 
   // ─── Chat Input ──────────────────────────────────────
   'chat.placeholder': 'Ask Claude to edit, debug or explain...',
