@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, spyOn } from 'bun:test'
+import { diagnosticsService } from '../services/diagnosticsService.js'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -458,5 +459,148 @@ describe('parsePermissionSnapshot', () => {
       accessibility: true,
       screenRecording: null,
     })
+  })
+})
+
+/**
+ * The icon endpoint rasterises a file and returns its bytes, so what it accepts
+ * as input is a security property: it takes a bundle id and resolves the path
+ * itself, and there is deliberately no parameter that names a file.
+ */
+describe('app icon endpoint input', () => {
+  async function requestIcon(query: string): Promise<Response> {
+    const { handleComputerUseApi, __resetInstalledAppPathCacheForTests } =
+      await importComputerUseApi()
+    __resetInstalledAppPathCacheForTests()
+    const url = new URL(`http://localhost/api/computer-use/app-icon${query}`)
+    return handleComputerUseApi(new Request(url, { method: 'GET' }), url, [
+      'api',
+      'computer-use',
+      'app-icon',
+    ])
+  }
+
+  it('rejects a request that names no bundle', async () => {
+    const response = await requestIcon('')
+    // 404 off darwin, where the endpoint does not exist at all.
+    expect([400, 404]).toContain(response.status)
+  })
+
+  it('refuses paths dressed up as bundle ids', async () => {
+    // None of these resolve through the installed-app list, so none of them can
+    // reach the filesystem — the point is that a path is not a way in.
+    for (const attempt of [
+      '/Applications/Safari.app',
+      '../../../etc/passwd',
+      '/etc/passwd',
+      '/System/Library/CoreServices/Finder.app/Contents/Resources/Finder.icns',
+    ]) {
+      const response = await requestIcon(
+        `?bundleId=${encodeURIComponent(attempt)}`,
+      )
+      expect(response.status).toBe(404)
+      expect(response.headers.get('Content-Type')).not.toBe('image/png')
+    }
+  })
+
+  it('reports an unknown bundle id as missing rather than erroring', async () => {
+    const response = await requestIcon('?bundleId=com.example.not.installed')
+    expect(response.status).toBe(404)
+  })
+
+  it('enumerates applications once for a burst of concurrent lookups', async () => {
+    // Opening the picker fires one icon request per visible row at the same
+    // moment. A check-then-fill cache is still cold for all of them, so without
+    // in-flight sharing each row would walk every application root — hundreds
+    // of `plutil` spawns to answer one screen.
+    const { resolveInstalledAppPath, __resetInstalledAppPathCacheForTests } =
+      await importComputerUseApi()
+    __resetInstalledAppPathCacheForTests()
+
+    let scans = 0
+    const lister = async () => {
+      scans += 1
+      await new Promise(resolve => setTimeout(resolve, 5))
+      return [{ bundleId: 'com.example.App', path: '/Applications/App.app' }]
+    }
+
+    const results = await Promise.all(
+      Array.from({ length: 25 }, () =>
+        resolveInstalledAppPath('com.example.App', lister),
+      ),
+    )
+
+    expect(scans).toBe(1)
+    expect(new Set(results)).toEqual(new Set(['/Applications/App.app']))
+
+    // The warm cache serves later lookups without scanning again.
+    expect(await resolveInstalledAppPath('com.example.App', lister)).toBe(
+      '/Applications/App.app',
+    )
+    expect(scans).toBe(1)
+
+    __resetInstalledAppPathCacheForTests()
+  })
+})
+
+/**
+ * Nulls render as a permanent "checking…" in the settings page, so a probe that
+ * fails silently is indistinguishable from one still in flight. That happened:
+ * the shipped sidecar got re-signed, the helper answered `unauthorized_client`,
+ * and the only visible symptom was a spinner that never resolved.
+ */
+describe('checkCuHelperPermissions failure reporting', () => {
+  it('records an error-level diagnostic when the helper probe throws', async () => {
+    const { checkCuHelperPermissions } = await importComputerUseApi()
+    const recorded: Array<Record<string, unknown>> = []
+    const spy = spyOn(diagnosticsService, 'recordEvent').mockImplementation(
+      async (input: unknown) => {
+        recorded.push(input as Record<string, unknown>)
+        return { written: true } as never
+      },
+    )
+
+    try {
+      const result = await checkCuHelperPermissions(async () => {
+        throw new Error(
+          'This helper command requires the signed Claude Code Haha desktop app.',
+        )
+      })
+
+      // Still degrades to unknown — the caller contract does not change.
+      expect(result).toEqual({ accessibility: null, screenRecording: null })
+
+      expect(recorded).toHaveLength(1)
+      expect(recorded[0]).toMatchObject({
+        type: 'computer_use_permission_probe_failed',
+        // The user did nothing wrong and the check did not complete, which is
+        // this project's definition of error rather than warn.
+        severity: 'error',
+        summary:
+          'This helper command requires the signed Claude Code Haha desktop app.',
+      })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('stays silent on the success path', async () => {
+    const { checkCuHelperPermissions } = await importComputerUseApi()
+    const spy = spyOn(diagnosticsService, 'recordEvent').mockImplementation(
+      async () => ({ written: true }) as never,
+    )
+
+    try {
+      const result = await checkCuHelperPermissions(
+        async () =>
+          ({ accessibility: true, screenRecording: false }) as never,
+      )
+
+      expect(result).toEqual({ accessibility: true, screenRecording: false })
+      // A granted-or-denied answer is a completed check, not a diagnostic event.
+      expect(spy).not.toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

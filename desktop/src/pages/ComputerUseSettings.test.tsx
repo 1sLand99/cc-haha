@@ -14,6 +14,7 @@ const computerUseApiMock = vi.hoisted(() => ({
   runSetup: vi.fn(),
   openSettings: vi.fn(),
   openPermissionCard: vi.fn(),
+  getAppIconUrl: vi.fn(),
 }))
 
 vi.mock('../api/computerUse', () => ({
@@ -74,6 +75,10 @@ describe('ComputerUseSettings', () => {
     computerUseApiMock.runSetup.mockReset()
     computerUseApiMock.openSettings.mockReset()
     computerUseApiMock.openPermissionCard.mockReset()
+    computerUseApiMock.getAppIconUrl.mockReset()
+    computerUseApiMock.getAppIconUrl.mockImplementation(
+      (bundleId: string) => `/api/computer-use/app-icon?bundleId=${bundleId}`,
+    )
     Reflect.deleteProperty(window, 'desktopHost')
 
     computerUseApiMock.getStatus.mockResolvedValue(readyStatus)
@@ -312,6 +317,64 @@ describe('ComputerUseSettings', () => {
         screenRecording: true,
       },
     }
+
+    /**
+     * Rows show the application's own icon, served per bundle id. The letter
+     * tile is the fallback for bundles that ship no icon, so it must appear on
+     * image error and NOT before — a page that renders letters while perfectly
+     * good icons exist looks broken.
+     */
+    describe('app icons', () => {
+      const authorizedConfig = {
+        ...enabledConfig,
+        authorizedApps: [
+          {
+            bundleId: 'com.example.Preview',
+            displayName: 'Preview',
+            authorizedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      }
+
+      it('points each row at the icon endpoint for its bundle id', async () => {
+        computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
+        computerUseApiMock.getAuthorizedApps.mockResolvedValue(authorizedConfig)
+
+        render(<ComputerUseSettings />)
+        await screen.findByText('Preview')
+
+        const image = document.querySelector('img[src*="app-icon"]')
+        expect(image).not.toBeNull()
+        expect(image?.getAttribute('src')).toContain('com.example.Preview')
+        // The picker is a long scroller; eager loading would fetch and
+        // rasterise every row that is nowhere near the viewport.
+        expect(image?.getAttribute('loading')).toBe('lazy')
+        expect(computerUseApiMock.getAppIconUrl).toHaveBeenCalledWith(
+          'com.example.Preview',
+        )
+      })
+
+      it('falls back to the letter tile when the icon fails to load', async () => {
+        computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
+        computerUseApiMock.getAuthorizedApps.mockResolvedValue(authorizedConfig)
+
+        render(<ComputerUseSettings />)
+        await screen.findByText('Preview')
+
+        const image = document.querySelector('img[src*="app-icon"]')
+        expect(image).not.toBeNull()
+        // A bundle with no icon 404s, which reaches the DOM as an error event.
+        expect(screen.queryByText('P')).toBeNull()
+
+        await act(async () => {
+          fireEvent.error(image as Element)
+          await Promise.resolve()
+        })
+
+        expect(document.querySelector('img[src*="app-icon"]')).toBeNull()
+        expect(screen.getByText('P')).toBeInTheDocument()
+      })
+    })
 
     it('pops the native permission card when enabling Any App with missing permissions', async () => {
       computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)

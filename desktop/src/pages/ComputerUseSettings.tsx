@@ -727,11 +727,48 @@ export function ComputerUseSettings() {
 
 type Translate = ReturnType<typeof useTranslation>
 
-/** Letter placeholder for an app icon (the /apps payload carries no icon). */
-function AppIconPlaceholder({ name }: { name: string }) {
+/**
+ * An app's real icon, falling back to a letter tile.
+ *
+ * The `/apps` payload deliberately carries no icon bytes — it lists every
+ * installed application, and inlining hundreds of PNGs would bloat one
+ * response. Each row instead points an `<img>` at the icon endpoint, which
+ * reads the bundle's own `.icns` the same way Finder does. `loading="lazy"`
+ * matters here: the picker is a long scroller, and without it every row off
+ * screen would still cost a request and a rasterisation.
+ *
+ * A bundle with no icon 404s, which is an ordinary outcome rather than a
+ * failure — that is what the letter tile is for.
+ */
+function AppIcon({ name, bundleId }: { name: string; bundleId?: string }) {
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    setFailed(false)
+  }, [bundleId])
+
+  const tileClass =
+    'flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-container-high)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+
+  if (bundleId && !failed) {
+    return (
+      <div className={tileClass}>
+        <img
+          src={computerUseApi.getAppIconUrl(bundleId)}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          loading="lazy"
+          onError={() => setFailed(true)}
+          className="block h-7 w-7 object-contain"
+        />
+      </div>
+    )
+  }
+
   const letter = name.trim().charAt(0).toUpperCase() || '?'
   return (
-    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-container-high)] text-[13px] font-semibold text-[var(--color-text-secondary)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+    <div className={`${tileClass} text-[13px] font-semibold text-[var(--color-text-secondary)]`}>
       {letter}
     </div>
   )
@@ -970,7 +1007,7 @@ function NativeComputerUse({
                   key={app.bundleId}
                   className="group flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-[var(--color-surface-hover)]"
                 >
-                  <AppIconPlaceholder name={app.displayName} />
+                  <AppIcon name={app.displayName} bundleId={app.bundleId} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-[var(--color-text-primary)]">
                       {app.displayName}
@@ -1053,7 +1090,7 @@ function NativeComputerUse({
                     onClick={() => onAddApp(app)}
                     className="group flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
                   >
-                    <AppIconPlaceholder name={app.displayName} />
+                    <AppIcon name={app.displayName} bundleId={app.bundleId} />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium text-[var(--color-text-primary)]">
                         {app.displayName}

@@ -14,6 +14,8 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import type { AppGrant, CuPermissionRequest } from '../../vendor/computer-use-mcp/types.js'
 import { computerUseApprovalService } from '../services/computerUseApprovalService.js'
+import { diagnosticsService } from '../services/diagnosticsService.js'
+import { normalizeIconSize, readAppIconPng } from '../services/macAppIcon.js'
 import { listInstalledMacApps } from './macInstalledApps.js'
 import { detectPythonRuntime, isPythonVersionAtLeast } from './computer-use-python.js'
 import { buildPipInstallAttempts } from '../../utils/computerUse/pipInstall.js'
@@ -223,17 +225,44 @@ function isCuHelperAvailableForServer(): boolean {
  * with NO Python prerequisite. Returns nulls on any failure so the caller can
  * surface "unknown" instead of throwing.
  */
-async function checkCuHelperPermissions(): Promise<{
+export async function checkCuHelperPermissions(
+  // Injected the same way `callCuHelper` injects its own exec, so the failure
+  // branch below is reachable from a test without a real helper binary.
+  call: typeof callCuHelper = callCuHelper,
+): Promise<{
   accessibility: boolean | null
   screenRecording: boolean | null
 }> {
   try {
-    const result = await callCuHelper<CuHelperPermissions>('check_permissions')
+    const result = await call<CuHelperPermissions>('check_permissions')
     return {
       accessibility: result.accessibility ?? null,
       screenRecording: result.screenRecording ?? null,
     }
-  } catch {
+  } catch (error) {
+    // Nulls reach the settings page as a permanent "checking…" — the UI cannot
+    // tell "not probed yet" from "probe failed". Swallowing the reason silently
+    // once cost a long investigation to rediscover that the shipped sidecar had
+    // been re-signed and the helper was answering `unauthorized_client`.
+    //
+    // This is an error, not a warning: the caller only gets here when the helper
+    // binary IS present, so the user did nothing wrong and the check still did
+    // not complete. A helper that is merely un-granted answers with `false`.
+    void diagnosticsService.recordEvent({
+      type: 'computer_use_permission_probe_failed',
+      severity: 'error',
+      summary:
+        error instanceof Error
+          ? error.message
+          : 'cu-helper check_permissions failed',
+      details: {
+        command: 'check_permissions',
+        // `unauthorized_client` means the process chain failed attestation —
+        // usually a signing-identity mismatch somewhere in helper -> sidecar
+        // -> desktop, not a missing OS grant.
+        hint: 'permissions stay unknown until this call succeeds',
+      },
+    })
     return { accessibility: null, screenRecording: null }
   }
 }
@@ -878,13 +907,62 @@ async function listInstalledApps(): Promise<{ bundleId: string; displayName: str
   }
 }
 
+/**
+ * Map a bundle id to its installed bundle path.
+ *
+ * Enumerating applications walks several directory trees, and the picker asks
+ * for one icon per visible row, so the mapping is cached briefly. The window is
+ * short enough that an app installed while the picker is open still appears on
+ * the next open, and long enough that a scroll through hundreds of rows scans
+ * once rather than once per row.
+ */
+const APP_PATH_CACHE_TTL_MS = 30_000
+let appPathCache: { at: number; byBundleId: Map<string, string> } | null = null
+let appPathScan: Promise<Map<string, string>> | null = null
+
+export async function resolveInstalledAppPath(
+  bundleId: string,
+  // Injected so a test can count scans without walking the real disk.
+  lister: () => Promise<{ bundleId: string; path: string }[]> = listInstalledApps,
+): Promise<string | null> {
+  const cached = appPathCache
+  if (cached && Date.now() - cached.at <= APP_PATH_CACHE_TTL_MS) {
+    return cached.byBundleId.get(bundleId) ?? null
+  }
+
+  // Share one scan across concurrent callers. Opening the picker fires an icon
+  // request per visible row at once, and a plain check-then-fill cache is still
+  // cold for all of them — each would launch its own enumeration of every
+  // application root.
+  if (!appPathScan) {
+    appPathScan = (async () => {
+      try {
+        const apps = await lister()
+        const byBundleId = new Map(apps.map(app => [app.bundleId, app.path]))
+        appPathCache = { at: Date.now(), byBundleId }
+        return byBundleId
+      } finally {
+        appPathScan = null
+      }
+    })()
+  }
+
+  return (await appPathScan).get(bundleId) ?? null
+}
+
+/** Test hook: forget the bundle-id mapping between cases. */
+export function __resetInstalledAppPathCacheForTests(): void {
+  appPathCache = null
+  appPathScan = null
+}
+
 // ============================================================================
 // Route handler
 // ============================================================================
 
 export async function handleComputerUseApi(
   req: Request,
-  _url: URL,
+  url: URL,
   segments: string[],
 ): Promise<Response> {
   const action = segments[2]
@@ -903,6 +981,39 @@ export async function handleComputerUseApi(
   if (action === 'apps' && req.method === 'GET') {
     const apps = await listInstalledApps()
     return Response.json({ apps })
+  }
+
+  // GET /api/computer-use/app-icon?bundleId=…&size=… — the app's own icon.
+  //
+  // The parameter is a bundle id, never a path: the server resolves it against
+  // the installed-app enumeration, so a caller cannot name an arbitrary file
+  // and have it rasterised and returned.
+  if (action === 'app-icon' && req.method === 'GET') {
+    if (process.platform !== 'darwin') {
+      return new Response('Not found', { status: 404 })
+    }
+    const bundleId = url.searchParams.get('bundleId')?.trim()
+    if (!bundleId) {
+      return Response.json({ error: 'bundleId is required' }, { status: 400 })
+    }
+
+    const appPath = await resolveInstalledAppPath(bundleId)
+    if (!appPath) return new Response('Not found', { status: 404 })
+
+    const size = normalizeIconSize(url.searchParams.get('size'))
+    const png = await readAppIconPng(appPath, size)
+    // A bundle with no icon is an ordinary outcome, not a failure — the row
+    // renders its letter placeholder when this 404s.
+    if (!png) return new Response('Not found', { status: 404 })
+
+    return new Response(png as unknown as BodyInit, {
+      headers: {
+        'Content-Type': 'image/png',
+        // Icons change only when an app is reinstalled; the server keeps its
+        // own cache too, this just stops the picker refetching while scrolling.
+        'Cache-Control': 'private, max-age=3600',
+      },
+    })
   }
 
   // GET /api/computer-use/authorized-apps — current authorized app config

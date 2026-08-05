@@ -1,4 +1,4 @@
-import { api } from './client'
+import { api, getApiUrl } from './client'
 
 export type ComputerUseStatus = {
   platform: string
@@ -109,6 +109,19 @@ export const computerUseApi = {
   },
   openSettings(pane: 'Privacy_ScreenCapture' | 'Privacy_Accessibility') {
     return api.post<{ ok: true }>('/api/computer-use/open-settings', { pane })
+  },
+  /**
+   * URL of an installed app's own icon, for use as an `<img src>`.
+   *
+   * macOS-only, and 404s when the bundle declares no icon — callers render a
+   * letter placeholder on error rather than treating that as a failure. The
+   * parameter is a bundle id because the server resolves it against the
+   * installed-app list; there is deliberately no way to ask for a path.
+   */
+  getAppIconUrl(bundleId: string, size = 72) {
+    return getApiUrl(
+      `/api/computer-use/app-icon?bundleId=${encodeURIComponent(bundleId)}&size=${size}`,
+    )
   },
   /**
    * macOS-only. Spawns the native `cu-helper request-access` permission card and
