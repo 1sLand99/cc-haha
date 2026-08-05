@@ -14,7 +14,7 @@ import { unregisterEscHotkey } from './escHotkey.js'
 // background regardless; we just stop blocking on it.
 const UNHIDE_TIMEOUT_MS = 5000
 
-// The macOS cu-helper daemon's glow/cursor overlay must drop at every turn
+// The macOS cu-helper daemon's cursor overlay must drop at every turn
 // boundary. overlayHide() rides the daemon's 20s REQUEST_TIMEOUT_MS; on an
 // abort path a wedged daemon could otherwise stall lock release for that long,
 // so we cap the wait here (same non-blocking discipline as UNHIDE_TIMEOUT_MS).
@@ -52,7 +52,7 @@ export async function cleanupComputerUseAfterTurn(
   deps: { overlayHide?: () => Promise<void> } = {},
 ): Promise<void> {
   // Drop the daemon overlay FIRST — before the hidden-apps block and before the
-  // isLockHeldLocally early-return below — so the glow fades promptly even on a
+  // isLockHeldLocally early-return below — so the cursor drops promptly even on a
   // turn that hid no apps and whose lock-release short-circuits. overlayHide
   // self-guards on its module-level `overlayShown`, so calling it unconditionally
   // is a single bool check (a pure no-op) off-daemon / on Windows.

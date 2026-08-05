@@ -34,6 +34,23 @@ import AppKit
 import Foundation
 import QuartzCore
 
+// MARK: - Non-animated gradient layer
+
+/// A `CAGradientLayer` that refuses every implicit animation. Without this,
+/// each `setFrame:` and each gradient/color mutation triggers Core Animation's
+/// default 0.25s fade/move, which makes the cursor's orb smear and lag behind
+/// its own motion. Returning `nil` from `action(forKey:)` disables implicit
+/// actions for ALL keys on this layer.
+///
+/// Previously lived in `CaptureGlowOverlay.swift`; it moved here when the glow
+/// border was removed, since the virtual cursor is now its only consumer.
+final class NonAnimatedGradientLayer: CAGradientLayer {
+    override func action(forKey event: String) -> CAAction? {
+        // NSNull would also disable; nil is the documented "no action" answer.
+        return nil
+    }
+}
+
 @MainActor
 public final class VirtualCursor {
 

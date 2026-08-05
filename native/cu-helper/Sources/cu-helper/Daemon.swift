@@ -30,7 +30,7 @@ enum DaemonOverlayTargetResolver {
 // Long-lived, dual-purpose engine for the Computer Use helper.
 //
 // The daemon owns the single main-thread CFRunLoop (via `NSApplication.run()`)
-// that the animated virtual cursor and the glowing capture overlay require —
+// that the animated virtual cursor requires —
 // CADisplayLink / CABasicAnimation only tick while a live run loop is spinning,
 // and a per-command one-shot process dies before any animation can outlive a
 // single stdout write. It also holds the *virtual* cursor's logical position
@@ -50,8 +50,8 @@ enum DaemonOverlayTargetResolver {
 //               {"id":"<opaque>","ok":false,"error":{"message":"…","code":"…"}}\n
 //
 // Control verbs handled in-daemon (never reach CommandRouter):
-//   overlay_show -> cursor.show() + glow.show(over: frontmost) ; result true
-//   overlay_hide -> cursor.hide() + glow.hide(animated:true)   ; result true
+//   overlay_show -> cursor.show()  ; result true
+//   overlay_hide -> cursor.hide()  ; result true
 //   ping         -> result "pong"
 //   shutdown     -> result true, then NSApp.terminate(nil)
 // Every other cmd is forwarded to the shared CommandRouter — the exact same
@@ -61,13 +61,8 @@ enum DaemonOverlayTargetResolver {
 public final class Daemon {
     private let socketPath: String
     private let cursor: VirtualCursor
-    private let glow: CaptureGlowOverlay
     private let inputMonitor: PhysicalInputEpochMonitor
     private let router: CommandRouter
-
-    /// Accent color for the capture-glow border. A calm system-blue glow reads
-    /// as "an assistant is driving this" without being alarming.
-    private let glowAccent: NSColor = NSColor(srgbRed: 0.20, green: 0.55, blue: 1.0, alpha: 1.0)
 
     /// Listening socket fd (AF_UNIX SOCK_STREAM). -1 until `bindAndListen`.
     private var listenFD: Int32 = -1
@@ -88,7 +83,7 @@ public final class Daemon {
     private var didStartRunLoop = false
 
     /// True between `overlay_show` and `overlay_hide` (CU active this turn). The
-    /// glow re-aims at the actual injection target while this holds.
+    /// cursor re-aims at the actual injection target while this holds.
     private var overlayActive = false
     private var explicitOverlayTarget: ProvenProcessTarget?
 
@@ -109,7 +104,6 @@ public final class Daemon {
         self.inputMonitor = inputMonitor
         let cursor = VirtualCursor(headless: false)
         self.cursor = cursor
-        self.glow = CaptureGlowOverlay()
         self.router = CommandRouter(
             cursor: cursor,
             capabilities: Capabilities(headless: false),
@@ -212,7 +206,7 @@ public final class Daemon {
         unlink(socketPath)
         unlink(pidfilePath)
 
-        stopOverlaySession(animated: false)
+        stopOverlaySession()
 
         // Release any keys/buttons the daemon was holding, SYNCHRONOUSLY, so we
         // never strand a stuck modifier/button when teardown is followed
@@ -431,7 +425,7 @@ public final class Daemon {
     /// Park all session-owned state only when the generation gate says no
     /// request can still touch it.
     private func cleanupDisconnectedSession() {
-        stopOverlaySession(animated: true)
+        stopOverlaySession()
         Injection.releaseAllHeldSync()
         router.resetSessionState()
     }
@@ -508,7 +502,7 @@ public final class Daemon {
             return .bool(true)
 
         case "overlay_hide":
-            stopOverlaySession(animated: true)
+            stopOverlaySession()
             return .bool(true)
 
         case "ping":
@@ -527,25 +521,23 @@ public final class Daemon {
             return .bool(true)
 
         default:
-            // Re-aim the glow at the app the injection resolved as its target —
-            // even if the injection itself THREW (e.g. `not_trusted` before the
-            // user has granted Accessibility). `Injection.resolveTargetPid` sets
-            // `lastResolvedTargetPid` BEFORE `ensurePostable` can throw, so this
-            // `defer` re-aims the glow whether the command succeeded or failed.
+            // Re-aim the cursor at the app the injection resolved as its target
+            // — even if the injection itself THREW (e.g. `not_trusted` before
+            // the user has granted Accessibility). `Injection.resolveTargetPid`
+            // sets `lastResolvedTargetPid` BEFORE `ensurePostable` can throw, so
+            // this `defer` re-aims whether the command succeeded or failed.
             // Without it, a thrown injection skipped the re-aim and stranded the
-            // glow on the initial overlay_show frame forever (= "glow stuck,
-            // doesn't follow" when injection was failing on a missing grant).
-            defer { retargetGlowIfNeeded() }
+            // cursor on the initial overlay_show target forever.
+            defer { retargetCursorIfNeeded() }
             return try await router.handle(cmd: cmd, payload: payload)
         }
     }
 
     // MARK: Control-verb helpers
 
-    /// Reveals the virtual cursor and the glowing border over the app Claude is
-    /// driving. The target selector is `{pid}` / `{bundleId}` / `{app}` and is
-    /// resolved independently of the frontmost app. Optional `playSound`
-    /// defaults false.
+    /// Reveals the virtual cursor over the app Claude is driving. The target
+    /// selector is `{pid}` / `{bundleId}` / `{app}` and is resolved
+    /// independently of the frontmost app.
     private func showOverlay(payload: JSONValue) throws {
         overlayActive = true
         // A new explicit request must never inherit the previous command's
@@ -553,7 +545,6 @@ public final class Daemon {
         // running.
         Injection.clearResolvedTarget()
         explicitOverlayTarget = nil
-        let playSound = payload["playSound"]?.asBool ?? false
         do {
             explicitOverlayTarget = try DaemonOverlayTargetResolver.resolve(
                 payload: payload,
@@ -561,82 +552,45 @@ public final class Daemon {
                 currentIdentity: { AXTree.currentProcessIdentity(pid: $0) }
             )
         } catch {
-            // A failed retarget must not leave the prior app glowing while the
-            // caller sees an overlay_show error.
-            stopOverlaySession(animated: false)
+            // A failed retarget must not leave the cursor bound to the prior
+            // app while the caller sees an overlay_show error.
+            stopOverlaySession()
             throw error
         }
         // A named app may not be running until get_app_state launches it. Stay
         // hidden rather than framing frontmost; the command's defer below will
         // re-aim as soon as the real process is resolved.
-        if let target = explicitOverlayTarget {
-            cursor.setVisualTarget(target)
-            cursor.show()
-            showGlow(
-                over: .window(pid: target.pid),
-                resolvedTarget: target,
-                playSound: playSound
-            )
-        } else {
-            cursor.setVisualTarget(nil)
-            cursor.show()
-            glow.stopTrackingAndHide(animated: false)
-        }
+        cursor.setVisualTarget(explicitOverlayTarget)
+        cursor.show()
     }
 
-    /// Show (or re-aim, re-entrantly) the glow border over `target`.
-    private func showGlow(
-        over target: OverlayTarget,
-        resolvedTarget: ProvenProcessTarget,
-        playSound: Bool
-    ) {
-        glow.show(
-            over: target,
-            resolvedTarget: resolvedTarget,
-            accentColor: glowAccent,
-            cornerRadius: 12,
-            borderWidth: 3,
-            style: .breathingAxial,
-            playCaptureSound: playSound
-        )
-    }
-
-    /// If the most recent injection resolved a target pid different from the one
-    /// the glow currently tracks, re-show the glow over that app's window so the
-    /// border tracks what Claude is actually driving. Transient visibility is
-    /// deliberately irrelevant: a hidden background tracker remains active.
-    private func retargetGlowIfNeeded() {
+    /// Bind the cursor to whatever the most recent injection actually resolved,
+    /// so it animates over the app Claude is driving rather than the one named
+    /// when the turn began.
+    private func retargetCursorIfNeeded() {
         guard overlayActive else { return }
         guard let target = resolvedInjectionOverlayTarget() else {
             cursor.setVisualTarget(nil)
-            glow.stopTrackingAndHide(animated: false)
             return
         }
         explicitOverlayTarget = target
         cursor.setVisualTarget(target)
-        if glow.isTracking(pid: target.pid) { return }
-        showGlow(
-            over: .window(pid: target.pid),
-            resolvedTarget: target,
-            playSound: false
-        )
     }
 
-    private func stopOverlaySession(animated: Bool) {
+    private func stopOverlaySession() {
         overlayActive = false
         explicitOverlayTarget = nil
         Injection.clearResolvedTarget()
         cursor.hide()
-        glow.stopTrackingAndHide(animated: animated)
     }
 
-    /// The app the glow should frame: ONLY the app the last injection / get_app_state
-    /// actually resolved (`Injection.lastResolvedTargetPid`). We deliberately do NOT
-    /// fall back to the frontmost app — at turn start, before any real target is
-    /// resolved, the frontmost app is the HOST (Claude Code Haha), so the fallback
-    /// framed our own window and the cursor glided onto our own sidebar. nil here =>
-    /// show nothing until a real target lands; `retargetGlowIfNeeded()` re-aims the
-    /// glow the moment an injection / get_app_state resolves the true target.
+    /// The app the cursor should follow: ONLY the app the last injection /
+    /// get_app_state actually resolved (`Injection.lastResolvedTargetPid`). We
+    /// deliberately do NOT fall back to the frontmost app — at turn start,
+    /// before any real target is resolved, the frontmost app is the HOST
+    /// (Claude Code Haha), so the fallback made the cursor glide onto our own
+    /// sidebar. nil here => follow nothing until a real target lands;
+    /// `retargetCursorIfNeeded()` re-aims the moment one resolves.
     private func resolvedInjectionOverlayTarget() -> ProvenProcessTarget? {
         guard let target = Injection.lastResolvedTarget,
               target.pid != getpid(),
@@ -703,8 +657,8 @@ public final class Daemon {
     }
 
     /// When monitors are plugged/unplugged the overlay windows must re-anchor.
-    /// The cursor/glow own their own per-screen window sets; rebuilding them on
-    /// reconfiguration keeps them aligned with the new NSScreen layout.
+    /// The cursor owns its own per-screen window set; rebuilding it on
+    /// reconfiguration keeps it aligned with the new NSScreen layout.
     private func installScreenParameterObserver() {
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -713,9 +667,7 @@ public final class Daemon {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                // Re-warm cursor windows for the new screen set. The glow's own
-                // WindowFrameTracker re-resolves on this notification; we only
-                // need to keep the cursor's per-screen windows in sync.
+                // Re-warm cursor windows for the new screen set.
                 self.cursor.preload()
             }
         }

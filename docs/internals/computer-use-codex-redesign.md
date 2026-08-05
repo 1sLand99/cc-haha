@@ -180,7 +180,7 @@ All anchors confirmed: `CommandRouter.swift:234` awaits the blocking glide befor
 | **Python 兜底层** | `runtime/mac_helper.py`、`pythonBridge.ts`、`callPythonHelper` 别名 | macOS 死重 |
 | **CLI 一次性兜底**(评估后) | `helperBridge.ts` 回退链 | macOS 只留 daemon |
 | **base64-over-NDJSON 截图**(若换 XPC 则连 socket 一起;若留 socket 则至少改二进制帧) | `cuHelperDaemon.ts:287-305`、`Daemon.swift` | 去编解码税 |
-| **30Hz `CGWindowList` 轮询**(评估) | `WindowFrameTracker.swift` | glow 跟随改纯 AXObserver(`KeyWindowTracker` 已是事件驱动,轮询是 fallback,可砍) |
+| ~~**30Hz `CGWindowList` 轮询**(评估)~~ **已解决** | ~~`WindowFrameTracker.swift`~~(已删) | 该轮询只服务 glow 边框跟随。边框本身已移除(视觉反馈只保留虚拟光标),`WindowFrameTracker` 随之删除,轮询不复存在 |
 
 ### 3.4 确认策略复刻(SKILL.md 4 档,逐字)
 

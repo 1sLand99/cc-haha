@@ -40,14 +40,14 @@ function maybeRestartDaemonForGrant(err: unknown, restart: () => void): void {
   restart()
 }
 
-// Canonical selector last requested for the glow. The explicit action target,
+// Canonical selector last requested for the cursor. The explicit action target,
 // never the frontmost app, is the source of truth. overlayHide() makes
 // isOverlayShown() false at turn end, so the next turn re-shows even when this
 // key is unchanged.
 let lastOverlayTargetKey: string | undefined
 
 /**
- * Commands that visibly drive the screen. The daemon's animated cursor + glow
+ * Commands that visibly drive the screen. The daemon's animated cursor
  * overlay should be on-screen while these run, so we (idempotently) show the
  * overlay before dispatching one. Read-only commands (screenshot, displays,
  * apps, clipboard, permissions) don't trigger the overlay.
@@ -57,7 +57,7 @@ const INJECTION_COMMANDS = new Set([
   'click', 'type', 'key', 'hold_key', 'scroll', 'drag',
   'move_mouse', 'mouse_down', 'mouse_up',
   // Codex contract verbs: get_app_state is each turn's opener (best place to
-  // re-aim the glow at the target app), and the index-action verbs so a
+  // re-aim the cursor at the target app), and the index-action verbs so a
   // pure-fill turn (no coordinate click) still lights the overlay.
   'get_app_state', 'set_value', 'select_text', 'perform_secondary_action',
   'type_text', 'press_key',
@@ -91,7 +91,7 @@ function overlayTargetPayload(
  * Platform-routed Computer Use helper call.
  *
  *   - macOS  → authenticated native `cu-helper` DAEMON only (animated virtual
- *              cursor + glowing target overlay; no cursor steal). There is no
+ *              cursor overlay; no cursor steal). There is no
  *              stateless CLI fallback: the helper rejects direct one-shot
  *              screenshot, mutation, clipboard and app commands.
  *   - Windows → the Python helper (`win_helper.py`); the native engine is
@@ -129,7 +129,7 @@ export async function callHelper<T>(
     }
 
     if (INJECTION_COMMANDS.has(command)) {
-      // The action's explicit selector is the only valid glow target. This is
+      // The action's explicit selector is the only valid cursor target. This is
       // fire-and-forget so visual feedback stays off the mutation hot path;
       // cuHelperDaemon serializes show/hide and deduplicates the wire call.
       const overlayTarget = overlayTargetPayload(payload)

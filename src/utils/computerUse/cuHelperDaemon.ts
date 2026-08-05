@@ -11,7 +11,7 @@ import { getRuntimePaths } from './pythonBridge.js'
  * Long-lived `cu-helper daemon` client (macOS only).
  *
  * The daemon owns the main run loop that the animated virtual cursor and the
- * glowing capture overlay need, and holds the virtual cursor's position +
+ * animated virtual cursor needs, and holds the virtual cursor's position +
  * held-input state across commands. We spawn ONE daemon per CLI process, keep
  * an AF_UNIX socket open to it, and speak the NDJSON request/response protocol:
  *
@@ -20,7 +20,7 @@ import { getRuntimePaths } from './pythonBridge.js'
  *   response  : {"id":"<n>","ok":true,"result":...}\n | {"id":"<n>","ok":false,"error":{...}}\n
  *
  * Routing through the daemon (instead of one-shot CLI) is what makes execution
- * VISIBLE — the user sees the AI cursor glide and the target window glow while
+ * VISIBLE — the user sees the AI cursor glide over the target window while
  * their real mouse stays free.
  *
  * Resilience: pre-dispatch launch/connect failures are typed so helperBridge can
@@ -690,7 +690,7 @@ function scheduleOverlayReconciliation(): Promise<void> {
   return overlayReconcilePromise
 }
 
-/** Reveal/retarget the animated cursor + glow to an explicit app selector. */
+/** Reveal/retarget the animated cursor to an explicit app selector. */
 export function overlayShow(
   target: Record<string, unknown> = {},
 ): Promise<void> {

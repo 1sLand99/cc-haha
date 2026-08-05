@@ -40,7 +40,7 @@ describe('cleanupComputerUseAfterTurn — turn-end overlay hide', () => {
   test('calls the injected overlayHide exactly once on a no-hidden-apps, lock-not-held turn', async () => {
     // Proves overlayHide runs even when the turn hid nothing AND the lock-release
     // path early-returns (isLockHeldLocally() is false in this process) — i.e. it
-    // runs BEFORE that early return, so the glow never gets stuck.
+    // runs BEFORE that early return, so the cursor never gets stuck.
     let hidden = 0
     await cleanupComputerUseAfterTurn(makeCtx(), {
       overlayHide: async () => {
