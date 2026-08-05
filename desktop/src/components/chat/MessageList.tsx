@@ -2,7 +2,7 @@ import { useRef, useEffect, useMemo, memo, useState, useCallback, useDeferredVal
 import { createPortal } from 'react-dom'
 import { ArrowDown, BookMarked, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleStop, FileStack, LoaderCircle, MessageCircle, Settings, Target, XCircle } from 'lucide-react'
 import { ApiError } from '../../api/client'
-import { sessionsApi, type SessionTurnCheckpoint } from '../../api/sessions'
+import { sessionsApi, type SessionRewindMode, type SessionTurnCheckpoint } from '../../api/sessions'
 import { listPendingPermissions, useChatStore } from '../../stores/chatStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useWorkspaceChatContextStore } from '../../stores/workspaceChatContextStore'
@@ -35,7 +35,7 @@ import { formatDurationMs, hasRunningBackgroundTasks as hasAnyRunningBackgroundT
 import { buildTurnCompletionByMessageId, type TurnCompletion } from '../../lib/turnCompletion'
 import { isTouchH5Document } from '../../lib/touchH5'
 import { Button } from '@/components/ui/Button'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { ActionDialog, type ActionDialogAction } from '@/components/ui/ActionDialog'
 import { clearWindowSelection, getSelectionPopoverPosition, useSelectionPopoverDismiss } from '../../hooks/useSelectionPopoverDismiss'
 import {
   getHeightsForSession,
@@ -912,7 +912,10 @@ function isSessionTurnCheckpoint(value: unknown): value is SessionTurnCheckpoint
     typeof checkpoint.code?.available === 'boolean' &&
     Array.isArray(checkpoint.code?.filesChanged) &&
     (checkpoint.restoreAvailable === undefined ||
-      typeof checkpoint.restoreAvailable === 'boolean')
+      typeof checkpoint.restoreAvailable === 'boolean') &&
+    (checkpoint.unverifiedChangeSources === undefined ||
+      (Array.isArray(checkpoint.unverifiedChangeSources) &&
+        checkpoint.unverifiedChangeSources.every((source) => typeof source === 'string')))
   )
 }
 
@@ -2219,6 +2222,28 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     () => visibleTurnChangeCards.find((card) => card.target.messageId === turnUndoConfirmTargetId) ?? null,
     [turnUndoConfirmTargetId, visibleTurnChangeCards],
   )
+  // Undo is not reversible, so the dialog — not just the card — has to say which
+  // changes it will leave behind when the checkpoint could not cover them all.
+  const confirmUnverifiedSources = confirmTurnCard?.checkpoint.unverifiedChangeSources ?? []
+  const confirmCanRestoreCode = confirmTurnCard?.checkpoint.restoreAvailable !== false
+  const confirmBodyText = confirmTurnCard?.isLatest
+    ? t('chat.turnChangesLatestConfirmBody')
+    : t('chat.turnChangesHistoricalConfirmBody')
+  const confirmCaution = !confirmCanRestoreCode
+    ? t('chat.turnChangesConversationOnlyConfirmBody')
+    : confirmUnverifiedSources.length > 0
+      ? t('chat.turnChangesPartialCoverageConfirmBody', {
+          sources: confirmUnverifiedSources.join(', '),
+        })
+      : null
+  const confirmBody = confirmCaution === null
+    ? confirmBodyText
+    : (
+        <div className="space-y-2 text-sm leading-6 text-[var(--color-text-secondary)]">
+          {confirmCanRestoreCode ? <p>{confirmBodyText}</p> : null}
+          <p className="text-[var(--color-warning)]">{confirmCaution}</p>
+        </div>
+      )
 
   useEffect(() => {
     const liveKeys = new Set(renderItemKeys)
@@ -2307,7 +2332,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     }
   }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, historyMutationEpoch, isMemberSession, latestCompletedTurnId, resolvedSessionId])
 
-  const handleUndoCurrentTurn = useCallback(async () => {
+  const handleUndoCurrentTurn = useCallback(async (mode: SessionRewindMode = 'both') => {
     if (!resolvedSessionId || !confirmTurnCard || rewindingTurnId || hasRunningBackgroundTasks) return
 
     const target = confirmTurnCard.target
@@ -2329,6 +2354,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         targetUserMessageId: checkpointTarget.targetUserMessageId,
         userMessageIndex: checkpointTarget.userMessageIndex,
         expectedContent: target.expectedContent,
+        mode,
       })
 
       await reloadHistory(resolvedSessionId)
@@ -2337,15 +2363,23 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         attachments: target.attachments,
       })
 
+      // Each branch has to match what actually happened on disk: nothing was
+      // restored in conversation mode, and in `both` mode a turn that also wrote
+      // off-checkpoint left changes behind. A plain success would overstate both.
+      const messageCount = result.conversation.messagesRemoved
+      const leftBehind = mode === 'both' ? result.unverifiedChangeSources ?? [] : []
       addToast({
-        type: 'success',
-        message: result.code.available
-          ? t('chat.rewindSuccessWithCode', {
-              count: result.conversation.messagesRemoved,
-            })
-          : t('chat.rewindSuccessConversationOnly', {
-              count: result.conversation.messagesRemoved,
-            }),
+        type: leftBehind.length > 0 ? 'warning' : 'success',
+        message: mode === 'conversation'
+          ? t('chat.rewindSuccessConversationOnly', { count: messageCount })
+          : leftBehind.length > 0
+            ? t('chat.rewindSuccessPartialCoverage', {
+                count: messageCount,
+                sources: leftBehind.join(', '),
+              })
+            : result.code.available
+              ? t('chat.rewindSuccessWithCode', { count: messageCount })
+              : t('chat.rewindSuccessConversationOnly', { count: messageCount }),
       })
 
       setTurnUndoConfirmTargetId(null)
@@ -2370,6 +2404,33 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     stopGeneration,
     t,
   ])
+
+  // Rolling the conversation back never depends on the checkpoint, so it stays
+  // on offer even when restoring the files is impossible — that is the only
+  // action left in that case, and losing it entirely was the whole complaint.
+  const confirmActions: ActionDialogAction[] = [
+    {
+      label: t('common.cancel'),
+      onClick: () => setTurnUndoConfirmTargetId(null),
+      variant: 'secondary',
+    },
+    {
+      label: t('chat.turnChangesUndoConversationOnly'),
+      onClick: () => { void handleUndoCurrentTurn('conversation') },
+      variant: confirmCanRestoreCode ? 'secondary' : 'danger',
+      loading: Boolean(rewindingTurnId),
+    },
+    ...(confirmCanRestoreCode
+      ? [{
+          label: confirmTurnCard?.isLatest
+            ? t('chat.turnChangesLatestConfirmUndo')
+            : t('chat.turnChangesHistoricalConfirmUndo'),
+          onClick: () => { void handleUndoCurrentTurn('both') },
+          variant: 'danger' as const,
+          loading: Boolean(rewindingTurnId),
+        }]
+      : []),
+  ]
 
   const handleBranchMessage = useCallback(async (target: BranchableMessageTarget) => {
     if (!resolvedSessionId || branchingMessageId) return
@@ -2812,25 +2873,19 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         </Button>
       )}
 
-      <ConfirmDialog
+      <ActionDialog
         open={Boolean(confirmTurnCard)}
         onClose={() => {
           if (!rewindingTurnId) {
             setTurnUndoConfirmTargetId(null)
           }
         }}
-        onConfirm={handleUndoCurrentTurn}
         title={confirmTurnCard?.isLatest
           ? t('chat.turnChangesLatestConfirmTitle')
           : t('chat.turnChangesHistoricalConfirmTitle')}
-        body={confirmTurnCard?.isLatest
-          ? t('chat.turnChangesLatestConfirmBody')
-          : t('chat.turnChangesHistoricalConfirmBody')}
-        confirmLabel={confirmTurnCard?.isLatest
-          ? t('chat.turnChangesLatestConfirmUndo')
-          : t('chat.turnChangesHistoricalConfirmUndo')}
-        cancelLabel={t('common.cancel')}
-        confirmVariant="danger"
+        body={confirmBody}
+        actions={confirmActions}
+        width={520}
         loading={Boolean(rewindingTurnId)}
       />
     </div>

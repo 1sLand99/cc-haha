@@ -5542,6 +5542,7 @@ describe('MessageList nested tool calls', () => {
         targetUserMessageId: 'transcript-user-1',
         userMessageIndex: 0,
         expectedContent: '实时这一轮',
+        mode: 'both',
       })
     })
   })
@@ -5878,6 +5879,7 @@ describe('MessageList nested tool calls', () => {
         targetUserMessageId: 'user-1',
         userMessageIndex: 0,
         expectedContent: '做一个页面',
+        mode: 'both',
       })
     })
     expect(reloadHistory).toHaveBeenCalledWith(ACTIVE_TAB)
@@ -5885,6 +5887,80 @@ describe('MessageList nested tool calls', () => {
       text: '做一个页面',
       attachments: undefined,
     })
+  })
+
+  it('offers a conversation-only rewind when the checkpoint cannot restore the files', async () => {
+    // Regression for #1192: an unrestorable checkpoint used to disable the undo
+    // outright, which also cost the user the conversation rollback. The files
+    // genuinely cannot be restored here, but backing out of the prompt can.
+    vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
+      checkpoints: [
+        {
+          target: {
+            targetUserMessageId: 'user-1',
+            userMessageIndex: 0,
+            userMessageCount: 1,
+          },
+          code: {
+            available: true,
+            filesChanged: ['src/first.ts'],
+            insertions: 1,
+            deletions: 0,
+          },
+          restoreAvailable: false,
+        },
+      ],
+    })
+    const rewind = vi.spyOn(sessionsApi, 'rewind').mockResolvedValue({
+      target: { targetUserMessageId: 'user-1', userMessageIndex: 0, userMessageCount: 1 },
+      conversation: { messagesRemoved: 2, removedMessageIds: ['user-1', 'assistant-1'] },
+      code: { available: true, filesChanged: ['src/first.ts'], insertions: 1, deletions: 0 },
+      restoreAvailable: false,
+      mode: 'conversation',
+    })
+    const reloadHistory = vi.fn().mockResolvedValue(undefined)
+    const queueComposerPrefill = vi.fn()
+
+    useChatStore.setState({
+      reloadHistory,
+      queueComposerPrefill,
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          messages: [
+            { id: 'user-1', type: 'user_text', content: '做一个页面', timestamp: 1 },
+            { id: 'assistant-1', type: 'assistant_text', content: 'first done', timestamp: 2 },
+          ],
+        }),
+      },
+    })
+
+    render(<MessageList />)
+
+    await screen.findByText('first.ts')
+    const undoButton = screen.getByRole('button', { name: 'Undo current turn changes' })
+    expect((undoButton as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(undoButton)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Undo current turn?' })
+    expect(
+      within(dialog).getByText(/the files cannot be restored safely/i),
+    ).toBeTruthy()
+    // The code-restoring action must be gone — offering it would fail server-side.
+    expect(within(dialog).queryByRole('button', { name: 'Undo current turn' })).toBeNull()
+
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Roll back conversation only' }),
+    )
+
+    await waitFor(() => {
+      expect(rewind).toHaveBeenCalledWith(ACTIVE_TAB, {
+        targetUserMessageId: 'user-1',
+        userMessageIndex: 0,
+        expectedContent: '做一个页面',
+        mode: 'conversation',
+      })
+    })
+    expect(reloadHistory).toHaveBeenCalledWith(ACTIVE_TAB)
   })
 
   it('does not render cards for turns without file changes', async () => {

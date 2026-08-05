@@ -34,6 +34,7 @@ import {
   executeSessionRewind,
   getSessionTurnCheckpointDiff,
   listSessionTurnCheckpoints,
+  parseSessionRewindMode,
   previewSessionRewind,
   type RewindTargetSelector,
 } from '../services/sessionRewindService.js'
@@ -999,9 +1000,9 @@ async function getGitInfo(sessionId: string): Promise<Response> {
 }
 
 async function rewindSession(req: Request, sessionId: string): Promise<Response> {
-  let body: RewindTargetSelector & { dryRun?: boolean }
+  let body: RewindTargetSelector & { dryRun?: boolean; mode?: unknown }
   try {
-    body = (await req.json()) as RewindTargetSelector & { dryRun?: boolean }
+    body = (await req.json()) as RewindTargetSelector & { dryRun?: boolean; mode?: unknown }
   } catch {
     throw ApiError.badRequest('Invalid JSON body')
   }
@@ -1013,9 +1014,10 @@ async function rewindSession(req: Request, sessionId: string): Promise<Response>
     throw ApiError.badRequest('targetUserMessageId (string) or userMessageIndex (integer) is required')
   }
 
+  const mode = parseSessionRewindMode(body.mode)
   const result = body.dryRun
     ? await previewSessionRewind(sessionId, body)
-    : await executeSessionRewind(sessionId, body)
+    : await executeSessionRewind(sessionId, body, mode)
 
   return Response.json(result)
 }

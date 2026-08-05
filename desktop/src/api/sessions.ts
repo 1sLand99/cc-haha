@@ -123,7 +123,21 @@ export type SessionRewindResponse = {
     deletions: number
   }
   restoreAvailable?: boolean
+  /**
+   * Tool names whose file effects the checkpoint could not capture (a writing
+   * shell command, a tool with no change extractor). Undo still works and still
+   * restores every file it lists — these are the changes it will leave behind.
+   */
+  unverifiedChangeSources?: string[]
+  /** What the executed rewind touched. Absent on dry-run previews. */
+  mode?: SessionRewindMode
 }
+
+/**
+ * `both` restores files and trims the transcript; `conversation` only trims,
+ * which stays possible even when the files cannot be restored.
+ */
+export type SessionRewindMode = 'both' | 'conversation'
 
 export type RecentProject = {
   projectPath: string
@@ -316,6 +330,7 @@ export type SessionTurnCheckpoint = {
   code: SessionRewindResponse['code']
   workDir?: string
   restoreAvailable?: boolean
+  unverifiedChangeSources?: string[]
 }
 
 export type SessionTurnCheckpointsResponse = {
@@ -473,6 +488,7 @@ export const sessionsApi = {
     userMessageIndex?: number
     expectedContent?: string
     dryRun?: boolean
+    mode?: SessionRewindMode
   }) {
     return api.post<SessionRewindResponse>(`/api/sessions/${sessionId}/rewind`, body, {
       timeout: 60_000,
