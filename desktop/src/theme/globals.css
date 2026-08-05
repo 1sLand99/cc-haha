@@ -2261,6 +2261,18 @@ html[data-window-kind='pet'] #root {
   order: 1;
 }
 
+/* At a side edge the fixed window follows the mascot partly off-screen. Keep
+   the wide card centred in the window and move only the mascot to the outer
+   side; the host moves the window back by the same amount, so the mascot stays
+   under the pointer while the card lands wholly inside the work area. */
+.pet-window-stack[data-panel-horizontal='left'] .pet-mascot-wrap {
+  align-self: flex-end;
+}
+
+.pet-window-stack[data-panel-horizontal='right'] .pet-mascot-wrap {
+  align-self: flex-start;
+}
+
 .pet-task-badge {
   position: absolute;
   z-index: 12;

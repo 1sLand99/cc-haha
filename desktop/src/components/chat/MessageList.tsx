@@ -1007,9 +1007,13 @@ const VIRTUAL_OVERSCAN_PX = 1200
 const VIRTUAL_DEFAULT_VIEWPORT_HEIGHT = 720
 const VIRTUAL_MIN_ITEM_HEIGHT = 48
 const VIRTUAL_MAX_ITEM_HEIGHT = 24_000
-// Windows WebView2 can report up to 2px oscillations for live chat content;
+// Chromium on Windows can report up to 2px oscillations for live chat content;
 // don't convert those into bottom-scroll corrections.
 const CONTENT_RESIZE_FOLLOW_JITTER_MAX_DELTA_PX = 2
+// Native scroll anchoring and fractional DPI can leave the WebView a few CSS
+// pixels shy of its computed bottom. Rewriting that correction on every live
+// delta makes the two owners fight and turns the rounding into visible bounce.
+const LIVE_FOLLOW_BOTTOM_GAP_TOLERANCE_PX = 4
 const USER_SCROLL_INTENT_WINDOW_MS = 500
 const CONVERSATION_NAVIGATION_MIN_ITEMS = 4
 const CONVERSATION_NAVIGATION_FULL_MIN_WIDTH_PX = 960
@@ -1116,14 +1120,7 @@ function setScrollTopWithoutLayoutRead(element: HTMLElement, scrollTop: number) 
   element.scrollTop = Math.max(0, scrollTop)
 }
 
-function setScrollToBottomWithoutLayoutRead(element: HTMLElement, behavior: ScrollBehavior) {
-  if (typeof element.scrollTo === 'function') {
-    try {
-      element.scrollTo({ top: SCROLL_BOTTOM_SENTINEL, behavior })
-    } catch {
-      element.scrollTo(0, SCROLL_BOTTOM_SENTINEL)
-    }
-  }
+function setScrollToBottomWithoutLayoutRead(element: HTMLElement) {
   element.scrollTop = SCROLL_BOTTOM_SENTINEL
 
   // Browsers clamp the large value to the true bottom without needing us to
@@ -1673,6 +1670,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   )
   const pendingMeasuredHeightsRef = useRef(false)
   const measureFlushFrameRef = useRef<number | null>(null)
+  const liveFollowFrameRef = useRef<number | null>(null)
   const navigationHighlightTimerRef = useRef<number | null>(null)
   const workspaceOriginRestoreFrameRef = useRef<number | null>(null)
   const conversationFindRefreshTimerRef = useRef<number | null>(null)
@@ -1687,6 +1685,12 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const userScrollIntentUntilRef = useRef(0)
   const lastSessionIdRef = useRef<string | null | undefined>(undefined)
   const lastTailMessageIdBySessionRef = useRef(new Map<string, string | null>())
+  const lastLiveFollowInputRef = useRef({
+    sessionId: resolvedSessionId,
+    messageCount: messages.length,
+    streamingText,
+    streamingToolInput,
+  })
   const t = useTranslation()
   const [turnChangeCards, setTurnChangeCards] = useState<TurnChangeCardModel[]>([])
   const [turnChangeLoadError, setTurnChangeLoadError] = useState<string | null>(null)
@@ -1720,6 +1724,9 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   useEffect(() => () => {
     if (measureFlushFrameRef.current !== null) {
       cancelAnimationFrame(measureFlushFrameRef.current)
+    }
+    if (liveFollowFrameRef.current !== null) {
+      cancelAnimationFrame(liveFollowFrameRef.current)
     }
     if (navigationHighlightTimerRef.current !== null) {
       window.clearTimeout(navigationHighlightTimerRef.current)
@@ -1771,17 +1778,15 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     })
   }, [])
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
+  const scrollToBottom = useCallback(() => {
     shouldAutoScrollRef.current = true
     isProgrammaticScrollingRef.current = true
     ignoreProgrammaticScrollUntilRef.current = performance.now() + 250
     lastAutoScrollAtRef.current = performance.now()
     const container = scrollContainerRef.current
-    let requestedScrollTop: number | null = null
     if (container) {
-      setScrollToBottomWithoutLayoutRead(container, behavior)
-      requestedScrollTop = container.scrollTop
-      ignoreProgrammaticScrollTopRef.current = requestedScrollTop
+      setScrollToBottomWithoutLayoutRead(container)
+      ignoreProgrammaticScrollTopRef.current = container.scrollTop
     }
     setVirtualViewport((current) => ({
       scrollTop: SCROLL_BOTTOM_SENTINEL,
@@ -1794,26 +1799,45 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       })
     }
     setIsAwayFromLatest(false)
-    // Reset flag after the scroll event(s) from scrollIntoView have fired
+    // Keep this path to one native scroll write. A second write in the next
+    // frame can fight Chromium's scroll anchoring at fractional Windows DPI.
     requestAnimationFrame(() => {
-      const latestContainer = scrollContainerRef.current
-      if (
-        shouldAutoScrollRef.current &&
-        latestContainer &&
-        (
-          requestedScrollTop === null ||
-          latestContainer.scrollTop === requestedScrollTop
-        )
-      ) {
-        setScrollToBottomWithoutLayoutRead(latestContainer, 'auto')
-        if (resolvedSessionId) {
-          sessionScrollSnapshots.set(resolvedSessionId, {
-            scrollTop: latestContainer.scrollTop,
-            wasAtBottom: true,
-          })
-        }
-      }
       isProgrammaticScrollingRef.current = false
+    })
+  }, [resolvedSessionId])
+
+  const requestLiveFollow = useCallback(() => {
+    if (!shouldAutoScrollRef.current || liveFollowFrameRef.current !== null) return
+
+    liveFollowFrameRef.current = requestAnimationFrame(() => {
+      liveFollowFrameRef.current = null
+      const container = scrollContainerRef.current
+      if (!container || !shouldAutoScrollRef.current) return
+
+      const bottomScrollTop = getBottomScrollTop(container)
+      const bottomGap = bottomScrollTop - container.scrollTop
+      if (Math.abs(bottomGap) > LIVE_FOLLOW_BOTTOM_GAP_TOLERANCE_PX) {
+        isProgrammaticScrollingRef.current = true
+        ignoreProgrammaticScrollUntilRef.current = performance.now() + 250
+        lastAutoScrollAtRef.current = performance.now()
+        setScrollTopWithoutLayoutRead(container, bottomScrollTop)
+        ignoreProgrammaticScrollTopRef.current = container.scrollTop
+        setVirtualViewport((current) => ({
+          scrollTop: container.scrollTop,
+          viewportHeight: container.clientHeight || current.viewportHeight || VIRTUAL_DEFAULT_VIEWPORT_HEIGHT,
+        }))
+        requestAnimationFrame(() => {
+          isProgrammaticScrollingRef.current = false
+        })
+      }
+
+      if (resolvedSessionId) {
+        sessionScrollSnapshots.set(resolvedSessionId, {
+          scrollTop: container.scrollTop,
+          wasAtBottom: true,
+        })
+      }
+      setIsAwayFromLatest(false)
     })
   }, [resolvedSessionId])
 
@@ -1830,7 +1854,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
 
     virtualItemHeightsRef.current.set(itemKey, measuredHeight)
     if (hasPendingPermissionCard && shouldAutoScrollRef.current) {
-      scrollToBottom('auto')
+      requestLiveFollow()
     }
 
     if (typeof requestAnimationFrame === 'undefined') {
@@ -1846,7 +1870,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         flushMeasuredHeightVersion()
       })
     }
-  }, [flushMeasuredHeightVersion, hasPendingPermissionCard, scrollToBottom])
+  }, [flushMeasuredHeightVersion, hasPendingPermissionCard, requestLiveFollow])
 
   const updateAutoScrollState = useCallback(() => {
     // Ignore scroll events triggered by our own programmatic scrolling to
@@ -1936,6 +1960,10 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         cancelAnimationFrame(measureFlushFrameRef.current)
         measureFlushFrameRef.current = null
       }
+      if (liveFollowFrameRef.current !== null) {
+        cancelAnimationFrame(liveFollowFrameRef.current)
+        liveFollowFrameRef.current = null
+      }
       setMeasuredItemsVersion((version) => version + 1)
 
       const container = scrollContainerRef.current
@@ -1956,7 +1984,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         ignoreProgrammaticScrollTopRef.current = null
         lastAutoScrollAtRef.current = performance.now()
         shouldAutoScrollRef.current = true
-        setScrollToBottomWithoutLayoutRead(container, 'auto')
+        setScrollToBottomWithoutLayoutRead(container)
         setVirtualViewport((current) => ({
           scrollTop: SCROLL_BOTTOM_SENTINEL,
           viewportHeight: container.clientHeight || current.viewportHeight || VIRTUAL_DEFAULT_VIEWPORT_HEIGHT,
@@ -1971,7 +1999,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       } else {
         // No container yet (initial mount before ref settles): fall back to the
         // existing scrollToBottom path which is safe pre-mount.
-        scrollToBottom('auto')
+        scrollToBottom()
       }
     }
   }, [resolvedSessionId, scrollToBottom])
@@ -1988,22 +2016,41 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     if (previousTailMessageId === undefined || previousTailMessageId === tailMessageId) return
 
     if (tailMessageType === 'user_text') {
-      scrollToBottom('auto')
+      scrollToBottom()
     }
   }, [resolvedSessionId, scrollToBottom, tailMessageId, tailMessageType])
 
   useEffect(() => {
+    const previousInput = lastLiveFollowInputRef.current
+    lastLiveFollowInputRef.current = {
+      sessionId: resolvedSessionId,
+      messageCount: messages.length,
+      streamingText,
+      streamingToolInput,
+    }
+    // Session restoration already owns the initial/switch scroll. Only live
+    // transitions within the same session enter the coalesced follow path.
+    if (
+      previousInput.sessionId !== resolvedSessionId ||
+      (
+        previousInput.messageCount === messages.length &&
+        previousInput.streamingText === streamingText &&
+        previousInput.streamingToolInput === streamingToolInput
+      )
+    ) {
+      return
+    }
     if (!shouldAutoScrollRef.current) {
       setIsAwayFromLatest(true)
       return
     }
 
-    scrollToBottom('auto')
-  }, [messages.length, resolvedSessionId, scrollToBottom, streamingText, streamingToolInput])
+    requestLiveFollow()
+  }, [messages.length, requestLiveFollow, resolvedSessionId, streamingText, streamingToolInput])
 
   const handleJumpToLatest = useCallback(() => {
     setProgrammaticNavigationItemId(null)
-    scrollToBottom('auto')
+    scrollToBottom()
   }, [scrollToBottom])
 
   useEffect(() => {
@@ -2024,12 +2071,12 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       }
       if (!shouldFollowContentResize) return
       if (!shouldAutoScrollRef.current) return
-      scrollToBottom('auto')
+      requestLiveFollow()
     })
     observer.observe(content)
 
     return () => observer.disconnect()
-  }, [scrollToBottom, shouldFollowContentResize])
+  }, [requestLiveFollow, shouldFollowContentResize])
 
   // Touch-H5 only: the visual-viewport fit (touchH5.ts) shrinks the scroll
   // container when the soft keyboard opens. If the user was reading the tail,
@@ -2042,12 +2089,12 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
 
     const observer = new ResizeObserver(() => {
       if (!shouldAutoScrollRef.current) return
-      scrollToBottom('auto')
+      requestLiveFollow()
     })
     observer.observe(container)
 
     return () => observer.disconnect()
-  }, [scrollToBottom])
+  }, [requestLiveFollow])
 
   const { toolResultMap, childToolCallsByParent, renderItems } = useMemo(
     () => buildRenderModel(messages, activeAskUserQuestionToolUseId),

@@ -3381,6 +3381,7 @@ describe('MessageList nested tool calls', () => {
     await waitFor(() => {
       expect(screen.getByText('streaming next token')).toBeTruthy()
     })
+    await waitForProgrammaticScrollReset()
     expect(scrollIntoView).not.toHaveBeenCalled()
     expect(scrollTop).toBe(600)
   })
@@ -3455,11 +3456,24 @@ describe('MessageList nested tool calls', () => {
     await waitFor(() => {
       expect(screen.getByText('2 lines · 36 chars')).toBeTruthy()
     })
+    await waitForProgrammaticScrollReset()
     expect(scrollIntoView).not.toHaveBeenCalled()
     expect(scrollTop).toBe(600)
   })
 
-  it('keeps auto-scrolling without reading scroll geometry synchronously', async () => {
+  it('coalesces real streaming transitions and ignores fractional bottom wobble', async () => {
+    let resizeCallback: ResizeObserverCallback | null = null
+    class TestResizeObserver {
+      observe = vi.fn()
+      unobserve = vi.fn()
+      disconnect = vi.fn()
+
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback
+      }
+    }
+    vi.stubGlobal('ResizeObserver', TestResizeObserver)
+
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
@@ -3472,63 +3486,84 @@ describe('MessageList nested tool calls', () => {
               timestamp: 1,
             },
           ],
-          streamingText: 'streaming',
+          streamingText: 'streaming seed',
         }),
       },
     })
 
     const { container } = render(<MessageList />)
     const scroller = container.querySelector('.overflow-y-auto') as HTMLDivElement
-    const readScrollHeight = vi.fn(() => {
-      throw new Error('scrollHeight should not be read while pinning to bottom')
-    })
-    const readClientHeight = vi.fn(() => {
-      throw new Error('clientHeight should not be read while pinning to bottom')
-    })
-    let scrollTop = 552
+    let scrollTop = 600
+    let scrollHeight = 1004
+    let scrollTopWriteCount = 0
     Object.defineProperty(scroller, 'scrollHeight', {
       configurable: true,
-      get: readScrollHeight,
+      get: () => scrollHeight,
     })
     Object.defineProperty(scroller, 'clientHeight', {
       configurable: true,
-      get: readClientHeight,
+      value: 400,
     })
     Object.defineProperty(scroller, 'scrollTop', {
       configurable: true,
       get: () => scrollTop,
       set: (value) => {
-        scrollTop = value >= 1_000_000_000 ? 600 : value
+        scrollTopWriteCount += 1
+        scrollTop = value
       },
     })
-    Object.defineProperty(scroller, 'scrollTo', {
-      configurable: true,
-      value: vi.fn((options: ScrollToOptions | number, y?: number) => {
-        scroller.scrollTop = typeof options === 'number' ? y ?? 0 : options.top ?? 0
-      }),
-    })
 
+    await waitFor(() => expect(resizeCallback).not.toBeNull())
     await waitForProgrammaticScrollReset()
+    scrollTopWriteCount = 0
+
+    const queuedFrames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      queuedFrames.push(callback)
+      return queuedFrames.length
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const flushFrame = () => {
+      const callbacks = queuedFrames.splice(0)
+      act(() => {
+        for (const callback of callbacks) callback(performance.now())
+      })
+    }
+
     act(() => {
-      useChatStore.setState((state) => ({
-        sessions: {
-          ...state.sessions,
-          [ACTIVE_TAB]: {
-            ...state.sessions[ACTIVE_TAB]!,
-            streamingText: 'streaming next token',
-          },
-        },
-      }))
+      const store = useChatStore.getState()
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_delta', text: ' next' })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_delta', text: ' token' })
+      resizeCallback?.([{
+        contentRect: { height: 404 },
+      } as ResizeObserverEntry], {} as ResizeObserver)
     })
 
     await waitFor(() => {
-      expect(screen.getByText('streaming next token')).toBeTruthy()
+      expect(screen.getByText('streaming seed next token')).toBeTruthy()
     })
-    await waitForProgrammaticScrollReset()
+    expect(queuedFrames.length).toBeGreaterThan(0)
+    flushFrame()
 
+    expect(scrollTopWriteCount).toBe(0)
     expect(scrollTop).toBe(600)
-    expect(readScrollHeight).not.toHaveBeenCalled()
-    expect(readClientHeight).not.toHaveBeenCalled()
+
+    scrollHeight = 1020
+    act(() => {
+      const store = useChatStore.getState()
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_delta', text: ' with' })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_delta', text: ' growth' })
+      resizeCallback?.([{
+        contentRect: { height: 420 },
+      } as ResizeObserverEntry], {} as ResizeObserver)
+    })
+    await waitFor(() => {
+      expect(screen.getByText('streaming seed next token with growth')).toBeTruthy()
+    })
+    flushFrame()
+
+    expect(scrollTopWriteCount).toBe(1)
+    expect(scrollTop).toBe(620)
   })
 
   it('keeps mobile H5 streaming output pinned after the transcript height grows', async () => {
@@ -3593,10 +3628,10 @@ describe('MessageList nested tool calls', () => {
     await waitFor(() => {
       expect(screen.getByText('streaming next token after height change')).toBeTruthy()
     })
+    await waitForProgrammaticScrollReset()
     expect(scrollIntoView).not.toHaveBeenCalled()
     expect(scrollTop).toBe(1000)
 
-    await waitForProgrammaticScrollReset()
     fireEvent.scroll(scroller)
 
     expect(screen.queryByRole('button', { name: 'Latest' })).toBeNull()
@@ -3667,6 +3702,7 @@ describe('MessageList nested tool calls', () => {
     act(() => {
       resizeCallback?.([], {} as ResizeObserver)
     })
+    await waitForProgrammaticScrollReset()
 
     expect(scrollIntoView).not.toHaveBeenCalled()
     expect(scrollTop).toBe(1200)
@@ -3771,6 +3807,7 @@ describe('MessageList nested tool calls', () => {
         target: scrollContent,
       } as unknown as ResizeObserverEntry], {} as ResizeObserver)
     })
+    await waitForProgrammaticScrollReset()
 
     expect(scrollTop).toBe(15196)
     expect(screen.queryByRole('button', { name: 'Latest' })).toBeNull()
@@ -4052,10 +4089,11 @@ describe('MessageList nested tool calls', () => {
     act(() => {
       resizeCallback?.(makeResizeEntry(400), {} as ResizeObserver)
     })
+    await waitForProgrammaticScrollReset()
     expect(scrollTop).toBe(600)
 
     scrollTopWriteCount = 0
-    // WebView2 can reach the opposite edge of a 2px oscillation through
+    // Chromium can reach the opposite edge of a 2px oscillation through
     // adjacent 1px observations. The sticky follow baseline must not turn
     // either edge into a bottom-scroll correction.
     for (const height of [401, 402, 401, 400, 401, 402, 401, 400]) {
@@ -4071,6 +4109,7 @@ describe('MessageList nested tool calls', () => {
     act(() => {
       resizeCallback?.(makeResizeEntry(420), {} as ResizeObserver)
     })
+    await waitForProgrammaticScrollReset()
 
     expect(scrollTop).toBe(640)
   })
