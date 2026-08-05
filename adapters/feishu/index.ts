@@ -13,7 +13,7 @@ import { WsBridge, type ServerMessage, type AttachmentRef } from '../common/ws-b
 import { MessageDedup } from '../common/message-dedup.js'
 import { StreamingCard } from './streaming-card.js'
 import { enqueue } from '../common/chat-queue.js'
-import { getConfiguredWorkDir, loadConfig } from '../common/config.js'
+import { loadConfig } from '../common/config.js'
 import {
   formatImHelp,
   formatImStatus,
@@ -26,7 +26,8 @@ import {
   type PermissionDecision,
 } from '../common/permission.js'
 import { SessionStore } from '../common/session-store.js'
-import { AdapterHttpClient, type RecentProject } from '../common/http-client.js'
+import { type RecentProject } from '../common/http-client.js'
+import { createAdapterClient } from '../common/adapter-client.js'
 import { restoreStoredSessionBinding } from '../common/session-recovery.js'
 import { isAllowedUser, tryPair } from '../common/pairing.js'
 import { extractInboundPayload } from './extract-payload.js'
@@ -56,8 +57,7 @@ const larkClient = new Lark.Client({
 const bridge = new WsBridge(config.serverUrl, 'feishu')
 const dedup = new MessageDedup()
 const sessionStore = new SessionStore()
-const defaultWorkDir = getConfiguredWorkDir(config, config.feishu)
-const httpClient = new AdapterHttpClient(config.serverUrl, { allowedProjectRoots: [defaultWorkDir] })
+const { httpClient, defaultWorkDir } = createAdapterClient(config, config.feishu)
 
 // Attachment plumbing — shared by inbound (download) and outbound (upload) paths.
 const attachmentStore = new AttachmentStore()
