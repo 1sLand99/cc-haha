@@ -116,6 +116,8 @@ Claude Code Haha 是一个**桌面端 Claude Code 工作台**：多会话与全�
 2. 首次启动后，在桌面端设置里配置模型提供商、API Key 和默认模型。
 3. 正式 macOS Release 需要经过签名和公证；如果安装的是 draft/unsigned 临时包，首次打开可能仍需手动放行。Windows 未签名安装包可能出现 SmartScreen 提示，点「更多信息」→「仍要运行」即可。详见 [桌面端安装指南](docs/start/install.md)。
 
+发布可信度与隐私：[Code signing policy](docs/start/code-signing.md) · [隐私与联网说明](docs/start/privacy.md)
+
 ## 从源码启动 CLI
 
 适合想调试底层 CLI、服务端或自行开发的用户：

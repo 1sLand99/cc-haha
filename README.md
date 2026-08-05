@@ -116,6 +116,8 @@ This project is maintained in the author's spare time. Corporate or individual s
 2. On first launch, configure your model provider, API key, and default model in Settings.
 3. Public macOS releases require signing and notarization. Draft or unsigned temporary builds may still need one-time manual approval. Unsigned Windows installers may show SmartScreen; click "More info" -> "Run anyway". See the [desktop installation guide](docs/en/start/install.md).
 
+Release trust and privacy: [Code signing policy](docs/en/start/code-signing.md) · [Privacy and network access](docs/en/start/privacy.md)
+
 ## Run the CLI from Source
 
 For users who want to debug the underlying CLI, server, or local development flow:
