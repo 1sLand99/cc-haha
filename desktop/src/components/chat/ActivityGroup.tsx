@@ -8,6 +8,7 @@ import {
   buildActivitySegments,
   countFailedToolCalls,
   hasUnresolvedToolCalls,
+  THINKING_SEGMENT_KEY,
   toolCallDurationMs,
   type ActivityStep,
 } from './activityGroupModel'
@@ -51,7 +52,13 @@ export const ActivityGroup = memo(function ActivityGroup({
   const toolCalls = useMemo(() => activityStepToolCalls(steps), [steps])
   const segments = useMemo(() => buildActivitySegments(steps, t), [steps, t])
   const failedCount = countFailedToolCalls(toolCalls, resultMap, childToolCallsByParent)
-  const isRunning = Boolean(isStreaming) || hasUnresolvedToolCalls(toolCalls, resultMap, childToolCallsByParent)
+  const hasActiveThinking = Boolean(activeThinkingId) && steps.some(
+    (step) => step.kind === 'thinking' && step.message.id === activeThinkingId,
+  )
+  const isRunning =
+    Boolean(isStreaming) ||
+    hasActiveThinking ||
+    hasUnresolvedToolCalls(toolCalls, resultMap, childToolCallsByParent)
 
   const soleToolCall = steps.length === 1 && steps[0]?.kind === 'tool' ? steps[0].toolCall : null
   if (soleToolCall) {
@@ -101,7 +108,12 @@ export const ActivityGroup = memo(function ActivityGroup({
                   <span aria-hidden="true" className="shrink-0 text-[var(--color-text-tertiary)]">·</span>
                 )}
                 <span className="flex shrink-0 items-center gap-[6px] whitespace-nowrap">
-                  <segment.icon size={13} strokeWidth={1.8} aria-hidden="true" />
+                  <segment.icon
+                    size={13}
+                    strokeWidth={1.8}
+                    className={hasActiveThinking && segment.key === THINKING_SEGMENT_KEY ? 'animate-pulse' : undefined}
+                    aria-hidden="true"
+                  />
                   {segment.label}
                 </span>
               </Fragment>

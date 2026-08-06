@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo, useState } from 'react'
 import { BookMarked, ChevronDown, ChevronRight, CircleCheck, Settings } from 'lucide-react'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ActivityGroup } from './ActivityGroup'
+import { ThinkingBlock } from './ThinkingBlock'
 import {
   activityStepToolCalls,
   toActivitySteps,
@@ -163,7 +164,10 @@ function ToolCallGroupContent({
 }: ContentProps) {
   const toolCalls = activityStepToolCalls(steps)
   const hasImageGeneration = toolCalls.some((toolCall) => isImageGenerationToolName(toolCall.toolName))
-  if (hasImageGeneration && !toolCalls.every((toolCall) => isImageGenerationToolName(toolCall.toolName))) {
+  const hasNonImageSteps = steps.some(
+    (step) => step.kind === 'thinking' || !isImageGenerationToolName(step.toolCall.toolName),
+  )
+  if (hasImageGeneration && hasNonImageSteps) {
     const segments: Array<
       | { kind: 'images'; toolCalls: ToolCall[] }
       | { kind: 'regular'; steps: ActivityStep[] }
@@ -215,6 +219,20 @@ function ToolCallGroupContent({
           />
         ))}
       </div>
+    )
+  }
+
+  if (toolCalls.length === 0) {
+    return (
+      <>
+        {steps.map((step) => step.kind === 'thinking' ? (
+          <ThinkingBlock
+            key={step.message.id}
+            content={step.message.content}
+            isActive={step.message.id === activeThinkingId}
+          />
+        ) : null)}
+      </>
     )
   }
 

@@ -1648,6 +1648,18 @@ describe('MessageList nested tool calls', () => {
     expect(screen.getByText(/waiting \d+s/)).toBeTruthy()
   })
 
+  it('shows a thinking placeholder as soon as first-turn preparation begins', () => {
+    render(<MessageList />)
+
+    act(() => {
+      useChatStore.getState().setPreparingTurn(ACTIVE_TAB, true)
+    })
+
+    const status = screen.getByTestId('turn-status-indicator')
+    expect(status.getAttribute('role')).toBe('status')
+    expect(status.textContent).toContain('Thinking')
+  })
+
   it('shows the non-streaming fallback notice in the active turn indicator', () => {
     useChatStore.setState({
       sessions: {
@@ -2020,6 +2032,48 @@ describe('MessageList nested tool calls', () => {
     ])
     // The tools-only projection stays intact for the agent/image/memory paths.
     expect(group.toolCalls.map((toolCall) => toolCall.toolUseId)).toEqual(['read-1', 'bash-1'])
+  })
+
+  it('keeps a completed tool group visibly live while post-tool thinking streams', () => {
+    render(<MessageList sessionId={ACTIVE_TAB} />)
+
+    const store = useChatStore.getState()
+    act(() => {
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_start',
+        blockType: 'tool_use',
+        toolName: 'Bash',
+        toolUseId: 'bash-live-1',
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'tool_use_complete',
+        toolName: 'Bash',
+        toolUseId: 'bash-live-1',
+        input: { command: 'git status --short' },
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'tool_result',
+        toolUseId: 'bash-live-1',
+        content: '',
+        isError: false,
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'thinking',
+        text: 'Now inspect the remaining UI paths.',
+      })
+    })
+
+    const group = screen.getByTestId('activity-group')
+    expect(group.getAttribute('data-running')).toBe('true')
+    expect(group.querySelector('.animate-spin')).not.toBeNull()
+    expect(group.querySelector('.animate-pulse')).not.toBeNull()
+
+    act(() => {
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+    })
+
+    expect(group.getAttribute('data-running')).toBe('false')
+    expect(group.querySelector('.animate-spin')).toBeNull()
   })
 
   it('leaves a run of pure reasoning as standalone thinking blocks', () => {

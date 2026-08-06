@@ -1115,7 +1115,10 @@ describe('ChatInput file mentions', () => {
   })
 
   it('starts an empty active session on the selected branch without an isolated worktree', async () => {
-    mocks.create.mockResolvedValueOnce({ sessionId: 'created-direct', workDir: '/repo' })
+    let resolveCreate!: (value: { sessionId: string; workDir: string }) => void
+    mocks.create.mockReturnValueOnce(new Promise((resolve) => {
+      resolveCreate = resolve
+    }))
     useSessionStore.setState({
       sessions: [{
         id: sessionId,
@@ -1166,12 +1169,23 @@ describe('ChatInput file mentions', () => {
         repository: { branch: 'feature/a', worktree: false },
       })
     })
-    expect(mocks.delete).toHaveBeenCalledWith(sessionId)
-    expect(mocks.wsSend).toHaveBeenCalledWith('created-direct', {
-      type: 'user_message',
-      content: 'run on feature branch',
-      attachments: [],
+
+    // Session creation can take seconds. The click must cross the store
+    // boundary immediately so the transcript can replace its empty hero with
+    // a live placeholder before the new session id exists.
+    expect(useChatStore.getState().sessions[sessionId]?.isPreparingTurn).toBe(true)
+
+    resolveCreate({ sessionId: 'created-direct', workDir: '/repo' })
+
+    await waitFor(() => {
+      expect(mocks.wsSend).toHaveBeenCalledWith('created-direct', {
+        type: 'user_message',
+        content: 'run on feature branch',
+        attachments: [],
+      })
     })
+    expect(useChatStore.getState().sessions['created-direct']?.isPreparingTurn).toBe(false)
+    expect(mocks.delete).toHaveBeenCalledWith(sessionId)
   })
 
   it('preserves explicit permission mode when replacing an empty session for branch launch', async () => {

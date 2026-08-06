@@ -138,6 +138,51 @@ describe('chat blocks', () => {
     expect(screen.queryByRole('button', { name: /ToolSearch \(1\), ImageEdit \(1\)/ })).toBeNull()
   })
 
+  it('keeps post-image thinking visible and live after the image result arrives', () => {
+    const imageCall: Extract<UIMessage, { type: 'tool_use' }> = {
+      id: 'image-use',
+      type: 'tool_use',
+      toolName: 'ImageGen',
+      toolUseId: 'image-1',
+      input: { prompt: 'A quiet mountain study' },
+      timestamp: 1,
+    }
+    const thinking: Extract<UIMessage, { type: 'thinking' }> = {
+      id: 'thinking-after-image',
+      type: 'thinking',
+      content: 'Check whether the generated image matches the requested composition.',
+      timestamp: 3,
+    }
+
+    render(
+      <ToolCallGroup
+        toolCalls={[imageCall]}
+        steps={[
+          { kind: 'tool', toolCall: imageCall },
+          { kind: 'thinking', message: thinking },
+        ]}
+        resultMap={new Map([[
+          'image-1',
+          {
+            id: 'image-result',
+            type: 'tool_result' as const,
+            toolUseId: 'image-1',
+            content: JSON.stringify({ type: 'image_generation_result', images: [] }),
+            isError: false,
+            timestamp: 2,
+          },
+        ]])}
+        childToolCallsByParent={new Map()}
+        agentTaskNotifications={{}}
+        activeThinkingId="thinking-after-image"
+      />,
+    )
+
+    const thinkingRow = screen.getByRole('button', { name: /Thinking/ })
+    expect(thinkingRow).toBeTruthy()
+    expect(thinkingRow.querySelector('.thinking-dots')).not.toBeNull()
+  })
+
   it('replaces every image placeholder with the saved tool result', () => {
     const content = JSON.stringify({
       type: 'image_generation_result',

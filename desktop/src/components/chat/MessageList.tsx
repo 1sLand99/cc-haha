@@ -1690,6 +1690,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const addToast = useUIStore((s) => s.addToast)
   const messages = sessionState?.messages ?? EMPTY_MESSAGES
   const chatState = sessionState?.chatState ?? 'idle'
+  const isPreparingTurn = Boolean(sessionState?.isPreparingTurn)
   const historyMutationEpoch = sessionState?.historyMutationEpoch ?? 0
   const streamingText = sessionState?.streamingText ?? ''
   const streamingToolInput = sessionState?.streamingToolInput ?? ''
@@ -1714,6 +1715,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     (permission) => permission.toolName !== 'AskUserQuestion',
   )
   const shouldFollowContentResize =
+    isPreparingTurn ||
     streamingText.trim().length > 0 ||
     chatState === 'streaming' ||
     chatState === 'compacting' ||
@@ -1774,6 +1776,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const [messageListWidth, setMessageListWidth] = useState<number | null>(null)
   const branchActionsDisabled =
     isMemberSession ||
+    isPreparingTurn ||
     chatState !== 'idle' ||
     hasRunningBackgroundTasks ||
     streamingText.trim().length > 0 ||
@@ -2937,6 +2940,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
               describing — it is part of the conversation, not composer chrome. */}
           {(hasApiRetry ||
             hasStreamingFallback ||
+            isPreparingTurn ||
             chatState === 'tool_executing' ||
             (chatState === 'thinking' && !activeThinkingId)) && (
             <StreamingIndicator />

@@ -213,6 +213,49 @@ describe('ActiveSession task polling', () => {
     expect(screen.getByTestId('chat-input')).toHaveAttribute('data-variant', 'default')
   })
 
+  it('replaces the empty hero with the transcript as soon as first-turn preparation begins', () => {
+    const sessionId = 'preparing-first-turn-session'
+    useSessionStore.setState({
+      sessions: [{
+        id: sessionId,
+        title: 'New Session',
+        createdAt: '2026-08-07T00:00:00.000Z',
+        modifiedAt: '2026-08-07T00:00:00.000Z',
+        messageCount: 0,
+        projectPath: '/workspace/project',
+        workDir: '/workspace/project',
+        workDirExists: true,
+      }],
+      activeSessionId: sessionId,
+      isLoading: false,
+      error: null,
+    })
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'New Session', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    useChatStore.setState({
+      sessions: {
+        [sessionId]: {
+          ...useChatStore.getState().getSession(sessionId),
+          connectionState: 'connected',
+          historyStatus: 'ready',
+        },
+      },
+    })
+
+    render(<ActiveSession />)
+    expect(screen.getByTestId('empty-session-hero')).toBeInTheDocument()
+
+    act(() => {
+      useChatStore.getState().setPreparingTurn(sessionId, true)
+    })
+
+    expect(screen.queryByTestId('empty-session-hero')).not.toBeInTheDocument()
+    expect(screen.getByTestId('message-list')).toBeInTheDocument()
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-variant', 'default')
+  })
+
   it('shows the session token badge when usage is cache-only', () => {
     const sessionId = 'cache-only-token-session'
 

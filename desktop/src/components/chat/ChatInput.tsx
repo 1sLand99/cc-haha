@@ -185,6 +185,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
     updateQueuedUserMessage,
     removeQueuedUserMessage,
     sendQueuedUserMessage,
+    setPreparingTurn,
   } = useChatStore()
   const activeTabId = useTabStore((s) => s.activeTabId)
   const sessionState = useChatStore((s) => activeTabId ? s.sessions[activeTabId] : undefined)
@@ -193,6 +194,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const launchBranch = repositoryLaunchDraft?.branch ?? null
   const launchUseWorktree = repositoryLaunchDraft?.useWorktree ?? false
   const chatState = sessionState?.chatState ?? 'idle'
+  const isPreparingTurn = Boolean(sessionState?.isPreparingTurn)
   const slashCommands = sessionState?.slashCommands ?? []
   const composerPrefill = sessionState?.composerPrefill ?? null
   const composerInsertion = sessionState?.composerInsertion ?? null
@@ -295,6 +297,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
     : null
   const canSubmit = !isWorkspaceMissing &&
     !launchTransitioning &&
+    !isPreparingTurn &&
     (!showLaunchControls || launchReady || !!pendingSlashUiAction) &&
     (input.trim().length > 0 || (!isMemberSession && (attachments.length > 0 || hasWorkspaceReferences)))
   const composerAttachments = useMemo(
@@ -790,14 +793,23 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
         (gitInfo?.branch ? launchBranch !== gitInfo.branch : true)
       if (shouldReplaceForRepositoryLaunch) {
         setLaunchTransitioning(true)
+        const placeholderSessionId = targetSessionId
+        setPreparingTurn(placeholderSessionId, true)
         try {
           const newSessionId = await replaceEmptySession(activeLaunchWorkDir, {
             branch: launchBranch,
             worktree: launchUseWorktree,
           })
-          if (!newSessionId) return
+          if (!newSessionId) {
+            setPreparingTurn(placeholderSessionId, false)
+            return
+          }
           targetSessionId = newSessionId
+          // Keep the placeholder continuous across the old-id -> new-id swap.
+          // sendMessage clears it in the same turn that appends the user row.
+          setPreparingTurn(targetSessionId, true)
         } catch (error) {
+          setPreparingTurn(placeholderSessionId, false)
           useUIStore.getState().addToast({
             type: 'error',
             message: error instanceof Error ? error.message : t('empty.failedToCreate'),
@@ -1291,7 +1303,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                 onCompositionStart={() => { composingRef.current = true }}
                 onCompositionEnd={() => { composingRef.current = false }}
                 placeholder={composerPlaceholder}
-                disabled={isWorkspaceMissing}
+                disabled={isWorkspaceMissing || launchTransitioning || isPreparingTurn}
                 className="flex-1"
                 editorClassName="max-h-[200px] overflow-y-auto py-2 leading-relaxed text-[var(--color-text-primary)]"
                 aria={{
@@ -1317,7 +1329,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
               onCompositionStart={() => { composingRef.current = true }}
               onCompositionEnd={() => { composingRef.current = false }}
               placeholder={composerPlaceholder}
-              disabled={isWorkspaceMissing}
+              disabled={isWorkspaceMissing || launchTransitioning || isPreparingTurn}
               editorClassName={`max-h-[200px] overflow-y-auto text-sm leading-relaxed text-[var(--color-text-primary)] ${
                 useCompactChrome ? 'py-1.5' : 'py-2'
               }`}

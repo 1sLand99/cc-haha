@@ -106,6 +106,12 @@ type PendingComputerUsePermissions = Record<string, PendingComputerUsePermission
 export type PerSessionState = {
   messages: UIMessage[]
   chatState: ChatState
+  /**
+   * The first prompt is waiting for an empty placeholder session to be
+   * replaced with its selected branch/worktree session. This is UI-only turn
+   * state: no request has been sent to the old session.
+   */
+  isPreparingTurn?: boolean
   connectionState: ConnectionState
   /** True after the server's authoritative reconnect snapshot has arrived. */
   connectionSnapshotReady?: boolean
@@ -173,6 +179,7 @@ export type PerSessionState = {
 const DEFAULT_SESSION_STATE: PerSessionState = {
   messages: [],
   chatState: 'idle',
+  isPreparingTurn: false,
   connectionState: 'disconnected',
   connectionSnapshotReady: false,
   historyStatus: 'idle',
@@ -349,6 +356,7 @@ type ChatStore = {
   clearComposerDraft: (sessionId: string) => void
   setRepositoryLaunchDraft: (sessionId: string, draft: RepositoryLaunchDraftState) => void
   clearRepositoryLaunchDraft: (sessionId: string) => void
+  setPreparingTurn: (sessionId: string, preparing: boolean) => void
   queueUserMessage: (
     sessionId: string,
     message: Omit<QueuedUserMessage, 'id' | 'createdAt'>,
@@ -1559,6 +1567,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             ...session,
             messages: newMessages,
             chatState: 'thinking',
+            isPreparingTurn: false,
             historyMutationEpoch: (session.historyMutationEpoch ?? 0) + 1,
             elapsedSeconds: 0,
             suppressNextTaskNotificationResponse: false,
@@ -2081,6 +2090,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((state) => ({
       sessions: updateSessionIn(state.sessions, sessionId, () => ({
         repositoryLaunchDraft: null,
+      })),
+    }))
+  },
+
+  setPreparingTurn: (sessionId, preparing) => {
+    set((state) => ({
+      sessions: updateSessionIn(state.sessions, sessionId, () => ({
+        isPreparingTurn: preparing,
       })),
     }))
   },

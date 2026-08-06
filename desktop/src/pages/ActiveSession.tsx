@@ -387,6 +387,7 @@ export function ActiveSession() {
   const t = useTranslation()
   const messages = sessionState?.messages ?? EMPTY_MESSAGES
   const streamingText = sessionState?.streamingText ?? ''
+  const isPreparingTurn = Boolean(sessionState?.isPreparingTurn)
   const backgroundTasks = useMemo(
     () => Object.values(sessionState?.backgroundAgentTasks ?? {}),
     [sessionState?.backgroundAgentTasks],
@@ -397,7 +398,11 @@ export function ActiveSession() {
   )
   const agentTaskNotifications = sessionState?.agentTaskNotifications ?? EMPTY_AGENT_TASK_NOTIFICATIONS
   const activeGoal = sessionState?.activeGoal ?? null
-  const isEmpty = messages.length === 0 && !streamingText && (session?.messageCount ?? 0) === 0
+  const isEmpty =
+    messages.length === 0 &&
+    !streamingText &&
+    !isPreparingTurn &&
+    (session?.messageCount ?? 0) === 0
   const compactEmptyHero = isEmpty && showTerminalPanel
   const isHistoryLoading =
     !isMemberSession &&
@@ -414,7 +419,7 @@ export function ActiveSession() {
   const visibleMessageCount = messages.length > 0 ? messages.length : session?.messageCount ?? 0
   const headerTitle = session?.title || t('session.untitled')
 
-  const isActive = chatState !== 'idle' || hasRunningBackgroundTasks
+  const isActive = isPreparingTurn || chatState !== 'idle' || hasRunningBackgroundTasks
   const totalTokens = getTokenUsageTotal(tokenUsage)
   const cachedTokens = (tokenUsage.cache_read_tokens ?? 0) +
     (tokenUsage.cache_creation_tokens ?? 0)
