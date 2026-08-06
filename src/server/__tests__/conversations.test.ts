@@ -1248,6 +1248,127 @@ describe('ConversationService', () => {
     }
   })
 
+  it('should reset context estimates at compact boundaries and ignore encrypted reasoning bytes', async () => {
+    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
+    const previousNodeEnv = process.env.NODE_ENV
+    const tmpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-transcript-compact-context-'))
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-workdir-compact-context-'))
+    process.env.CLAUDE_CONFIG_DIR = tmpConfigDir
+    process.env.NODE_ENV = 'development'
+
+    try {
+      const svc = new SessionService()
+      const { sessionId } = await svc.createSession(workDir)
+      const found = await svc.findSessionFile(sessionId)
+      expect(found).not.toBeNull()
+
+      const encryptedReasoning =
+        `cc-haha:openai-reasoning:v1:${JSON.stringify({
+          summary: [],
+          encrypted_content: 'x'.repeat(400_000),
+        })}`
+      const entries = [
+        {
+          type: 'assistant',
+          uuid: crypto.randomUUID(),
+          timestamp: '2026-08-07T00:00:00.000Z',
+          cwd: workDir,
+          message: {
+            role: 'assistant',
+            model: 'gpt-5.6-terra',
+            content: [{ type: 'redacted_thinking', data: encryptedReasoning }],
+            usage: {
+              input_tokens: 8_000,
+              output_tokens: 1_000,
+              cache_read_input_tokens: 331_000,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        },
+        {
+          type: 'system',
+          subtype: 'compact_boundary',
+          uuid: crypto.randomUUID(),
+          timestamp: '2026-08-07T00:00:01.000Z',
+          content: 'Conversation compacted',
+        },
+        {
+          type: 'user',
+          uuid: crypto.randomUUID(),
+          timestamp: '2026-08-07T00:00:02.000Z',
+          cwd: workDir,
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: 'summary'.repeat(100) }],
+          },
+        },
+        {
+          type: 'assistant',
+          uuid: crypto.randomUUID(),
+          timestamp: '2026-08-07T00:00:03.000Z',
+          cwd: workDir,
+          message: {
+            role: 'assistant',
+            model: 'gpt-5.6-terra',
+            content: [{ type: 'text', text: 'continued' }],
+            usage: {
+              input_tokens: 8_000,
+              output_tokens: 100,
+              cache_read_input_tokens: 2_000,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        },
+        {
+          type: 'assistant',
+          uuid: crypto.randomUUID(),
+          timestamp: '2026-08-07T00:00:04.000Z',
+          cwd: workDir,
+          message: {
+            role: 'assistant',
+            model: 'gpt-5.6-terra',
+            content: [{ type: 'redacted_thinking', data: encryptedReasoning }],
+            usage: {
+              input_tokens: 0,
+              output_tokens: 0,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        },
+      ]
+      await fs.appendFile(
+        found!.filePath,
+        entries.map(entry => JSON.stringify(entry)).join('\n') + '\n',
+      )
+
+      const contextEstimate = await svc.getTranscriptContextEstimate(sessionId)
+      const inspectionSnapshot = await svc.getInspectionTranscriptSnapshot(sessionId)
+
+      expect(contextEstimate?.model).toBe('gpt-5.6-terra')
+      expect(contextEstimate?.totalTokens).toBe(10_100)
+      expect(contextEstimate?.percentage).toBe(3)
+      expect(contextEstimate?.categories.reduce(
+        (sum, category) => sum + category.tokens,
+        0,
+      )).toBe(contextEstimate?.rawMaxTokens)
+      expect(inspectionSnapshot?.contextEstimate).toEqual(contextEstimate)
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previousConfigDir
+      }
+      if (previousNodeEnv === undefined) {
+        delete process.env.NODE_ENV
+      } else {
+        process.env.NODE_ENV = previousNodeEnv
+      }
+      await fs.rm(tmpConfigDir, { recursive: true, force: true })
+      await fs.rm(workDir, { recursive: true, force: true })
+    }
+  })
+
   it('should use active provider model context windows for transcript estimates', async () => {
     const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
     const previousNodeEnv = process.env.NODE_ENV

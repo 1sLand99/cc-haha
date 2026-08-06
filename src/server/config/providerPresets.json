@@ -249,7 +249,10 @@
     },
     "needsApiKey": true,
     "websiteUrl": "https://www.atlascloud.ai",
-    "authStrategy": "api_key"
+    "authStrategy": "api_key",
+    "modelContextWindows": {
+      "deepseek-ai/deepseek-v4-pro": 1000000
+    }
   },
   {
     "id": "fennoai",

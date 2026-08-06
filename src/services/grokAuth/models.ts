@@ -39,10 +39,30 @@ function model(
 }
 
 const EXPLICIT_MODELS = new Set(GROK_MODEL_CATALOG.map((entry) => entry.value))
+const CLAUDE_COMPATIBILITY_ALIASES = new Set([
+  'default',
+  'grok',
+  'haiku',
+  'sonnet',
+  'opus',
+])
 
 export function resolveGrokModel(modelId: string): string {
-  const normalized = modelId.trim().toLowerCase()
-  return EXPLICIT_MODELS.has(normalized) ? normalized : GROK_DEFAULT_MAIN_MODEL
+  const requested = modelId.trim()
+  const normalized = requested.toLowerCase()
+  if (EXPLICIT_MODELS.has(normalized)) return normalized
+  if (
+    !normalized ||
+    normalized.startsWith('claude-') ||
+    CLAUDE_COMPATIBILITY_ALIASES.has(normalized)
+  ) {
+    return GROK_DEFAULT_MAIN_MODEL
+  }
+
+  // The authenticated catalog can expose models newer than this bundled
+  // client. Forward those IDs unchanged so selecting a remotely advertised
+  // model never silently sends the request to a different model.
+  return requested
 }
 
 export function getGrokContextWindowForModel(modelId: string): number | null {

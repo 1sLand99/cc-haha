@@ -142,6 +142,7 @@ describe('provider presets API', () => {
       sonnet: 'deepseek-ai/deepseek-v4-pro',
       opus: 'deepseek-ai/deepseek-v4-pro',
     })
+    expect(atlascloud?.modelContextWindows?.['deepseek-ai/deepseek-v4-pro']).toBe(1000000)
     expect(xuanshuapi?.baseUrl).toBe('https://www.xuanshuapi.com')
     expect(xuanshuapi?.apiFormat).toBe('anthropic')
     expect(xuanshuapi?.authStrategy).toBe('auth_token')
