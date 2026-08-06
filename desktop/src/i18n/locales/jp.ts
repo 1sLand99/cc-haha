@@ -2003,6 +2003,8 @@ export const jp: Record<TranslationKey, string> = {
   'toolGroup.searchedMany': '{count} 件のパターンを検索しました',
   'toolGroup.agentOne': 'エージェントを 1 件起動しました',
   'toolGroup.agentMany': '{count} 件のエージェントを起動しました',
+  'toolGroup.thought': '思考',
+  'toolGroup.failedCount': '{count} 件失敗',
   'toolGroup.collapseAgent': 'エージェントを折りたたむ',
   'toolGroup.expandAgent': 'エージェントを展開',
   'toolGroup.openRun': '実行を開く',

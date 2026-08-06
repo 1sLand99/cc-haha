@@ -165,10 +165,11 @@ describe('buildSessionActivityModel', () => {
     })
 
     expect(hasVisibleSessionActivity(model)).toBe(true)
+    // Plan, then the agents working it, then the processes it left running.
     expect(getVisibleActivitySections(model).map((section) => section.id)).toEqual([
       'tasks',
-      'backgroundTasks',
       'subagents',
+      'backgroundTasks',
     ])
     expect(model.badgeCount).toBe(3)
   })

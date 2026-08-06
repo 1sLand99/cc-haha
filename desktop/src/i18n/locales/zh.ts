@@ -2002,6 +2002,8 @@ export const zh: Record<TranslationKey, string> = {
   'toolGroup.searchedMany': '搜索了 {count} 个模式',
   'toolGroup.agentOne': '派遣了一个代理',
   'toolGroup.agentMany': '派遣了 {count} 个代理',
+  'toolGroup.thought': '思考',
+  'toolGroup.failedCount': '{count} 项失败',
   'toolGroup.collapseAgent': '收起代理',
   'toolGroup.expandAgent': '展开代理',
   'toolGroup.openRun': '打开运行记录',

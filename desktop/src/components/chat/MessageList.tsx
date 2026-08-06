@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, memo, useState, useCallback, useDeferredValue, useLayoutEffect, type ReactNode } from 'react'
+import { useRef, useEffect, useMemo, memo, useState, useCallback, useDeferredValue, useLayoutEffect, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowDown, BookMarked, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleStop, FileStack, LoaderCircle, MessageCircle, Settings, Target, XCircle } from 'lucide-react'
 import { ApiError } from '../../api/client'
@@ -17,6 +17,7 @@ import { AssistantMessage } from './AssistantMessage'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ToolCallGroup } from './ToolCallGroup'
+import type { ActivityStep } from './activityGroupModel'
 import { ToolResultBlock } from './ToolResultBlock'
 import { PermissionDialog } from './PermissionDialog'
 import { AskUserQuestion } from './AskUserQuestion'
@@ -56,7 +57,12 @@ type BackgroundTaskEvent = Extract<UIMessage, { type: 'background_task' }>
 type CompactSummaryEvent = Extract<UIMessage, { type: 'compact_summary' }>
 
 type RenderItem =
-  | { kind: 'tool_group'; toolCalls: ToolCall[]; id: string }
+  /**
+   * One contiguous activity run. `steps` is the run in transcript order —
+   * thinking blocks included — and `toolCalls` is the tools-only projection the
+   * agent/image/memory renderers still work from.
+   */
+  | { kind: 'tool_group'; toolCalls: ToolCall[]; steps: ActivityStep[]; id: string }
   | { kind: 'message'; message: UIMessage }
 
 type RenderModel = {
@@ -630,26 +636,54 @@ export function buildRenderModel(messages: UIMessage[], activeAskUserQuestionToo
   const toolUseIds = new Set<string>()
   const lastUnresolvedAskUserQuestionIndexByToolUseId = new Map<string, number>()
   let lastUnresolvedAskUserQuestionIndex: number | null = null
-  let pendingToolCalls: ToolCall[] = []
+  let pendingSteps: ActivityStep[] = []
+  let pendingToolCount = 0
+  let pendingAgentCount = 0
 
   const flushGroup = () => {
-    if (pendingToolCalls.length > 0) {
-      items.push({
-        kind: 'tool_group',
-        toolCalls: [...pendingToolCalls],
-        id: `group-${pendingToolCalls[0]!.id}`,
-      })
-      pendingToolCalls = []
+    if (pendingSteps.length === 0) return
+    const steps = pendingSteps
+    const toolCount = pendingToolCount
+    pendingSteps = []
+    pendingToolCount = 0
+    pendingAgentCount = 0
+
+    if (toolCount === 0) {
+      // A run of pure reasoning has nothing to summarize into a header, so the
+      // thinking blocks keep their standalone inline form.
+      for (const step of steps) {
+        if (step.kind === 'thinking') items.push({ kind: 'message', message: step.message })
+      }
+      return
     }
+
+    const toolCalls = steps.flatMap((step) => (step.kind === 'tool' ? [step.toolCall] : []))
+    items.push({
+      kind: 'tool_group',
+      toolCalls,
+      steps,
+      // Keyed off the first tool call, not the first step: a thinking block that
+      // later gains tools must not remount the group under the reader.
+      id: `group-${toolCalls[0]!.id}`,
+    })
   }
   const appendRootToolCall = (toolCall: ToolCall) => {
     const nextIsAgent = toolCall.toolName === 'Agent'
-    const pendingIsAgentGroup = pendingToolCalls.every((pendingToolCall) => pendingToolCall.toolName === 'Agent')
+    // Agent runs render as their own dispatch cards, so they never mix with
+    // ordinary steps — including the thinking that preceded the dispatch.
+    const pendingIsAgentGroup = pendingToolCount > 0 && pendingAgentCount === pendingToolCount
+    const pendingBlocksAgent = nextIsAgent && pendingSteps.length > pendingAgentCount
 
-    if (pendingToolCalls.length > 0 && pendingIsAgentGroup !== nextIsAgent) {
+    if (pendingBlocksAgent || (pendingToolCount > 0 && pendingIsAgentGroup !== nextIsAgent)) {
       flushGroup()
     }
-    pendingToolCalls.push(toolCall)
+    pendingSteps.push({ kind: 'tool', toolCall })
+    pendingToolCount += 1
+    if (nextIsAgent) pendingAgentCount += 1
+  }
+  const appendThinking = (message: Extract<UIMessage, { type: 'thinking' }>) => {
+    if (pendingToolCount > 0 && pendingAgentCount === pendingToolCount) flushGroup()
+    pendingSteps.push({ kind: 'thinking', message })
   }
 
   for (const msg of messages) {
@@ -718,6 +752,8 @@ export function buildRenderModel(messages: UIMessage[], activeAskUserQuestionToo
       } else {
         appendRootToolCall(msg)
       }
+    } else if (msg.type === 'thinking') {
+      appendThinking(msg)
     } else {
       flushGroup()
       items.push({ kind: 'message', message: msg })
@@ -1018,6 +1054,14 @@ const CONTENT_RESIZE_FOLLOW_JITTER_MAX_DELTA_PX = 2
 // delta makes the two owners fight and turns the rounding into visible bounce.
 const LIVE_FOLLOW_BOTTOM_GAP_TOLERANCE_PX = 4
 const USER_SCROLL_INTENT_WINDOW_MS = 500
+/**
+ * Backstop for the disclosure suppression window. The window normally ends at
+ * the next animation frame (see `handleDisclosureToggle`); this only bounds it
+ * if that frame never runs, so a dropped rAF cannot leave follow off forever.
+ */
+const DISCLOSURE_FOLLOW_SUPPRESS_MS = 400
+/** Collapse toggles inside the transcript, matched via event delegation. */
+const CHAT_DISCLOSURE_SELECTOR = '[data-chat-disclosure="true"]'
 const CONVERSATION_NAVIGATION_MIN_ITEMS = 4
 const CONVERSATION_NAVIGATION_FULL_MIN_WIDTH_PX = 960
 const CONVERSATION_NAVIGATION_COMPACT_MIN_WIDTH_PX = 560
@@ -1303,7 +1347,10 @@ function getMessageContentWeight(message: UIMessage): number {
 
 function getRenderItemContentWeight(item: RenderItem): number {
   if (item.kind === 'message') return getMessageContentWeight(item.message)
-  return item.toolCalls.reduce((total, toolCall) => total + getMessageContentWeight(toolCall), 0)
+  return item.steps.reduce(
+    (total, step) => total + getMessageContentWeight(step.kind === 'tool' ? step.toolCall : step.message),
+    0,
+  )
 }
 
 export function shouldVirtualizeRenderItems(
@@ -1370,8 +1417,15 @@ function estimateMessageHeight(message: UIMessage): number {
   }
 }
 
+/** A collapsed activity group is one header line, however many steps it holds. */
+const ACTIVITY_GROUP_COLLAPSED_HEIGHT = 52
+
 function estimateRenderItemHeight(item: RenderItem): number {
   if (item.kind === 'message') return estimateMessageHeight(item.message)
+  // Agent dispatch groups keep their taller per-agent cards; everything else
+  // collapses to the single-line activity header.
+  const isAgentGroup = item.toolCalls.length > 0 && item.toolCalls.every((toolCall) => toolCall.toolName === 'Agent')
+  if (!isAgentGroup) return ACTIVITY_GROUP_COLLAPSED_HEIGHT
   const textWeight = getRenderItemContentWeight(item)
   return clampNumber(92 + item.toolCalls.length * 78 + Math.ceil(textWeight / 140) * 16, 88, 2600)
 }
@@ -1407,7 +1461,9 @@ function getMessageMetricSignature(message: UIMessage): string {
 
 function getRenderItemMetricSignature(item: RenderItem): string {
   if (item.kind === 'message') return getMessageMetricSignature(item.message)
-  return item.toolCalls.map(getMessageMetricSignature).join('|')
+  return item.steps
+    .map((step) => getMessageMetricSignature(step.kind === 'tool' ? step.toolCall : step.message))
+    .join('|')
 }
 
 function findVirtualStartIndex(offsets: number[], target: number) {
@@ -1638,6 +1694,8 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const streamingText = sessionState?.streamingText ?? ''
   const streamingToolInput = sessionState?.streamingToolInput ?? ''
   const activeThinkingId = sessionState?.activeThinkingId ?? null
+  const hasApiRetry = Boolean(sessionState?.apiRetry)
+  const hasStreamingFallback = Boolean(sessionState?.streamingFallback)
   const agentTaskNotifications = sessionState?.agentTaskNotifications ?? EMPTY_AGENT_TASK_NOTIFICATIONS
   const backgroundAgentTasks = sessionState?.backgroundAgentTasks
   const agentTaskStatuses = useMemo<Record<string, BackgroundAgentTask['status']>>(() => {
@@ -1686,6 +1744,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const ignoreProgrammaticScrollUntilRef = useRef(0)
   const ignoreProgrammaticScrollTopRef = useRef<number | null>(null)
   const userScrollIntentUntilRef = useRef(0)
+  const disclosureLayoutUntilRef = useRef(0)
   const lastSessionIdRef = useRef<string | null | undefined>(undefined)
   const lastTailMessageIdBySessionRef = useRef(new Map<string, string | null>())
   const lastLiveFollowInputRef = useRef({
@@ -1913,6 +1972,41 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     }
   }, [hasPendingPermissionCard, resolvedSessionId, syncVirtualViewportFromContainer])
 
+  /**
+   * Expanding a collapsed block is the reader rearranging their own view, not
+   * the model producing output — so the live-follow must not treat the height
+   * jump as new content and yank the transcript to the bottom (#1177). Browser
+   * scroll anchoring already keeps the clicked row where it is; this only has to
+   * stop `requestLiveFollow` from overriding it for that one frame.
+   *
+   * Deliberately not `userScrollIntentUntilRef`: that one is set by any
+   * pointerdown on the scroller, so reusing it would suppress content-resize
+   * follow on every stray click and turn "no jump" into "randomly stops
+   * following".
+   */
+  const handleDisclosureToggle = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target
+    if (!(target instanceof Element) || !target.closest(CHAT_DISCLOSURE_SELECTOR)) return
+
+    disclosureLayoutUntilRef.current = performance.now() + DISCLOSURE_FOLLOW_SUPPRESS_MS
+
+    // Suppression only covers the resize frame. Once the block is open the
+    // container is no longer at the bottom, and the next streamed token would
+    // pull it back down and throw the reader out again — so re-decide whether
+    // we are still following, exactly as a wheel gesture would.
+    requestAnimationFrame(() => {
+      // The expansion's resize has landed by now, so hand follow back before the
+      // next token arrives — suppression must never outlive the reader's click.
+      disclosureLayoutUntilRef.current = 0
+      const container = scrollContainerRef.current
+      if (!container) return
+      const atBottom = isNearScrollBottom(container)
+      shouldAutoScrollRef.current = atBottom
+      setIsAwayFromLatest(!atBottom)
+      syncVirtualViewportFromContainer(container)
+    })
+  }, [syncVirtualViewportFromContainer])
+
   const markUserScrollIntent = useCallback(() => {
     userScrollIntentUntilRef.current = performance.now() + USER_SCROLL_INTENT_WINDOW_MS
   }, [])
@@ -2074,6 +2168,8 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       }
       if (!shouldFollowContentResize) return
       if (!shouldAutoScrollRef.current) return
+      // The reader just opened something: the growth is theirs, not the model's.
+      if (performance.now() < disclosureLayoutUntilRef.current) return
       requestLiveFollow()
     })
     observer.observe(content)
@@ -2729,10 +2825,12 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
           <ToolCallGroup
             sessionId={resolvedSessionId}
             toolCalls={item.toolCalls}
+            steps={item.steps}
             resultMap={toolResultMap}
             childToolCallsByParent={childToolCallsByParent}
             agentTaskNotifications={agentTaskNotifications}
             agentTaskStatuses={agentTaskStatuses}
+            activeThinkingId={activeThinkingId}
             isStreaming={
               chatState === 'tool_executing' &&
               item.toolCalls.some((tc) => !toolResultMap.has(tc.toolUseId))
@@ -2778,6 +2876,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       <div
         ref={scrollContainerRef}
         onScroll={updateAutoScrollState}
+        onClickCapture={handleDisclosureToggle}
         onWheel={handleWheelScrollIntent}
         onPointerDown={markUserScrollIntent}
         onTouchStart={markUserScrollIntent}
@@ -2833,8 +2932,13 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
           {/* Show StreamingIndicator when:
               - tool_executing: background work is running
               - thinking but no active ThinkingBlock yet: the gap between
-                sending a message and receiving the first thinking delta */}
-          {(chatState === 'tool_executing' || (chatState === 'thinking' && !activeThinkingId)) && (
+                sending a message and receiving the first thinking delta
+              The live status stays in the transcript, next to the output it is
+              describing — it is part of the conversation, not composer chrome. */}
+          {(hasApiRetry ||
+            hasStreamingFallback ||
+            chatState === 'tool_executing' ||
+            (chatState === 'thinking' && !activeThinkingId)) && (
             <StreamingIndicator />
           )}
 

@@ -362,8 +362,16 @@ describe('chat blocks', () => {
 
     fireEvent.click(screen.getByRole('button'))
 
-    expect((container.textContent?.match(/detail line 1\b/g) ?? []).length).toBe(1)
-    expect(container.textContent).toContain('detail line 25')
+    // Scoped to the output block, not the whole card: the header also carries a
+    // one-line summary of the failure, which is not a duplicated body. Counting
+    // over `container.textContent` only ever passed by accident — the old
+    // material glyph rendered the literal text "error" straight after the
+    // summary, and that killed the `\b` the regex depends on.
+    const errorBodies = [...container.querySelectorAll('pre')].filter(
+      (block) => block.textContent?.includes('detail line 1'),
+    )
+    expect(errorBodies).toHaveLength(1)
+    expect(errorBodies[0]?.textContent).toContain('detail line 25')
     expect(screen.queryByRole('button', { name: /more lines/ })).toBeNull()
   })
 

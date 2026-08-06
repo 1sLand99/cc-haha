@@ -1348,7 +1348,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
             `-mx-3` has to cancel the panel's `p-3` exactly, and the panel is
             padded by the same chrome rule.
           */}
-          <div data-testid="chat-input-toolbar" className={`flex items-center justify-between border-t border-[var(--color-border-separator)] ${
+          <div data-testid="chat-input-toolbar" className={`flex items-center justify-between ${
             isHeroComposer
               ? 'pt-3'
               : useCompactChrome
@@ -1373,7 +1373,10 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                       onClick={() => setPlusMenuOpen((value) => !value)}
                       aria-label={t('chat.composerTools')}
                       aria-expanded={plusMenuOpen}
-                      className={`inline-flex items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${isMobileComposer ? 'h-11 w-11' : 'h-8 w-8'}`}
+                      // Bordered on desktop so the tools affordance reads as a
+                      // control at rest, not only on hover — it sits next to
+                      // the permission chip, which is bordered too.
+                      className={`inline-flex items-center justify-center rounded-[var(--radius-md)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${isMobileComposer ? 'h-11 w-11' : 'h-8 w-8 border border-[var(--color-border)]'}`}
                     >
                       <span className="material-symbols-outlined text-[18px]">add</span>
                     </button>
@@ -1487,7 +1490,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                   send without a word next to it. Dropping the label is why the
                   name now lives only in `aria-label`, on both breakpoints. */}
               <Button
-                variant={!isMemberSession && isActive ? 'danger' : 'primary'}
+                variant={!isMemberSession && isActive ? 'danger' : 'accent'}
                 size="base"
                 shape="circle"
                 onClick={!isMemberSession && isActive ? () => stopGeneration(activeTabId!) : handleSubmit}

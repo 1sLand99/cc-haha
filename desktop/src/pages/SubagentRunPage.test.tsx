@@ -260,7 +260,7 @@ describe('SubagentRunPage', () => {
 
     render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="SubAgent" />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /ran a command, found files/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /ran a command.*found files/i }))
     fireEvent.click(screen.getByRole('button', { name: /Bash.*pwd/i }))
     expect(document.querySelector('[data-shell-output]')).toHaveTextContent('/workspace')
 

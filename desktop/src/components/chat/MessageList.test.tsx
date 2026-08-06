@@ -1754,8 +1754,9 @@ describe('MessageList nested tool calls', () => {
 
     render(<MessageList />)
 
-    const groupSummary = screen.getByText('TaskUpdate (1), ran a command')
-    const groupButton = groupSummary.closest('button')
+    // The activity header lists each tool family as its own segment, so the
+    // summary is never one text node — match the button by accessible name.
+    const groupButton = screen.getByRole('button', { name: /TaskUpdate \(1\).*ran a command/i })
     expect(groupButton?.textContent).not.toContain('check_circle')
     expect(screen.queryByText('local_bash')).toBeNull()
 
@@ -1985,6 +1986,108 @@ describe('MessageList nested tool calls', () => {
     expect(screen.getByText('bun test')).toBeTruthy()
   })
 
+  it('keeps thinking inside the surrounding activity run instead of splitting it', () => {
+    const messages: UIMessage[] = [
+      {
+        id: 'tool-read',
+        type: 'tool_use',
+        toolName: 'Read',
+        toolUseId: 'read-1',
+        input: { file_path: '/tmp/example.ts' },
+        timestamp: 1,
+      },
+      { id: 'think-1', type: 'thinking', content: 'The delay is unconditional here.', timestamp: 2 },
+      {
+        id: 'tool-bash',
+        type: 'tool_use',
+        toolName: 'Bash',
+        toolUseId: 'bash-1',
+        input: { command: 'bun test' },
+        timestamp: 3,
+      },
+    ]
+
+    const { renderItems } = buildRenderModel(messages)
+
+    expect(renderItems).toHaveLength(1)
+    const group = renderItems[0]
+    expect(group?.kind).toBe('tool_group')
+    if (group?.kind !== 'tool_group') throw new Error('expected a tool group')
+    expect(group.steps.map((step) => step.kind === 'tool' ? step.toolCall.toolUseId : step.message.id)).toEqual([
+      'read-1',
+      'think-1',
+      'bash-1',
+    ])
+    // The tools-only projection stays intact for the agent/image/memory paths.
+    expect(group.toolCalls.map((toolCall) => toolCall.toolUseId)).toEqual(['read-1', 'bash-1'])
+  })
+
+  it('leaves a run of pure reasoning as standalone thinking blocks', () => {
+    const messages: UIMessage[] = [
+      { id: 'think-1', type: 'thinking', content: 'First consider the call sites.', timestamp: 1 },
+      { id: 'think-2', type: 'thinking', content: 'Then the retry path.', timestamp: 2 },
+    ]
+
+    const { renderItems } = buildRenderModel(messages)
+
+    expect(renderItems.map((item) => item.kind === 'message' ? item.message.id : item.id)).toEqual([
+      'think-1',
+      'think-2',
+    ])
+  })
+
+  it('keeps thinking out of an agent dispatch group', () => {
+    const messages: UIMessage[] = [
+      { id: 'think-1', type: 'thinking', content: 'Split the review by subsystem.', timestamp: 1 },
+      {
+        id: 'tool-agent',
+        type: 'tool_use',
+        toolName: 'Agent',
+        toolUseId: 'agent-1',
+        input: { description: 'Review desktop impact' },
+        timestamp: 2,
+      },
+    ]
+
+    const { renderItems } = buildRenderModel(messages)
+
+    expect(renderItems.map((item) => item.kind === 'message' ? `message:${item.message.id}` : `group:${item.id}`)).toEqual([
+      'message:think-1',
+      'group:group-tool-agent',
+    ])
+  })
+
+  it('ends an activity run at the assistant reply that narrates it', () => {
+    const messages: UIMessage[] = [
+      { id: 'think-1', type: 'thinking', content: 'Check the handler first.', timestamp: 1 },
+      {
+        id: 'tool-read',
+        type: 'tool_use',
+        toolName: 'Read',
+        toolUseId: 'read-1',
+        input: { file_path: '/tmp/example.ts' },
+        timestamp: 2,
+      },
+      { id: 'assistant-1', type: 'assistant_text', content: 'Found the unconditional delay.', timestamp: 3 },
+      {
+        id: 'tool-bash',
+        type: 'tool_use',
+        toolName: 'Bash',
+        toolUseId: 'bash-1',
+        input: { command: 'bun test' },
+        timestamp: 4,
+      },
+    ]
+
+    const { renderItems } = buildRenderModel(messages)
+
+    expect(renderItems.map((item) => item.kind === 'message' ? `message:${item.message.id}` : `group:${item.id}`)).toEqual([
+      'group:group-tool-read',
+      'message:assistant-1',
+      'group:group-tool-bash',
+    ])
+  })
+
   it('keeps root tool runs split when nested child tool calls appear between them', () => {
     const messages: UIMessage[] = [
       {
@@ -2202,7 +2305,7 @@ describe('MessageList nested tool calls', () => {
 
     render(<MessageList />)
 
-    const mixedGroupButton = screen.getByRole('button', { name: /TaskUpdate \(1\), ran a command/i })
+    const mixedGroupButton = screen.getByRole('button', { name: /TaskUpdate \(1\).*ran a command/i })
     expect(screen.queryByText('git status --short')).toBeNull()
     fireEvent.click(mixedGroupButton)
     expect(screen.getByText('git status --short')).toBeTruthy()
@@ -2232,7 +2335,7 @@ describe('MessageList nested tool calls', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /TaskUpdate \(1\), ran a command/i })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /TaskUpdate \(1\).*ran a command/i })).toBeTruthy()
     })
     expect(screen.queryByText('git status --short')).toBeNull()
     expect(screen.queryByText('package.json')).toBeNull()
@@ -3459,6 +3562,146 @@ describe('MessageList nested tool calls', () => {
     await waitForProgrammaticScrollReset()
     expect(scrollIntoView).not.toHaveBeenCalled()
     expect(scrollTop).toBe(600)
+  })
+
+  // #1177: expanding a collapsed run is the reader rearranging their own view.
+  // The content-resize follow used to read that height jump as new output and
+  // slam the transcript to the bottom, throwing the just-clicked row off screen.
+  it('does not follow the height jump the reader causes by expanding a run, but still follows the next token', async () => {
+    let resizeCallback: ResizeObserverCallback | null = null
+    class TestResizeObserver {
+      observe = vi.fn()
+      unobserve = vi.fn()
+      disconnect = vi.fn()
+
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback
+      }
+    }
+    vi.stubGlobal('ResizeObserver', TestResizeObserver)
+
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          chatState: 'tool_executing',
+          messages: [
+            { id: 'user-1', type: 'user_text', content: 'latest prompt', timestamp: 1 },
+            {
+              id: 'tool-read',
+              type: 'tool_use',
+              toolName: 'Read',
+              toolUseId: 'read-1',
+              input: { file_path: '/repo/a.ts' },
+              timestamp: 2,
+            },
+            {
+              id: 'result-read',
+              type: 'tool_result',
+              toolUseId: 'read-1',
+              content: 'ok',
+              isError: false,
+              timestamp: 3,
+            },
+            {
+              id: 'tool-bash',
+              type: 'tool_use',
+              toolName: 'Bash',
+              toolUseId: 'bash-1',
+              input: { command: 'bun test' },
+              timestamp: 4,
+            },
+            {
+              id: 'result-bash',
+              type: 'tool_result',
+              toolUseId: 'bash-1',
+              content: 'done',
+              isError: false,
+              timestamp: 5,
+            },
+          ],
+          streamingText: 'seed',
+        }),
+      },
+    })
+
+    const { container } = render(<MessageList />)
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLDivElement
+    let scrollTop = 600
+    let scrollHeight = 1000
+    let scrollTopWriteCount = 0
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 })
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTopWriteCount += 1
+        scrollTop = value
+      },
+    })
+
+    await waitFor(() => expect(resizeCallback).not.toBeNull())
+    await waitForProgrammaticScrollReset()
+    scrollTopWriteCount = 0
+
+    const queuedFrames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      queuedFrames.push(callback)
+      return queuedFrames.length
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const flushFrame = () => {
+      const callbacks = queuedFrames.splice(0)
+      act(() => {
+        for (const callback of callbacks) callback(performance.now())
+      })
+    }
+
+    // The reader opens the run; it grows by 500px.
+    const setStreamingText = (text: string) => {
+      useChatStore.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [ACTIVE_TAB]: { ...state.sessions[ACTIVE_TAB]!, streamingText: text },
+        },
+      }))
+    }
+
+    const disclosure = container.querySelector('[data-chat-disclosure="true"]') as HTMLButtonElement
+    expect(disclosure).toBeTruthy()
+    scrollHeight = 1500
+    act(() => {
+      fireEvent.click(disclosure)
+      resizeCallback?.([{ contentRect: { height: 900 } } as ResizeObserverEntry], {} as ResizeObserver)
+    })
+    flushFrame()
+
+    expect(scrollTopWriteCount).toBe(0)
+    expect(scrollTop).toBe(600)
+
+    // Expanding pushed the container off the bottom, so following stops until
+    // the reader returns — same semantics as scrolling up by hand.
+    scrollHeight = 1520
+    act(() => {
+      setStreamingText('seed more')
+      resizeCallback?.([{ contentRect: { height: 920 } } as ResizeObserverEntry], {} as ResizeObserver)
+    })
+    flushFrame()
+    expect(scrollTop).toBe(600)
+
+    // Back at the bottom, streaming follows again — the guard suppresses the
+    // reader's own resize, never the model's output.
+    act(() => {
+      scrollTop = 1120
+      fireEvent.scroll(scroller)
+    })
+    scrollHeight = 1560
+    act(() => {
+      setStreamingText('seed more still')
+      resizeCallback?.([{ contentRect: { height: 960 } } as ResizeObserverEntry], {} as ResizeObserver)
+    })
+    flushFrame()
+    expect(scrollTop).toBe(1160)
   })
 
   it('coalesces real streaming transitions and ignores fractional bottom wobble', async () => {
@@ -4734,7 +4977,9 @@ describe('MessageList nested tool calls', () => {
     expect(assistantShell).toBeTruthy()
     expect(assistantShell?.className).toContain('items-start')
     expect(assistantShell?.className).toContain('group')
-    expect(assistantShell?.className).not.toContain('w-full')
+    // Replies take the full column even when they are one short line — only the
+    // user bubble hugs its text. Side is what distinguishes them, not width.
+    expect(assistantShell?.className).toContain('w-full')
     expect(assistantShell?.className).not.toContain('ml-10')
     expect(userActions?.getAttribute('data-align')).toBe('end')
     expect(assistantActions?.getAttribute('data-align')).toBe('start')

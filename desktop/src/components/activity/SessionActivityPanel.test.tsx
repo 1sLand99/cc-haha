@@ -105,6 +105,42 @@ function model(overrides: Partial<SessionActivityModel> = {}): SessionActivityMo
 describe('SessionActivityPanel', () => {
   afterEach(cleanup)
 
+  it('tints the row icon tile by status so a one-line row still states what happened', () => {
+    render(
+      <SessionActivityPanel
+        model={model({
+          sections: {
+            ...model().sections,
+            backgroundTasks: {
+              id: 'backgroundTasks',
+              title: 'Background Tasks',
+              emptyLabel: 'No background tasks',
+              rows: [
+                { id: 'bg-run', section: 'backgroundTasks', label: 'Vite dev server', status: 'running', taskId: 'bg-run', openable: false },
+                { id: 'bg-fail', section: 'backgroundTasks', label: 'pytest -q', status: 'failed', taskId: 'bg-fail', openable: false },
+              ],
+            },
+          },
+        })}
+        open
+        onClose={vi.fn()}
+        onOpenSubagent={vi.fn()}
+      />,
+    )
+
+    const tiles = screen.getAllByTestId('activity-row-icon')
+    const running = tiles.find((tile) => tile.getAttribute('data-tone-status') === 'running')
+    const failed = tiles.find((tile) => tile.getAttribute('data-tone-status') === 'failed')
+
+    // 30px matches AgentMascot, so SubAgent and background rows share a text column.
+    expect(running?.className).toContain('h-[30px]')
+    expect(running?.className).toContain('bg-[var(--color-brand-soft)]')
+    // Paired tokens, never a raw accent on its own container (AGENTS.md 3.2).
+    expect(running?.className).toContain('text-[var(--color-on-brand-soft)]')
+    expect(failed?.className).toContain('bg-[var(--color-error-container)]')
+    expect(failed?.className).toContain('text-[var(--color-on-error-container)]')
+  })
+
   it('renders populated tasks section without empty visible section labels', () => {
     render(
       <SessionActivityPanel
@@ -172,7 +208,9 @@ describe('SessionActivityPanel', () => {
     expect(screen.getByLabelText('Task in progress')).toHaveClass('motion-reduce:animate-none')
     expect(screen.getByLabelText('Task in progress')).toHaveClass('rounded-full')
     expect(screen.getByLabelText('Task in progress').querySelector('svg')).toBeNull()
-    expect(screen.getByText('Active task').closest('button,div')).toHaveClass('py-2.5')
+    // Dense row rhythm: the panel is an index of what is happening, so a row is
+    // a line, not a card. Pinned because it is easy to lose to a stray `py-2.5`.
+    expect(screen.getByText('Active task').closest('button,div')).toHaveClass('py-1.5')
     expect(screen.getByText('Finished task')).toHaveClass('line-through')
     expect(screen.queryByText('Completed')).not.toBeInTheDocument()
     expect(screen.queryByText('Pending')).not.toBeInTheDocument()

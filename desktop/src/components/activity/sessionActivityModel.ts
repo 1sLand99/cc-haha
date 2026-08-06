@@ -57,11 +57,16 @@ export type BuildSessionActivityModelInput = {
   teamMembers?: TeamMember[]
 }
 
+/**
+ * Ordered by how directly each section answers "what is this turn doing":
+ * the plan first, then the agents working it, then the processes it left
+ * running. Background tasks outlive the turn, so they sit last.
+ */
 export const VISIBLE_ACTIVITY_SECTION_ORDER = [
   'tasks',
+  'subagents',
   'team',
   'backgroundTasks',
-  'subagents',
   'sources',
 ] as const satisfies readonly ActivitySectionId[]
 

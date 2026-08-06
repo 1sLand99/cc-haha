@@ -2001,6 +2001,8 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'toolGroup.searchedMany': 'searched {count} patterns',
   'toolGroup.agentOne': 'dispatched an agent',
   'toolGroup.agentMany': 'dispatched {count} agents',
+  'toolGroup.thought': 'Thinking',
+  'toolGroup.failedCount': '{count} failed',
   'toolGroup.collapseAgent': 'Collapse agent',
   'toolGroup.expandAgent': 'Expand agent',
   'toolGroup.openRun': 'Open run',
