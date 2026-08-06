@@ -1559,6 +1559,64 @@ describe('chatStore history mapping', () => {
     })
   })
 
+  it('keeps identical consecutive turns after each completed turn hydrates transcript ids', async () => {
+    const repeatedTurnHistory = (turns: number): MessageEntry[] => Array.from(
+      { length: turns },
+      (_, index) => [
+        {
+          id: `transcript-user-${index + 1}`,
+          type: 'user' as const,
+          timestamp: `2026-08-06T00:00:0${index * 2}.000Z`,
+          content: '你好',
+        },
+        {
+          id: `transcript-assistant-${index + 1}`,
+          type: 'assistant' as const,
+          timestamp: `2026-08-06T00:00:0${index * 2 + 1}.000Z`,
+          content: '你好！有什么可以帮你的吗？',
+        },
+      ],
+    ).flat()
+    vi.mocked(sessionsApi.getMessages)
+      .mockResolvedValueOnce({ messages: repeatedTurnHistory(1) })
+      .mockResolvedValueOnce({ messages: repeatedTurnHistory(2) })
+
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'idle' }),
+      },
+    })
+
+    const completeTurn = async (expectedHistoryLoads: number) => {
+      useChatStore.getState().sendMessage(TEST_SESSION_ID, '你好')
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'content_delta',
+        text: '你好！有什么可以帮你的吗？',
+      })
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'message_complete',
+        usage: { input_tokens: 1, output_tokens: 2 },
+      })
+      await vi.waitFor(() => {
+        expect(sessionsApi.getMessages).toHaveBeenCalledTimes(expectedHistoryLoads)
+        expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
+      })
+    }
+
+    await completeTurn(1)
+    await completeTurn(2)
+
+    const textMessages = useChatStore.getState().sessions[TEST_SESSION_ID]?.messages.filter(
+      (message) => message.type === 'user_text' || message.type === 'assistant_text',
+    )
+    expect(textMessages).toMatchObject([
+      { type: 'user_text', transcriptMessageId: 'transcript-user-1' },
+      { type: 'assistant_text', transcriptMessageId: 'transcript-assistant-1' },
+      { type: 'user_text', transcriptMessageId: 'transcript-user-2' },
+      { type: 'assistant_text', transcriptMessageId: 'transcript-assistant-2' },
+    ])
+  })
+
   it('does not duplicate a hydrated assistant reply when live output replays after reconnect', () => {
     useChatStore.setState({
       sessions: {

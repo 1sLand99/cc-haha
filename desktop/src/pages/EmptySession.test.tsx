@@ -627,7 +627,7 @@ describe('EmptySession', () => {
     })
   })
 
-  it('materializes the active provider runtime before the first draft message', async () => {
+  it('materializes the active provider runtime and visible default effort before the first draft message', async () => {
     useProviderStore.setState({
       providers: [{
         id: 'provider-minimax',
@@ -663,6 +663,7 @@ describe('EmptySession', () => {
     expect(useSessionRuntimeStore.getState().selections['draft-session']).toEqual({
       providerId: 'provider-minimax',
       modelId: 'MiniMax-M3[1m]',
+      effortLevel: 'max',
     })
     expect(mocks.wsSend.mock.calls.slice(0, 3)).toEqual([
       [
@@ -671,6 +672,7 @@ describe('EmptySession', () => {
           type: 'set_runtime_config',
           providerId: 'provider-minimax',
           modelId: 'MiniMax-M3[1m]',
+          effortLevel: 'max',
         },
       ],
       ['draft-session', { type: 'prewarm_session' }],

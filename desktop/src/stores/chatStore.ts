@@ -885,28 +885,65 @@ function mergeRestoredTranscriptMessageIds(
 
   if (restoredCandidates.length === 0) return messages
 
+  const claimedTranscriptMessageIds = new Set(messages.flatMap((message) => (
+    (message.type === 'user_text' || message.type === 'assistant_text') &&
+    message.transcriptMessageId
+      ? [message.transcriptMessageId]
+      : []
+  )))
   let restoredCursor = 0
+  let currentTurnAssistantTranscriptIds = new Set<string>()
   let changed = false
   const merged = messages.map((message) => {
-    if (
-      (message.type !== 'user_text' && message.type !== 'assistant_text') ||
-      message.transcriptMessageId
-    ) {
+    if (message.type !== 'user_text' && message.type !== 'assistant_text') {
       return message
     }
 
-    const matchIndex = restoredCandidates.findIndex((candidate, index) =>
+    if (message.type === 'user_text') {
+      currentTurnAssistantTranscriptIds = new Set<string>()
+    }
+
+    if (message.transcriptMessageId) {
+      const anchorIndex = restoredCandidates.findIndex((candidate, index) =>
+        index >= restoredCursor &&
+        candidate.transcriptMessageId === message.transcriptMessageId)
+      if (anchorIndex >= 0) restoredCursor = anchorIndex + 1
+      if (message.type === 'assistant_text') {
+        currentTurnAssistantTranscriptIds.add(message.transcriptMessageId)
+      }
+      return message
+    }
+
+    let matchIndex = restoredCandidates.findIndex((candidate, index) =>
       index >= restoredCursor &&
+      !claimedTranscriptMessageIds.has(candidate.transcriptMessageId!) &&
       candidate.type === message.type &&
       candidate.content.trim() === message.content.trim())
 
+    // A repeated reply in the same turn is a replay only when that turn already
+    // claimed the matching transcript id. A new user message resets this set, so
+    // an identical later turn can still claim its own distinct transcript ids.
+    if (matchIndex === -1 && message.type === 'assistant_text') {
+      matchIndex = restoredCandidates.findIndex((candidate) =>
+        candidate.type === message.type &&
+        currentTurnAssistantTranscriptIds.has(candidate.transcriptMessageId!) &&
+        candidate.content.trim() === message.content.trim())
+    }
+
     if (matchIndex === -1) return message
 
-    restoredCursor = matchIndex + 1
+    const transcriptMessageId = restoredCandidates[matchIndex]!.transcriptMessageId!
+    if (!claimedTranscriptMessageIds.has(transcriptMessageId)) {
+      restoredCursor = matchIndex + 1
+      claimedTranscriptMessageIds.add(transcriptMessageId)
+    }
+    if (message.type === 'assistant_text') {
+      currentTurnAssistantTranscriptIds.add(transcriptMessageId)
+    }
     changed = true
     return {
       ...message,
-      transcriptMessageId: restoredCandidates[matchIndex]!.transcriptMessageId,
+      transcriptMessageId,
     }
   })
 

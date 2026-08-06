@@ -30,7 +30,10 @@ import {
 } from '../components/chat/SlashCommandMenu'
 import { useMobileViewport } from '../hooks/useMobileViewport'
 import { isDesktopRuntime } from '../lib/desktopRuntime'
-import { resolveActiveProviderRuntimeSelection } from '../lib/runtimeSelection'
+import {
+  normalizeRuntimeSelection,
+  resolveActiveProviderRuntimeSelection,
+} from '../lib/runtimeSelection'
 import {
   filesToComposerAttachments,
   getDataTransferFiles,
@@ -138,6 +141,7 @@ export function EmptySession() {
   const addToast = useUIStore((state) => state.addToast)
   const currentModel = useSettingsStore((state) => state.currentModel)
   const activeProviderName = useSettingsStore((state) => state.activeProviderName)
+  const effortLevel = useSettingsStore((state) => state.effortLevel)
   const chatSendBehavior = useSettingsStore((state) => state.chatSendBehavior)
   const defaultPermissionMode = useSettingsStore((state) => state.permissionMode)
   const providers = useProviderStore((state) => state.providers)
@@ -336,7 +340,16 @@ export function EmptySession() {
           providers,
           currentModel?.id,
         )
-      const runtimeSelection = explicitDraftSelection ?? defaultActiveProviderSelection ?? undefined
+      const activeCustomProvider = defaultActiveProviderSelection
+        ? providers.find((provider) => provider.id === defaultActiveProviderSelection.providerId)
+        : undefined
+      const defaultRuntimeSelection = defaultActiveProviderSelection && activeCustomProvider
+        ? normalizeRuntimeSelection(
+          { ...defaultActiveProviderSelection, effortLevel },
+          activeCustomProvider.apiFormat,
+        )
+        : defaultActiveProviderSelection
+      const runtimeSelection = explicitDraftSelection ?? defaultRuntimeSelection ?? undefined
       const sessionId = await createSession(
         workDir || undefined,
         {
