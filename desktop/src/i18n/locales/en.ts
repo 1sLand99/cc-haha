@@ -1647,6 +1647,8 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'repoLaunch.newBranchPlaceholder': 'feature/my-change',
   'repoLaunch.newBranchFrom': 'Starts from {branch}',
   'repoLaunch.newBranchSubmit': 'Create',
+  'repoLaunch.newBranchSuccessCurrent': 'Created and selected “{branch}”. It will be checked out when the session starts.',
+  'repoLaunch.newBranchSuccessIsolated': 'Created and selected “{branch}”. An isolated worktree will be created from it when the session starts.',
   'repoLaunch.newBranchErrorInvalid': 'Git will not accept this branch name.',
   'repoLaunch.newBranchErrorExists': 'A branch with this name already exists.',
   'repoLaunch.newBranchErrorFailed': 'Could not create the branch.',

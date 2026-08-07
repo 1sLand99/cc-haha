@@ -1649,6 +1649,8 @@ export const jp: Record<TranslationKey, string> = {
   'repoLaunch.newBranchPlaceholder': 'feature/my-change',
   'repoLaunch.newBranchFrom': '{branch} から作成',
   'repoLaunch.newBranchSubmit': '作成',
+  'repoLaunch.newBranchSuccessCurrent': '「{branch}」を作成して選択しました。セッション開始時にこのブランチへ切り替えます。',
+  'repoLaunch.newBranchSuccessIsolated': '「{branch}」を作成して選択しました。セッション開始時にこのブランチから独立した worktree を作成します。',
   'repoLaunch.newBranchErrorInvalid': 'Git はこのブランチ名を受け付けません。',
   'repoLaunch.newBranchErrorExists': '同じ名前のブランチが既に存在します。',
   'repoLaunch.newBranchErrorFailed': 'ブランチを作成できませんでした。',

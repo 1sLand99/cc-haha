@@ -1649,6 +1649,8 @@ export const kr: Record<TranslationKey, string> = {
   'repoLaunch.newBranchPlaceholder': 'feature/my-change',
   'repoLaunch.newBranchFrom': '{branch} 기준으로 생성',
   'repoLaunch.newBranchSubmit': '생성',
+  'repoLaunch.newBranchSuccessCurrent': '“{branch}” 브랜치를 만들고 선택했습니다. 세션을 시작할 때 이 브랜치로 전환합니다.',
+  'repoLaunch.newBranchSuccessIsolated': '“{branch}” 브랜치를 만들고 선택했습니다. 세션을 시작할 때 이 브랜치를 기준으로 독립 worktree를 만듭니다.',
   'repoLaunch.newBranchErrorInvalid': 'Git이 이 브랜치 이름을 허용하지 않습니다.',
   'repoLaunch.newBranchErrorExists': '같은 이름의 브랜치가 이미 있습니다.',
   'repoLaunch.newBranchErrorFailed': '브랜치를 만들지 못했습니다.',

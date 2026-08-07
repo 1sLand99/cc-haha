@@ -1648,6 +1648,8 @@ export const zh: Record<TranslationKey, string> = {
   'repoLaunch.newBranchPlaceholder': 'feature/my-change',
   'repoLaunch.newBranchFrom': '以 {branch} 為基礎建立',
   'repoLaunch.newBranchSubmit': '建立',
+  'repoLaunch.newBranchSuccessCurrent': '已建立並選取「{branch}」，工作階段啟動時將切換到該分支。',
+  'repoLaunch.newBranchSuccessIsolated': '已建立並選取「{branch}」，工作階段啟動時將以它為基礎建立獨立工作樹。',
   'repoLaunch.newBranchErrorInvalid': 'Git 不接受這個分支名稱。',
   'repoLaunch.newBranchErrorExists': '同名分支已存在。',
   'repoLaunch.newBranchErrorFailed': '建立分支失敗。',
