@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { act } from 'react'
@@ -6,6 +6,20 @@ import { act } from 'react'
 const viewportMocks = vi.hoisted(() => ({
   isMobile: false,
 }))
+const sessionApiMocks = vi.hoisted(() => ({
+  getGitInfo: vi.fn(),
+}))
+
+vi.mock('../api/sessions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/sessions')>()
+  return {
+    ...actual,
+    sessionsApi: {
+      ...actual.sessionsApi,
+      getGitInfo: sessionApiMocks.getGitInfo,
+    },
+  }
+})
 
 vi.mock('../hooks/useMobileViewport', () => ({
   useMobileViewport: () => viewportMocks.isMobile,
@@ -85,6 +99,17 @@ import {
   TERMINAL_PANEL_MAX_HEIGHT,
   TERMINAL_PANEL_MIN_HEIGHT,
 } from '../stores/terminalPanelStore'
+
+beforeEach(() => {
+  sessionApiMocks.getGitInfo.mockReset()
+  sessionApiMocks.getGitInfo.mockResolvedValue({
+    branch: 'main',
+    repoName: 'project',
+    workDir: '/workspace/project',
+    changedFiles: 0,
+    worktree: null,
+  })
+})
 
 afterEach(() => {
   cleanup()
@@ -311,6 +336,112 @@ describe('ActiveSession task polling', () => {
 
     const tokenBadge = screen.getByTitle(/cache 1,500/i)
     expect(tokenBadge).toHaveTextContent('1.5k API tokens')
+  })
+
+  it('shows the worktree name in the header and reveals its directory on focus', async () => {
+    const worktreeSessionId = 'worktree-header-session'
+    const regularSessionId = 'regular-header-session'
+    const worktreeName = 'desktop-feature-worktree-header'
+    const plannedPath = `/workspace/project/.claude/worktrees/${worktreeName}`
+
+    sessionApiMocks.getGitInfo.mockImplementation(async (sessionId: string) => ({
+      branch: 'feature/worktree-header',
+      repoName: 'project',
+      workDir: sessionId === worktreeSessionId ? plannedPath : '/workspace/project',
+      changedFiles: 0,
+      worktree: sessionId === worktreeSessionId ? {
+        enabled: true,
+        path: null,
+        plannedPath,
+        sourceWorkDir: '/workspace/project',
+        slug: worktreeName,
+        branch: 'worktree/feature-worktree-header',
+      } : null,
+    }))
+
+    useSessionStore.setState({
+      sessions: [
+        {
+          id: worktreeSessionId,
+          title: 'Worktree Header Session',
+          createdAt: '2026-08-07T00:00:00.000Z',
+          modifiedAt: '2026-08-07T00:00:00.000Z',
+          messageCount: 1,
+          projectPath: '/workspace/project',
+          workDir: plannedPath,
+          workDirExists: true,
+        },
+        {
+          id: regularSessionId,
+          title: 'Regular Header Session',
+          createdAt: '2026-08-07T00:00:00.000Z',
+          modifiedAt: '2026-08-07T00:00:00.000Z',
+          messageCount: 1,
+          projectPath: '/workspace/project',
+          workDir: '/workspace/project',
+          workDirExists: true,
+        },
+      ],
+      activeSessionId: worktreeSessionId,
+      isLoading: false,
+      error: null,
+    })
+    useTabStore.setState({
+      tabs: [
+        { sessionId: worktreeSessionId, title: 'Worktree Header Session', type: 'session', status: 'idle' },
+        { sessionId: regularSessionId, title: 'Regular Header Session', type: 'session', status: 'idle' },
+      ],
+      activeTabId: worktreeSessionId,
+    })
+    const idleSessionState = {
+      chatState: 'idle' as const,
+      connectionState: 'connected' as const,
+      streamingText: '',
+      streamingToolInput: '',
+      activeToolUseId: null,
+      activeToolName: null,
+      activeThinkingId: null,
+      pendingPermission: null,
+      pendingComputerUsePermission: null,
+      tokenUsage: { input_tokens: 0, output_tokens: 0 },
+      streamingResponseChars: 0,
+      elapsedSeconds: 0,
+      statusVerb: '',
+      slashCommands: [],
+      agentTaskNotifications: {},
+      elapsedTimer: null,
+    }
+    useChatStore.setState({
+      sessions: {
+        [worktreeSessionId]: {
+          ...idleSessionState,
+          messages: [{ id: 'worktree-message', type: 'assistant_text', content: 'ready', timestamp: 1 }],
+        },
+        [regularSessionId]: {
+          ...idleSessionState,
+          messages: [{ id: 'regular-message', type: 'assistant_text', content: 'ready', timestamp: 1 }],
+        },
+      },
+    })
+
+    render(<ActiveSession />)
+
+    const indicator = await screen.findByTestId('session-worktree-indicator')
+    expect(indicator).toHaveTextContent(worktreeName)
+    expect(screen.getByRole('heading', { name: 'Worktree Header Session' })).toBeInTheDocument()
+    expect(within(screen.getByTestId('session-header')).queryByText(plannedPath)).not.toBeInTheDocument()
+
+    fireEvent.focus(indicator)
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(plannedPath)
+
+    act(() => {
+      useTabStore.getState().setActiveTab(regularSessionId)
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('session-worktree-indicator')).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('heading', { name: 'Regular Header Session' })).toBeInTheDocument()
   })
 
   it('shows a loading state for historical sessions while messages are loading', () => {

@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement, RefObject } from 'react'
-import { Target } from 'lucide-react'
+import { GitFork, Target } from 'lucide-react'
 import {
   SCHEDULED_TAB_ID,
   SETTINGS_TAB_ID,
@@ -24,9 +24,11 @@ import {
 import { useTranslation } from '../i18n'
 import { Button } from '@/components/ui/Button'
 import { LoadingState } from '@/components/ui/LoadingState'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { BrandSeal } from '@/components/composite/BrandSeal'
 import { MessageList } from '../components/chat/MessageList'
 import { ChatInput } from '../components/chat/ChatInput'
+import { getWorktreeDisplayName, WorktreeDetails } from '../components/chat/WorktreeDetails'
 import { ComputerUsePermissionModal } from '../components/chat/ComputerUsePermissionModal'
 import { WorkbenchPanel } from '../components/workbench/WorkbenchPanel'
 import { SessionActivityPanel } from '../components/activity/SessionActivityPanel'
@@ -45,6 +47,7 @@ import {
 import { useActivityPanelStore } from '../stores/activityPanelStore'
 import { getSessionBrowsablePath, getSessionWorkspaceState } from '../lib/sessionWorkspace'
 import type { AgentTaskNotification, UIMessage } from '../types/chat'
+import { sessionsApi, type SessionGitInfo } from '../api/sessions'
 
 /**
  * Stable fallbacks for optional session state. A `?? []` / `?? {}` literal allocates a
@@ -333,6 +336,10 @@ export function ActiveSession() {
   const memberInfo = useTeamStore((s) => activeTabId ? s.getMemberBySessionId(activeTabId) : null)
   const activeTeam = useTeamStore((s) => s.activeTeam)
   const isMemberSession = !!memberInfo
+  const [sessionGitInfo, setSessionGitInfo] = useState<{
+    sessionId: string
+    info: SessionGitInfo
+  } | null>(null)
   const showWorkbench = useWorkspacePanelStore((state) =>
     activeTabId && isSessionTabState(activeTabId, activeTabType) && !isMemberSession && !isMobileLayout
       ? state.isPanelOpen(activeTabId)
@@ -358,6 +365,26 @@ export function ActiveSession() {
       connectToSession(activeTabId)
     }
   }, [activeTabId, isMemberSession, connectToSession])
+
+  useEffect(() => {
+    if (!activeTabId || isMemberSession || !isSessionTabState(activeTabId, activeTabType)) return
+
+    let cancelled = false
+    setSessionGitInfo((current) => current?.sessionId === activeTabId ? null : current)
+    void sessionsApi.getGitInfo(activeTabId)
+      .then((info) => {
+        if (!cancelled && info.worktree?.enabled) {
+          setSessionGitInfo({ sessionId: activeTabId, info })
+        }
+      })
+      .catch(() => {
+        // Git metadata is supplementary; the session remains usable without it.
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeTabId, activeTabType, isMemberSession])
 
   useEffect(() => {
     if (!activeTabId || isMemberSession) return
@@ -418,6 +445,10 @@ export function ActiveSession() {
       : null
   const visibleMessageCount = messages.length > 0 ? messages.length : session?.messageCount ?? 0
   const headerTitle = session?.title || t('session.untitled')
+  const currentGitInfo = sessionGitInfo?.sessionId === activeTabId ? sessionGitInfo.info : null
+  const worktree = currentGitInfo?.worktree?.enabled ? currentGitInfo.worktree : null
+  const worktreePath = worktree?.path || worktree?.plannedPath || null
+  const worktreeName = getWorktreeDisplayName(worktree?.slug, worktreePath)
 
   const isActive = isPreparingTurn || chatState !== 'idle' || hasRunningBackgroundTasks
   const totalTokens = getTokenUsageTotal(tokenUsage)
@@ -676,6 +707,23 @@ export function ActiveSession() {
                             <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-success)] animate-pulse-dot" />
                             {t('session.active')}
                           </span>
+                        ),
+                        worktreeName && (
+                          <Tooltip
+                            key="worktree"
+                            placement="bottom-start"
+                            content={<WorktreeDetails name={worktreeName} path={worktreePath} />}
+                          >
+                            <span
+                              data-testid="session-worktree-indicator"
+                              tabIndex={0}
+                              className="flex min-w-0 max-w-[260px] shrink cursor-help items-center gap-1 rounded-[4px] text-[var(--color-text-secondary)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)]"
+                            >
+                              <GitFork size={11} className="shrink-0 text-[var(--color-brand)]" aria-hidden="true" />
+                              <span className="shrink-0 capitalize">{t('sidebar.worktree')}:</span>
+                              <span className="min-w-0 truncate font-medium">{worktreeName}</span>
+                            </span>
+                          </Tooltip>
                         ),
                         totalTokens > 0 && (
                           <span
