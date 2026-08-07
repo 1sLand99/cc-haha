@@ -2173,6 +2173,14 @@ html[data-touch-h5] [data-message-actions] {
   width: 2.75rem;
 }
 
+/* Agent list rows reveal their edit / delete / override buttons on hover, which
+   never fires on a touchscreen — the controls would be unreachable there. */
+.app-shell--mobile [data-agent-row-actions],
+html[data-touch-h5] [data-agent-row-actions] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* Kill the gray flash WKWebView paints over any tapped interactive element;
    components carry their own pressed/hover styling. */
 html[data-touch-h5],
