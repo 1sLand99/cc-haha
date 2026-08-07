@@ -20,8 +20,8 @@ import {
 /**
  * `card` is the standalone bordered block. `row` strips the border, the ink icon
  * square and the bold name so the call reads as one line inside an expanded
- * activity group — the fix for "one card per tool call" (#1177). Its own output
- * still gets a card, but only once the row is expanded.
+ * activity group. Expanded row details stay inline on a nested guide instead of
+ * rebuilding the card stack that the activity-group treatment removed (#1177).
  */
 export type ToolCallChrome = 'card' | 'row'
 
@@ -156,8 +156,14 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
   )
   const liveStatsSummary = liveStats ? formatContentStats(liveStats, t) : ''
 
-  const preview = useMemo(() => renderPreview(toolName, obj, result, t), [obj, result, toolName, t])
-  const details = useMemo(() => renderDetails(toolName, obj, t, isPending ? partialInput : undefined), [isPending, obj, partialInput, toolName, t])
+  const preview = useMemo(
+    () => renderPreview(toolName, obj, result, t, isRow),
+    [isRow, obj, result, toolName, t],
+  )
+  const details = useMemo(
+    () => renderDetails(toolName, obj, t, isPending ? partialInput : undefined, isRow),
+    [isPending, isRow, obj, partialInput, toolName, t],
+  )
   const hasResultDetails = Boolean(result && extractTextContent(result.content))
   const hasEditPreview = toolName === 'Edit' && typeof obj.old_string === 'string' && typeof obj.new_string === 'string'
   const hasWritePreview = toolName === 'Write' && typeof obj.content === 'string'
@@ -211,13 +217,16 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
   }
 
   return (
-    <div className={
-      isRow
-        ? ''
-        : `overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] ${
-          compact ? 'mb-0' : 'mb-2'
-        }`
-    }>
+    <div
+      data-tool-call-chrome={chrome}
+      className={
+        isRow
+          ? ''
+          : `overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] ${
+            compact ? 'mb-0' : 'mb-2'
+          }`
+      }
+    >
       <button
         type="button"
         data-chat-disclosure="true"
@@ -315,13 +324,14 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
 
       {expandable && expanded && (
         <div
+          data-tool-call-details={isRow ? 'inline' : 'panel'}
           data-tool-output-error={result?.isError ? 'true' : undefined}
           className={
             isRow
-              ? `mb-2 mt-1 space-y-2.5 rounded-[var(--radius-lg)] border px-3 py-2.5 ${
+              ? `mb-2 ml-2 mt-1 space-y-2.5 border-l py-1 pl-3 ${
                 result?.isError
-                  ? 'border-[var(--color-error-soft-hover)] bg-[var(--color-error-soft)]'
-                  : 'border-[var(--color-border)] bg-[var(--color-surface-container-lowest)]'
+                  ? 'border-[var(--color-error-soft-hover)]'
+                  : 'border-[var(--color-border)]'
               }`
               : `space-y-2.5 border-t px-4 py-3.5 ${
                 result?.isError
@@ -464,6 +474,7 @@ function renderPreview(
   obj: Record<string, unknown>,
   result?: { content: unknown; isError: boolean } | null,
   t?: (key: TranslationKey, params?: Record<string, string | number>) => string,
+  embedded = false,
 ) {
   const filePath = typeof obj.file_path === 'string' ? obj.file_path : 'file'
   // Must match the terminal-card condition below exactly. When they diverged, a
@@ -473,7 +484,7 @@ function renderPreview(
   const shellCommand = isShellTool(toolName) && typeof obj.command === 'string' ? obj.command : null
   const echoesInTerminal = shellCommand !== null
   const resultText = getVisibleResultText(toolName, result, echoesInTerminal)
-  const resultOutput = result && resultText ? renderResultOutput(result, resultText, t) : null
+  const resultOutput = result && resultText ? renderResultOutput(result, resultText, t, embedded) : null
 
   if (toolName === 'Edit' && typeof obj.old_string === 'string' && typeof obj.new_string === 'string') {
     return (
@@ -745,17 +756,49 @@ function renderResultOutput(
   result: { content: unknown; isError: boolean },
   text: string,
   t?: (key: TranslationKey, params?: Record<string, string | number>) => string,
+  embedded = false,
 ) {
+  const label = result.isError
+    ? t?.('tool.errorOutput') ?? 'Error Output'
+    : t?.('tool.toolOutput') ?? 'Tool Output'
+
+  if (embedded) {
+    return (
+      <>
+        <InlineImageGallery text={text} />
+        {result.isError ? (
+          <div data-tool-detail-surface="embedded" className="overflow-hidden bg-[var(--color-error-soft)]">
+            <div className="flex items-center justify-between border-b border-[var(--color-error-soft-hover)] px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-error)]">
+              <span>{label}</span>
+              <CopyButton
+                text={text}
+                className="rounded-[var(--radius-sm)] px-2 py-1 text-[11px] normal-case tracking-normal text-[var(--color-error)] transition-colors hover:bg-[var(--color-error-soft-hover)]"
+              />
+            </div>
+            <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[12px] leading-[1.45] text-[var(--color-error)]">
+              {text}
+            </pre>
+          </div>
+        ) : (
+          <CodeViewer code={text} language="plaintext" maxLines={18} chrome="embedded" label={label} />
+        )}
+      </>
+    )
+  }
+
   return (
     <>
       <InlineImageGallery text={text} />
-      <div className={`overflow-hidden rounded-[var(--radius-lg)] border ${
-        result.isError
-          ? 'border-[var(--color-error)] bg-[var(--color-error-container)]'
-          : 'border-[var(--color-border)] bg-[var(--color-surface)]'
-      }`}>
+      <div
+        data-tool-detail-surface="card"
+        className={`overflow-hidden rounded-[var(--radius-lg)] border ${
+          result.isError
+            ? 'border-[var(--color-error)] bg-[var(--color-error-container)]'
+            : 'border-[var(--color-border)] bg-[var(--color-surface)]'
+        }`}
+      >
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-outline)]">
-          <span>{result.isError ? t?.('tool.errorOutput') ?? 'Error Output' : t?.('tool.toolOutput') ?? 'Tool Output'}</span>
+          <span>{label}</span>
           <CopyButton
             text={text}
             className="rounded-[var(--radius-sm)] border border-[var(--color-border)] px-2 py-1 text-[11px] normal-case tracking-normal text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)]"
@@ -778,15 +821,16 @@ function renderDetails(
   obj: Record<string, unknown>,
   t?: (key: TranslationKey, params?: Record<string, string | number>) => string,
   partialInput?: string,
+  embedded = false,
 ) {
   if (partialInput) {
     if (toolName === 'Write') {
       const writerContent = extractPartialJsonStringField(partialInput, 'content')
       if (writerContent !== null) {
-        return renderWriterPreview(writerContent, t)
+        return renderWriterPreview(writerContent, t, embedded)
       }
     }
-    return renderPartialInput(partialInput, t)
+    return renderPartialInput(partialInput, t, embedded)
   }
 
   if (toolName === 'Edit' || toolName === 'Write') {
@@ -804,10 +848,15 @@ function renderDetails(
   }
 
   const text = JSON.stringify(displayed, null, 2)
+  const label = t?.('tool.toolInput') ?? 'Tool Input'
+  if (embedded) {
+    return <CodeViewer code={text} language="json" maxLines={18} chrome="embedded" label={label} />
+  }
+
   return (
-    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div data-tool-detail-surface="card" className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-outline)]">
-        <span>{t?.('tool.toolInput') ?? 'Tool Input'}</span>
+        <span>{label}</span>
         <CopyButton
           text={text}
           className="rounded-[var(--radius-sm)] border border-[var(--color-border)] px-2 py-1 text-[11px] normal-case tracking-normal text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)]"
@@ -977,6 +1026,7 @@ function formatCount(count: number): string {
 function renderWriterPreview(
   content: string,
   t?: (key: TranslationKey, params?: Record<string, string | number>) => string,
+  embedded = false,
 ) {
   const contentStats = countContentStats(content)
   const lines = content.length === 0 ? [] : content.split('\n')
@@ -1000,7 +1050,14 @@ function renderWriterPreview(
   }, t)
 
   return (
-    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div
+      data-tool-detail-surface={embedded ? 'embedded' : 'card'}
+      className={
+        embedded
+          ? 'overflow-hidden bg-[var(--color-surface)]'
+          : 'overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]'
+      }
+    >
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-outline)]">
         <span>{t?.('tool.writerPreview') ?? 'Writer'}</span>
         <span className="font-mono normal-case tracking-normal tabular-nums">
@@ -1017,13 +1074,28 @@ function renderWriterPreview(
 function renderPartialInput(
   partialInput: string,
   t?: (key: TranslationKey, params?: Record<string, string | number>) => string,
+  embedded = false,
 ) {
   const formattedInput = formatPartialJsonInput(partialInput)
+  const label = t?.('tool.partialInput') ?? 'Partial input'
+
+  if (embedded) {
+    return (
+      <CodeViewer
+        code={formattedInput}
+        language="json"
+        maxLines={8}
+        wrapLongLines
+        chrome="embedded"
+        label={label}
+      />
+    )
+  }
 
   return (
-    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div data-tool-detail-surface="card" className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="border-b border-[var(--color-border)] px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-outline)]">
-        {t?.('tool.partialInput') ?? 'Partial input'}
+        {label}
       </div>
       <CodeViewer code={formattedInput} language="json" maxLines={8} wrapLongLines />
     </div>

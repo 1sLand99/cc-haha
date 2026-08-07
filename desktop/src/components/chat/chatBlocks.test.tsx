@@ -349,6 +349,35 @@ describe('chat blocks', () => {
     expect(container.textContent).not.toContain('const answer = 42')
   })
 
+  it('keeps expanded row input and output inline instead of nesting detail cards', () => {
+    const { container } = render(
+      <ToolCallBlock
+        chrome="row"
+        toolName="TaskCreate"
+        input={{ subject: 'Inspect activity UI', description: 'Find the nested card treatment' }}
+        result={{ content: 'Task #1 created successfully', isError: false }}
+      />,
+    )
+
+    const row = container.querySelector('[data-tool-call-chrome="row"]')
+    const disclosure = row?.querySelector<HTMLButtonElement>('[data-chat-disclosure="true"]')
+    expect(disclosure).toBeTruthy()
+    fireEvent.click(disclosure!)
+
+    const details = container.querySelector('[data-tool-call-details="inline"]')
+    expect(details).toBeTruthy()
+    expect(details?.className).not.toContain('rounded-')
+
+    const viewers = [...container.querySelectorAll('[data-code-viewer-chrome]')]
+    expect(viewers).toHaveLength(2)
+    expect(viewers.every((viewer) => viewer.getAttribute('data-code-viewer-chrome') === 'embedded')).toBe(true)
+    // Each section owns one compact header and one copy action. The previous
+    // nested Tool Output -> PLAINTEXT and Tool Input -> JSON cards doubled both.
+    expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2)
+    expect((details?.textContent?.match(/Tool Output/g) ?? [])).toHaveLength(1)
+    expect((details?.textContent?.match(/Tool Input/g) ?? [])).toHaveLength(1)
+  })
+
   // #1149: bash stdout used to be dropped entirely — the card showed the command
   // three times and the result zero times. Output is now echoed into the terminal.
   it('echoes bash stdout into the terminal card when expanded', () => {

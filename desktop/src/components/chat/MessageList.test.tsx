@@ -1545,6 +1545,15 @@ describe('MessageList nested tool calls', () => {
     expect(screen.queryByText(/Read .*example\.ts.*done/i)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /dispatched an agent/i }))
     expect(screen.getByText(/Read .*example\.ts.*done/i)).toBeTruthy()
+
+    const agentRow = container.querySelector('[data-agent-call-layout="row"]')
+    expect(agentRow).toBeTruthy()
+    expect(agentRow?.className).not.toMatch(/\b(?:border|rounded)-/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand agent' }))
+    const nestedToolRow = container.querySelector('[data-tool-call-chrome="row"]')
+    expect(nestedToolRow).toBeTruthy()
+    expect(nestedToolRow?.textContent).toContain('Read')
     expect(container.textContent).toContain('Agent')
   })
 
