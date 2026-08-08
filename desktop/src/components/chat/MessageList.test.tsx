@@ -2635,7 +2635,9 @@ describe('MessageList nested tool calls', () => {
     const renderedKinds = renderItems.map((item) =>
       item.kind === 'tool_group'
         ? `tool:${item.toolCalls[0]?.toolUseId}`
-        : `message:${item.message.id}`,
+        : item.kind === 'team_card'
+          ? `team:${item.id}`
+          : `message:${item.message.id}`,
     )
 
     expect(renderedKinds).toEqual([
@@ -6243,6 +6245,42 @@ describe('MessageList nested tool calls', () => {
     expect(screen.queryByText('first.ts')).toBeNull()
   })
 
+  it('does not call parent-session checkpoint APIs for a completed SubAgent conversation', async () => {
+    const subagentTabId = '__subagent__parent-session__agent-tool-1'
+    const getTurnCheckpoints = vi.spyOn(sessionsApi, 'getTurnCheckpoints')
+      .mockRejectedValue(new Error(`Session not found: ${subagentTabId}`))
+    useTabStore.setState({
+      activeTabId: subagentTabId,
+      tabs: [{
+        sessionId: subagentTabId,
+        title: 'Completed reviewer',
+        type: 'subagent',
+        status: 'idle',
+        sourceSessionId: 'parent-session',
+        subagentToolUseId: 'agent-tool-1',
+      }],
+    })
+    useChatStore.setState({
+      sessions: {
+        [subagentTabId]: makeSessionState({
+          messages: [
+            { id: 'user-1', type: 'user_text', content: 'Review the patch', timestamp: 1 },
+            { id: 'assistant-1', type: 'assistant_text', content: 'Review complete', timestamp: 2 },
+          ],
+        }),
+      },
+    })
+
+    render(<MessageList sessionId={subagentTabId} />)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(getTurnCheckpoints).not.toHaveBeenCalled()
+    expect(screen.queryByText(`Session not found: ${subagentTabId}`)).toBeNull()
+  })
+
   it('confirms before rewinding to an earlier turn from a historical change card', async () => {
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
       checkpoints: [
@@ -7012,6 +7050,26 @@ describe('turn rail positions', () => {
     expect(positions).toEqual(['none', 'start', 'end', 'none', 'solo'])
   })
 
+  it('keeps a team card inside the turn that dispatched it', () => {
+    const positions = railFor([
+      { id: 'user-1', type: 'user_text', content: 'Build it with a team', timestamp: 1 },
+      {
+        id: 'tool-create',
+        type: 'tool_use',
+        toolName: 'TeamCreate',
+        toolUseId: 'team-1',
+        input: { name: 'pqueue-hardening' },
+        timestamp: 2,
+      },
+      { id: 'reply-1', type: 'assistant_text', content: 'Team is up.', timestamp: 3 },
+    ])
+
+    // `team_card` is the one render item that is neither a message nor a tool
+    // group, so it is the one that could silently fall out of the turn walk and
+    // take the spacing with it. It is a response like any other.
+    expect(positions).toEqual(['none', 'start', 'end'])
+  })
+
   it('marks a turn that produced a single item as solo, not start', () => {
     const positions = railFor([
       { id: 'user-1', type: 'user_text', content: 'Status?', timestamp: 1 },
@@ -7070,5 +7128,117 @@ describe('turn rail positions', () => {
     expect(trailingStreamingRailPosition(['none', 'start'])).toBe('end')
     // The user just sent: nothing has landed under the new prompt yet.
     expect(trailingStreamingRailPosition(['none', 'solo', 'none'])).toBe('solo')
+  })
+})
+
+describe('Agent Teams chat projection', () => {
+  function sendMessageRun(
+    id: string,
+    result: unknown,
+    isError = false,
+    input: unknown = { to: 'worker', message: 'Review task #2' },
+  ): UIMessage[] {
+    return [
+      {
+        id: `tool-${id}`,
+        type: 'tool_use',
+        toolName: 'SendMessage',
+        toolUseId: id,
+        input,
+        timestamp: 1,
+      },
+      {
+        id: `result-${id}`,
+        type: 'tool_result',
+        toolUseId: id,
+        content: result,
+        isError,
+        timestamp: 2,
+      },
+    ]
+  }
+
+  it('hides a successful routed teammate message only in a lead workbench session', () => {
+    const messages = sendMessageRun('team-message', {
+      routing: {
+        sender: 'team-lead',
+        target: 'worker',
+        content: 'Review task #2',
+      },
+    })
+
+    expect(buildRenderModel(messages).renderItems).toHaveLength(1)
+    expect(buildRenderModel(messages, null, {
+      hideTeamCoordinationTools: true,
+      teamMemberNames: new Set(['worker']),
+    }).renderItems).toHaveLength(0)
+  })
+
+  it('hides successful team messages from their real input shape when the transport omits routing', () => {
+    const direct = sendMessageRun('direct', 'Message sent to worker inbox')
+    const broadcast = sendMessageRun('broadcast', 'Message broadcast to 4 teammates', false, {
+      to: '*',
+      message: 'Start the dependency graph',
+    })
+    const messages = [...direct, ...broadcast]
+
+    expect(buildRenderModel(messages, null, {
+      hideTeamCoordinationTools: true,
+      teamMemberNames: new Set(['worker']),
+    }).renderItems).toHaveLength(0)
+  })
+
+  it('keeps ordinary agent continuation and failed team SendMessage calls visible', () => {
+    const ordinary = sendMessageRun(
+      'ordinary',
+      'Message queued to async agent a1',
+      false,
+      { to: 'async-agent-a1', message: 'Continue' },
+    )
+    const failed = sendMessageRun('failed', {
+      routing: { sender: 'team-lead', target: 'missing-worker' },
+    }, true)
+
+    expect(buildRenderModel(ordinary, null, {
+      hideTeamCoordinationTools: true,
+      teamMemberNames: new Set(['worker']),
+    }).renderItems).toHaveLength(1)
+    expect(buildRenderModel(failed, null, {
+      hideTeamCoordinationTools: true,
+    }).renderItems).toHaveLength(1)
+  })
+
+  it('replaces the TeamCreate call with a team card at the point the team was formed', () => {
+    const messages: UIMessage[] = [
+      { id: 'user-1', type: 'user_text', content: 'Audit the queue', timestamp: 1 },
+      {
+        id: 'tool-create',
+        type: 'tool_use',
+        toolName: 'TeamCreate',
+        toolUseId: 'create-1',
+        input: { team_name: 'audit-team' },
+        timestamp: 2,
+      },
+      {
+        id: 'result-create',
+        type: 'tool_result',
+        toolUseId: 'create-1',
+        content: '{"team_name":"audit-team","lead_agent_id":"team-lead@audit-team"}',
+        isError: false,
+        timestamp: 3,
+      },
+      { id: 'assistant-1', type: 'assistant_text', content: 'Team is up.', timestamp: 4 },
+    ]
+
+    const lead = buildRenderModel(messages, null, { hideTeamCoordinationTools: true })
+    expect(lead.renderItems.map((item) => item.kind))
+      .toEqual(['message', 'team_card', 'message'])
+    // The card sits where the call was, not appended at the end — scrolling
+    // back must still show that this turn handed work to a team.
+    expect(lead.renderItems[1]).toMatchObject({ kind: 'team_card', id: 'team-card-tool-create' })
+
+    // An ordinary session with no workbench keeps the raw tool call.
+    expect(buildRenderModel(messages).renderItems.map((item) => item.kind))
+      .toEqual(['message', 'tool_group', 'message'])
   })
 })

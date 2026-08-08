@@ -35,4 +35,12 @@ export const subagentsApi = {
       `/api/sessions/${encodeURIComponent(sessionId)}/subagents/by-tool/${encodeURIComponent(toolUseId)}${query}`,
     )
   },
+
+  sendMessage(sessionId: string, toolUseId: string, content: string, taskId?: string) {
+    const query = taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''
+    return api.post<{ ok: true; delivery?: 'queued' | 'resumed'; agent_id?: string }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/subagents/by-tool/${encodeURIComponent(toolUseId)}/messages${query}`,
+      { content },
+    )
+  },
 }

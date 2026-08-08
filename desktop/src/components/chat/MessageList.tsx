@@ -24,6 +24,7 @@ import { AskUserQuestion } from './AskUserQuestion'
 import { StreamingIndicator } from './StreamingIndicator'
 import { InlineTaskSummary } from './InlineTaskSummary'
 import { CurrentTurnChangeCard } from './CurrentTurnChangeCard'
+import { AgentTeamsInlineCard } from '../agentTeams/AgentTeamsSummary'
 import {
   buildConversationNavigationItems,
   ConversationNavigator,
@@ -64,6 +65,11 @@ type RenderItem =
    */
   | { kind: 'tool_group'; toolCalls: ToolCall[]; steps: ActivityStep[]; id: string }
   | { kind: 'message'; message: UIMessage }
+  /**
+   * Stands in for the TeamCreate call so the transcript records that this turn
+   * handed work to a team, without expanding into the workbench inline.
+   */
+  | { kind: 'team_card'; id: string }
 
 type RenderModel = {
   renderItems: RenderItem[]
@@ -629,7 +635,56 @@ function appendChildToolCall(
   }
 }
 
-export function buildRenderModel(messages: UIMessage[], activeAskUserQuestionToolUseId?: string | null): RenderModel {
+function hasTeamMessageRouting(value: unknown): boolean {
+  if (typeof value === 'string') {
+    try {
+      return hasTeamMessageRouting(JSON.parse(value))
+    } catch {
+      return false
+    }
+  }
+  if (Array.isArray(value)) return value.some(hasTeamMessageRouting)
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  const routing = record.routing
+  if (routing && typeof routing === 'object') {
+    const route = routing as Record<string, unknown>
+    if (typeof route.sender === 'string' && typeof route.target === 'string') return true
+  }
+  return 'content' in record && hasTeamMessageRouting(record.content)
+}
+
+function getSendMessageTarget(value: unknown): string | null {
+  if (typeof value === 'string') {
+    try {
+      return getSendMessageTarget(JSON.parse(value))
+    } catch {
+      return null
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const target = (value as Record<string, unknown>).to
+  return typeof target === 'string' ? target : null
+}
+
+function isTeamCoordinationSendMessage(
+  input: unknown,
+  result: unknown,
+  teamMemberNames: ReadonlySet<string> | undefined,
+): boolean {
+  if (hasTeamMessageRouting(result)) return true
+  const target = getSendMessageTarget(input)
+  return target === '*' || Boolean(target && teamMemberNames?.has(target))
+}
+
+export function buildRenderModel(
+  messages: UIMessage[],
+  activeAskUserQuestionToolUseId?: string | null,
+  options: {
+    hideTeamCoordinationTools?: boolean
+    teamMemberNames?: ReadonlySet<string>
+  } = {},
+): RenderModel {
   const items: RenderItem[] = []
   const toolResultMap = new Map<string, ToolResult>()
   const childToolCallsByParent = new Map<string, ToolCall[]>()
@@ -724,6 +779,22 @@ export function buildRenderModel(messages: UIMessage[], activeAskUserQuestionToo
       if (msg.parentToolUseId && toolUseIds.has(msg.parentToolUseId)) {
         flushGroup()
         appendChildToolCall(childToolCallsByParent, msg.parentToolUseId, msg)
+        continue
+      }
+      const toolResult = toolResultMap.get(msg.toolUseId)
+      if (
+        options.hideTeamCoordinationTools &&
+        msg.toolName === 'SendMessage' &&
+        toolResult?.isError === false &&
+        isTeamCoordinationSendMessage(msg.input, toolResult.content, options.teamMemberNames)
+      ) {
+        continue
+      }
+      // The raw TeamCreate call and its JSON result say nothing a reader can
+      // use; the team card in its place links to the workbench that does.
+      if (options.hideTeamCoordinationTools && msg.toolName === 'TeamCreate') {
+        flushGroup()
+        items.push({ kind: 'team_card', id: `team-card-${msg.id}` })
         continue
       }
       if (msg.toolName === 'AskUserQuestion') {
@@ -1272,7 +1343,8 @@ function clampNumber(value: number, min: number, max: number) {
 }
 
 function getRenderItemKey(item: RenderItem) {
-  return item.kind === 'tool_group' ? item.id : item.message.id
+  if (item.kind === 'tool_group' || item.kind === 'team_card') return item.id
+  return item.message.id
 }
 
 function findConversationMatches(
@@ -1436,6 +1508,9 @@ function getMessageContentWeight(message: UIMessage): number {
 
 function getRenderItemContentWeight(item: RenderItem): number {
   if (item.kind === 'message') return getMessageContentWeight(item.message)
+  // The team card is a fixed-height summary, so it contributes no text weight
+  // to the virtualization heuristic.
+  if (item.kind === 'team_card') return 0
   return item.steps.reduce(
     (total, step) => total + getMessageContentWeight(step.kind === 'tool' ? step.toolCall : step.message),
     0,
@@ -1514,15 +1589,18 @@ function estimateMessageHeight(message: UIMessage): number {
 }
 
 /** A collapsed activity group is one header line, however many steps it holds:
- *  py-1 (8) + a 12.5px line (~18) + the rail's padding-bottom (8).
+ *  py-1 (8) + a 12.5px line (~18) + the turn's padding-bottom (8).
  *
  *  A group only renders its rows while it is still running, and a running group
  *  sits at the scroll anchor where items are mounted and measured — so estimates
  *  are only ever consulted for the settled, collapsed form, which is this line. */
 const ACTIVITY_GROUP_COLLAPSED_HEIGHT = 34
+/** Avatar row plus two text lines, plus the turn's padding-bottom. */
+const TEAM_CARD_HEIGHT = 86
 
 export function estimateRenderItemHeight(item: RenderItem): number {
   if (item.kind === 'message') return estimateMessageHeight(item.message)
+  if (item.kind === 'team_card') return TEAM_CARD_HEIGHT
   // Agent dispatch groups keep their taller per-agent cards; everything else
   // collapses to the single-line activity header.
   const isAgentGroup = item.toolCalls.length > 0 && item.toolCalls.every((toolCall) => toolCall.toolName === 'Agent')
@@ -1562,6 +1640,7 @@ function getMessageMetricSignature(message: UIMessage): string {
 
 function getRenderItemMetricSignature(item: RenderItem): string {
   if (item.kind === 'message') return getMessageMetricSignature(item.message)
+  if (item.kind === 'team_card') return `team_card:${item.id}`
   return item.steps
     .map((step) => getMessageMetricSignature(step.kind === 'tool' ? step.toolCall : step.message))
     .join('|')
@@ -1798,6 +1877,26 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const isMemberSession = useTeamStore((s) =>
     resolvedSessionId ? Boolean(s.getMemberBySessionId(resolvedSessionId)) : false,
   )
+  const isSubagentSession = useTabStore((s) => s.tabs.some((tab) => (
+    tab.sessionId === resolvedSessionId && tab.type === 'subagent'
+  )))
+  const isDirectAgentSession = isMemberSession || isSubagentSession
+  const teamWorkbench = useTeamStore((s) =>
+    resolvedSessionId ? s.workbenchesBySession[resolvedSessionId] : undefined,
+  )
+  const isTeamLeadSession = Boolean(teamWorkbench?.snapshots.length)
+  const teamSnapshot = teamWorkbench?.snapshots.at(-1)
+  const openTeamWorkbench = useCallback((leadSessionId: string) => {
+    useWorkspacePanelStore.getState().closePanel(leadSessionId)
+    useTeamStore.getState().setWorkbenchOpen(leadSessionId, true)
+  }, [])
+  const teamMemberNames = useMemo(() => {
+    const snapshots = teamWorkbench?.snapshots
+    if (!snapshots?.length) return undefined
+    return new Set(snapshots[snapshots.length - 1]!.team.members.flatMap((member) =>
+      member.name ? [member.name] : [],
+    ))
+  }, [teamWorkbench?.snapshots])
   const addToast = useUIStore((s) => s.addToast)
   const messages = sessionState?.messages ?? EMPTY_MESSAGES
   const chatState = sessionState?.chatState ?? 'idle'
@@ -1886,7 +1985,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const conversationFindMatchesRef = useRef<ConversationFindMatch[]>([])
   const [messageListWidth, setMessageListWidth] = useState<number | null>(null)
   const branchActionsDisabled =
-    isMemberSession ||
+    isDirectAgentSession ||
     isPreparingTurn ||
     chatState !== 'idle' ||
     hasRunningBackgroundTasks ||
@@ -2310,8 +2409,11 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   }, [requestLiveFollow])
 
   const { toolResultMap, childToolCallsByParent, renderItems } = useMemo(
-    () => buildRenderModel(messages, activeAskUserQuestionToolUseId),
-    [activeAskUserQuestionToolUseId, messages],
+    () => buildRenderModel(messages, activeAskUserQuestionToolUseId, {
+      hideTeamCoordinationTools: isTeamLeadSession,
+      teamMemberNames,
+    }),
+    [activeAskUserQuestionToolUseId, isTeamLeadSession, messages, teamMemberNames],
   )
   // Defer the per-message branchable / completed-turn computations so the first
   // commit on tab switch can render the virtualization window without doing two
@@ -2487,7 +2589,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   }, [renderItemKeys])
 
   useEffect(() => {
-    if (!resolvedSessionId || completedTurnTargets.length === 0 || isMemberSession) {
+    if (!resolvedSessionId || completedTurnTargets.length === 0 || isDirectAgentSession) {
       setTurnChangeCards([])
       setTurnChangeLoadError(null)
       setIsLoadingTurnChangeCards(false)
@@ -2554,7 +2656,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     return () => {
       cancelled = true
     }
-  }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, historyMutationEpoch, isMemberSession, latestCompletedTurnId, resolvedSessionId])
+  }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, historyMutationEpoch, isDirectAgentSession, latestCompletedTurnId, resolvedSessionId])
 
   const handleUndoCurrentTurn = useCallback(async (mode: SessionRewindMode = 'both') => {
     if (!resolvedSessionId || !confirmTurnCard || rewindingTurnId || hasRunningBackgroundTasks) return
@@ -2969,6 +3071,13 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
             // whether a run stands open.
             isLive={chatState !== 'idle' && index === renderItems.length - 1 && !hasTrailingStreamingItem}
           />
+        ) : item.kind === 'team_card' ? (
+          teamSnapshot && resolvedSessionId ? (
+            <AgentTeamsInlineCard
+              snapshot={teamSnapshot}
+              onOpen={() => openTeamWorkbench(resolvedSessionId)}
+            />
+          ) : null
         ) : (
           <MessageBlock
             sessionId={resolvedSessionId}
@@ -3018,7 +3127,11 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       >
         <div
           ref={scrollContentRef}
-          className={compact ? 'mx-auto max-w-full' : 'mx-auto max-w-[900px]'}
+          // The reading measure holds whether or not a right-hand panel is
+          // open — `compact` only tightens padding. Dropping to `max-w-full`
+          // was what made the transcript lose its centred structure the moment
+          // the agent-teams workbench appeared.
+          className="mx-auto max-w-[900px]"
         >
           {virtualTranscriptWindow.enabled ? (
             <VirtualSpacer height={virtualTranscriptWindow.beforeHeight} position="top" />
@@ -3178,6 +3291,7 @@ export const MessageBlock = memo(function MessageBlock({
             branchAction={branchAction}
             timestamp={message.timestamp}
             sessionId={sessionId ?? undefined}
+            teammateFrom={message.teammateFrom}
           />
         </SelectableChatMessage>
       )

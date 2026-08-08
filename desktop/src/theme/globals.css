@@ -401,6 +401,121 @@
   }
 }
 
+/* ─── Agent Teams Workbench ──────────────────────────────────────
+   Position changes create the walking motion. React updates one layout state
+   and CSS interpolates it without scheduling per-frame JS work. */
+.agent-teams-bot {
+  transition:
+    left 900ms cubic-bezier(0.55, 0, 0.25, 1),
+    top 900ms cubic-bezier(0.55, 0, 0.25, 1),
+    opacity 700ms ease;
+}
+
+.agent-teams-task {
+  animation: agent-teams-enter 350ms ease-out both;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.agent-teams-person {
+  transform-origin: 50% 84%;
+  transition: transform 180ms ease;
+}
+
+.agent-teams-person:hover {
+  transform: translateY(-2px) scale(1.035);
+}
+
+.agent-teams-person:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.agent-teams-drawer {
+  animation: agent-teams-drawer-enter 250ms ease-out both;
+}
+
+.agent-teams-character {
+  transform-origin: 50% 84%;
+}
+
+.agent-teams-character-working {
+  animation: agent-teams-focus 2.4s ease-in-out infinite;
+}
+
+.agent-teams-character-idle {
+  animation: agent-teams-breathe 4.2s ease-in-out infinite;
+}
+
+.agent-teams-character-archived {
+  filter: saturate(0.84);
+  opacity: 0.96;
+}
+
+.agent-teams-character-message {
+  animation: agent-teams-message 720ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+.agent-teams-zz {
+  animation: agent-teams-zz 2.2s ease-out infinite;
+}
+
+.agent-teams-flow {
+  animation: agent-teams-flow 700ms linear infinite;
+}
+
+@keyframes agent-teams-enter {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes agent-teams-drawer-enter {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes agent-teams-focus {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  45% { transform: translateY(-2px) rotate(-1deg); }
+  70% { transform: translateY(-1px) rotate(1deg); }
+}
+
+@keyframes agent-teams-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-1px) scale(1.015); }
+}
+
+@keyframes agent-teams-message {
+  0% { filter: drop-shadow(0 0 0 rgba(var(--cc-ac-rgb), 0)); transform: scale(1); }
+  45% { filter: drop-shadow(0 0 8px rgba(var(--cc-ac-rgb), 0.55)); transform: scale(1.1) translateY(-2px); }
+  100% { filter: drop-shadow(0 0 0 rgba(var(--cc-ac-rgb), 0)); transform: scale(1); }
+}
+
+@keyframes agent-teams-zz {
+  0% { opacity: 0; transform: translate(0, 2px); }
+  30% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(7px, -11px); }
+}
+
+@keyframes agent-teams-flow {
+  to { stroke-dashoffset: -18; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-teams-bot,
+  .agent-teams-person,
+  .agent-teams-task,
+  .agent-teams-drawer,
+  .agent-teams-character-working,
+  .agent-teams-character-idle,
+  .agent-teams-character-message,
+  .agent-teams-zz,
+  .agent-teams-flow {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 /* ─── Terminal ANSI palette ───────────────────────────────────────
    The embedded terminal stays dark under all three themes (that is what
    the per-theme `--color-terminal-*` values encode — light/white/dark
@@ -2084,9 +2199,10 @@ body.sidebar-resizing * {
 .chat-turn-rail {
   display: flow-root;
   /* Owned here rather than on the message components, so a turn's internal
-     rhythm is retunable in one place. Blocks inside the transcript therefore
-     carry no bottom margin of their own; containers that reuse them
-     (SubagentRunPage) space them themselves. */
+     rhythm is retunable in one place — and so every surface that shows a
+     transcript inherits it. SubagentRunPage and AgentTeamsMemberView both
+     render MessageList itself, so blocks carry no bottom margin of their own
+     and nothing downstream has to re-derive the spacing. */
   padding-bottom: 8px;
 }
 
