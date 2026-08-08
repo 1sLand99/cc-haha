@@ -24,6 +24,7 @@ import { AskUserQuestion } from './AskUserQuestion'
 import { StreamingIndicator } from './StreamingIndicator'
 import { InlineTaskSummary } from './InlineTaskSummary'
 import { CurrentTurnChangeCard } from './CurrentTurnChangeCard'
+import { AgentTeamsInlineCard } from '../agentTeams/AgentTeamsSummary'
 import {
   buildConversationNavigationItems,
   ConversationNavigator,
@@ -64,6 +65,11 @@ type RenderItem =
    */
   | { kind: 'tool_group'; toolCalls: ToolCall[]; steps: ActivityStep[]; id: string }
   | { kind: 'message'; message: UIMessage }
+  /**
+   * Stands in for the TeamCreate call so the transcript records that this turn
+   * handed work to a team, without expanding into the workbench inline.
+   */
+  | { kind: 'team_card'; id: string }
 
 type RenderModel = {
   renderItems: RenderItem[]
@@ -784,6 +790,13 @@ export function buildRenderModel(
       ) {
         continue
       }
+      // The raw TeamCreate call and its JSON result say nothing a reader can
+      // use; the team card in its place links to the workbench that does.
+      if (options.hideTeamCoordinationTools && msg.toolName === 'TeamCreate') {
+        flushGroup()
+        items.push({ kind: 'team_card', id: `team-card-${msg.id}` })
+        continue
+      }
       if (msg.toolName === 'AskUserQuestion') {
         const isResolved = toolResultMap.has(msg.toolUseId)
         const lastUnresolvedIndex = lastUnresolvedAskUserQuestionIndexByToolUseId.get(msg.toolUseId)
@@ -1241,7 +1254,8 @@ function clampNumber(value: number, min: number, max: number) {
 }
 
 function getRenderItemKey(item: RenderItem) {
-  return item.kind === 'tool_group' ? item.id : item.message.id
+  if (item.kind === 'tool_group' || item.kind === 'team_card') return item.id
+  return item.message.id
 }
 
 function findConversationMatches(
@@ -1405,6 +1419,9 @@ function getMessageContentWeight(message: UIMessage): number {
 
 function getRenderItemContentWeight(item: RenderItem): number {
   if (item.kind === 'message') return getMessageContentWeight(item.message)
+  // The team card is a fixed-height summary, so it contributes no text weight
+  // to the virtualization heuristic.
+  if (item.kind === 'team_card') return 0
   return item.steps.reduce(
     (total, step) => total + getMessageContentWeight(step.kind === 'tool' ? step.toolCall : step.message),
     0,
@@ -1477,9 +1494,12 @@ function estimateMessageHeight(message: UIMessage): number {
 
 /** A collapsed activity group is one header line, however many steps it holds. */
 const ACTIVITY_GROUP_COLLAPSED_HEIGHT = 52
+/** Avatar row plus two text lines plus the card's own margin. */
+const TEAM_CARD_HEIGHT = 78
 
 function estimateRenderItemHeight(item: RenderItem): number {
   if (item.kind === 'message') return estimateMessageHeight(item.message)
+  if (item.kind === 'team_card') return TEAM_CARD_HEIGHT
   // Agent dispatch groups keep their taller per-agent cards; everything else
   // collapses to the single-line activity header.
   const isAgentGroup = item.toolCalls.length > 0 && item.toolCalls.every((toolCall) => toolCall.toolName === 'Agent')
@@ -1519,6 +1539,7 @@ function getMessageMetricSignature(message: UIMessage): string {
 
 function getRenderItemMetricSignature(item: RenderItem): string {
   if (item.kind === 'message') return getMessageMetricSignature(item.message)
+  if (item.kind === 'team_card') return `team_card:${item.id}`
   return item.steps
     .map((step) => getMessageMetricSignature(step.kind === 'tool' ? step.toolCall : step.message))
     .join('|')
@@ -1753,6 +1774,11 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     resolvedSessionId ? s.workbenchesBySession[resolvedSessionId] : undefined,
   )
   const isTeamLeadSession = Boolean(teamWorkbench?.snapshots.length)
+  const teamSnapshot = teamWorkbench?.snapshots.at(-1)
+  const openTeamWorkbench = useCallback((leadSessionId: string) => {
+    useWorkspacePanelStore.getState().closePanel(leadSessionId)
+    useTeamStore.getState().setWorkbenchOpen(leadSessionId, true)
+  }, [])
   const teamMemberNames = useMemo(() => {
     const snapshots = teamWorkbench?.snapshots
     if (!snapshots?.length) return undefined
@@ -2915,6 +2941,13 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
               item.toolCalls.some((tc) => !toolResultMap.has(tc.toolUseId))
             }
           />
+        ) : item.kind === 'team_card' ? (
+          teamSnapshot && resolvedSessionId ? (
+            <AgentTeamsInlineCard
+              snapshot={teamSnapshot}
+              onOpen={() => openTeamWorkbench(resolvedSessionId)}
+            />
+          ) : null
         ) : (
           <MessageBlock
             sessionId={resolvedSessionId}
@@ -2964,7 +2997,11 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
       >
         <div
           ref={scrollContentRef}
-          className={compact ? 'mx-auto max-w-full' : 'mx-auto max-w-[900px]'}
+          // The reading measure holds whether or not a right-hand panel is
+          // open — `compact` only tightens padding. Dropping to `max-w-full`
+          // was what made the transcript lose its centred structure the moment
+          // the agent-teams workbench appeared.
+          className="mx-auto max-w-[900px]"
         >
           {virtualTranscriptWindow.enabled ? (
             <VirtualSpacer height={virtualTranscriptWindow.beforeHeight} position="top" />
@@ -3116,6 +3153,7 @@ export const MessageBlock = memo(function MessageBlock({
             branchAction={branchAction}
             timestamp={message.timestamp}
             sessionId={sessionId ?? undefined}
+            teammateFrom={message.teammateFrom}
           />
         </SelectableChatMessage>
       )

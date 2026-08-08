@@ -1,24 +1,20 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ChevronLeft, ChevronRight, Radio, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronLeft, ChevronRight, Maximize2, Radio, X } from 'lucide-react'
 import { Badge, StatusDot, type Tone } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { Progress } from '@/components/ui/Progress'
-import dataAnalystAvatar from '../../assets/agent-teams/data-analyst.png'
-import docsCoordinatorAvatar from '../../assets/agent-teams/docs-coordinator.png'
-import qaEngineerAvatar from '../../assets/agent-teams/qa-engineer.png'
-import releaseEngineerAvatar from '../../assets/agent-teams/release-engineer.png'
-import securityReviewerAvatar from '../../assets/agent-teams/security-reviewer.png'
-import serverEngineerAvatar from '../../assets/agent-teams/server-engineer.png'
-import teamLeadAvatar from '../../assets/agent-teams/team-lead.png'
-import uiDesignerAvatar from '../../assets/agent-teams/ui-designer.png'
 import { useTranslation, type TranslationKey } from '../../i18n'
-import { useTeamStore } from '../../stores/teamStore'
+import { useTabStore } from '../../stores/tabStore'
+import { useTeamStore, type WorkbenchView } from '../../stores/teamStore'
 import type {
   TeamMember,
   TeamWorkbenchMessage,
   TeamWorkbenchSnapshot,
 } from '../../types/team'
+import { MEMBER_AVATARS, memberAccentColor } from './agentTeamsAvatars'
+import { AgentTeamsCommunicationFeed } from './AgentTeamsCommunicationFeed'
+import { AgentTeamsMemberView } from './AgentTeamsMemberView'
 import {
   getWorkbenchPhase,
   getWorkbenchProgress,
@@ -29,30 +25,16 @@ import {
   WORKBENCH_TASK_HEIGHT,
   WORKBENCH_TASK_WIDTH,
   type PositionedWorkbenchTask,
-  type MemberAvatarKey,
   type WorkbenchPhase,
   type WorkbenchTaskState,
 } from './agentTeamsModel'
 
-const MEMBER_AVATARS: Record<MemberAvatarKey, string> = {
-  'team-lead': teamLeadAvatar,
-  'server-engineer': serverEngineerAvatar,
-  'ui-designer': uiDesignerAvatar,
-  'qa-engineer': qaEngineerAvatar,
-  'security-reviewer': securityReviewerAvatar,
-  'data-analyst': dataAnalystAvatar,
-  'release-engineer': releaseEngineerAvatar,
-  'docs-coordinator': docsCoordinatorAvatar,
-}
-
-const MEMBER_ACCENTS = [
-  'var(--color-brand)',
-  'var(--color-warning)',
-  'var(--color-success)',
-  'var(--color-info)',
-  'var(--color-text-secondary)',
-  'var(--color-error)',
-] as const
+/**
+ * Stable default for the view selector. A `?? { kind: 'overview' }` literal
+ * allocates a fresh object on every store read, which zustand compares by
+ * identity — that renders forever.
+ */
+const OVERVIEW_VIEW: WorkbenchView = { kind: 'overview' }
 
 type MemberWorkState = 'working' | 'idle' | 'stopped' | 'exited' | 'error'
 
@@ -111,10 +93,7 @@ function memberStateLabel(state: MemberWorkState, t: TranslationFn): string {
 }
 
 function memberAccent(member: TeamMember, index: number): string {
-  const colorIndex = member.color
-    ? ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan'].indexOf(member.color)
-    : -1
-  return MEMBER_ACCENTS[(colorIndex >= 0 ? colorIndex : index) % MEMBER_ACCENTS.length]!
+  return memberAccentColor(member.color, index)
 }
 
 function memberName(member: TeamMember): string {
@@ -127,37 +106,6 @@ function memberMatchesIdentity(member: TeamMember, identity: string): boolean {
     .includes(identity)
 }
 
-function messageText(message: TeamWorkbenchMessage, t: TranslationFn): string {
-  if (message.protocolType === 'task_assignment') {
-    return t('agentTeams.communication.taskAssignment', {
-      task: message.taskId ? `#${message.taskId}` : '',
-      subject: message.text,
-    })
-  }
-  if (message.protocolType === 'shutdown_request') {
-    return t('agentTeams.communication.shutdownRequest', { reason: message.text })
-  }
-  if (message.protocolType === 'shutdown_response') {
-    return t('agentTeams.communication.shutdownResponse')
-  }
-  if (message.protocolType === 'idle_notification') {
-    return t('agentTeams.communication.idle')
-  }
-  return message.text
-}
-
-function messageKindLabel(message: TeamWorkbenchMessage, t: TranslationFn): string {
-  if (message.kind === 'direct') return t('agentTeams.communication.direct')
-  if (message.kind === 'broadcast') return t('agentTeams.communication.broadcast')
-  return t('agentTeams.communication.system')
-}
-
-function messageTone(message: TeamWorkbenchMessage): string {
-  if (message.kind === 'direct') return 'var(--color-brand)'
-  if (message.kind === 'broadcast') return 'var(--color-warning)'
-  return 'var(--color-text-tertiary)'
-}
-
 function formatSnapshotTime(snapshot: TeamWorkbenchSnapshot): string {
   const time = new Date(snapshot.generatedAt)
   return Number.isNaN(time.getTime())
@@ -165,16 +113,25 @@ function formatSnapshotTime(snapshot: TeamWorkbenchSnapshot): string {
     : time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
+export function AgentTeamsWorkbench({
+  sessionId,
+  variant = 'panel',
+}: {
+  sessionId: string
+  /** `full` is the detached tab: the feed gets its own column beside the map. */
+  variant?: 'panel' | 'full'
+}) {
   const t = useTranslation()
   const timeline = useTeamStore((state) => state.workbenchesBySession[sessionId])
   const historyIndex = useTeamStore((state) => state.workbenchHistoryIndexBySession[sessionId] ?? null)
+  const view = useTeamStore((state) => state.workbenchViewBySession[sessionId] ?? OVERVIEW_VIEW)
   const setHistoryIndex = useTeamStore((state) => state.setWorkbenchHistoryIndex)
   const setWorkbenchOpen = useTeamStore((state) => state.setWorkbenchOpen)
+  const setWorkbenchView = useTeamStore((state) => state.setWorkbenchView)
+  const openMemberInWorkbench = useTeamStore((state) => state.openMemberInWorkbench)
   const openMemberSession = useTeamStore((state) => state.openMemberSession)
   const officeViewportRef = useRef<HTMLDivElement>(null)
   const [officeWidth, setOfficeWidth] = useState(604)
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
 
   const snapshots = timeline?.snapshots ?? []
@@ -182,6 +139,7 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
   const selectedIndex = historyIndex === null ? latestIndex : Math.min(historyIndex, latestIndex)
   const snapshot = selectedIndex >= 0 ? snapshots[selectedIndex] : undefined
   const previousSnapshot = selectedIndex > 0 ? snapshots[selectedIndex - 1] : undefined
+  const isFull = variant === 'full'
 
   useEffect(() => {
     const element = officeViewportRef.current
@@ -194,12 +152,15 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
     return () => observer.disconnect()
   }, [])
 
+  // A member view outlives its member when the roster changes mid-run; fall
+  // back to the map rather than rendering an empty body.
+  const selectedAgentId = view.kind === 'member' ? view.agentId : null
   useEffect(() => {
-    if (!selectedMemberId || !snapshot) return
-    if (!snapshot.team.members.some((member) => member.agentId === selectedMemberId)) {
-      setSelectedMemberId(null)
+    if (!selectedAgentId || !snapshot) return
+    if (!snapshot.team.members.some((member) => member.agentId === selectedAgentId)) {
+      setWorkbenchView(sessionId, { kind: 'overview' })
     }
-  }, [selectedMemberId, snapshot])
+  }, [selectedAgentId, sessionId, setWorkbenchView, snapshot])
 
   const layout = useMemo(
     () => layoutWorkbenchTasks(snapshot?.tasks ?? [], officeWidth),
@@ -266,13 +227,21 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
   const hasNewMessage = Boolean(
     previousSnapshot && latestMessage && previousSnapshot.messages.at(-1)?.id !== latestMessage.id,
   )
-  const selectedMember = selectedMemberId
-    ? members.find((member) => member.agentId === selectedMemberId) ?? null
+  const selectedMember = selectedAgentId
+    ? members.find((member) => member.agentId === selectedAgentId) ?? null
     : null
+  const selectMember = (member: TeamMember) => {
+    if (selectedAgentId === member.agentId) {
+      setWorkbenchView(sessionId, { kind: 'overview' })
+      return
+    }
+    openMemberInWorkbench(sessionId, member, snapshot.team)
+  }
 
   return (
     <section
       aria-label={t('agentTeams.title')}
+      data-workbench-variant={variant}
       className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--color-surface)] text-[var(--color-text-primary)]"
     >
       <header className="flex h-[42px] shrink-0 items-center gap-2.5 border-b border-[var(--color-border)] px-4">
@@ -340,17 +309,41 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
           <span className="hidden w-[64px] text-right font-mono text-[10px] tabular-nums text-[var(--color-text-tertiary)] 2xl:block">
             {historyIndex === null ? t('agentTeams.live') : `T+${selectedIndex}`} · {formatSnapshotTime(snapshot)}
           </span>
-          <IconButton
-            icon={<X aria-hidden="true" />}
-            label={t('agentTeams.closeWorkbench')}
-            size="sm"
-            tone="muted"
-            onClick={() => setWorkbenchOpen(sessionId, false)}
-          />
+          {isFull ? null : (
+            <>
+              <IconButton
+                icon={<Maximize2 aria-hidden="true" />}
+                label={t('agentTeams.openFullscreen')}
+                size="sm"
+                tone="muted"
+                onClick={() => {
+                  useTabStore.getState().openTeamWorkbenchTab(sessionId, snapshot.team.name)
+                  setWorkbenchOpen(sessionId, false)
+                }}
+              />
+              <IconButton
+                icon={<X aria-hidden="true" />}
+                label={t('agentTeams.closeWorkbench')}
+                size="sm"
+                tone="muted"
+                onClick={() => setWorkbenchOpen(sessionId, false)}
+              />
+            </>
+          )}
         </div>
       </header>
 
-      <div ref={officeViewportRef} className="min-h-0 flex-1 overflow-auto">
+      {selectedMember ? (
+        <AgentTeamsMemberView
+          member={selectedMember}
+          snapshot={snapshot}
+          onBack={() => setWorkbenchView(sessionId, { kind: 'overview' })}
+          onOpenInTab={() => openMemberSession(selectedMember, snapshot.team)}
+        />
+      ) : (
+      <div className={isFull ? 'flex min-h-0 flex-1' : 'flex min-h-0 flex-1 flex-col'}>
+
+      <div ref={officeViewportRef} className="min-h-0 min-w-0 flex-1 overflow-auto">
         <div
           data-testid="agent-teams-office"
           className="agent-teams-org-canvas relative mx-auto"
@@ -402,7 +395,7 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
               canvasWidth={layout.width}
               accent={memberAccent(leadMember, members.indexOf(leadMember))}
               isMessageSender={Boolean(hasNewMessage && latestMessage && memberMatchesIdentity(leadMember, latestMessage.from))}
-              onSelect={() => setSelectedMemberId((current) => current === leadMember.agentId ? null : leadMember.agentId)}
+              onSelect={() => selectMember(leadMember)}
               t={t}
             />
           ) : null}
@@ -418,7 +411,7 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
                 position={position}
                 accent={memberAccent(member, members.indexOf(member))}
                 isMessageSender={Boolean(hasNewMessage && latestMessage && memberMatchesIdentity(member, latestMessage.from))}
-                onSelect={() => setSelectedMemberId((current) => current === member.agentId ? null : member.agentId)}
+                onSelect={() => selectMember(member)}
                 t={t}
               />
             )
@@ -438,7 +431,7 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
               snapshot={snapshot}
               primaryTaskByMemberId={primaryTaskByMemberId}
               latestMessage={hasNewMessage ? latestMessage : undefined}
-              onSelectMember={(member) => setSelectedMemberId((current) => current === member.agentId ? null : member.agentId)}
+              onSelectMember={selectMember}
               onFocusTask={setFocusedTaskId}
               t={t}
             />
@@ -446,19 +439,15 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
         </div>
       </div>
 
-      <CommunicationFeed snapshot={snapshot} selectedIndex={selectedIndex} t={t} />
-
-      {selectedMember ? (
-        <MemberDrawer
-          member={selectedMember}
-          snapshot={snapshot}
-          avatarKey={getMemberAvatarKey(selectedMember, selectedMember.agentId === leadId)}
-          accent={memberAccent(selectedMember, members.indexOf(selectedMember))}
-          onClose={() => setSelectedMemberId(null)}
-          onOpenConversation={() => openMemberSession(selectedMember, snapshot.team)}
-          t={t}
-        />
-      ) : null}
+      {/* Detached, the feed earns a full-height column of its own — who said
+          what to whom is the substance of a multi-agent run, and the panel
+          form had it squeezed into a 200px strip under the map. */}
+      <AgentTeamsCommunicationFeed
+        snapshot={snapshot}
+        {...(isFull ? { fill: true } : {})}
+      />
+      </div>
+      )}
     </section>
   )
 }
@@ -832,174 +821,5 @@ function TaskCard({
         )}
       </div>
     </article>
-  )
-}
-
-function CommunicationFeed({
-  snapshot,
-  selectedIndex,
-  t,
-}: {
-  snapshot: TeamWorkbenchSnapshot
-  selectedIndex: number
-  t: TranslationFn
-}) {
-  const messages = [...snapshot.messages].reverse()
-  return (
-    <section className="flex h-[196px] shrink-0 flex-col border-t border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="flex shrink-0 items-baseline gap-2 px-4 pb-1 pt-2">
-        <h3 className="text-[12px] font-extrabold">{t('agentTeams.communication.title')}</h3>
-        <span className="text-[10px] text-[var(--color-text-tertiary)]">
-          {t('agentTeams.communication.count', { count: messages.length })}
-        </span>
-        {snapshot.deletedAt ? (
-          <span className="ml-auto text-[10px] font-semibold text-[var(--color-success)]">
-            {t('agentTeams.disbanded')}
-          </span>
-        ) : null}
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
-        {messages.length === 0 ? (
-          <div className="px-1 py-6 text-center text-[11px] text-[var(--color-text-tertiary)]">
-            {t('agentTeams.communication.empty')}
-          </div>
-        ) : messages.map((message, index) => (
-          <div
-            key={message.id}
-            className={`mb-0.5 rounded-[var(--radius-md)] px-2 py-1.5 ${index === 0 ? 'bg-[var(--color-brand-soft)]' : ''}`}
-          >
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className="text-[9px] font-extrabold" style={{ color: messageTone(message) }}>
-                {messageKindLabel(message, t)}
-              </span>
-              {message.kind !== 'system' ? (
-                <span className="min-w-0 truncate font-mono text-[10px] font-bold text-[var(--color-text-secondary)]">
-                  {message.from} → {message.kind === 'broadcast' ? t('agentTeams.communication.everyone') : message.to}
-                </span>
-              ) : null}
-              {message.taskId ? (
-                <span className="shrink-0 font-mono text-[9px] text-[var(--color-text-tertiary)]">#{message.taskId}</span>
-              ) : null}
-              <span className="ml-auto shrink-0 font-mono text-[9px] tabular-nums text-[var(--color-text-tertiary)]">
-                T+{selectedIndex}
-              </span>
-            </div>
-            <div className="mt-0.5 line-clamp-2 text-[11px] leading-[1.55] text-[var(--color-text-secondary)]">
-              {messageText(message, t)}
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function MemberDrawer({
-  member,
-  snapshot,
-  avatarKey,
-  accent,
-  onClose,
-  onOpenConversation,
-  t,
-}: {
-  member: TeamMember
-  snapshot: TeamWorkbenchSnapshot
-  avatarKey: MemberAvatarKey
-  accent: string
-  onClose: () => void
-  onOpenConversation: () => void
-  t: TranslationFn
-}) {
-  const isLead = member.agentId === snapshot.team.leadAgentId
-  const state = memberState(member, snapshot, isLead)
-  const tasks = snapshot.tasks.filter((task) => taskOwnedByMember(task, member))
-  const messages = snapshot.messages
-    .filter((message) => message.from === memberName(member) || message.to === memberName(member) || message.recipients.includes(memberName(member)))
-    .slice(-5)
-    .reverse()
-  const currentTask = runningTaskForMember(snapshot.tasks, member)
-  const name = memberName(member)
-  return (
-    <aside
-      role="dialog"
-      aria-label={t('agentTeams.memberDetails', { name })}
-      className="agent-teams-drawer absolute inset-y-0 right-0 z-[var(--z-drawer)] flex w-[min(360px,100%)] flex-col bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-overlay)]"
-    >
-      <header className="shrink-0 border-b border-[var(--color-border)] px-5 py-4">
-        <div className="flex items-center gap-3">
-          <span className="relative inline-flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-[var(--radius-xl)] bg-[var(--color-surface-container)]">
-            <img
-              src={MEMBER_AVATARS[avatarKey]}
-              alt=""
-              draggable={false}
-              className="h-[68px] w-[68px] select-none object-contain drop-shadow-[0_5px_4px_rgba(0,0,0,0.16)]"
-            />
-            <span
-              aria-hidden="true"
-              className="absolute bottom-1 left-1/2 h-1.5 w-7 -translate-x-1/2 rounded-full border border-[var(--color-surface-container-lowest)]"
-              style={{ background: accent }}
-            />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-mono text-[14px] font-extrabold">{name}</div>
-            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--color-text-secondary)]">
-              <StatusDot tone={state === 'error' ? 'danger' : state === 'working' ? 'brand' : state === 'exited' ? 'success' : 'neutral'} pulse={state === 'working'} />
-              {member.role} · {memberStateLabel(state, t)}
-            </div>
-          </div>
-          <IconButton icon={<X aria-hidden="true" />} label={t('workbench.close')} size="sm" tone="muted" onClick={onClose} />
-        </div>
-        <div className="mt-3 rounded-[var(--radius-md)] bg-[var(--color-surface-container)] px-3 py-2 font-mono text-[10.5px] leading-5 text-[var(--color-text-secondary)]">
-          {currentTask?.activeForm || currentTask?.subject || member.currentTask || memberStateLabel(state, t)}
-        </div>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        <DrawerSection title={t('agentTeams.memberTasks')}>
-          {tasks.length === 0 ? (
-            <p className="py-2 text-[11px] text-[var(--color-text-tertiary)]">{t('agentTeams.noMemberTasks')}</p>
-          ) : tasks.map((task) => (
-            <div key={task.id} className="flex items-center gap-2 border-b border-[var(--color-border-separator)] py-2 text-[11px]">
-              <span className="font-mono font-bold text-[var(--color-brand)]">#{task.id}</span>
-              <span className="min-w-0 flex-1 truncate font-medium">{task.subject}</span>
-              <Badge tone={taskTone(task.status === 'completed' ? 'completed' : task.status === 'in_progress' ? 'running' : 'open')} size="xs">
-                {taskStateLabel(task.status === 'completed' ? 'completed' : task.status === 'in_progress' ? 'running' : 'open', t)}
-              </Badge>
-            </div>
-          ))}
-        </DrawerSection>
-        <DrawerSection title={t('agentTeams.memberMessages')}>
-          {messages.length === 0 ? (
-            <p className="py-2 text-[11px] text-[var(--color-text-tertiary)]">{t('agentTeams.noMemberMessages')}</p>
-          ) : messages.map((message) => (
-            <div key={message.id} className="border-b border-[var(--color-border-separator)] py-2">
-              <div className="text-[9px] font-extrabold" style={{ color: messageTone(message) }}>
-                {messageKindLabel(message, t)} · {message.from} → {message.to}
-              </div>
-              <div className="mt-1 line-clamp-3 text-[11px] leading-5 text-[var(--color-text-secondary)]">
-                {messageText(message, t)}
-              </div>
-            </div>
-          ))}
-        </DrawerSection>
-        <p className="mt-5 text-[10px] text-[var(--color-text-tertiary)]">
-          {t(snapshot.deletedAt ? 'agentTeams.archivedConversationHint' : 'agentTeams.fullConversationHint')}
-        </p>
-      </div>
-      <div className="shrink-0 border-t border-[var(--color-border)] p-4">
-        <Button variant="accent" size="md" block onClick={onOpenConversation} disabled={isLead}>
-          {t(snapshot.deletedAt ? 'agentTeams.openExecution' : 'agentTeams.openConversation', { name })}
-        </Button>
-      </div>
-    </aside>
-  )
-}
-
-function DrawerSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="mb-5">
-      <h3 className="mb-1 text-[10.5px] font-extrabold tracking-[0.08em] text-[var(--color-text-tertiary)]">{title}</h3>
-      {children}
-    </section>
   )
 }

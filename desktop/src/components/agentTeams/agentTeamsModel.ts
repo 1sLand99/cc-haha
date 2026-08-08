@@ -1,5 +1,7 @@
+import { AGENT_LIFECYCLE_TYPES } from '../../types/team'
 import type {
   TeamMember,
+  TeamWorkbenchMessage,
   TeamWorkbenchSnapshot,
   TeamWorkbenchTask,
 } from '../../types/team'
@@ -197,6 +199,88 @@ export function getWorkbenchProgress(snapshot: TeamWorkbenchSnapshot) {
     total,
     percent: total === 0 ? 0 : Math.round((completed / total) * 100),
   }
+}
+
+/**
+ * A workbench message is either something a teammate wrote or a protocol
+ * signal the runtime emitted. The feed used to print the latter as raw JSON
+ * (`{"type":"idle_notification",...}`), which is both unreadable and the
+ * opposite of what the transcript does — `extractVisibleTeammateMessageContents`
+ * has always dropped these payloads from chat. Classifying here lets the feed
+ * render a sentence and de-emphasise it instead.
+ */
+export type WorkbenchMessageBody =
+  | { kind: 'text'; text: string }
+  | { kind: 'lifecycle'; type: string; detail?: string }
+
+/** Protocol payloads the feed states in words rather than dumping verbatim. */
+const NARRATED_PROTOCOL_TYPES = new Set([
+  ...AGENT_LIFECYCLE_TYPES,
+  'shutdown_response',
+  'task_assignment',
+])
+
+const LIFECYCLE_DETAIL_FIELDS = ['idleReason', 'reason', 'detail', 'message'] as const
+const READABLE_BODY_FIELDS = ['message', 'content', 'text', 'summary', 'reason'] as const
+
+function parseJsonObject(raw: string): Record<string, unknown> | null {
+  if (!raw.startsWith('{') || !raw.endsWith('}')) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function firstNonEmptyString(
+  record: Record<string, unknown>,
+  fields: readonly string[],
+): string | undefined {
+  for (const field of fields) {
+    const value = record[field]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+export function parseWorkbenchMessageBody(
+  message: Pick<TeamWorkbenchMessage, 'text' | 'protocolType'>,
+): WorkbenchMessageBody {
+  const raw = message.text?.trim() ?? ''
+  const payload = parseJsonObject(raw)
+  const payloadType = typeof payload?.type === 'string' ? payload.type : undefined
+  const type = message.protocolType ?? payloadType
+
+  if (type && NARRATED_PROTOCOL_TYPES.has(type)) {
+    return {
+      kind: 'lifecycle',
+      type,
+      ...(payload ? { detail: firstNonEmptyString(payload, LIFECYCLE_DETAIL_FIELDS) } : {}),
+    }
+  }
+
+  // An unrecognised JSON payload still beats raw braces: surface whichever
+  // field actually carries prose, and only fall back to the literal text when
+  // nothing readable is in there.
+  if (payload) {
+    return { kind: 'text', text: firstNonEmptyString(payload, READABLE_BODY_FIELDS) ?? raw }
+  }
+  return { kind: 'text', text: raw }
+}
+
+/**
+ * Wall-clock time the message was sent. The feed previously stamped every row
+ * with `T+{snapshotIndex}`, which is identical for every message in a snapshot
+ * and therefore carries no information at all.
+ */
+export function formatWorkbenchMessageTime(timestamp: string): string {
+  const time = new Date(timestamp)
+  return Number.isNaN(time.getTime())
+    ? ''
+    : time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
 export function memberInitials(member: TeamMember): string {

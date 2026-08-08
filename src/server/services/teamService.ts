@@ -90,6 +90,12 @@ export type TranscriptMessage = {
   timestamp: string
   model?: string
   parentToolUseId?: string
+  /**
+   * Structured tool output the desktop transcript needs to render a result as
+   * anything richer than plain text. Dropping it here degraded every member
+   * tool call to its stringified body.
+   */
+  toolUseResult?: unknown
 }
 
 export type TeamTranscriptPage = {
@@ -1608,6 +1614,7 @@ export class TeamService {
         ? { parentToolUseId: entry.parentToolUseId }
         : {}),
       ...(model ? { model } : {}),
+      ...(entry.toolUseResult !== undefined ? { toolUseResult: entry.toolUseResult } : {}),
     }
   }
 

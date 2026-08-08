@@ -2510,7 +2510,9 @@ describe('MessageList nested tool calls', () => {
     const renderedKinds = renderItems.map((item) =>
       item.kind === 'tool_group'
         ? `tool:${item.toolCalls[0]?.toolUseId}`
-        : `message:${item.message.id}`,
+        : item.kind === 'team_card'
+          ? `team:${item.id}`
+          : `message:${item.message.id}`,
     )
 
     expect(renderedKinds).toEqual([
@@ -6861,5 +6863,39 @@ describe('Agent Teams chat projection', () => {
     expect(buildRenderModel(failed, null, {
       hideTeamCoordinationTools: true,
     }).renderItems).toHaveLength(1)
+  })
+
+  it('replaces the TeamCreate call with a team card at the point the team was formed', () => {
+    const messages: UIMessage[] = [
+      { id: 'user-1', type: 'user_text', content: 'Audit the queue', timestamp: 1 },
+      {
+        id: 'tool-create',
+        type: 'tool_use',
+        toolName: 'TeamCreate',
+        toolUseId: 'create-1',
+        input: { team_name: 'audit-team' },
+        timestamp: 2,
+      },
+      {
+        id: 'result-create',
+        type: 'tool_result',
+        toolUseId: 'create-1',
+        content: '{"team_name":"audit-team","lead_agent_id":"team-lead@audit-team"}',
+        isError: false,
+        timestamp: 3,
+      },
+      { id: 'assistant-1', type: 'assistant_text', content: 'Team is up.', timestamp: 4 },
+    ]
+
+    const lead = buildRenderModel(messages, null, { hideTeamCoordinationTools: true })
+    expect(lead.renderItems.map((item) => item.kind))
+      .toEqual(['message', 'team_card', 'message'])
+    // The card sits where the call was, not appended at the end — scrolling
+    // back must still show that this turn handed work to a team.
+    expect(lead.renderItems[1]).toMatchObject({ kind: 'team_card', id: 'team-card-tool-create' })
+
+    // An ordinary session with no workbench keeps the raw tool call.
+    expect(buildRenderModel(messages).renderItems.map((item) => item.kind))
+      .toEqual(['message', 'tool_group', 'message'])
   })
 })

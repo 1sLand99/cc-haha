@@ -4208,8 +4208,14 @@ function buildAbortedHistoryLoadUpdate(
 
 const TEAMMATE_CONTENT_REGEX = /<teammate-message\s+teammate_id="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/teammate-message>/g
 
-function extractVisibleTeammateMessageContents(text: string): string[] {
-  const contents: string[] = []
+export type VisibleTeammateMessage = { from: string; content: string }
+
+/**
+ * Teammate turns carry the sender in the tag; keeping it lets the transcript
+ * attribute the message instead of rendering it as an anonymous user turn.
+ */
+function extractVisibleTeammateMessages(text: string): VisibleTeammateMessage[] {
+  const messages: VisibleTeammateMessage[] = []
 
   for (const match of text.matchAll(TEAMMATE_CONTENT_REGEX)) {
     const content = match[2]?.trim()
@@ -4226,11 +4232,12 @@ function extractVisibleTeammateMessageContents(text: string): string[] {
       }
     }
 
-    contents.push(content)
+    messages.push({ from: match[1] ?? '', content })
   }
 
-  return contents
+  return messages
 }
+
 
 function pushAssistantHistoryText(
   messages: UIMessage[],
@@ -4893,13 +4900,15 @@ export function mapHistoryMessagesToUiMessages(
 
       if (isTeammateMessage(msg.content)) {
         if (!includeTeammateMessages) continue
-        const teammateContents = extractVisibleTeammateMessageContents(msg.content)
-        if (teammateContents.length === 0) continue
+        const teammateMessages = extractVisibleTeammateMessages(msg.content)
+        if (teammateMessages.length === 0) continue
+        const sender = teammateMessages[0]!.from
         uiMessages.push({
           id: msg.id || nextId(),
           type: 'user_text',
-          content: teammateContents.join('\n\n'),
+          content: teammateMessages.map((message) => message.content).join('\n\n'),
           ...(msg.id ? { transcriptMessageId: msg.id } : {}),
+          ...(sender ? { teammateFrom: sender } : {}),
           timestamp,
         })
         continue
@@ -4943,12 +4952,15 @@ export function mapHistoryMessagesToUiMessages(
       const modelTextParts: string[] = []
       const attachments: UIAttachment[] = []
       const imageSourcePaths: string[] = []
+      let teammateSender: string | undefined
       const hasImageBlock = (msg.content as UserHistoryBlock[]).some((block) => block.type === 'image')
       for (const [blockIndex, block] of (msg.content as UserHistoryBlock[]).entries()) {
         if (block.type === 'text' && block.text && isTeammateMessage(block.text)) {
           modelTextParts.push(block.text)
           if (!includeTeammateMessages) continue
-          visibleTextParts.push(...extractVisibleTeammateMessageContents(block.text))
+          const teammateMessages = extractVisibleTeammateMessages(block.text)
+          teammateSender ??= teammateMessages.find((message) => message.from)?.from
+          visibleTextParts.push(...teammateMessages.map((message) => message.content))
         } else if (block.type === 'text' && block.text) {
           modelTextParts.push(block.text)
           const imageSourcePath = hasImageBlock ? extractImageMetadataSourcePath(block.text) : undefined
@@ -4997,6 +5009,7 @@ export function mapHistoryMessagesToUiMessages(
           content: userContent,
           ...(msg.id ? { transcriptMessageId: msg.id } : {}),
           ...(modelContent ? { modelContent } : {}),
+          ...(teammateSender ? { teammateFrom: teammateSender } : {}),
           attachments: allAttachments.length > 0 ? allAttachments : undefined,
           timestamp,
         })

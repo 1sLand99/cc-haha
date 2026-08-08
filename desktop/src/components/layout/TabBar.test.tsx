@@ -458,7 +458,7 @@ describe('TabBar', () => {
     expect(useActivityPanelStore.getState().isOpen(sessionId)).toBe(true)
   })
 
-  it('moves team activity out of the activity rail and reserves the workspace slot', async () => {
+  it('offers the team workbench alongside the workspace entry instead of replacing it', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')
     const { useChatStore } = await import('../../stores/chatStore')
@@ -498,22 +498,60 @@ describe('TabBar', () => {
       render(<TabBar />)
     })
 
-    expect(screen.queryByRole('button', { name: /activity/i })).not.toBeInTheDocument()
-    expect(screen.queryByTestId('session-activity-badge')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Show Workspace' })).not.toBeInTheDocument()
-    const workbenchButton = screen.getByRole('button', { name: 'Hide Agent Teams Workbench' })
-    expect(workbenchButton).toHaveAttribute('aria-pressed', 'true')
+    // A team existing is not a reason to take over the right-hand slot, so the
+    // workbench starts closed and the workspace entry stays reachable.
+    const workbenchButton = screen.getByRole('button', { name: 'Show Agent Teams Workbench' })
+    expect(workbenchButton).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: 'Show Workspace' })).toBeInTheDocument()
 
     fireEvent.click(workbenchButton)
 
-    expect(useTeamStore.getState().workbenchOpenBySession[sessionId]).toBe(false)
-    expect(screen.getByRole('button', { name: 'Show Agent Teams Workbench' })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: 'Show Agent Teams Workbench' }))
     expect(useTeamStore.getState().workbenchOpenBySession[sessionId]).toBe(true)
+    expect(screen.getByRole('button', { name: 'Hide Agent Teams Workbench' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    // Only an open workbench suppresses the activity rail — the two would
+    // otherwise fight over the same edge of the window.
+    expect(screen.queryByRole('button', { name: /activity/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Agent Teams Workbench' }))
+    expect(useTeamStore.getState().workbenchOpenBySession[sessionId]).toBe(false)
+  })
+
+  it('lets the workspace panel evict an open team workbench from the shared slot', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+    const { useSessionStore } = await import('../../stores/sessionStore')
+    const { useTeamStore } = await import('../../stores/teamStore')
+    const { useWorkspacePanelStore } = await import('../../stores/workspacePanelStore')
+    const sessionId = 'session-team'
+
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'Team Chat', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    useSessionStore.setState({
+      sessions: [{ id: sessionId, title: 'Team Chat', workDir: '/tmp/project', workDirExists: true }],
+    } as Partial<ReturnType<typeof useSessionStore.getState>>)
+    useChatStore.setState({
+      sessions: { [sessionId]: makeChatSession('idle') },
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+    useTeamStore.setState({
+      workbenchesBySession: { [sessionId]: teamWorkbenchTimeline(sessionId) },
+      workbenchOpenBySession: { [sessionId]: true },
+    } as Partial<ReturnType<typeof useTeamStore.getState>>)
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Workspace' }))
+
+    expect(useTeamStore.getState().workbenchOpenBySession[sessionId]).toBe(false)
+    expect(useWorkspacePanelStore.getState().isPanelOpen(sessionId)).toBe(true)
   })
 
   it('hides team-only activity when the active team belongs to another session', async () => {
@@ -602,7 +640,10 @@ describe('TabBar', () => {
 
     expect(screen.queryByRole('button', { name: /activity/i })).not.toBeInTheDocument()
     expect(screen.queryByTestId('session-activity-badge')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Show Workspace' })).not.toBeInTheDocument()
+    // The workspace entry survives a team arriving mid-session; only the
+    // workbench toggle is added.
+    expect(screen.getByRole('button', { name: 'Show Workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show Agent Teams Workbench' })).toBeInTheDocument()
   })
 
   it('does not show the activity button for settings tabs', async () => {

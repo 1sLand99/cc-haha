@@ -2092,7 +2092,7 @@ describe('chatStore history mapping', () => {
     })
   })
 
-  it('surfaces teammate prompt content when mapping member transcript history', () => {
+  it('attributes teammate prompts to their sender when mapping member transcript history', () => {
     const messages: MessageEntry[] = [
       {
         id: 'user-1',
@@ -2100,18 +2100,45 @@ describe('chatStore history mapping', () => {
         timestamp: '2026-04-06T00:00:00.000Z',
         content: '<teammate-message teammate_id="security-reviewer">Review the auth diff and call out risks.</teammate-message>',
       },
+      {
+        id: 'user-2',
+        type: 'user',
+        timestamp: '2026-04-06T00:01:00.000Z',
+        content: [
+          { type: 'text', text: '<teammate-message teammate_id="team-lead">Ship it once tests pass.</teammate-message>' },
+        ],
+      },
+      {
+        id: 'user-3',
+        type: 'user',
+        timestamp: '2026-04-06T00:02:00.000Z',
+        content: 'What did you find?',
+      },
     ]
 
     const mapped = mapHistoryMessagesToUiMessages(messages, {
       includeTeammateMessages: true,
     })
 
+    // Without the sender, a teammate's instruction and the operator's own
+    // prompt render as the same anonymous bubble.
     expect(mapped).toMatchObject([
       {
         type: 'user_text',
         content: 'Review the auth diff and call out risks.',
+        teammateFrom: 'security-reviewer',
+      },
+      {
+        type: 'user_text',
+        content: 'Ship it once tests pass.',
+        teammateFrom: 'team-lead',
+      },
+      {
+        type: 'user_text',
+        content: 'What did you find?',
       },
     ])
+    expect(mapped[2]).not.toHaveProperty('teammateFrom')
   })
 
   it('preserves source user ids when restoring array-content user prompts', () => {

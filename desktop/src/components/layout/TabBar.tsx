@@ -19,7 +19,7 @@ import { isPlaceholderSessionTitle } from '../../lib/sessionTitle'
 import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
 import { useTerminalPanelStore } from '../../stores/terminalPanelStore'
 import { useCLITaskStore } from '../../stores/cliTaskStore'
-import { useTeamStore } from '../../stores/teamStore'
+import { isAgentTeamsWorkbenchOpen as isAgentTeamsWorkbenchOpenFor, useTeamStore } from '../../stores/teamStore'
 import { StatusDot } from '@/components/ui/Badge'
 import { IconButton } from '@/components/ui/IconButton'
 import { useDismissable } from '@/hooks/useDismissable'
@@ -134,12 +134,10 @@ export function TabBar() {
   const hasAgentTeamsWorkbench = useTeamStore((state) => Boolean(
     activeTabId && state.workbenchesBySession[activeTabId]?.snapshots.length,
   ))
-  const isAgentTeamsWorkbenchOpen = useTeamStore((state) => Boolean(
-    activeTabId &&
-    state.workbenchesBySession[activeTabId]?.snapshots.length &&
-    (state.workbenchOpenBySession[activeTabId] ?? true),
-  ))
-  const isWorkspacePanelOpen = !hasAgentTeamsWorkbench && isWorkbenchOpen && workbenchMode === 'workspace'
+  const isAgentTeamsWorkbenchOpen = useTeamStore((state) =>
+    isAgentTeamsWorkbenchOpenFor(state, activeTabId),
+  )
+  const isWorkspacePanelOpen = !isAgentTeamsWorkbenchOpen && isWorkbenchOpen && workbenchMode === 'workspace'
   const isTerminalPanelOpen = useTerminalPanelStore((state) =>
     activeTabId && isActiveSessionTab ? state.isPanelOpen(activeTabId) : false,
   )
@@ -176,7 +174,10 @@ export function TabBar() {
       hasVisibleActivity: hasVisibleSessionActivity(model),
     }
   }))
-  const showActivityButton = activeTabId && activityState.hasVisibleActivity && !isWorkbenchOpen && !hasAgentTeamsWorkbench
+  const showActivityButton = activeTabId &&
+    activityState.hasVisibleActivity &&
+    !isWorkbenchOpen &&
+    !isAgentTeamsWorkbenchOpen
 
   const moveTab = useTabStore((s) => s.moveTab)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -601,7 +602,14 @@ export function TabBar() {
             label={t(isAgentTeamsWorkbenchOpen
               ? 'agentTeams.hideWorkbench'
               : 'agentTeams.showWorkbench')}
-            onClick={() => useTeamStore.getState().toggleWorkbench(activeTabId)}
+            onClick={() => {
+              // One right-hand slot, two tenants: claiming it for the team
+              // evicts the workspace panel rather than silently losing to it.
+              if (!isAgentTeamsWorkbenchOpen) {
+                useWorkspacePanelStore.getState().closePanel(activeTabId)
+              }
+              useTeamStore.getState().toggleWorkbench(activeTabId)
+            }}
             size="md"
             tone={isAgentTeamsWorkbenchOpen ? 'default' : 'muted'}
             pressed={isAgentTeamsWorkbenchOpen}
@@ -623,7 +631,7 @@ export function TabBar() {
           pressed={isTerminalPanelOpen}
           data-active={isTerminalPanelOpen ? 'true' : 'false'}
         />
-        {isActiveSessionTab && activeTabId && !hasAgentTeamsWorkbench && (
+        {isActiveSessionTab && activeTabId && (
           <IconButton
             icon={isWorkspacePanelOpen ? <FolderOpen size={18} strokeWidth={1.9} /> : <Folder size={18} strokeWidth={1.9} />}
             label={t(isWorkspacePanelOpen ? 'tabs.hideWorkspace' : 'tabs.showWorkspace')}
@@ -632,6 +640,7 @@ export function TabBar() {
               if (workbench.isPanelOpen(activeTabId) && workbench.getMode(activeTabId) === 'workspace') {
                 workbench.closePanel(activeTabId)
               } else {
+                useTeamStore.getState().setWorkbenchOpen(activeTabId, false)
                 workbench.setMode(activeTabId, 'workspace')
                 workbench.openPanel(activeTabId)
               }

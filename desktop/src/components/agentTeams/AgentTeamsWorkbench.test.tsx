@@ -132,22 +132,69 @@ describe('AgentTeamsWorkbench', () => {
     expect(screen.getByText('Snapshot v3 ready')).toBeTruthy()
   })
 
-  it('opens teammate details from the moving figure without replacing the workbench', async () => {
+  it('swaps the workbench body to a teammate run and back without leaving the panel', async () => {
     getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
     await act(async () => {
       await useTeamStore.getState().fetchWorkbench('visual-team')
     })
     render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
-    fireEvent.click(screen.getByTestId('agent-teams-member-reviewer@visual-team'))
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('agent-teams-member-reviewer@visual-team'))
+    })
 
-    expect(screen.getByRole('dialog', { name: 'reviewer details' })).toBeTruthy()
-    expect(screen.getByText('OWNED TASKS')).toBeTruthy()
-    expect(screen.getByText('Working on task 2')).toBeTruthy()
+    const memberView = screen.getByTestId('agent-teams-member-view')
+    expect(memberView.getAttribute('data-member-agent-id')).toBe('reviewer@visual-team')
+    expect(screen.getByTestId('agent-teams-member-current-task').textContent).toContain('Working on task 2')
+    // The map is replaced, not overlaid — the panel is too narrow to show both.
+    expect(screen.queryByTestId('agent-teams-office')).toBeNull()
+    // Selecting a teammate must not steal the tab; that is what the explicit
+    // "open in tab" action is for.
+    expect(useTabStore.getState().activeTabId).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back to team overview' }))
+    })
     expect(screen.getByTestId('agent-teams-office')).toBeTruthy()
+    expect(screen.queryByTestId('agent-teams-member-view')).toBeNull()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Talk directly to reviewer' }))
+  it('detaches the selected teammate into its own tab on request', async () => {
+    getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('agent-teams-member-reviewer@visual-team'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open in tab' }))
+    })
+
     expect(useTabStore.getState().activeTabId).toBe('team-member:reviewer@visual-team')
+  })
+
+  it('detaches the whole workbench into a full-screen tab and closes the panel', async () => {
+    getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    useTeamStore.getState().setWorkbenchOpen('lead-session', true)
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Open the workbench full screen/i }))
+    })
+
+    const tab = useTabStore.getState().tabs.find((current) => current.type === 'team')
+    expect(tab?.sessionId).toBe('__team__lead-session')
+    expect(tab?.teamLeadSessionId).toBe('lead-session')
+    expect(useTabStore.getState().activeTabId).toBe('__team__lead-session')
+    // The docked panel would otherwise keep a duplicate of the same workbench
+    // pinned beside the tab that replaced it.
+    expect(useTeamStore.getState().workbenchOpenBySession['lead-session']).toBe(false)
   })
 
   it('closes the workbench without discarding its archived timeline', async () => {
@@ -184,10 +231,14 @@ describe('AgentTeamsWorkbench', () => {
       expect(figure.getAttribute('style') ?? '').not.toContain('opacity: 0')
     }
 
-    fireEvent.click(screen.getByTestId('agent-teams-member-reviewer@visual-team'))
-    const executionButton = screen.getByRole('button', { name: 'View reviewer execution' })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('agent-teams-member-reviewer@visual-team'))
+    })
+    const executionButton = screen.getByRole('button', { name: 'Open in tab' })
     expect((executionButton as HTMLButtonElement).disabled).toBe(false)
-    fireEvent.click(executionButton)
+    await act(async () => {
+      fireEvent.click(executionButton)
+    })
     expect(useTabStore.getState().activeTabId).toBe('team-member:reviewer@visual-team')
   })
 })

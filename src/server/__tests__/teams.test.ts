@@ -388,6 +388,50 @@ describe('TeamService', () => {
     expect(continued.messages.map(message => message.id)).toEqual(['continued-fragment'])
   })
 
+  it('carries structured tool results through the member transcript', async () => {
+    await writeTeamConfig('tool-result-team', makeTeamConfig({
+      name: 'tool-result-team',
+      leadSessionId: 'lead-session-tool-result',
+      members: [{
+        agentId: 'security-reviewer@tool-result-team',
+        name: 'security-reviewer',
+        agentType: 'security-reviewer',
+        joinedAt: 1700000000000,
+        cwd: '/tmp/project',
+        isActive: false,
+      }],
+    }))
+    await writeSubagentTranscriptFile(
+      '-tmp-project',
+      'lead-session-tool-result',
+      'agent-tools.jsonl',
+      [{
+        type: 'tool_result',
+        agentName: 'security-reviewer',
+        uuid: 'tool-result-message',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'call-1', content: 'ok' }],
+        },
+        // The desktop transcript renders structured results from this field;
+        // dropping it degraded every member tool call to plain text.
+        toolUseResult: { questions: [{ question: 'Ship?' }], answers: { Ship: 'yes' } },
+        timestamp: '2026-01-01T00:00:01.000Z',
+      }],
+    )
+
+    const page = await service.getMemberTranscriptPage(
+      'tool-result-team',
+      'security-reviewer@tool-result-team',
+    )
+
+    expect(page.messages).toHaveLength(1)
+    expect(page.messages[0]!.toolUseResult).toEqual({
+      questions: [{ question: 'Ship?' }],
+      answers: { Ship: 'yes' },
+    })
+  })
+
   it('does not identify a teammate transcript from another member prompt mention', async () => {
     await writeTeamConfig('identity-team', makeTeamConfig({
       name: 'identity-team',

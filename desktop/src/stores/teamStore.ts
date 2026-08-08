@@ -16,12 +16,17 @@ import { useTabStore } from './tabStore'
 const MEMBER_POLL_INTERVAL_MS = 1500
 const MEMBER_TRANSCRIPT_MATCH_WINDOW_MS = 120_000
 const WORKBENCH_HISTORY_LIMIT = 200
-export const AGENT_TEAMS_WORKBENCH_DEFAULT_WIDTH = 700
-export const AGENT_TEAMS_WORKBENCH_MIN_WIDTH = 440
-export const AGENT_TEAMS_WORKBENCH_MAX_WIDTH = 940
+/**
+ * Sized against the workspace panel rather than the workbench's own content:
+ * both share the one right-hand slot, and a wider default was what squeezed the
+ * chat column past the point where its 900px reading measure survives.
+ */
+export const AGENT_TEAMS_WORKBENCH_DEFAULT_WIDTH = 480
+export const AGENT_TEAMS_WORKBENCH_MIN_WIDTH = 380
+export const AGENT_TEAMS_WORKBENCH_MAX_WIDTH = 720
 
 /** Generate a synthetic sessionId for team member tabs */
-const memberSessionId = (agentId: string) => `team-member:${agentId}`
+export const memberSessionId = (agentId: string) => `team-member:${agentId}`
 
 /** Module-level timer for polling member transcript */
 let memberPollTimer: ReturnType<typeof setInterval> | null = null
@@ -35,6 +40,20 @@ const memberTranscriptCursors = new Map<string, {
 }>()
 const memberRefreshGenerations = new Map<string, number>()
 const workbenchRefreshGenerations = new Map<string, number>()
+
+/**
+ * The workbench opens on an explicit user gesture, never on discovery. Auto
+ * expanding it took over the one right-hand slot, hid the workspace and
+ * activity entries, and compacted the transcript the moment a team appeared.
+ */
+export function isAgentTeamsWorkbenchOpen(
+  state: Pick<TeamStore, 'workbenchesBySession' | 'workbenchOpenBySession'>,
+  sessionId: string | null | undefined,
+): boolean {
+  if (!sessionId) return false
+  if (!state.workbenchesBySession[sessionId]?.snapshots.length) return false
+  return state.workbenchOpenBySession[sessionId] === true
+}
 
 export function clampAgentTeamsWorkbenchWidth(width: number): number {
   if (!Number.isFinite(width)) return AGENT_TEAMS_WORKBENCH_DEFAULT_WIDTH
@@ -125,6 +144,21 @@ function appendWorkbenchSnapshot(
   }
 }
 
+/**
+ * A member transcript stays worth polling while any surface is showing it: the
+ * detached member tab, or a workbench body switched to that member.
+ */
+function isMemberSessionWatched(
+  state: Pick<TeamStore, 'workbenchViewBySession'>,
+  memberTabId: string,
+  agentId: string,
+): boolean {
+  if (useTabStore.getState().activeTabId === memberTabId) return true
+  return Object.values(state.workbenchViewBySession).some(
+    (view) => view?.kind === 'member' && view.agentId === agentId,
+  )
+}
+
 function isPendingMemberMessage(message: UIMessage): message is Extract<UIMessage, { type: 'user_text' }> & { pending: true } {
   return message.type === 'user_text' && message.pending === true
 }
@@ -197,6 +231,11 @@ function syncMemberSessionMessages(
   })
 }
 
+/** Which face of the workbench is showing: the team map, or one member's run. */
+export type WorkbenchView =
+  | { kind: 'overview' }
+  | { kind: 'member'; agentId: string }
+
 type TeamStore = {
   teams: TeamSummary[]
   activeTeam: TeamDetail | null
@@ -205,6 +244,7 @@ type TeamStore = {
   workbenchesBySession: Record<string, TeamWorkbenchTimeline | undefined>
   workbenchHistoryIndexBySession: Record<string, number | null | undefined>
   workbenchOpenBySession: Record<string, boolean | undefined>
+  workbenchViewBySession: Record<string, WorkbenchView | undefined>
   workbenchPanelWidth: number
 
   fetchTeams: () => Promise<void>
@@ -214,6 +254,8 @@ type TeamStore = {
   setWorkbenchHistoryIndex: (sessionId: string, index: number | null) => void
   setWorkbenchOpen: (sessionId: string, open: boolean) => void
   toggleWorkbench: (sessionId: string) => void
+  setWorkbenchView: (sessionId: string, view: WorkbenchView) => void
+  openMemberInWorkbench: (sessionId: string, member: TeamMember, team?: TeamDetail) => void
   setWorkbenchPanelWidth: (width: number) => void
   getMemberBySessionId: (sessionId: string) => TeamMember | null
   refreshMemberSession: (sessionId: string) => Promise<void>
@@ -238,6 +280,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
   workbenchesBySession: {},
   workbenchHistoryIndexBySession: {},
   workbenchOpenBySession: {},
+  workbenchViewBySession: {},
   workbenchPanelWidth: AGENT_TEAMS_WORKBENCH_DEFAULT_WIDTH,
 
   fetchTeams: async () => {
@@ -283,10 +326,6 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
             error: null,
           },
         },
-        workbenchOpenBySession: {
-          ...state.workbenchOpenBySession,
-          [sessionId]: state.workbenchOpenBySession[sessionId] ?? true,
-        },
       }))
     } catch {
       // Workbench discovery supplements the session; an ordinary conversation
@@ -329,10 +368,6 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
             state.workbenchesBySession[sessionId],
             snapshot,
           ),
-        },
-        workbenchOpenBySession: {
-          ...state.workbenchOpenBySession,
-          [sessionId]: state.workbenchOpenBySession[sessionId] ?? true,
         },
       }))
     } catch (err) {
@@ -377,9 +412,40 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
   toggleWorkbench: (sessionId) => set((state) => ({
     workbenchOpenBySession: {
       ...state.workbenchOpenBySession,
-      [sessionId]: !(state.workbenchOpenBySession[sessionId] ?? true),
+      [sessionId]: state.workbenchOpenBySession[sessionId] !== true,
     },
   })),
+
+  setWorkbenchView: (sessionId, view) => set((state) => ({
+    workbenchViewBySession: {
+      ...state.workbenchViewBySession,
+      [sessionId]: view,
+    },
+  })),
+
+  /**
+   * Selecting a teammate swaps the workbench's own body instead of opening a
+   * tab, so the team map stays one click away. The member transcript still
+   * loads through the same poll path a detached member tab uses.
+   */
+  openMemberInWorkbench: (sessionId, member, requestedTeam) => {
+    const team = requestedTeam ?? get().activeTeam
+    if (team && get().activeTeam?.name !== team.name) {
+      set({ activeTeam: team, memberColors: memberColorsForTeam(team) })
+    }
+    set((state) => ({
+      workbenchViewBySession: {
+        ...state.workbenchViewBySession,
+        [sessionId]: { kind: 'member', agentId: member.agentId },
+      },
+    }))
+
+    const memberTabId = memberSessionId(member.agentId)
+    void get().refreshMemberSession(memberTabId)
+    if (member.status === 'running' || member.status === 'idle') {
+      get().startMemberPolling(memberTabId)
+    }
+  },
 
   setWorkbenchPanelWidth: (width) => set({
     workbenchPanelWidth: clampAgentTeamsWorkbenchWidth(width),
@@ -426,6 +492,9 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
         timestamp: msg.timestamp,
         model: msg.model,
         parentToolUseId: msg.parentToolUseId,
+        // Structured tool output drives the richer result renderers; omitting
+        // it here flattened every member tool call back to plain text.
+        toolUseResult: msg.toolUseResult,
       }))
       const transcriptMessages = mapHistoryMessagesToUiMessages(
         asEntries as Parameters<typeof mapHistoryMessagesToUiMessages>[0],
@@ -498,8 +567,10 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
     get().stopMemberPolling()
     polledMemberSessionId = sessionId
     memberPollTimer = setInterval(() => {
-      const currentTabId = useTabStore.getState().activeTabId
-      if (currentTabId !== sessionId) {
+      // A member transcript is watched either through its own tab or through a
+      // workbench body showing that member; polling only on the former stopped
+      // the embedded view dead on its first tick.
+      if (!isMemberSessionWatched(get(), sessionId, member.agentId)) {
         get().stopMemberPolling()
         return
       }
@@ -526,6 +597,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
       workbenchesBySession: {},
       workbenchHistoryIndexBySession: {},
       workbenchOpenBySession: {},
+      workbenchViewBySession: {},
     })
   },
 

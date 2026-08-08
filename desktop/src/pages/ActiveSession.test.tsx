@@ -1210,7 +1210,7 @@ describe('ActiveSession task polling', () => {
     expect(useTabStore.getState().activeTabId).toBe('__subagent__activity-subagent-open-session__agent-tool-1')
   })
 
-  it('renders Agent Teams in its dedicated workbench instead of the activity panel', () => {
+  it('keeps the team workbench closed behind the header strip until it is opened', () => {
     const sessionId = 'team-activity-panel-session'
 
     useActivityPanelStore.getState().open(sessionId)
@@ -1310,16 +1310,28 @@ describe('ActiveSession task polling', () => {
 
     render(<ActiveSession />)
 
+    // Discovering a team must not seize the right-hand slot or compact the
+    // transcript; the header strip is the whole of its main-session footprint.
+    const strip = screen.getByTestId('agent-teams-strip')
+    expect(strip).toHaveAttribute('data-open', 'false')
+    expect(screen.queryByTestId('agent-teams-workbench-panel')).not.toBeInTheDocument()
+    expect(screen.getByTestId('message-list')).toHaveAttribute('data-compact', 'false')
+
+    act(() => {
+      fireEvent.click(strip)
+    })
+
     expect(screen.queryByTestId('session-activity-panel')).not.toBeInTheDocument()
     expect(screen.getByTestId('agent-teams-workbench-panel')).toHaveClass('bg-[var(--color-surface)]')
     expect(screen.getByTestId('agent-teams-resize-handle')).not.toHaveClass('border-x')
     expect(screen.getByTestId('agent-teams-resize-handle').firstElementChild).toHaveClass('opacity-0')
     expect(screen.getByTestId('agent-teams-workbench')).toHaveTextContent(`agent-teams:${sessionId}`)
     expect(screen.getByTestId('message-list')).toHaveAttribute('data-compact', 'true')
+    expect(screen.getByTestId('agent-teams-strip')).toHaveAttribute('data-open', 'true')
     expect(useActivityPanelStore.getState().isOpen(sessionId)).toBe(false)
 
     act(() => {
-      useTeamStore.getState().setWorkbenchOpen(sessionId, false)
+      fireEvent.click(screen.getByTestId('agent-teams-strip'))
     })
 
     expect(screen.queryByTestId('agent-teams-workbench-panel')).not.toBeInTheDocument()

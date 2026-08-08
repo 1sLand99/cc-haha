@@ -4,6 +4,7 @@ import { GitFork, Target } from 'lucide-react'
 import {
   SCHEDULED_TAB_ID,
   SETTINGS_TAB_ID,
+  TEAM_TAB_PREFIX,
   TERMINAL_TAB_PREFIX,
   TRACE_TAB_PREFIX,
   WORKBENCH_TAB_PREFIX,
@@ -16,6 +17,7 @@ import { useCLITaskStore } from '../stores/cliTaskStore'
 import {
   AGENT_TEAMS_WORKBENCH_MAX_WIDTH,
   AGENT_TEAMS_WORKBENCH_MIN_WIDTH,
+  isAgentTeamsWorkbenchOpen,
   useTeamStore,
 } from '../stores/teamStore'
 import { useWorkspacePanelStore } from '../stores/workspacePanelStore'
@@ -36,6 +38,7 @@ import { getWorktreeDisplayName, WorktreeDetails } from '../components/chat/Work
 import { ComputerUsePermissionModal } from '../components/chat/ComputerUsePermissionModal'
 import { WorkbenchPanel } from '../components/workbench/WorkbenchPanel'
 import { AgentTeamsWorkbench } from '../components/agentTeams/AgentTeamsWorkbench'
+import { AgentTeamsStrip } from '../components/agentTeams/AgentTeamsSummary'
 import { SessionActivityPanel } from '../components/activity/SessionActivityPanel'
 import { buildSessionActivityModel, hasVisibleSessionActivity } from '../components/activity/sessionActivityModel'
 import { TerminalSettings } from './TerminalSettings'
@@ -69,7 +72,7 @@ const ACTIVITY_AUTOCLOSE_GRACE_MS = 2000
 const WORKSPACE_RESIZE_STEP = 32
 const TERMINAL_RESIZE_STEP = 24
 const CHAT_COLUMN_WITH_WORKSPACE_CLASS =
-  'min-w-[320px] flex-1 bg-[var(--color-surface)]'
+  'min-w-[400px] flex-1 bg-[var(--color-surface)]'
 const EMPTY_DISMISSED_BACKGROUND_TASK_KEYS: readonly string[] = []
 
 function isSessionTabState(activeTabId: string | null, activeTabType: TabType | null | undefined) {
@@ -80,7 +83,8 @@ function isSessionTabState(activeTabId: string | null, activeTabType: TabType | 
     activeTabId !== SCHEDULED_TAB_ID &&
     !activeTabId.startsWith(TERMINAL_TAB_PREFIX) &&
     !activeTabId.startsWith(TRACE_TAB_PREFIX) &&
-    !activeTabId.startsWith(WORKBENCH_TAB_PREFIX)
+    !activeTabId.startsWith(WORKBENCH_TAB_PREFIX) &&
+    !activeTabId.startsWith(TEAM_TAB_PREFIX)
 }
 
 function getTokenUsageTotal(usage: TokenUsage): number {
@@ -406,10 +410,10 @@ export function ActiveSession() {
   const session = sessions.find((s) => s.id === activeTabId)
   const memberInfo = useTeamStore((s) => activeTabId ? s.getMemberBySessionId(activeTabId) : null)
   const activeTeam = useTeamStore((s) => s.activeTeam)
-  const agentTeamsTimeline = useTeamStore((s) => activeTabId ? s.workbenchesBySession[activeTabId] : undefined)
-  const agentTeamsWorkbenchOpen = useTeamStore((s) => activeTabId
-    ? s.workbenchOpenBySession[activeTabId] ?? true
-    : false)
+  const agentTeamsSnapshot = useTeamStore((s) => activeTabId
+    ? s.workbenchesBySession[activeTabId]?.snapshots.at(-1)
+    : undefined)
+  const agentTeamsWorkbenchOpen = useTeamStore((s) => isAgentTeamsWorkbenchOpen(s, activeTabId))
   const agentTeamsPanelWidth = useTeamStore((s) => s.workbenchPanelWidth)
   const fetchTeamForSession = useTeamStore((s) => s.fetchTeamForSession)
   const isMemberSession = !!memberInfo
@@ -424,13 +428,15 @@ export function ActiveSession() {
       : false,
   )
   const showAgentTeamsWorkbench = Boolean(
-    agentTeamsTimeline?.snapshots.length &&
     agentTeamsWorkbenchOpen &&
     activeTabId &&
     isSessionTabState(activeTabId, activeTabType) &&
     !isMemberSession &&
     !isMobileLayout,
   )
+  // Both panels share the one right-hand slot, so the last one opened wins.
+  // Their toolbar entries stay independent — opening a team no longer removes
+  // the workspace and activity affordances from the tab bar.
   const showWorkbench = workspaceWorkbenchOpen && !showAgentTeamsWorkbench
   const showRightPanel = showWorkbench || showAgentTeamsWorkbench
   const workspacePanelWidth = useWorkspacePanelStore((state) => state.width)
@@ -764,13 +770,16 @@ export function ActiveSession() {
               {!isMemberSession && !isMobileLayout && (
                 <div
                   data-testid="session-header"
-                  className={
-                    showRightPanel
-                      ? 'flex w-full items-center border-b border-[var(--color-border)] px-4 py-2.5'
-                      : 'w-full border-b border-[var(--color-border)] px-9 py-3'
-                  }
+                  className={[
+                    'w-full border-b border-[var(--color-border)]',
+                    showRightPanel ? 'px-4 py-2.5' : 'px-9 py-3',
+                  ].join(' ')}
                 >
-                  <div className={showRightPanel ? 'min-w-0 flex-1' : 'mx-auto w-full max-w-[900px] min-w-0'}>
+                  {/* Stays centred on the same 900px measure as the transcript
+                      regardless of the right-hand panel — only the padding
+                      tightens, so the header never drifts out of alignment
+                      with the messages beneath it. */}
+                  <div className="mx-auto w-full min-w-0 max-w-[900px]">
                     <div className="flex min-w-0 items-center gap-3">
                       <h1
                         className={`min-w-0 flex-1 truncate font-bold leading-tight tracking-[-0.2px] text-[var(--color-text-primary)] ${
@@ -857,6 +866,21 @@ export function ActiveSession() {
                       isRunning={isActive}
                       compact={showRightPanel}
                     />
+                    {agentTeamsSnapshot ? (
+                      <AgentTeamsStrip
+                        snapshot={agentTeamsSnapshot}
+                        open={showAgentTeamsWorkbench}
+                        compact={showRightPanel}
+                        onOpen={() => {
+                          if (showAgentTeamsWorkbench) {
+                            useTeamStore.getState().setWorkbenchOpen(activeTabId, false)
+                            return
+                          }
+                          useWorkspacePanelStore.getState().closePanel(activeTabId)
+                          useTeamStore.getState().setWorkbenchOpen(activeTabId, true)
+                        }}
+                      />
+                    ) : null}
                   </div>
                 </div>
               )}
@@ -955,8 +979,8 @@ export function ActiveSession() {
               className="flex h-full shrink-0 flex-col bg-[var(--color-surface)]"
               style={{
                 width: rightPanelWidth,
-                maxWidth: 'min(940px, 72%)',
-                minWidth: 'min(440px, 54%)',
+                maxWidth: '62%',
+                minWidth: 'min(380px, 46%)',
               }}
             >
               <AgentTeamsWorkbench sessionId={activeTabId} />

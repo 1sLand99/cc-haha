@@ -15,6 +15,7 @@ type TranscriptMessage = {
   timestamp: string
   model?: string
   parentToolUseId?: string
+  toolUseResult?: unknown
 }
 
 type TranscriptResponse = {

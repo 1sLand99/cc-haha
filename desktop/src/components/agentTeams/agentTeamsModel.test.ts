@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { TeamMember, TeamWorkbenchSnapshot, TeamWorkbenchTask } from '../../types/team'
 import {
+  formatWorkbenchMessageTime,
   getWorkbenchPhase,
   getWorkbenchProgress,
   getWorkbenchTaskState,
   getMemberAvatarKey,
   layoutWorkbenchTasks,
+  parseWorkbenchMessageBody,
   runningTaskForMember,
   taskOwnedByMember,
   WORKBENCH_TASK_WIDTH,
@@ -135,5 +137,42 @@ describe('Agent Teams workbench model', () => {
       ...finished,
       deletedAt: '2026-08-08T00:01:00.000Z',
     })).toBe('completed')
+  })
+
+  it('narrates protocol payloads instead of leaking their raw JSON into the feed', () => {
+    // This exact shape was rendering verbatim in the communication feed.
+    const idle = parseWorkbenchMessageBody({
+      text: '{"type":"idle_notification","from":"release-engineer","timestamp":"2026-08-08T07:42:16.666Z","idleReason":"available"}',
+    })
+    expect(idle).toEqual({ kind: 'lifecycle', type: 'idle_notification', detail: 'available' })
+
+    // protocolType wins over the body, and is enough on its own.
+    expect(parseWorkbenchMessageBody({ text: 'shutting down', protocolType: 'shutdown_request' }))
+      .toEqual({ kind: 'lifecycle', type: 'shutdown_request', detail: undefined })
+
+    // Authored prose is never reclassified.
+    expect(parseWorkbenchMessageBody({ text: 'Race condition confirmed in queue.ts' }))
+      .toEqual({ kind: 'text', text: 'Race condition confirmed in queue.ts' })
+  })
+
+  it('surfaces readable fields from unrecognised JSON rather than printing braces', () => {
+    expect(parseWorkbenchMessageBody({ text: '{"type":"custom_event","message":"handoff ready"}' }))
+      .toEqual({ kind: 'text', text: 'handoff ready' })
+
+    // Nothing prose-like inside: keep the payload rather than silently dropping it.
+    const opaque = '{"type":"custom_event","count":3}'
+    expect(parseWorkbenchMessageBody({ text: opaque })).toEqual({ kind: 'text', text: opaque })
+
+    // Malformed JSON must not throw or be mistaken for a protocol signal.
+    expect(parseWorkbenchMessageBody({ text: '{not json' })).toEqual({ kind: 'text', text: '{not json' })
+  })
+
+  it('stamps messages with their own send time, not a shared snapshot index', () => {
+    const first = formatWorkbenchMessageTime('2026-08-08T07:42:16.666Z')
+    const second = formatWorkbenchMessageTime('2026-08-08T09:15:00.000Z')
+    expect(first).toBeTruthy()
+    // Two messages inside one snapshot used to render an identical `T+0`.
+    expect(first).not.toBe(second)
+    expect(formatWorkbenchMessageTime('not-a-date')).toBe('')
   })
 })

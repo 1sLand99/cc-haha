@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mergeMemberTranscriptDelta, useTeamStore } from './teamStore'
+import { isAgentTeamsWorkbenchOpen, mergeMemberTranscriptDelta, useTeamStore } from './teamStore'
 import { useChatStore } from './chatStore'
 import { useTabStore } from './tabStore'
 import type { UIMessage } from '../types/chat'
@@ -355,7 +355,7 @@ describe('teamStore workbench timeline', () => {
     expect(snapshots[1]?.deletedAt).toBeTruthy()
   })
 
-  it('restores an archived workbench by lead session and opens it by default', async () => {
+  it('restores an archived workbench by lead session without forcing it open', async () => {
     const archived = {
       ...workbench('v9', 'completed'),
       deletedAt: '2026-08-08T00:10:00.000Z',
@@ -376,7 +376,20 @@ describe('teamStore workbench timeline', () => {
       snapshots: [expect.objectContaining({ version: 'v9', deletedAt: archived.deletedAt })],
     })
     expect(state.activeTeam?.name).toBe('team-workbench')
-    expect(state.workbenchOpenBySession['lead-session']).toBe(true)
+    // Discovery must not open the panel — that is the header strip's job, and
+    // auto-opening evicted the workspace panel and compacted the transcript.
+    expect(isAgentTeamsWorkbenchOpen(state, 'lead-session')).toBe(false)
+
+    state.setWorkbenchOpen('lead-session', true)
+    expect(isAgentTeamsWorkbenchOpen(useTeamStore.getState(), 'lead-session')).toBe(true)
+  })
+
+  it('never reports the workbench open for a session that has no timeline', () => {
+    const state = useTeamStore.getState()
+    state.setWorkbenchOpen('session-without-team', true)
+
+    expect(isAgentTeamsWorkbenchOpen(useTeamStore.getState(), 'session-without-team')).toBe(false)
+    expect(isAgentTeamsWorkbenchOpen(useTeamStore.getState(), null)).toBe(false)
   })
 
   it('keeps a restored workbench available after closing and reopening it', async () => {
