@@ -56,6 +56,16 @@ describe('useTranslation', () => {
     }
   })
 
+  it('localizes the counted activity summary in every registered locale', () => {
+    for (const locale of ['en', 'zh', 'zh-TW', 'jp', 'kr'] as const) {
+      const label = translate(locale, 'toolGroup.thoughtMany', { count: 5 })
+      expect(label).not.toBe('toolGroup.thoughtMany')
+      // The count is what the folded run is showing; a locale that drops the
+      // placeholder would silently reduce it back to a bare "Thinking".
+      expect(label).toContain('5')
+    }
+  })
+
   it('localizes built-in agent overrides and row actions in every registered locale', () => {
     for (const locale of ['en', 'zh', 'zh-TW', 'jp', 'kr'] as const) {
       for (const key of [

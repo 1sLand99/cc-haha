@@ -754,6 +754,14 @@ export function buildRenderModel(messages: UIMessage[], activeAskUserQuestionToo
       }
     } else if (msg.type === 'thinking') {
       appendThinking(msg)
+    } else if (msg.type === 'background_task' && msg.task.status === 'completed') {
+      // The activity panel already lists every background task — agent-like ones
+      // under SubAgents, the rest under Background Tasks — with live status and a
+      // way into the full run. A card here repeating a finished one just buries
+      // the conversation under status reports, and a long team session emits
+      // dozens. Anything that did NOT finish cleanly still gets a card: a failure
+      // or a stop changes what the turn means, and the panel can be closed.
+      continue
     } else {
       flushGroup()
       items.push({ kind: 'message', message: msg })
@@ -927,6 +935,72 @@ function buildChangedFilesByRenderIndex(
   return filesByRenderIndex
 }
 
+/**
+ * Where a render item sits inside its turn, which is what decides its spacing.
+ *
+ * `none` is the user bubble: it opens an exchange, so it carries the large gap
+ * that separates one turn from the last. Everything else is a response and takes
+ * the tight within-turn gap. The names still read positionally because the
+ * boundaries are what the spacing is derived from — see `.chat-turn-rail*`,
+ * which owns the actual values and deliberately draws nothing.
+ */
+export type TurnRailPosition = 'none' | 'start' | 'middle' | 'end' | 'solo'
+
+/**
+ * Rail position for every render item, indexed alongside `renderItems`.
+ *
+ * Deliberately breaks on EVERY `user_text`, unlike the three turn walks above
+ * (`buildTurnCardInsertionMap`, `buildChangedFilesByRenderIndex`,
+ * `getBranchableMessageTargets`) which skip `pending` ones. Those answer "which
+ * turn owns this checkpoint", and a member session's pending echo must not steal
+ * ownership. This answers "where does the line stop", and a pending message still
+ * renders as a visible right-aligned bubble (see the `user_text` case in
+ * `MessageBlock`) — a bubble mid-column is a break whatever it means for
+ * attribution. Do not "fix" this to match the others.
+ */
+export function buildTurnRailPositions(
+  renderItems: RenderItem[],
+  options: { hasTrailingStreamingItem?: boolean } = {},
+): TurnRailPosition[] {
+  const positions: TurnRailPosition[] = new Array<TurnRailPosition>(renderItems.length).fill('none')
+  let runStart = -1
+
+  /** Label the open run [runStart, endExclusive). `continues` = the streaming
+   *  block will pick the line up below, so the run must not cap itself. */
+  const closeRun = (endExclusive: number, continues: boolean) => {
+    if (runStart < 0) return
+    const last = endExclusive - 1
+    for (let index = runStart; index <= last; index += 1) {
+      positions[index] = index === runStart ? 'start' : 'middle'
+    }
+    if (!continues) positions[last] = runStart === last ? 'solo' : 'end'
+    runStart = -1
+  }
+
+  renderItems.forEach((item, index) => {
+    if (item.kind === 'message' && item.message.type === 'user_text') {
+      closeRun(index, false)
+      positions[index] = 'none'
+      return
+    }
+    if (runStart < 0) runStart = index
+  })
+
+  closeRun(renderItems.length, Boolean(options.hasTrailingStreamingItem))
+
+  return positions
+}
+
+/**
+ * Rail position for the live streaming reply, which renders outside the virtual
+ * list. It caps whatever run the transcript left open, or stands alone when the
+ * user has just sent and nothing else has landed yet.
+ */
+export function trailingStreamingRailPosition(positions: TurnRailPosition[]): TurnRailPosition {
+  const last = positions[positions.length - 1]
+  return last === 'start' || last === 'middle' ? 'end' : 'solo'
+}
+
 function getApiErrorMessage(error: unknown) {
   return error instanceof ApiError
     ? typeof error.body === 'object' && error.body && 'message' in error.body
@@ -1044,7 +1118,11 @@ const TOUCH_H5_VIRTUALIZE_MIN_RENDER_ITEMS = 60
 const TOUCH_H5_VIRTUALIZE_MIN_CONTENT_CHARS = 60_000
 const VIRTUAL_OVERSCAN_PX = 1200
 const VIRTUAL_DEFAULT_VIEWPORT_HEIGHT = 720
-const VIRTUAL_MIN_ITEM_HEIGHT = 48
+/** Floor for both estimated AND measured item heights, so it has to sit under
+ *  the shortest real item — a collapsed activity line at ~34px. Set above that
+ *  and every such row is recorded too tall forever: the clamp is applied to the
+ *  ResizeObserver's reading too, so no amount of measuring corrects it. */
+const VIRTUAL_MIN_ITEM_HEIGHT = 24
 const VIRTUAL_MAX_ITEM_HEIGHT = 24_000
 // Chromium on Windows can report up to 2px oscillations for live chat content;
 // don't convert those into bottom-scroll corrections.
@@ -1085,6 +1163,17 @@ const CHAT_SCROLL_AREA_CLASS = [
 const CHAT_RENDER_ITEM_CLASS = [
   'chat-render-item',
 ].join(' ')
+
+/**
+ * Carries the turn rail. Kept separate from `chat-render-item` on purpose: the
+ * streaming reply and the turn status line also sit on the rail but are not
+ * transcript items, and `.chat-render-item` is counted exactly in tests.
+ */
+const CHAT_TURN_RAIL_CLASS = 'chat-turn-rail'
+
+function turnRailClass(position: TurnRailPosition): string {
+  return `${CHAT_TURN_RAIL_CLASS} chat-turn-rail--${position}`
+}
 
 export function isRenderItemFullyVisibleInChatScroller(renderItem: HTMLElement) {
   const scroller = renderItem.closest<HTMLElement>('.chat-scroll-area')
@@ -1391,14 +1480,21 @@ function estimateTextHeight(content: string, baseHeight: number) {
   return clampNumber(estimated, VIRTUAL_MIN_ITEM_HEIGHT, VIRTUAL_MAX_ITEM_HEIGHT)
 }
 
+/* Base heights are the non-text chrome of one item, measured as a border box so
+ * they match what the ResizeObserver reports. Post-rail that is:
+ *   prompt   24 rail padding-top (the turn gap) + 8 padding-bottom
+ *            + 26 bubble padding + 36 action bar = 94
+ *   reply    8 rail padding-bottom + 36 action bar = 44 (the card is gone)
+ * The action bar is 36 (mt-2 + h-7) and always reserves its space — it must not
+ * collapse on hover, or the transcript shifts under the reader's cursor. */
 function estimateMessageHeight(message: UIMessage): number {
   switch (message.type) {
     case 'user_text':
-      return estimateTextHeight(message.content, message.attachments?.length ? 140 : 74)
+      return estimateTextHeight(message.content, message.attachments?.length ? 160 : 94)
     case 'assistant_text':
-      return estimateTextHeight(message.content, 96)
+      return estimateTextHeight(message.content, 44)
     case 'thinking':
-      return estimateTextHeight(message.content, 88)
+      return estimateTextHeight(message.content, 40)
     case 'tool_use':
       return clampNumber(92 + Math.ceil(getMessageContentWeight(message) / 120) * 18, 72, 2200)
     case 'tool_result':
@@ -1417,10 +1513,15 @@ function estimateMessageHeight(message: UIMessage): number {
   }
 }
 
-/** A collapsed activity group is one header line, however many steps it holds. */
-const ACTIVITY_GROUP_COLLAPSED_HEIGHT = 52
+/** A collapsed activity group is one header line, however many steps it holds:
+ *  py-1 (8) + a 12.5px line (~18) + the rail's padding-bottom (8).
+ *
+ *  A group only renders its rows while it is still running, and a running group
+ *  sits at the scroll anchor where items are mounted and measured — so estimates
+ *  are only ever consulted for the settled, collapsed form, which is this line. */
+const ACTIVITY_GROUP_COLLAPSED_HEIGHT = 34
 
-function estimateRenderItemHeight(item: RenderItem): number {
+export function estimateRenderItemHeight(item: RenderItem): number {
   if (item.kind === 'message') return estimateMessageHeight(item.message)
   // Agent dispatch groups keep their taller per-agent cards; everything else
   // collapses to the single-line activity header.
@@ -1632,11 +1733,13 @@ const MeasuredRenderItem = memo(function MeasuredRenderItem({
   itemKey,
   onHeightChange,
   highlighted,
+  railPosition,
   children,
 }: {
   itemKey: string
   onHeightChange: (itemKey: string, height: number) => void
   highlighted: boolean
+  railPosition: TurnRailPosition
   children: ReactNode
 }) {
   const itemRef = useRef<HTMLDivElement>(null)
@@ -1648,8 +1751,15 @@ const MeasuredRenderItem = memo(function MeasuredRenderItem({
     if (typeof ResizeObserver === 'undefined') return undefined
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0]
-      if (entry && Number.isFinite(entry.contentRect.height) && entry.contentRect.height > 0) {
-        onHeightChange(itemKey, Math.ceil(entry.contentRect.height))
+      if (!entry) return
+      // Border box, not `contentRect`: the rail's padding is the gap between
+      // turns, so a content-box read would under-measure every item by that gap
+      // and the virtualizer's offsets would drift low over a long transcript.
+      // `borderBoxSize` predates every browser we ship on; the fallback is for
+      // environments that stub ResizeObserver with `contentRect` alone.
+      const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height
+      if (Number.isFinite(height) && height > 0) {
+        onHeightChange(itemKey, Math.ceil(height))
       }
     })
     observer.observe(node)
@@ -1661,7 +1771,8 @@ const MeasuredRenderItem = memo(function MeasuredRenderItem({
       ref={itemRef}
       data-virtual-message-item={itemKey}
       data-chat-render-item-key={itemKey}
-      className={`${CHAT_RENDER_ITEM_CLASS} ${highlighted ? 'chat-render-item--navigation-target' : ''}`}
+      data-turn-rail={railPosition}
+      className={`${CHAT_RENDER_ITEM_CLASS} ${turnRailClass(railPosition)} ${highlighted ? 'chat-render-item--navigation-target' : ''}`}
     >
       {children}
     </div>
@@ -2234,6 +2345,20 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     () => buildChangedFilesByRenderIndex(renderItems, turnChangeCards),
     [renderItems, turnChangeCards],
   )
+  const hasTrailingStreamingItem = streamingText.trim().length > 0
+  const turnRailPositions = useMemo(
+    () => buildTurnRailPositions(renderItems, { hasTrailingStreamingItem }),
+    [renderItems, hasTrailingStreamingItem],
+  )
+  const streamingRailPosition = trailingStreamingRailPosition(turnRailPositions)
+  // The rail is the progress indicator: whichever segment the turn is currently
+  // working in carries the running state, so it sits next to the work it
+  // describes instead of in a separate strip somewhere else on screen.
+  const showsTurnStatusLine = hasApiRetry
+    || hasStreamingFallback
+    || isPreparingTurn
+    || chatState === 'tool_executing'
+    || (chatState === 'thinking' && !activeThinkingId)
   const renderItemKeys = useMemo(
     () => renderItems.map(getRenderItemKey),
     [renderItems],
@@ -2838,6 +2963,11 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
               chatState === 'tool_executing' &&
               item.toolCalls.some((tc) => !toolResultMap.has(tc.toolUseId))
             }
+            // Only the tail of a live turn can still grow. Everything above it
+            // is finished, whatever any individual tool's state looks like this
+            // instant — which is why this, and not `isStreaming`, decides
+            // whether a run stands open.
+            isLive={chatState !== 'idle' && index === renderItems.length - 1 && !hasTrailingStreamingItem}
           />
         ) : (
           <MessageBlock
@@ -2897,6 +3027,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
           {virtualTranscriptWindow.items.map(({ item, index }) => {
             const itemKey = getRenderItemKey(item)
             const content = renderTranscriptItem(item, index)
+            const railPosition = turnRailPositions[index] ?? 'none'
 
             return virtualTranscriptWindow.enabled ? (
               <MeasuredRenderItem
@@ -2904,6 +3035,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
                 itemKey={itemKey}
                 onHeightChange={handleVirtualItemHeightChange}
                 highlighted={highlightedNavigationItemKey === itemKey}
+                railPosition={railPosition}
               >
                 {content}
               </MeasuredRenderItem>
@@ -2911,7 +3043,8 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
               <div
                 key={itemKey}
                 data-chat-render-item-key={itemKey}
-                className={`${CHAT_RENDER_ITEM_CLASS} chat-render-item--cv ${highlightedNavigationItemKey === itemKey ? 'chat-render-item--navigation-target' : ''}`}
+                data-turn-rail={railPosition}
+                className={`${CHAT_RENDER_ITEM_CLASS} chat-render-item--cv ${turnRailClass(railPosition)} ${highlightedNavigationItemKey === itemKey ? 'chat-render-item--navigation-target' : ''}`}
               >
                 {content}
               </div>
@@ -2923,7 +3056,11 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
           ) : null}
 
           {streamingText.trim() && (
-            <div data-chat-render-item-key={STREAMING_ASSISTANT_NAVIGATION_KEY}>
+            <div
+              data-chat-render-item-key={STREAMING_ASSISTANT_NAVIGATION_KEY}
+              data-turn-rail={streamingRailPosition}
+              className={turnRailClass(streamingRailPosition)}
+            >
               <AssistantMessage content={streamingText} isStreaming={chatState === 'streaming'} />
             </div>
           )}
@@ -2938,12 +3075,13 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
                 sending a message and receiving the first thinking delta
               The live status stays in the transcript, next to the output it is
               describing — it is part of the conversation, not composer chrome. */}
-          {(hasApiRetry ||
-            hasStreamingFallback ||
-            isPreparingTurn ||
-            chatState === 'tool_executing' ||
-            (chatState === 'thinking' && !activeThinkingId)) && (
-            <StreamingIndicator />
+          {showsTurnStatusLine && (
+            // On the rail, so the lit line runs all the way down to the status
+            // it explains — except while preparing a turn, when no transcript
+            // item exists yet and the status has to stand on its own.
+            <div className={renderItems.length === 0 ? undefined : turnRailClass('end')}>
+              <StreamingIndicator />
+            </div>
           )}
 
           {!isLoadingTurnChangeCards && visibleTurnChangeCards.length === 0 && turnChangeLoadError && (
@@ -3055,13 +3193,14 @@ export const MessageBlock = memo(function MessageBlock({
             content={message.content}
             branchAction={branchAction}
             sessionId={sessionId ?? undefined}
-            timestamp={message.timestamp}
             turnChangedFiles={turnChangedFiles}
             turnCompletion={turnCompletion}
           />
         </SelectableChatMessage>
       )
     case 'thinking':
+      // No wrapper padding: the row's own `-mx-2 … px-2` already lands its text
+      // on the column's left edge, the same as one inside a run.
       return <ThinkingBlock content={message.content} isActive={message.id === activeThinkingId} />
     case 'tool_use':
       if (message.toolName === 'AskUserQuestion' && !message.isPending) {

@@ -85,6 +85,8 @@ type Props = {
   showOpenRun?: boolean
   /** When true, the last tool is still executing. */
   isStreaming?: boolean
+  /** This run is the tail of a turn that is still producing into it. */
+  isLive?: boolean
 }
 
 export const ToolCallGroup = memo(function ToolCallGroup({
@@ -98,6 +100,7 @@ export const ToolCallGroup = memo(function ToolCallGroup({
   activeThinkingId,
   showOpenRun = true,
   isStreaming,
+  isLive = false,
 }: Props) {
   const resolvedSteps = useMemo(() => steps ?? toActivitySteps(toolCalls), [steps, toolCalls])
   const memoryActivity = getMemoryToolActivity(toolCalls, resultMap)
@@ -109,7 +112,7 @@ export const ToolCallGroup = memo(function ToolCallGroup({
       (step) => step.kind === 'thinking' || !isMemoryToolCall(step.toolCall),
     )
     return (
-      <div className={regularSteps.length > 0 ? 'mb-2 space-y-2' : ''}>
+      <div className={regularSteps.length > 0 ? 'space-y-2' : ''}>
         <MemoryToolActivityGroup
           activity={memoryActivity}
           toolCalls={memoryToolCalls}
@@ -145,6 +148,7 @@ export const ToolCallGroup = memo(function ToolCallGroup({
       activeThinkingId={activeThinkingId}
       showOpenRun={showOpenRun}
       isStreaming={isStreaming}
+      isLive={isLive}
     />
   )
 })
@@ -161,6 +165,7 @@ function ToolCallGroupContent({
   activeThinkingId,
   showOpenRun = true,
   isStreaming,
+  isLive = false,
 }: ContentProps) {
   const toolCalls = activityStepToolCalls(steps)
   const hasImageGeneration = toolCalls.some((toolCall) => isImageGenerationToolName(toolCall.toolName))
@@ -266,6 +271,7 @@ function ToolCallGroupContent({
       childToolCallsByParent={childToolCallsByParent}
       activeThinkingId={activeThinkingId}
       isStreaming={isStreaming}
+      isLive={isLive}
     />
   )
 }
@@ -293,7 +299,7 @@ function MemoryToolActivityGroup({
   const hiddenCount = Math.max(0, activity.files.length - visibleFiles.length)
 
   return (
-    <div className="mb-2">
+    <div>
       <div
         data-testid="memory-tool-activity-card"
         className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-memory-border)] bg-[var(--color-memory-surface)]"
@@ -417,7 +423,7 @@ function AgentToolGroup({
   const anyStopped = statuses.some((status) => status === 'stopped')
 
   return (
-    <div className="mb-2 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)]">
+    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)]">
       <button
         type="button"
         data-chat-disclosure="true"

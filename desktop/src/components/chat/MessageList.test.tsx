@@ -3,12 +3,15 @@ import { act, createEvent, fireEvent, render, screen, waitFor, within } from '@t
 import {
   MessageList,
   buildRenderModel,
+  buildTurnRailPositions,
   buildVirtualItemOffsets,
+  estimateRenderItemHeight,
   getActiveConversationNavigationItemId,
   getConversationNavigationTargetScrollTop,
   isRenderItemFullyVisibleInChatScroller,
   resetSessionScrollSnapshotsForTests,
   shouldVirtualizeRenderItems,
+  trailingStreamingRailPosition,
 } from './MessageList'
 import type { ConversationNavigationItem } from './ConversationNavigator'
 import type { VirtualRenderItemMetric } from './virtualHeightCache'
@@ -1229,7 +1232,10 @@ describe('MessageList nested tool calls', () => {
               task: {
                 taskId: 'shell-task-1',
                 toolUseId: 'shell-tool-1',
-                status: 'completed',
+                // `stopped`, not `completed`: a cleanly finished task is left to
+                // the activity panel now. What this asserts is duration
+                // formatting, which does not depend on which end state it is.
+                status: 'stopped',
                 taskType: 'local_bash',
                 summary: 'Running Playwright checks',
                 usage: {
@@ -1249,6 +1255,39 @@ describe('MessageList nested tool calls', () => {
     render(<MessageList />)
 
     expect(screen.getByTestId('background-task-event-card').textContent).toContain('1 分 5 秒')
+  })
+
+  it('leaves a completed background task to the activity panel, but keeps a failure', () => {
+    const task = (id: string, status: 'completed' | 'failed') => ({
+      id: `background-task-${id}`,
+      type: 'background_task' as const,
+      timestamp: 2,
+      task: {
+        taskId: id,
+        toolUseId: `${id}-tool`,
+        status,
+        taskType: 'local_bash',
+        summary: `Ran ${id}`,
+        startedAt: 1,
+        updatedAt: 2,
+      },
+    })
+
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({ messages: [task('done-1', 'completed'), task('broke-1', 'failed')] }),
+      },
+    })
+
+    render(<MessageList />)
+
+    // A team session emits dozens of "task completed" reports and the panel
+    // already lists every one of them; repeating each as a card buries the
+    // conversation. A failure still interrupts — it changes what the turn means,
+    // and the panel it would otherwise live in can be closed.
+    const cards = screen.getAllByTestId('background-task-event-card')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.textContent).toContain('broke-1')
   })
 
   it('renders stopped non-agent background tasks as neutral transcript events', () => {
@@ -1305,7 +1344,9 @@ describe('MessageList nested tool calls', () => {
               timestamp: 3,
               task: {
                 taskId: 'unknown-task',
-                status: 'completed',
+                // See above: the label is what this asserts, and a cleanly
+                // finished task no longer draws a card to read it off.
+                status: 'stopped',
                 summary: 'Finished background work',
                 startedAt: 1,
                 updatedAt: 3,
@@ -1461,27 +1502,30 @@ describe('MessageList nested tool calls', () => {
   })
 
   it('splits large virtualization spacers into content-visibility chunks', async () => {
+    const messages: UIMessage[] = Array.from({ length: 240 }, (_, index) => ({
+      id: `assistant-${index}`,
+      type: 'assistant_text',
+      content: `assistant transcript line ${index}`,
+      timestamp: index,
+    }))
     useChatStore.setState({
-      sessions: {
-        [ACTIVE_TAB]: makeSessionState({
-          messages: Array.from({ length: 240 }, (_, index) => ({
-            id: `assistant-${index}`,
-            type: 'assistant_text',
-            content: `assistant transcript line ${index}`,
-            timestamp: index,
-          })),
-        }),
-      },
+      sessions: { [ACTIVE_TAB]: makeSessionState({ messages }) },
     })
+
+    // Derived from the estimator rather than a literal, so "the middle" keeps
+    // meaning the middle when item heights change. A hardcoded scrollTop silently
+    // becomes "past the end" the moment the transcript gets denser.
+    const estimatedContentHeight = buildRenderModel(messages).renderItems
+      .reduce((total, item) => total + estimateRenderItemHeight(item), 0)
 
     const { container } = render(<MessageList />)
     const scrollArea = container.querySelector('.chat-scroll-area') as HTMLElement
     Object.defineProperty(scrollArea, 'clientHeight', { configurable: true, value: 500 })
-    Object.defineProperty(scrollArea, 'scrollHeight', { configurable: true, value: 240 * 200 })
+    Object.defineProperty(scrollArea, 'scrollHeight', { configurable: true, value: estimatedContentHeight })
     await waitForProgrammaticScrollReset()
 
     // Scroll to middle so both top and bottom spacers are present
-    scrollArea.scrollTop = 20_000
+    scrollArea.scrollTop = Math.round(estimatedContentHeight / 2)
     await act(async () => {
       fireEvent.scroll(scrollArea)
     })
@@ -1775,14 +1819,14 @@ describe('MessageList nested tool calls', () => {
 
     render(<MessageList />)
 
-    // The activity header lists each tool family as its own segment, so the
-    // summary is never one text node — match the button by accessible name.
-    const groupButton = screen.getByRole('button', { name: /TaskUpdate \(1\).*ran a command/i })
-    expect(groupButton?.textContent).not.toContain('check_circle')
-    expect(screen.queryByText('local_bash')).toBeNull()
-
-    fireEvent.click(groupButton!)
-    expect(screen.getByText('local_bash')).toBeTruthy()
+    // Settled, so it opens as a summary; the nested call is part of the run's
+    // trajectory once opened, not a detail buried a further click down.
+    const group = screen.getByTestId('activity-group')
+    fireEvent.click(group.querySelector('[data-chat-disclosure="true"]')!)
+    expect(within(group).getByText('local_bash')).toBeTruthy()
+    expect(within(group).getByText('bun run dev')).toBeTruthy()
+    // Icon ligature names must never leak into the row text.
+    expect(group.textContent).not.toContain('check_circle')
   })
 
   it('does not render blank assistant bubbles for whitespace-only text', () => {
@@ -2074,15 +2118,92 @@ describe('MessageList nested tool calls', () => {
 
     const group = screen.getByTestId('activity-group')
     expect(group.getAttribute('data-running')).toBe('true')
-    expect(group.querySelector('.animate-spin')).not.toBeNull()
-    expect(group.querySelector('.animate-pulse')).not.toBeNull()
+    // The tool finished but the run has not: feedback has to stay somewhere the
+    // reader can see (#d3ba73af3, which restored it after an earlier collapse
+    // dropped it). It now sits on the step that is actually still going — the
+    // streaming thinking row — rather than on a summary header above them all.
+    expect(group.querySelector('.thinking-dots')).not.toBeNull()
 
     act(() => {
       store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
     })
 
     expect(group.getAttribute('data-running')).toBe('false')
-    expect(group.querySelector('.animate-spin')).toBeNull()
+    expect(group.querySelector('.thinking-dots')).toBeNull()
+  })
+
+  it('spaces turns without drawing a rail', () => {
+    const { container } = render(<MessageList sessionId={ACTIVE_TAB} />)
+    const store = useChatStore.getState()
+
+    act(() => {
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_start',
+        blockType: 'tool_use',
+        toolName: 'Bash',
+        toolUseId: 'bash-rail-1',
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'tool_use_complete',
+        toolName: 'Bash',
+        toolUseId: 'bash-rail-1',
+        input: { command: 'npx xo' },
+      })
+    })
+
+    // The wrapper survives because it still owns turn spacing and the block
+    // formatting context the virtualizer measures against...
+    expect(container.querySelectorAll('.chat-turn-rail').length).toBeGreaterThan(0)
+    // ...but it draws nothing. Tone separates prose from machinery now, and a
+    // line on top of that was a third way of saying what the turn gap and the
+    // right-aligned prompt already say.
+    expect(container.querySelectorAll('.chat-turn-rail--live')).toHaveLength(0)
+  })
+
+  it('draws a lone thinking block the same as one sitting in a run', () => {
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          messages: [
+            { id: 'user-1', type: 'user_text', content: '看下 issue', timestamp: 1 },
+            // Opens the turn with reasoning and then narrates, so this one is
+            // flushed as a tool-less run — the case that used to get the bare
+            // label with no reasoning shown at all.
+            { id: 'think-lone', type: 'thinking', content: '先加载浏览器技能再读 issue。', timestamp: 2 },
+            { id: 'reply-1', type: 'assistant_text', content: '我先加载浏览器技能。', timestamp: 3 },
+            { id: 'think-in-run', type: 'thinking', content: 'gh issue 失败了,改用 REST API。', timestamp: 4 },
+            {
+              id: 'tool-1',
+              type: 'tool_use',
+              toolName: 'Bash',
+              toolUseId: 'bash-1',
+              input: { command: 'gh api', description: '取 issue 内容' },
+              timestamp: 5,
+            },
+          ],
+        }),
+      },
+    })
+
+    const { container } = render(<MessageList />)
+
+    // Open the settled run so both thinking rows are on screen at once.
+    fireEvent.click(
+      screen.getByTestId('activity-group').querySelector('[data-chat-disclosure="true"]')!,
+    )
+
+    // Whether a thought is followed by a tool call is a fact about the run, not
+    // about the thought, so it must not change how the thought is drawn — the
+    // lone one used to show its label and nothing else.
+    expect(screen.getByText('先加载浏览器技能再读 issue。')).toBeTruthy()
+    expect(screen.getByText('gh issue 失败了,改用 REST API。')).toBeTruthy()
+
+    const [lone, inRun] = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-thinking-row="true"]'),
+    )
+    expect(lone).toBeTruthy()
+    expect(inRun).toBeTruthy()
+    expect(lone!.className).toBe(inRun!.className)
   })
 
   it('leaves a run of pure reasoning as standalone thinking blocks', () => {
@@ -2337,7 +2458,7 @@ describe('MessageList nested tool calls', () => {
     expect(screen.queryByText('Review coverage')).toBeNull()
   })
 
-  it('honors a manual collapse of mixed tool groups when nested tool calls arrive', async () => {
+  it('keeps a row the reader opened open when nested tool calls arrive', async () => {
     const initialMessages: UIMessage[] = [
       {
         id: 'tool-task-update',
@@ -2368,12 +2489,13 @@ describe('MessageList nested tool calls', () => {
 
     render(<MessageList />)
 
-    const mixedGroupButton = screen.getByRole('button', { name: /TaskUpdate \(1\).*ran a command/i })
-    expect(screen.queryByText('git status --short')).toBeNull()
-    fireEvent.click(mixedGroupButton)
-    expect(screen.getByText('git status --short')).toBeTruthy()
-    fireEvent.click(mixedGroupButton)
-    expect(screen.queryByText('git status --short')).toBeNull()
+    // Every step is on screen already; what the reader opts into is one row's
+    // detail. That choice is what has to survive the next server update — the
+    // regression here was expansion state resetting on every live refresh.
+    const group = screen.getByTestId('activity-group')
+    expect(group.querySelectorAll('[data-tool-call-details]')).toHaveLength(0)
+    fireEvent.click(within(group).getByText('git status --short'))
+    expect(group.querySelectorAll('[data-tool-call-details]')).toHaveLength(1)
 
     act(() => {
       useChatStore.setState({
@@ -2397,11 +2519,14 @@ describe('MessageList nested tool calls', () => {
       })
     })
 
+    // The newly dispatched child shows up...
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /TaskUpdate \(1\).*ran a command/i })).toBeTruthy()
+      expect(screen.getByText('package.json')).toBeTruthy()
     })
-    expect(screen.queryByText('git status --short')).toBeNull()
-    expect(screen.queryByText('package.json')).toBeNull()
+    // ...and the row the reader opened is still open.
+    expect(
+      screen.getByTestId('activity-group').querySelectorAll('[data-tool-call-details]'),
+    ).toHaveLength(1)
   })
 
   it('honors a manual collapse of memory activity when regular tools join the group', async () => {
@@ -2912,26 +3037,66 @@ describe('MessageList nested tool calls', () => {
 
     expect(screen.getByRole('button', { name: 'Copy prompt' })).toBeTruthy()
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Copy reply' })[1]!)
+    // One copy per turn, on the reply that closes it. The intermediate reply
+    // ("先看 CLI 和服务端入口。") carries no action bar at all — nobody copies a
+    // step, and reserving its 36px on every one outweighed the text itself.
+    const replyCopies = screen.getAllByRole('button', { name: 'Copy reply' })
+    expect(replyCopies).toHaveLength(1)
+
+    fireEvent.click(replyCopies[0]!)
 
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith('再看 desktop 前后端边界。')
     })
+    // Still that reply alone, never the turn's replies glued together.
     expect(writeText).not.toHaveBeenCalledWith(
       '先看 CLI 和服务端入口。\n再看 desktop 前后端边界。'
     )
+  })
+
+  it('leaves a mid-turn reply with no action bar to reserve space for', () => {
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          chatState: 'thinking',
+          messages: [
+            { id: 'user-1', type: 'user_text', content: '接着改', timestamp: 1 },
+            { id: 'assistant-1', type: 'assistant_text', content: '先看调用点。', timestamp: 2 },
+          ],
+        }),
+      },
+    })
+
+    const { container } = render(<MessageList />)
+
+    const assistantShell = container.querySelector('[data-message-shell="assistant"]')
+    expect(assistantShell).toBeTruthy()
+    // Absent, not hidden: a hover-gated bar still reserved its height whether or
+    // not anyone hovered, which is the cost this removes.
+    expect(assistantShell!.querySelector('[data-message-actions]')).toBeNull()
+    // The prompt keeps its own — reworking a question is what the bar is for.
+    expect(
+      container.querySelector('[data-message-shell="user"] [data-message-actions]'),
+    ).not.toBeNull()
   })
 
   it('releases pointer focus from message actions after clicking copy', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
+          // A closed turn: actions live on the reply that ends one.
           messages: [
+            {
+              id: 'user-1',
+              type: 'user_text',
+              content: '看一下操作条',
+              timestamp: 1,
+            },
             {
               id: 'assistant-1',
               type: 'assistant_text',
-              content: '离开 hover 后操作条应该恢复隐藏。',
-              timestamp: 1,
+              content: '点完复制后焦点不应该留在按钮上。',
+              timestamp: 2,
             },
           ],
         }),
@@ -5009,8 +5174,8 @@ describe('MessageList nested tool calls', () => {
               content: '这条回复应该停在左侧。',
               timestamp: assistantTimestamp,
             },
-            // Keeps the reply mid-turn: a turn-closing reply swaps its hover
-            // timestamp for the always-on completion stamp (#1151).
+            // Keeps the first reply mid-turn, which now means it carries no
+            // action bar at all — only the reply that closes a turn does.
             {
               id: 'tool-1',
               type: 'tool_use',
@@ -5018,6 +5183,12 @@ describe('MessageList nested tool calls', () => {
               toolUseId: 'tool-use-1',
               input: { file_path: '/tmp/a.ts' },
               timestamp: assistantTimestamp + 1_000,
+            },
+            {
+              id: 'assistant-2',
+              type: 'assistant_text',
+              content: '这条收尾回复带操作条。',
+              timestamp: assistantTimestamp + 2_000,
             },
           ],
         }),
@@ -5028,10 +5199,16 @@ describe('MessageList nested tool calls', () => {
 
     const userShell = screen.getByText('请把这条 prompt 放在右侧').closest('[data-message-shell="user"]')
     const assistantShell = screen.getByText('这条回复应该停在左侧。').closest('[data-message-shell="assistant"]')
+    const closingShell = screen.getByText('这条收尾回复带操作条。').closest('[data-message-shell="assistant"]')
     const userActions = screen.getByRole('button', { name: 'Copy prompt' }).closest('[data-message-actions]')
     const assistantActions = screen.getByRole('button', { name: 'Copy reply' }).closest('[data-message-actions]')
     const userTime = within(userActions as HTMLElement).getByText(formatMessageHoverTime(userTimestamp, 'en'))
-    const assistantTime = within(assistantActions as HTMLElement).getByText(formatMessageHoverTime(assistantTimestamp, 'en'))
+
+    // The bar the assistant does get belongs to the closing reply, not the
+    // mid-turn one, and it is the only one on that side.
+    expect(assistantActions?.closest('[data-message-shell="assistant"]')).toBe(closingShell)
+    expect(assistantShell?.querySelector('[data-message-actions]')).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Copy reply' })).toHaveLength(1)
 
     expect(userShell).toBeTruthy()
     expect(userShell?.className).toContain('items-end')
@@ -5052,7 +5229,10 @@ describe('MessageList nested tool calls', () => {
     expect(userActions?.className).not.toContain('group-hover:h-7')
     expect(userActions?.className).not.toContain('invisible')
     expect(userTime.getAttribute('title')).toBe(formatExactMessageTimestamp(userTimestamp, 'en'))
-    expect(assistantTime.getAttribute('title')).toBe(formatExactMessageTimestamp(assistantTimestamp, 'en'))
+    // The closing reply's bar is not hover-gated: it is rare and deliberate now,
+    // so hiding it until hover would only make a present affordance hard to find.
+    expect(assistantActions?.className).not.toContain('opacity-0')
+    expect(assistantActions?.className).not.toContain('pointer-events-none')
   })
 
   describe('turn completion stamp (#1151)', () => {
@@ -5148,12 +5328,16 @@ describe('MessageList nested tool calls', () => {
       // stamp there rendered above the work it introduced.
       expect(stampFor('接下来把两处调用点都接上：')).toBeNull()
       expect(stampFor('接着改')).toBeNull()
-      // Both still carry their own timestamp inside the hover-gated bar.
-      for (const [text, timestamp] of [['接着改', T0], ['接下来把两处调用点都接上：', T0 + 10_000]] as const) {
-        const bar = shellFor(text)?.querySelector('[data-message-actions]')
-        expect(bar?.className).toContain('opacity-0')
-        expect(within(bar as HTMLElement).getByText(formatMessageHoverTime(timestamp, 'en'))).toBeTruthy()
-      }
+      // The prompt keeps its timestamp in the hover-gated bar.
+      const promptBar = shellFor('接着改')?.querySelector('[data-message-actions]')
+      expect(promptBar?.className).toContain('opacity-0')
+      expect(within(promptBar as HTMLElement).getByText(formatMessageHoverTime(T0, 'en'))).toBeTruthy()
+
+      // The mid-turn reply has no bar, so it has no per-reply timestamp either —
+      // a deliberate trade for the 36px the bar reserved on every reply. The
+      // turn is still locatable in time: the prompt above stamps its start and
+      // the closing reply stamps its end.
+      expect(shellFor('接下来把两处调用点都接上：')?.querySelector('[data-message-actions]')).toBeNull()
     })
 
     it('leaves the running turn unstamped while keeping earlier turns stamped', () => {
@@ -6466,7 +6650,12 @@ describe('MessageList nested tool calls', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
-          messages: [{ id: 'assistant-origin', type: 'assistant_text', content: 'review result', timestamp: 1 }],
+          // A prompt closes the turn, which is what gives the reply the action
+          // bar this test borrows as its focus target.
+          messages: [
+            { id: 'user-origin', type: 'user_text', content: 'review please', timestamp: 0 },
+            { id: 'assistant-origin', type: 'assistant_text', content: 'review result', timestamp: 1 },
+          ],
         }),
       },
     })
@@ -6502,7 +6691,10 @@ describe('MessageList nested tool calls', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
-          messages: [{ id: 'assistant-clipped', type: 'assistant_text', content: 'review result', timestamp: 1 }],
+          messages: [
+            { id: 'user-clipped', type: 'user_text', content: 'review please', timestamp: 0 },
+            { id: 'assistant-clipped', type: 'assistant_text', content: 'review result', timestamp: 1 },
+          ],
         }),
       },
     })
@@ -6538,9 +6730,13 @@ describe('MessageList nested tool calls', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
+          // Prompts, because this test needs an action bar on an arbitrary item
+          // deep in the list as its focus target, and prompts keep theirs on
+          // every message. What is under test is the remount-then-focus path,
+          // which does not care which side the message came from.
           messages: Array.from({ length: 220 }, (_, index) => ({
             id: `virtual-origin-${index}`,
-            type: 'assistant_text' as const,
+            type: 'user_text' as const,
             content: `virtual transcript ${index}`,
             timestamp: index,
           })),
@@ -6576,7 +6772,7 @@ describe('MessageList nested tool calls', () => {
     })
     const restoredItem = container.querySelector<HTMLElement>('[data-chat-render-item-key="virtual-origin-0"]')
     expect(restoredItem).not.toBeNull()
-    const opener = restoredItem!.querySelector<HTMLButtonElement>('[aria-label="Copy reply"]')!
+    const opener = restoredItem!.querySelector<HTMLButtonElement>('[aria-label="Copy prompt"]')!
     opener.id = 'virtual-origin-opener'
 
     await act(async () => {
@@ -6593,7 +6789,10 @@ describe('MessageList nested tool calls', () => {
     useChatStore.setState({
       sessions: {
         [ACTIVE_TAB]: makeSessionState({
-          messages: [{ id: 'assistant-return', type: 'assistant_text', content: 'returned conversation', timestamp: 1 }],
+          messages: [
+            { id: 'user-return', type: 'user_text', content: 'review please', timestamp: 0 },
+            { id: 'assistant-return', type: 'assistant_text', content: 'returned conversation', timestamp: 1 },
+          ],
         }),
       },
     })
@@ -6747,5 +6946,129 @@ describe('workspace panel origin visibility', () => {
     vi.spyOn(item, 'getBoundingClientRect').mockReturnValue({ top: 80, bottom: 460, left: 60, right: 620 } as DOMRect)
 
     expect(isRenderItemFullyVisibleInChatScroller(item)).toBe(false)
+  })
+})
+
+describe('virtual height estimates', () => {
+  // jsdom has no layout, so the virtualizer's estimates are never exercised by
+  // the rendering tests — a stale constant here shows up only as a long real
+  // transcript jumping under the reader on scroll-up. These pin the ordering and
+  // the ceiling instead of exact pixels, so they survive retuning but not a
+  // constant left behind by a density change.
+  const itemFor = (message: UIMessage) => ({ kind: 'message' as const, message })
+
+  const oneLineReply = itemFor({
+    id: 'reply-1', type: 'assistant_text', content: 'Waiting on #10.', timestamp: 1,
+  })
+  const collapsedActivity = buildRenderModel([
+    { id: 'tool-1', type: 'tool_use', toolName: 'Bash', toolUseId: 'bash-1', input: { command: 'npx xo' }, timestamp: 1 },
+    { id: 'think-1', type: 'thinking', content: 'Check the lint spread.', timestamp: 2 },
+  ]).renderItems[0]!
+
+  it('orders a collapsed run under a one-line reply under a prompt with attachments', () => {
+    const promptWithAttachments = itemFor({
+      id: 'user-1',
+      type: 'user_text',
+      content: 'Look at this',
+      timestamp: 1,
+      attachments: [{ type: 'image', name: 'shot.png' }],
+    })
+
+    expect(estimateRenderItemHeight(collapsedActivity))
+      .toBeLessThan(estimateRenderItemHeight(oneLineReply))
+    expect(estimateRenderItemHeight(oneLineReply))
+      .toBeLessThan(estimateRenderItemHeight(promptWithAttachments))
+  })
+
+  it('keeps a one-line reply under 80px now that the card is gone', () => {
+    expect(estimateRenderItemHeight(oneLineReply)).toBeLessThan(80)
+  })
+
+  it('never estimates below the clamp that also floors measured heights', () => {
+    // VIRTUAL_MIN_ITEM_HEIGHT is applied to the ResizeObserver's reading too, so
+    // it has to stay under the shortest real item or that row is recorded too
+    // tall permanently.
+    expect(estimateRenderItemHeight(collapsedActivity)).toBeGreaterThan(24)
+  })
+})
+
+describe('turn rail positions', () => {
+  /** Rail positions for a transcript, driven through the real render model. */
+  const railFor = (messages: UIMessage[], hasTrailingStreamingItem = false) =>
+    buildTurnRailPositions(buildRenderModel(messages).renderItems, { hasTrailingStreamingItem })
+
+  it('runs one rail from the first response to the last, breaking at each prompt', () => {
+    const positions = railFor([
+      { id: 'user-1', type: 'user_text', content: 'Fix the lint', timestamp: 1 },
+      { id: 'think-1', type: 'thinking', content: 'Check the call sites.', timestamp: 2 },
+      { id: 'tool-1', type: 'tool_use', toolName: 'Bash', toolUseId: 'bash-1', input: { command: 'npx xo' }, timestamp: 3 },
+      { id: 'reply-1', type: 'assistant_text', content: 'Dispatched release-engineer.', timestamp: 4 },
+      { id: 'user-2', type: 'user_text', content: 'And the rest?', timestamp: 5 },
+      { id: 'reply-2', type: 'assistant_text', content: 'Only two files left.', timestamp: 6 },
+    ])
+
+    // The thinking + tool run collapses into one activity group, so the first
+    // turn renders as [group, reply] and the second as a lone reply.
+    expect(positions).toEqual(['none', 'start', 'end', 'none', 'solo'])
+  })
+
+  it('marks a turn that produced a single item as solo, not start', () => {
+    const positions = railFor([
+      { id: 'user-1', type: 'user_text', content: 'Status?', timestamp: 1 },
+      { id: 'reply-1', type: 'assistant_text', content: 'Still waiting on #10.', timestamp: 2 },
+    ])
+
+    expect(positions).toEqual(['none', 'solo'])
+  })
+
+  it('leaves the run open for the streaming reply to cap', () => {
+    const messages: UIMessage[] = [
+      { id: 'user-1', type: 'user_text', content: 'Fix the lint', timestamp: 1 },
+      { id: 'tool-1', type: 'tool_use', toolName: 'Bash', toolUseId: 'bash-1', input: { command: 'npx xo' }, timestamp: 2 },
+      { id: 'reply-1', type: 'assistant_text', content: 'One file left.', timestamp: 3 },
+    ]
+
+    // Settled: the last transcript item caps the rail itself.
+    expect(railFor(messages, false)).toEqual(['none', 'start', 'end'])
+    // Streaming: the live reply renders below the window and becomes the cap, so
+    // no transcript item may close the line or it breaks right where the reader
+    // is watching it grow.
+    expect(railFor(messages, true)).toEqual(['none', 'start', 'middle'])
+  })
+
+  it('breaks the rail at a pending prompt even though turn attribution does not', () => {
+    // A member session echoes the prompt with `pending: true`. The three turn
+    // walks skip those so a checkpoint keeps its owner, but it still renders as a
+    // right-aligned bubble — the line has to stop at a visible bubble.
+    const positions = railFor([
+      { id: 'user-1', type: 'user_text', content: 'Review the diff', timestamp: 1 },
+      { id: 'reply-1', type: 'assistant_text', content: 'On it.', timestamp: 2 },
+      { id: 'user-2', type: 'user_text', content: 'Review the diff', timestamp: 3, pending: true },
+      { id: 'reply-2', type: 'assistant_text', content: 'Two findings.', timestamp: 4 },
+    ])
+
+    expect(positions).toEqual(['none', 'solo', 'none', 'solo'])
+  })
+
+  it('rails a transcript that opens without a prompt', () => {
+    // Resumed history can start mid-turn; the response still deserves a line.
+    const positions = railFor([
+      { id: 'reply-1', type: 'assistant_text', content: 'Picking up where we left off.', timestamp: 1 },
+      { id: 'reply-2', type: 'assistant_text', content: 'Two files left.', timestamp: 2 },
+    ])
+
+    expect(positions).toEqual(['start', 'end'])
+  })
+
+  it('gives an empty transcript no rail and lets a streaming reply stand alone', () => {
+    expect(railFor([])).toEqual([])
+    expect(trailingStreamingRailPosition([])).toBe('solo')
+  })
+
+  it('caps an open run with the streaming reply and stands alone after a fresh prompt', () => {
+    expect(trailingStreamingRailPosition(['none', 'start', 'middle'])).toBe('end')
+    expect(trailingStreamingRailPosition(['none', 'start'])).toBe('end')
+    // The user just sent: nothing has landed under the new prompt yet.
+    expect(trailingStreamingRailPosition(['none', 'solo', 'none'])).toBe('solo')
   })
 })

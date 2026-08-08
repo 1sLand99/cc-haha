@@ -33,7 +33,7 @@ export const UserMessage = memo(function UserMessage({ content, attachments, bra
   )
 
   return (
-    <div className="mb-5 flex justify-end">
+    <div className="flex justify-end">
       <div
         data-message-shell="user"
         className="group flex min-w-0 max-w-[82%] flex-col items-end sm:max-w-[78%] lg:max-w-[640px]"

@@ -2021,6 +2021,7 @@ export const kr: Record<TranslationKey, string> = {
   'toolGroup.agentOne': '에이전트 1개를 디스패치했습니다',
   'toolGroup.agentMany': '에이전트 {count}개를 디스패치했습니다',
   'toolGroup.thought': '사고',
+  'toolGroup.thoughtMany': '{count}번 사고',
   'toolGroup.failedCount': '{count}건 실패',
   'toolGroup.collapseAgent': '에이전트 접기',
   'toolGroup.expandAgent': '에이전트 펼치기',

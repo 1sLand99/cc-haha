@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from 'react'
 import { CircleStop, CircleX, LoaderCircle } from 'lucide-react'
+import { activitySegmentIcon } from './activityGroupModel'
 import { CodeViewer } from './CodeViewer'
 import { DiffViewer } from './DiffViewer'
 import { TerminalChrome } from './TerminalChrome'
@@ -138,6 +139,9 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
   const icon = TOOL_ICONS[toolName] || 'build'
   const filePath = typeof obj.file_path === 'string' ? obj.file_path : ''
   const summary = getToolSummary(toolName, obj, t)
+  // Prose reads as prose. Monospace is for the things that are literally code —
+  // a command, a glob, a path — not for a sentence describing one.
+  const summaryIsProse = isProseToolSummary(toolName, obj)
   const outputSummary = getToolResultSummary(
     toolName,
     result?.content,
@@ -244,7 +248,13 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
             : compact ? 'w-full gap-[11px] px-3.5 py-2.5' : 'w-full gap-3 px-4 py-3'
         }`}
       >
-        {isRow ? null : compact ? (
+        {isRow ? (
+          /* Rows had no icon at all, so every step began with a bare word and
+             the eye had nothing to run down. A leading glyph gives the run a
+             left edge, separates one tool family from the next at a glance, and
+             marks the whole line as machinery rather than speech. */
+          <RowToolIcon toolName={toolName} active={Boolean(pendingSummary)} />
+        ) : compact ? (
           <span className="material-symbols-outlined shrink-0 text-[16px] text-[var(--color-text-secondary)]">{icon}</span>
         ) : (
           /* The ink square is the design's tool badge: solid `--t1` with the page
@@ -255,7 +265,16 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
         )}
         <span className={
           isRow
-            ? 'shrink-0 text-[13px] font-medium text-[var(--color-text-secondary)]'
+            // The running step is the one the reader is waiting on, so it is the
+            // one that gets colour. Finished steps stay grey and the eye lands on
+            // where the run actually is without a separate progress strip.
+            //
+            // Grey even when finished, and a step below the prose it sits among:
+            // the layers have to be separable at a glance, or a run of machinery
+            // reads as loudly as the sentence that concludes it.
+            ? `shrink-0 text-[12.5px] font-medium ${
+                pendingSummary ? 'text-[var(--color-brand)]' : 'text-[var(--color-text-tertiary)]'
+              }`
             : `shrink-0 font-bold text-[var(--color-text-primary)] ${compact ? 'text-[13px]' : 'text-[14px]'}`
         }>
           {toolName}
@@ -265,7 +284,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
             {filePath.split('/').pop()}
           </span>
         ) : summary ? (
-          <span className={`min-w-0 flex-1 truncate font-mono ${isRow ? 'text-[12px] text-[var(--color-text-tertiary)]' : compact ? 'text-[12.5px] text-[var(--color-text-secondary)]' : 'text-[13px] text-[var(--color-text-secondary)]'}`}>
+          <span className={`min-w-0 flex-1 truncate ${summaryIsProse ? '' : 'font-mono'} ${isRow ? 'text-[12px] text-[var(--color-text-tertiary)]' : compact ? 'text-[12.5px] text-[var(--color-text-secondary)]' : 'text-[13px] text-[var(--color-text-secondary)]'}`}>
             {summary}
           </span>
         ) : (
@@ -1243,10 +1262,46 @@ function stripAnsi(value: string): string {
     .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, '')
 }
 
+function RowToolIcon({ toolName, active }: { toolName: string; active: boolean }) {
+  const Icon = activitySegmentIcon(toolName)
+  return (
+    <Icon
+      size={13}
+      strokeWidth={1.8}
+      aria-hidden="true"
+      className={`mt-[3px] shrink-0 self-start ${
+        active ? 'text-[var(--color-brand)]' : 'text-[var(--color-text-tertiary)]'
+      }`}
+    />
+  )
+}
+
+/** Whether the row's summary is a sentence rather than something code-shaped. */
+function isProseToolSummary(toolName: string, obj: Record<string, unknown>): boolean {
+  switch (toolName) {
+    case 'Bash':
+    case 'PowerShell':
+    case 'Agent':
+      return typeof obj.description === 'string' && obj.description.trim().length > 0
+    case 'Read':
+    case 'Write':
+    case 'Edit':
+      return true
+    default:
+      return false
+  }
+}
+
 function getToolSummary(toolName: string, obj: Record<string, unknown>, t?: (key: TranslationKey, params?: Record<string, string | number>) => string): string {
   switch (toolName) {
     case 'Bash':
     case 'PowerShell':
+      // The model sends a short description of what the command is for, in the
+      // conversation's language ("查看最近 commit 的改动文件"). Prefer it: a row
+      // saying that is readable at a glance, where the raw command it stands for
+      // is a pipeline that truncates into noise. The command itself is still one
+      // click away in the expanded row.
+      if (typeof obj.description === 'string' && obj.description.trim()) return obj.description
       return typeof obj.command === 'string' ? obj.command : ''
     case 'Read':
       return t?.('tool.readFileContents') ?? 'Read file contents'

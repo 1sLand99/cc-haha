@@ -2021,6 +2021,7 @@ export const jp: Record<TranslationKey, string> = {
   'toolGroup.agentOne': 'エージェントを 1 件起動しました',
   'toolGroup.agentMany': '{count} 件のエージェントを起動しました',
   'toolGroup.thought': '思考',
+  'toolGroup.thoughtMany': '{count} 回思考',
   'toolGroup.failedCount': '{count} 件失敗',
   'toolGroup.collapseAgent': 'エージェントを折りたたむ',
   'toolGroup.expandAgent': 'エージェントを展開',

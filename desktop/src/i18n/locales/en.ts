@@ -2019,6 +2019,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'toolGroup.agentOne': 'dispatched an agent',
   'toolGroup.agentMany': 'dispatched {count} agents',
   'toolGroup.thought': 'Thinking',
+  'toolGroup.thoughtMany': 'Thought {count} times',
   'toolGroup.failedCount': '{count} failed',
   'toolGroup.collapseAgent': 'Collapse agent',
   'toolGroup.expandAgent': 'Expand agent',
