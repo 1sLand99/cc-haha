@@ -109,8 +109,32 @@ describe('SubagentRunPage', () => {
     expect(transcript).not.toHaveTextContent('assistant_text')
   })
 
-  it('continues a completed SubAgent from the shared conversation composer', async () => {
-    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun())
+  it('hides the composer for a one-shot SubAgent and explains why', async () => {
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun({ canSendMessage: false }))
+
+    render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="Kuhn" />)
+
+    await screen.findByTestId('subagent-conversation')
+    expect(screen.getByTestId('subagent-readonly-note')).toHaveTextContent(
+      'This is the record of a one-shot subagent. It cannot be continued.',
+    )
+    expect(document.querySelector('[data-composer-editor]')).toBeNull()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('hides the composer when the server does not report an inbox at all', async () => {
+    const { canSendMessage: _omitted, ...withoutFlag } = subagentRun()
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(withoutFlag as SubagentRunResponse)
+
+    render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="Kuhn" />)
+
+    await screen.findByTestId('subagent-conversation')
+    expect(screen.getByTestId('subagent-readonly-note')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('continues a resumable agent from the shared conversation composer', async () => {
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun({ canSendMessage: true }))
     vi.mocked(subagentsApi.sendMessage).mockResolvedValue({
       ok: true,
       agent_id: 'abc123',
@@ -129,6 +153,7 @@ describe('SubagentRunPage', () => {
     )
 
     await screen.findByTestId('subagent-conversation')
+    expect(screen.queryByTestId('subagent-readonly-note')).not.toBeInTheDocument()
     setComposerText('Review the new regression test.', 31)
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
 
@@ -143,7 +168,7 @@ describe('SubagentRunPage', () => {
   })
 
   it('keeps a failed continuation visible after the transcript refreshes', async () => {
-    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun())
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun({ canSendMessage: true }))
     vi.mocked(subagentsApi.sendMessage).mockRejectedValue(new Error('Agent transcript is unavailable'))
     useTabStore.getState().openTab('session-1', 'Parent session')
     useTabStore.getState().openSubagentTab('session-1', 'tool-1', 'Kuhn', 'agent-1')

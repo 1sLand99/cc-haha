@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Maximize2, Radio, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Radio } from 'lucide-react'
 import { Badge, StatusDot, type Tone } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { Progress } from '@/components/ui/Progress'
 import { useTranslation, type TranslationKey } from '../../i18n'
-import { useTabStore } from '../../stores/tabStore'
 import { useTeamStore, type WorkbenchView } from '../../stores/teamStore'
 import type {
   TeamMember,
@@ -113,20 +112,18 @@ function formatSnapshotTime(snapshot: TeamWorkbenchSnapshot): string {
     : time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-export function AgentTeamsWorkbench({
-  sessionId,
-  variant = 'panel',
-}: {
-  sessionId: string
-  /** `full` is the detached tab: the feed gets its own column beside the map. */
-  variant?: 'panel' | 'full'
-}) {
+/**
+ * The working view of a team run: the dependency map, the per-member
+ * drill-down, the message log and history scrubbing. It only ever renders in
+ * its own tab — the docked side of the split shows {@link AgentTeamsReport}
+ * instead, because none of this survives being squeezed to panel width.
+ */
+export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
   const t = useTranslation()
   const timeline = useTeamStore((state) => state.workbenchesBySession[sessionId])
   const historyIndex = useTeamStore((state) => state.workbenchHistoryIndexBySession[sessionId] ?? null)
   const view = useTeamStore((state) => state.workbenchViewBySession[sessionId] ?? OVERVIEW_VIEW)
   const setHistoryIndex = useTeamStore((state) => state.setWorkbenchHistoryIndex)
-  const setWorkbenchOpen = useTeamStore((state) => state.setWorkbenchOpen)
   const setWorkbenchView = useTeamStore((state) => state.setWorkbenchView)
   const openMemberInWorkbench = useTeamStore((state) => state.openMemberInWorkbench)
   const openMemberSession = useTeamStore((state) => state.openMemberSession)
@@ -139,7 +136,6 @@ export function AgentTeamsWorkbench({
   const selectedIndex = historyIndex === null ? latestIndex : Math.min(historyIndex, latestIndex)
   const snapshot = selectedIndex >= 0 ? snapshots[selectedIndex] : undefined
   const previousSnapshot = selectedIndex > 0 ? snapshots[selectedIndex - 1] : undefined
-  const isFull = variant === 'full'
 
   useEffect(() => {
     const element = officeViewportRef.current
@@ -241,7 +237,6 @@ export function AgentTeamsWorkbench({
   return (
     <section
       aria-label={t('agentTeams.title')}
-      data-workbench-variant={variant}
       className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--color-surface)] text-[var(--color-text-primary)]"
     >
       <header className="flex h-[42px] shrink-0 items-center gap-2.5 border-b border-[var(--color-border)] px-4">
@@ -249,13 +244,17 @@ export function AgentTeamsWorkbench({
           {snapshot.team.name}
         </span>
         <Badge tone={phaseTone(phase)} size="xs" bordered>{phaseLabel(phase, t)}</Badge>
-        <Progress
-          value={progress.percent}
-          tone="auto"
-          size="xs"
-          label={t('agentTeams.progressLabel')}
-          className="w-[84px] shrink-0"
-        />
+        {/* Progress is `w-full` internally and `cx` does not merge Tailwind
+            classes, so the width has to come from a wrapper rather than from
+            a `w-*` passed through `className`. */}
+        <div className="w-[84px] shrink-0">
+          <Progress
+            value={progress.percent}
+            tone="auto"
+            size="xs"
+            label={t('agentTeams.progressLabel')}
+          />
+        </div>
         <span className="shrink-0 text-[11px] tabular-nums text-[var(--color-text-secondary)]">
           {progress.completed}/{progress.total}
         </span>
@@ -309,27 +308,6 @@ export function AgentTeamsWorkbench({
           <span className="hidden w-[64px] text-right font-mono text-[10px] tabular-nums text-[var(--color-text-tertiary)] 2xl:block">
             {historyIndex === null ? t('agentTeams.live') : `T+${selectedIndex}`} · {formatSnapshotTime(snapshot)}
           </span>
-          {isFull ? null : (
-            <>
-              <IconButton
-                icon={<Maximize2 aria-hidden="true" />}
-                label={t('agentTeams.openFullscreen')}
-                size="sm"
-                tone="muted"
-                onClick={() => {
-                  useTabStore.getState().openTeamWorkbenchTab(sessionId, snapshot.team.name)
-                  setWorkbenchOpen(sessionId, false)
-                }}
-              />
-              <IconButton
-                icon={<X aria-hidden="true" />}
-                label={t('agentTeams.closeWorkbench')}
-                size="sm"
-                tone="muted"
-                onClick={() => setWorkbenchOpen(sessionId, false)}
-              />
-            </>
-          )}
         </div>
       </header>
 
@@ -341,7 +319,7 @@ export function AgentTeamsWorkbench({
           onOpenInTab={() => openMemberSession(selectedMember, snapshot.team)}
         />
       ) : (
-      <div className={isFull ? 'flex min-h-0 flex-1' : 'flex min-h-0 flex-1 flex-col'}>
+      <div className="flex min-h-0 flex-1">
 
       <div ref={officeViewportRef} className="min-h-0 min-w-0 flex-1 overflow-auto">
         <div
@@ -439,13 +417,10 @@ export function AgentTeamsWorkbench({
         </div>
       </div>
 
-      {/* Detached, the feed earns a full-height column of its own — who said
-          what to whom is the substance of a multi-agent run, and the panel
-          form had it squeezed into a 200px strip under the map. */}
-      <AgentTeamsCommunicationFeed
-        snapshot={snapshot}
-        {...(isFull ? { fill: true } : {})}
-      />
+      {/* The feed earns a full-height column of its own — who said what to
+          whom is the substance of a multi-agent run, and the old docked form
+          had it squeezed into a 210px strip under the map. */}
+      <AgentTeamsCommunicationFeed snapshot={snapshot} fill />
       </div>
       )}
     </section>

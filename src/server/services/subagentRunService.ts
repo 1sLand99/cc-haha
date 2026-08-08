@@ -30,6 +30,14 @@ export type SubagentRunResponse = {
   truncated: boolean
   updatedAt?: string
   source: SubagentRunSource
+  /**
+   * Whether a follow-up message can still reach this agent. A one-shot
+   * subagent is dispatched, answers once, and is done — resuming it would
+   * spawn a detached background copy whose output has nowhere to land, so the
+   * client must not offer a composer for it. Named teammates and in-flight
+   * background agents are the two cases that do have a live inbox.
+   */
+  canSendMessage: boolean
 }
 
 export type SubagentRunResolution = {
@@ -352,16 +360,35 @@ export async function getSubagentRunByTool(
   const teammateFragments = teammateName
     ? await sessionService.getSubagentTranscriptFragmentsByAgentType(sessionId, teammateName)
     : []
+  // Sidecar metadata is written before the agent starts, so it is the only
+  // hint that exists while the run is still streaming. The other candidates
+  // are all recovered from the completion result.
+  const metadataAgentId = normalizeAgentIdHint(
+    (await sessionService.findSubagentAgentIdByToolUseId(sessionId, toolUseId)) ?? undefined,
+  )
   const transcript = teammateFragments.length > 0
     ? {
         agentId: teammateFragments[teammateFragments.length - 1]!.agentId,
         messages: mergeTeammateTranscriptFragments(teammateFragments),
       }
     : await resolveTranscript(sessionId, [
+        metadataAgentId,
         resolution.agentId,
         safeLiveTaskId,
         notification?.taskId,
       ])
+  const status = statusFromResolution(resolution, notification)
+  const resolvedAgentId = transcript.agentId
+    ?? metadataAgentId
+    ?? normalizeAgentIdHint(resolution.agentId ?? undefined)
+    ?? null
+  // An async launch acknowledges immediately, so `isAsyncLaunch` is already
+  // true while that agent runs — which is exactly the window where queuing a
+  // follow-up works. A synchronous subagent only produces its tool_result at
+  // the very end, so it never qualifies.
+  const canSendMessage = Boolean(resolvedAgentId) && (
+    Boolean(teammateName) || (resolution.isAsyncLaunch && status === 'running')
+  )
   const transcriptMessages = transcript.messages
   const truncated = truncateSubagentMessages(transcriptMessages)
   const transcriptUsage = usageFromTranscriptMessages(transcriptMessages)
@@ -377,11 +404,11 @@ export async function getSubagentRunByTool(
   return {
     sessionId,
     toolUseId,
-    agentId: transcript.agentId ?? normalizeAgentIdHint(resolution.agentId ?? undefined) ?? null,
+    agentId: resolvedAgentId,
     ...(notification?.taskId || safeLiveTaskId
       ? { taskId: notification?.taskId || safeLiveTaskId }
       : {}),
-    status: statusFromResolution(resolution, notification),
+    status,
     ...(resolution.description ? { description: resolution.description } : {}),
     ...(resolution.prompt ? { prompt: resolution.prompt } : {}),
     ...(notification?.summary ? { summary: notification.summary } : {}),
@@ -400,5 +427,6 @@ export async function getSubagentRunByTool(
       : safeLiveTaskId
         ? 'live-task'
         : 'session-history',
+    canSendMessage,
   }
 }

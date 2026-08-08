@@ -116,7 +116,7 @@ export function AgentTeamsStrip({
         </span>
       ) : null}
       <span className="ml-auto flex shrink-0 items-center gap-0.5 font-medium text-[var(--color-brand)]">
-        {t(open ? 'agentTeams.hideWorkbench' : 'agentTeams.inline.open')}
+        {t(open ? 'agentTeams.hideReport' : 'agentTeams.inline.open')}
         <ChevronRight size={12} strokeWidth={2.4} aria-hidden="true" />
       </span>
     </button>

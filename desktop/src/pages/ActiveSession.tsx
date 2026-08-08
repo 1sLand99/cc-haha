@@ -37,7 +37,7 @@ import { ChatInput } from '../components/chat/ChatInput'
 import { getWorktreeDisplayName, WorktreeDetails } from '../components/chat/WorktreeDetails'
 import { ComputerUsePermissionModal } from '../components/chat/ComputerUsePermissionModal'
 import { WorkbenchPanel } from '../components/workbench/WorkbenchPanel'
-import { AgentTeamsWorkbench } from '../components/agentTeams/AgentTeamsWorkbench'
+import { AgentTeamsReport } from '../components/agentTeams/AgentTeamsReport'
 import { AgentTeamsStrip } from '../components/agentTeams/AgentTeamsSummary'
 import { SessionActivityPanel } from '../components/activity/SessionActivityPanel'
 import { buildSessionActivityModel, hasVisibleSessionActivity } from '../components/activity/sessionActivityModel'
@@ -976,14 +976,14 @@ export function ActiveSession() {
             <aside
               ref={workbenchPanelRef}
               data-testid="agent-teams-workbench-panel"
-              className="flex h-full shrink-0 flex-col bg-[var(--color-surface)]"
+              className="flex h-full shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)]"
               style={{
                 width: rightPanelWidth,
                 maxWidth: '62%',
                 minWidth: 'min(380px, 46%)',
               }}
             >
-              <AgentTeamsWorkbench sessionId={activeTabId} />
+              <AgentTeamsReport sessionId={activeTabId} />
             </aside>
           </>
         ) : showWorkbench ? (

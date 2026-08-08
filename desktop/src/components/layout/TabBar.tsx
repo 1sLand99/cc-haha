@@ -28,7 +28,7 @@ import { getDesktopHost } from '../../lib/desktopHost'
 import { hasRunningBackgroundTasks } from '../../lib/backgroundTasks'
 import { WindowControls, showWindowControls } from './WindowControls'
 import { OpenProjectMenu } from './OpenProjectMenu'
-import { Folder, FolderOpen, SquareTerminal, UsersRound } from 'lucide-react'
+import { Folder, FolderOpen, SquareTerminal } from 'lucide-react'
 import { ActionDialog } from '@/components/ui/ActionDialog'
 import { buildSessionActivityModel, hasVisibleSessionActivity } from '../activity/sessionActivityModel'
 import { SessionActivityButton } from '../activity/SessionActivityButton'
@@ -131,9 +131,6 @@ export function TabBar() {
   const workbenchMode = useWorkspacePanelStore((state) =>
     activeTabId && isActiveSessionTab ? state.getMode(activeTabId) : 'workspace',
   )
-  const hasAgentTeamsWorkbench = useTeamStore((state) => Boolean(
-    activeTabId && state.workbenchesBySession[activeTabId]?.snapshots.length,
-  ))
   const isAgentTeamsWorkbenchOpen = useTeamStore((state) =>
     isAgentTeamsWorkbenchOpenFor(state, activeTabId),
   )
@@ -596,26 +593,10 @@ export function TabBar() {
         {isDesktopRuntime && isActiveSessionTab && (
           <OpenProjectMenu path={openProjectPath} />
         )}
-        {isActiveSessionTab && activeTabId && hasAgentTeamsWorkbench && (
-          <IconButton
-            icon={<UsersRound size={17} strokeWidth={1.9} />}
-            label={t(isAgentTeamsWorkbenchOpen
-              ? 'agentTeams.hideWorkbench'
-              : 'agentTeams.showWorkbench')}
-            onClick={() => {
-              // One right-hand slot, two tenants: claiming it for the team
-              // evicts the workspace panel rather than silently losing to it.
-              if (!isAgentTeamsWorkbenchOpen) {
-                useWorkspacePanelStore.getState().closePanel(activeTabId)
-              }
-              useTeamStore.getState().toggleWorkbench(activeTabId)
-            }}
-            size="md"
-            tone={isAgentTeamsWorkbenchOpen ? 'default' : 'muted'}
-            pressed={isAgentTeamsWorkbenchOpen}
-            data-active={isAgentTeamsWorkbenchOpen ? 'true' : 'false'}
-          />
-        )}
+        {/* No team toggle here: AgentTeamsStrip in the session header is the
+            entry point, and it carries the team name, roster and progress that
+            a bare icon cannot. Both render under exactly the same condition,
+            so a second toggle was only ever a duplicate. */}
         <IconButton
           icon={<SquareTerminal size={17} strokeWidth={1.9} />}
           label={t('tabs.openTerminal')}

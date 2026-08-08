@@ -43,9 +43,9 @@ vi.mock('../components/workbench/WorkbenchPanel', () => ({
   ),
 }))
 
-vi.mock('../components/agentTeams/AgentTeamsWorkbench', () => ({
-  AgentTeamsWorkbench: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid="agent-teams-workbench">agent-teams:{sessionId}</div>
+vi.mock('../components/agentTeams/AgentTeamsReport', () => ({
+  AgentTeamsReport: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="agent-teams-report">agent-teams:{sessionId}</div>
   ),
 }))
 
@@ -1323,9 +1323,13 @@ describe('ActiveSession task polling', () => {
 
     expect(screen.queryByTestId('session-activity-panel')).not.toBeInTheDocument()
     expect(screen.getByTestId('agent-teams-workbench-panel')).toHaveClass('bg-[var(--color-surface)]')
+    // The split needs a resting seam. The drag affordance inside the handle
+    // still only appears on hover, so the border has to come from the panel —
+    // without it the transcript and the report bleed into each other.
+    expect(screen.getByTestId('agent-teams-workbench-panel')).toHaveClass('border-l')
     expect(screen.getByTestId('agent-teams-resize-handle')).not.toHaveClass('border-x')
     expect(screen.getByTestId('agent-teams-resize-handle').firstElementChild).toHaveClass('opacity-0')
-    expect(screen.getByTestId('agent-teams-workbench')).toHaveTextContent(`agent-teams:${sessionId}`)
+    expect(screen.getByTestId('agent-teams-report')).toHaveTextContent(`agent-teams:${sessionId}`)
     expect(screen.getByTestId('message-list')).toHaveAttribute('data-compact', 'true')
     expect(screen.getByTestId('agent-teams-strip')).toHaveAttribute('data-open', 'true')
     expect(useActivityPanelStore.getState().isOpen(sessionId)).toBe(false)

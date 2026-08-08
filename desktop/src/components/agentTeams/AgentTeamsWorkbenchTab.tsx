@@ -43,7 +43,7 @@ export function AgentTeamsWorkbenchTab({
           {t('agentTeams.backToSession')}
         </Button>
       </div>
-      <AgentTeamsWorkbench sessionId={leadSessionId} variant="full" />
+      <AgentTeamsWorkbench sessionId={leadSessionId} />
     </div>
   )
 }

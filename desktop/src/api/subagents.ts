@@ -26,6 +26,13 @@ export type SubagentRunResponse = {
   truncated: boolean
   updatedAt?: string
   source: SubagentRunSource
+  /**
+   * Whether a follow-up can still reach this agent. Only named teammates and
+   * in-flight background agents have an inbox — a one-shot subagent answers
+   * once and is done, so the page shows its record without a composer.
+   * Optional so a response from an older server still parses.
+   */
+  canSendMessage?: boolean
 }
 
 export const subagentsApi = {

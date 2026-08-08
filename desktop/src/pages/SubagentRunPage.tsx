@@ -185,7 +185,18 @@ export function SubagentRunPage({
           </div>
         ) : null}
       </main>
-      <ChatInput />
+      {/* A one-shot subagent has no inbox: the parent turn already collected
+          its answer, so a message here would only fork a detached background
+          copy. Only teammates and in-flight background agents get a composer. */}
+      {data?.canSendMessage ? <ChatInput /> : null}
+      {data && !data.canSendMessage ? (
+        <p
+          data-testid="subagent-readonly-note"
+          className="shrink-0 border-t border-[var(--color-border)] px-5 py-3 text-center text-[11.5px] text-[var(--color-text-tertiary)]"
+        >
+          {t('subagentRun.readOnly')}
+        </p>
+      ) : null}
     </div>
   )
 }

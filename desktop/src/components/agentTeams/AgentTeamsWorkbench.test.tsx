@@ -176,38 +176,22 @@ describe('AgentTeamsWorkbench', () => {
     expect(useTabStore.getState().activeTabId).toBe('team-member:reviewer@visual-team')
   })
 
-  it('detaches the whole workbench into a full-screen tab and closes the panel', async () => {
+  // Opening the workbench tab and closing the docked side now belong to
+  // AgentTeamsReport — see AgentTeamsReport.test.tsx.
+
+  it('carries no docked-panel chrome of its own', async () => {
     getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
     await act(async () => {
       await useTeamStore.getState().fetchWorkbench('visual-team')
     })
-    useTeamStore.getState().setWorkbenchOpen('lead-session', true)
     render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Open the workbench full screen/i }))
-    })
-
-    const tab = useTabStore.getState().tabs.find((current) => current.type === 'team')
-    expect(tab?.sessionId).toBe('__team__lead-session')
-    expect(tab?.teamLeadSessionId).toBe('lead-session')
-    expect(useTabStore.getState().activeTabId).toBe('__team__lead-session')
-    // The docked panel would otherwise keep a duplicate of the same workbench
-    // pinned beside the tab that replaced it.
-    expect(useTeamStore.getState().workbenchOpenBySession['lead-session']).toBe(false)
-  })
-
-  it('closes the workbench without discarding its archived timeline', async () => {
-    getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'completed', 'completed']))
-    await act(async () => {
-      await useTeamStore.getState().fetchWorkbench('visual-team')
-    })
-    render(<AgentTeamsWorkbench sessionId="lead-session" />)
-
-    fireEvent.click(screen.getByRole('button', { name: /Close Agent Teams workbench/i }))
-
-    expect(useTeamStore.getState().workbenchOpenBySession['lead-session']).toBe(false)
-    expect(useTeamStore.getState().workbenchesBySession['lead-session']?.snapshots[0]?.version).toBe('v1')
+    expect(screen.queryByRole('button', { name: /Open the workbench full screen/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Close Agent Teams workbench/i })).toBeNull()
+    // The feed always owns a column here; the 210px docked strip is gone.
+    const feed = screen.getByTestId('agent-teams-communication')
+    expect(feed.className).toContain('h-full')
+    expect(feed.className).not.toContain('h-[210px]')
   })
 
   it('keeps every archived teammate character visible inside the organization tree', async () => {
