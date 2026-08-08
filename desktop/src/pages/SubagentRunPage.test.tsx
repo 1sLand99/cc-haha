@@ -3,10 +3,12 @@ import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SubagentRunResponse } from '../api/subagents'
 import { useSettingsStore } from '../stores/settingsStore'
+import { setComposerText } from '../components/chat/composerTestUtils'
 
 vi.mock('../api/subagents', () => ({
   subagentsApi: {
     getRunByTool: vi.fn(),
+    sendMessage: vi.fn(),
   },
 }))
 
@@ -68,6 +70,7 @@ describe('SubagentRunPage', () => {
     cleanup()
     vi.useRealTimers()
     vi.mocked(subagentsApi.getRunByTool).mockReset()
+    vi.mocked(subagentsApi.sendMessage).mockReset()
   })
 
   it('returns to the parent session and closes its own tab via the back button', async () => {
@@ -104,6 +107,66 @@ describe('SubagentRunPage', () => {
     expect(transcript).toHaveTextContent('Read files')
     expect(transcript).toHaveTextContent('Finding')
     expect(transcript).not.toHaveTextContent('assistant_text')
+  })
+
+  it('continues a completed SubAgent from the shared conversation composer', async () => {
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun())
+    vi.mocked(subagentsApi.sendMessage).mockResolvedValue({
+      ok: true,
+      agent_id: 'abc123',
+      delivery: 'resumed',
+    })
+    useTabStore.getState().openTab('session-1', 'Parent session')
+    useTabStore.getState().openSubagentTab('session-1', 'tool-1', 'Kuhn', 'agent-1')
+
+    render(
+      <SubagentRunPage
+        sourceSessionId="session-1"
+        toolUseId="tool-1"
+        taskId="agent-1"
+        title="Kuhn"
+      />,
+    )
+
+    await screen.findByTestId('subagent-conversation')
+    setComposerText('Review the new regression test.', 31)
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+
+    await waitFor(() => {
+      expect(subagentsApi.sendMessage).toHaveBeenCalledWith(
+        'session-1',
+        'tool-1',
+        'Review the new regression test.',
+        'agent-1',
+      )
+    })
+  })
+
+  it('keeps a failed continuation visible after the transcript refreshes', async () => {
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun())
+    vi.mocked(subagentsApi.sendMessage).mockRejectedValue(new Error('Agent transcript is unavailable'))
+    useTabStore.getState().openTab('session-1', 'Parent session')
+    useTabStore.getState().openSubagentTab('session-1', 'tool-1', 'Kuhn', 'agent-1')
+
+    render(
+      <SubagentRunPage
+        sourceSessionId="session-1"
+        toolUseId="tool-1"
+        taskId="agent-1"
+        title="Kuhn"
+      />,
+    )
+
+    await screen.findByTestId('subagent-conversation')
+    setComposerText('Continue the review.', 20)
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+    expect(await screen.findByText('Agent transcript is unavailable')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh SubAgent run' }))
+    await waitFor(() => expect(subagentsApi.getRunByTool).toHaveBeenCalledTimes(2))
+    expect(screen.getByText('Continue the review.')).toBeInTheDocument()
+    expect(screen.getByText('Agent transcript is unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument()
   })
 
   it('renders a loading state while the run is loading', () => {

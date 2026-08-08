@@ -13,7 +13,11 @@ import {
 import { useSessionStore } from '../stores/sessionStore'
 import { useChatStore } from '../stores/chatStore'
 import { useCLITaskStore } from '../stores/cliTaskStore'
-import { useTeamStore } from '../stores/teamStore'
+import {
+  AGENT_TEAMS_WORKBENCH_MAX_WIDTH,
+  AGENT_TEAMS_WORKBENCH_MIN_WIDTH,
+  useTeamStore,
+} from '../stores/teamStore'
 import { useWorkspacePanelStore } from '../stores/workspacePanelStore'
 import {
   TERMINAL_PANEL_DEFAULT_HEIGHT,
@@ -31,6 +35,7 @@ import { ChatInput } from '../components/chat/ChatInput'
 import { getWorktreeDisplayName, WorktreeDetails } from '../components/chat/WorktreeDetails'
 import { ComputerUsePermissionModal } from '../components/chat/ComputerUsePermissionModal'
 import { WorkbenchPanel } from '../components/workbench/WorkbenchPanel'
+import { AgentTeamsWorkbench } from '../components/agentTeams/AgentTeamsWorkbench'
 import { SessionActivityPanel } from '../components/activity/SessionActivityPanel'
 import { buildSessionActivityModel, hasVisibleSessionActivity } from '../components/activity/sessionActivityModel'
 import { TerminalSettings } from './TerminalSettings'
@@ -222,6 +227,72 @@ function WorkspaceResizeHandle({ panelRef }: { panelRef: RefObject<HTMLElement> 
   )
 }
 
+function AgentTeamsResizeHandle({ panelRef }: { panelRef: RefObject<HTMLElement> }) {
+  const t = useTranslation()
+  const width = useTeamStore((state) => state.workbenchPanelWidth)
+  const setWidth = useTeamStore((state) => state.setWorkbenchPanelWidth)
+  const [dragState, setDragState] = useState<{ startX: number; startWidth: number } | null>(null)
+  const dragStateRef = useRef(dragState)
+
+  useEffect(() => {
+    dragStateRef.current = dragState
+  }, [dragState])
+
+  useEffect(() => {
+    if (!dragState) return
+    const handlePointerMove = (event: PointerEvent) => {
+      const current = dragStateRef.current
+      if (!current) return
+      setWidth(current.startWidth + current.startX - event.clientX)
+    }
+    const handlePointerUp = () => setDragState(null)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+    return () => {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+    }
+  }, [dragState, setWidth])
+
+  return (
+    <div
+      role="separator"
+      aria-label={t('agentTeams.resizePanel')}
+      aria-orientation="vertical"
+      aria-valuemin={AGENT_TEAMS_WORKBENCH_MIN_WIDTH}
+      aria-valuemax={AGENT_TEAMS_WORKBENCH_MAX_WIDTH}
+      aria-valuenow={width}
+      tabIndex={0}
+      data-testid="agent-teams-resize-handle"
+      onPointerDown={(event) => {
+        if (event.button !== 0) return
+        event.preventDefault()
+        setDragState({ startX: event.clientX, startWidth: getRenderedWorkspacePanelWidth(panelRef, width) })
+      }}
+      onKeyDown={(event) => {
+        const renderedWidth = getRenderedWorkspacePanelWidth(panelRef, width)
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault()
+          setWidth(renderedWidth + WORKSPACE_RESIZE_STEP)
+        }
+        if (event.key === 'ArrowRight') {
+          event.preventDefault()
+          setWidth(renderedWidth - WORKSPACE_RESIZE_STEP)
+        }
+      }}
+      className="group relative z-[var(--z-raised)] flex w-[7px] shrink-0 cursor-col-resize items-center justify-center bg-[var(--color-surface)] outline-none"
+    >
+      <span aria-hidden="true" className="h-[34px] w-px rounded-full bg-[var(--color-border-separator)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:bg-[var(--color-border-focus)] group-focus-visible:opacity-100" />
+    </div>
+  )
+}
+
 function TerminalResizeHandle() {
   const t = useTranslation()
   const height = useTerminalPanelStore((state) => state.height)
@@ -335,18 +406,35 @@ export function ActiveSession() {
   const session = sessions.find((s) => s.id === activeTabId)
   const memberInfo = useTeamStore((s) => activeTabId ? s.getMemberBySessionId(activeTabId) : null)
   const activeTeam = useTeamStore((s) => s.activeTeam)
+  const agentTeamsTimeline = useTeamStore((s) => activeTabId ? s.workbenchesBySession[activeTabId] : undefined)
+  const agentTeamsWorkbenchOpen = useTeamStore((s) => activeTabId
+    ? s.workbenchOpenBySession[activeTabId] ?? true
+    : false)
+  const agentTeamsPanelWidth = useTeamStore((s) => s.workbenchPanelWidth)
+  const fetchTeamForSession = useTeamStore((s) => s.fetchTeamForSession)
   const isMemberSession = !!memberInfo
+  const isArchivedMemberSession = memberInfo?.status === 'completed'
   const [sessionGitInfo, setSessionGitInfo] = useState<{
     sessionId: string
     info: SessionGitInfo
   } | null>(null)
-  const showWorkbench = useWorkspacePanelStore((state) =>
+  const workspaceWorkbenchOpen = useWorkspacePanelStore((state) =>
     activeTabId && isSessionTabState(activeTabId, activeTabType) && !isMemberSession && !isMobileLayout
       ? state.isPanelOpen(activeTabId)
       : false,
   )
-  const showRightPanel = showWorkbench
-  const rightPanelWidth = useWorkspacePanelStore((state) => state.width)
+  const showAgentTeamsWorkbench = Boolean(
+    agentTeamsTimeline?.snapshots.length &&
+    agentTeamsWorkbenchOpen &&
+    activeTabId &&
+    isSessionTabState(activeTabId, activeTabType) &&
+    !isMemberSession &&
+    !isMobileLayout,
+  )
+  const showWorkbench = workspaceWorkbenchOpen && !showAgentTeamsWorkbench
+  const showRightPanel = showWorkbench || showAgentTeamsWorkbench
+  const workspacePanelWidth = useWorkspacePanelStore((state) => state.width)
+  const rightPanelWidth = showAgentTeamsWorkbench ? agentTeamsPanelWidth : workspacePanelWidth
   const showTerminalPanel = useTerminalPanelStore((state) =>
     activeTabId && isSessionTabState(activeTabId, activeTabType) && !isMemberSession && !isMobileLayout
       ? state.isPanelOpen(activeTabId)
@@ -363,8 +451,9 @@ export function ActiveSession() {
   useEffect(() => {
     if (activeTabId && !isMemberSession) {
       connectToSession(activeTabId)
+      void fetchTeamForSession(activeTabId)
     }
-  }, [activeTabId, isMemberSession, connectToSession])
+  }, [activeTabId, isMemberSession, connectToSession, fetchTeamForSession])
 
   useEffect(() => {
     if (!activeTabId || isMemberSession || !isSessionTabState(activeTabId, activeTabType)) return
@@ -454,13 +543,6 @@ export function ActiveSession() {
   const totalTokens = getTokenUsageTotal(tokenUsage)
   const cachedTokens = (tokenUsage.cache_read_tokens ?? 0) +
     (tokenUsage.cache_creation_tokens ?? 0)
-  const activityTeamMembers = useMemo(() => {
-    if (!activeTeam || activeTeam.leadSessionId !== activeTabId) return []
-    return activeTeam.members.filter((member) =>
-      !activeTeam.leadAgentId || member.agentId !== activeTeam.leadAgentId
-    )
-  }, [activeTabId, activeTeam])
-
   useEffect(() => {
     if (!activeTabId) return
     pruneDismissedBackgroundTaskKeys(
@@ -482,11 +564,9 @@ export function ActiveSession() {
       backgroundTasks,
       dismissedBackgroundTaskKeys,
       agentNotifications: Object.values(agentTaskNotifications),
-      teamMembers: activityTeamMembers,
     })
   }, [
     activeTabId,
-    activityTeamMembers,
     agentTaskNotifications,
     backgroundTasks,
     cliTasks,
@@ -540,9 +620,9 @@ export function ActiveSession() {
   }, [activeTabId, closeActivityPanel, hasVisibleActivity, isActivityPanelOpen, sessionState?.historyStatus])
 
   useEffect(() => {
-    if (!activeTabId || !showWorkbench || !isActivityPanelOpen) return
+    if (!activeTabId || !showRightPanel || !isActivityPanelOpen) return
     closeActivityPanel(activeTabId)
-  }, [activeTabId, closeActivityPanel, isActivityPanelOpen, showWorkbench])
+  }, [activeTabId, closeActivityPanel, isActivityPanelOpen, showRightPanel])
 
   const handleOpenSubagentRun = useCallback((payload: { sessionId: string; taskId?: string; toolUseId: string; title: string }) => {
     useTabStore.getState().openSubagentTab(payload.sessionId, payload.toolUseId, payload.title, payload.taskId)
@@ -574,7 +654,7 @@ export function ActiveSession() {
   // squeezes the column by itself — the column yields with padding instead.
   const showActivityRail = Boolean(activityModel) &&
     hasVisibleActivity &&
-    !showWorkbench &&
+    !showRightPanel &&
     !isMobileLayout &&
     !isMemberSession &&
     isSessionTabState(activeTabId, activeTabType)
@@ -615,7 +695,9 @@ export function ActiveSession() {
                     )}
                   </div>
                   <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-                    {t('teams.memberSessionHint')}
+                    {t(isArchivedMemberSession
+                      ? 'teams.archivedMemberSessionHint'
+                      : 'teams.memberSessionHint')}
                   </p>
                 </div>
                 <Button
@@ -807,10 +889,20 @@ export function ActiveSession() {
             />
           ) : null}
 
-          <ChatInput
-            variant={isEmpty && !isMemberSession && !showRightPanel ? 'hero' : 'default'}
-            compact={showRightPanel}
-          />
+          {isArchivedMemberSession ? (
+            <div
+              data-testid="member-session-readonly"
+              className="flex shrink-0 items-center justify-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface-container)] px-6 py-3 text-[11px] text-[var(--color-text-secondary)]"
+            >
+              <span className="material-symbols-outlined text-[14px] text-[var(--color-success)]" style={{ fontVariationSettings: "'FILL' 1" }}>history</span>
+              {t('teams.archivedMemberReadOnly')}
+            </div>
+          ) : (
+            <ChatInput
+              variant={isEmpty && !isMemberSession && !showRightPanel ? 'hero' : 'default'}
+              compact={showRightPanel}
+            />
+          )}
 
           {terminalPanelRuntimeId && activeTabId ? (
             <div
@@ -854,7 +946,23 @@ export function ActiveSession() {
           />
         ) : null}
 
-        {showWorkbench ? (
+        {showAgentTeamsWorkbench ? (
+          <>
+            <AgentTeamsResizeHandle panelRef={workbenchPanelRef} />
+            <aside
+              ref={workbenchPanelRef}
+              data-testid="agent-teams-workbench-panel"
+              className="flex h-full shrink-0 flex-col bg-[var(--color-surface)]"
+              style={{
+                width: rightPanelWidth,
+                maxWidth: 'min(940px, 72%)',
+                minWidth: 'min(440px, 54%)',
+              }}
+            >
+              <AgentTeamsWorkbench sessionId={activeTabId} />
+            </aside>
+          </>
+        ) : showWorkbench ? (
           <>
             <WorkspaceResizeHandle panelRef={workbenchPanelRef} />
             <aside

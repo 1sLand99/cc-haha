@@ -629,7 +629,56 @@ function appendChildToolCall(
   }
 }
 
-export function buildRenderModel(messages: UIMessage[], activeAskUserQuestionToolUseId?: string | null): RenderModel {
+function hasTeamMessageRouting(value: unknown): boolean {
+  if (typeof value === 'string') {
+    try {
+      return hasTeamMessageRouting(JSON.parse(value))
+    } catch {
+      return false
+    }
+  }
+  if (Array.isArray(value)) return value.some(hasTeamMessageRouting)
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  const routing = record.routing
+  if (routing && typeof routing === 'object') {
+    const route = routing as Record<string, unknown>
+    if (typeof route.sender === 'string' && typeof route.target === 'string') return true
+  }
+  return 'content' in record && hasTeamMessageRouting(record.content)
+}
+
+function getSendMessageTarget(value: unknown): string | null {
+  if (typeof value === 'string') {
+    try {
+      return getSendMessageTarget(JSON.parse(value))
+    } catch {
+      return null
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const target = (value as Record<string, unknown>).to
+  return typeof target === 'string' ? target : null
+}
+
+function isTeamCoordinationSendMessage(
+  input: unknown,
+  result: unknown,
+  teamMemberNames: ReadonlySet<string> | undefined,
+): boolean {
+  if (hasTeamMessageRouting(result)) return true
+  const target = getSendMessageTarget(input)
+  return target === '*' || Boolean(target && teamMemberNames?.has(target))
+}
+
+export function buildRenderModel(
+  messages: UIMessage[],
+  activeAskUserQuestionToolUseId?: string | null,
+  options: {
+    hideTeamCoordinationTools?: boolean
+    teamMemberNames?: ReadonlySet<string>
+  } = {},
+): RenderModel {
   const items: RenderItem[] = []
   const toolResultMap = new Map<string, ToolResult>()
   const childToolCallsByParent = new Map<string, ToolCall[]>()
@@ -724,6 +773,15 @@ export function buildRenderModel(messages: UIMessage[], activeAskUserQuestionToo
       if (msg.parentToolUseId && toolUseIds.has(msg.parentToolUseId)) {
         flushGroup()
         appendChildToolCall(childToolCallsByParent, msg.parentToolUseId, msg)
+        continue
+      }
+      const toolResult = toolResultMap.get(msg.toolUseId)
+      if (
+        options.hideTeamCoordinationTools &&
+        msg.toolName === 'SendMessage' &&
+        toolResult?.isError === false &&
+        isTeamCoordinationSendMessage(msg.input, toolResult.content, options.teamMemberNames)
+      ) {
         continue
       }
       if (msg.toolName === 'AskUserQuestion') {
@@ -1687,6 +1745,21 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const isMemberSession = useTeamStore((s) =>
     resolvedSessionId ? Boolean(s.getMemberBySessionId(resolvedSessionId)) : false,
   )
+  const isSubagentSession = useTabStore((s) => s.tabs.some((tab) => (
+    tab.sessionId === resolvedSessionId && tab.type === 'subagent'
+  )))
+  const isDirectAgentSession = isMemberSession || isSubagentSession
+  const teamWorkbench = useTeamStore((s) =>
+    resolvedSessionId ? s.workbenchesBySession[resolvedSessionId] : undefined,
+  )
+  const isTeamLeadSession = Boolean(teamWorkbench?.snapshots.length)
+  const teamMemberNames = useMemo(() => {
+    const snapshots = teamWorkbench?.snapshots
+    if (!snapshots?.length) return undefined
+    return new Set(snapshots[snapshots.length - 1]!.team.members.flatMap((member) =>
+      member.name ? [member.name] : [],
+    ))
+  }, [teamWorkbench?.snapshots])
   const addToast = useUIStore((s) => s.addToast)
   const messages = sessionState?.messages ?? EMPTY_MESSAGES
   const chatState = sessionState?.chatState ?? 'idle'
@@ -1775,7 +1848,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const conversationFindMatchesRef = useRef<ConversationFindMatch[]>([])
   const [messageListWidth, setMessageListWidth] = useState<number | null>(null)
   const branchActionsDisabled =
-    isMemberSession ||
+    isDirectAgentSession ||
     isPreparingTurn ||
     chatState !== 'idle' ||
     hasRunningBackgroundTasks ||
@@ -2199,8 +2272,11 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   }, [requestLiveFollow])
 
   const { toolResultMap, childToolCallsByParent, renderItems } = useMemo(
-    () => buildRenderModel(messages, activeAskUserQuestionToolUseId),
-    [activeAskUserQuestionToolUseId, messages],
+    () => buildRenderModel(messages, activeAskUserQuestionToolUseId, {
+      hideTeamCoordinationTools: isTeamLeadSession,
+      teamMemberNames,
+    }),
+    [activeAskUserQuestionToolUseId, isTeamLeadSession, messages, teamMemberNames],
   )
   // Defer the per-message branchable / completed-turn computations so the first
   // commit on tab switch can render the virtualization window without doing two
@@ -2362,7 +2438,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   }, [renderItemKeys])
 
   useEffect(() => {
-    if (!resolvedSessionId || completedTurnTargets.length === 0 || isMemberSession) {
+    if (!resolvedSessionId || completedTurnTargets.length === 0 || isDirectAgentSession) {
       setTurnChangeCards([])
       setTurnChangeLoadError(null)
       setIsLoadingTurnChangeCards(false)
@@ -2429,7 +2505,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
     return () => {
       cancelled = true
     }
-  }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, historyMutationEpoch, isMemberSession, latestCompletedTurnId, resolvedSessionId])
+  }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, historyMutationEpoch, isDirectAgentSession, latestCompletedTurnId, resolvedSessionId])
 
   const handleUndoCurrentTurn = useCallback(async (mode: SessionRewindMode = 'both') => {
     if (!resolvedSessionId || !confirmTurnCard || rewindingTurnId || hasRunningBackgroundTasks) return

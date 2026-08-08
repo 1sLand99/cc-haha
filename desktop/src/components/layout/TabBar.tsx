@@ -28,7 +28,7 @@ import { getDesktopHost } from '../../lib/desktopHost'
 import { hasRunningBackgroundTasks } from '../../lib/backgroundTasks'
 import { WindowControls, showWindowControls } from './WindowControls'
 import { OpenProjectMenu } from './OpenProjectMenu'
-import { Folder, FolderOpen, SquareTerminal } from 'lucide-react'
+import { Folder, FolderOpen, SquareTerminal, UsersRound } from 'lucide-react'
 import { ActionDialog } from '@/components/ui/ActionDialog'
 import { buildSessionActivityModel, hasVisibleSessionActivity } from '../activity/sessionActivityModel'
 import { SessionActivityButton } from '../activity/SessionActivityButton'
@@ -131,7 +131,15 @@ export function TabBar() {
   const workbenchMode = useWorkspacePanelStore((state) =>
     activeTabId && isActiveSessionTab ? state.getMode(activeTabId) : 'workspace',
   )
-  const isWorkspacePanelOpen = isWorkbenchOpen && workbenchMode === 'workspace'
+  const hasAgentTeamsWorkbench = useTeamStore((state) => Boolean(
+    activeTabId && state.workbenchesBySession[activeTabId]?.snapshots.length,
+  ))
+  const isAgentTeamsWorkbenchOpen = useTeamStore((state) => Boolean(
+    activeTabId &&
+    state.workbenchesBySession[activeTabId]?.snapshots.length &&
+    (state.workbenchOpenBySession[activeTabId] ?? true),
+  ))
+  const isWorkspacePanelOpen = !hasAgentTeamsWorkbench && isWorkbenchOpen && workbenchMode === 'workspace'
   const isTerminalPanelOpen = useTerminalPanelStore((state) =>
     activeTabId && isActiveSessionTab ? state.isPanelOpen(activeTabId) : false,
   )
@@ -147,15 +155,6 @@ export function TabBar() {
     () => new Set(dismissedBackgroundTaskKeyList),
     [dismissedBackgroundTaskKeyList],
   )
-  const activityTeamMembers = useTeamStore(useShallow((state) => {
-    const activeTeam = state.activeTeam
-    if (!activeTabId || !activeTeam || activeTeam.leadSessionId !== activeTabId) {
-      return []
-    }
-    return activeTeam.members.filter((member) =>
-      !activeTeam.leadAgentId || member.agentId !== activeTeam.leadAgentId
-    )
-  }))
   const activityState = useChatStore(useShallow((state) => {
     if (!activeTabId || !isActiveSessionTab) {
       return { hasVisibleActivity: false }
@@ -172,13 +171,12 @@ export function TabBar() {
       backgroundTasks: Object.values(sessionState?.backgroundAgentTasks ?? {}),
       dismissedBackgroundTaskKeys,
       agentNotifications: Object.values(sessionState?.agentTaskNotifications ?? {}),
-      teamMembers: activityTeamMembers,
     })
     return {
       hasVisibleActivity: hasVisibleSessionActivity(model),
     }
   }))
-  const showActivityButton = activeTabId && activityState.hasVisibleActivity && !isWorkbenchOpen
+  const showActivityButton = activeTabId && activityState.hasVisibleActivity && !isWorkbenchOpen && !hasAgentTeamsWorkbench
 
   const moveTab = useTabStore((s) => s.moveTab)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -597,6 +595,19 @@ export function TabBar() {
         {isDesktopRuntime && isActiveSessionTab && (
           <OpenProjectMenu path={openProjectPath} />
         )}
+        {isActiveSessionTab && activeTabId && hasAgentTeamsWorkbench && (
+          <IconButton
+            icon={<UsersRound size={17} strokeWidth={1.9} />}
+            label={t(isAgentTeamsWorkbenchOpen
+              ? 'agentTeams.hideWorkbench'
+              : 'agentTeams.showWorkbench')}
+            onClick={() => useTeamStore.getState().toggleWorkbench(activeTabId)}
+            size="md"
+            tone={isAgentTeamsWorkbenchOpen ? 'default' : 'muted'}
+            pressed={isAgentTeamsWorkbenchOpen}
+            data-active={isAgentTeamsWorkbenchOpen ? 'true' : 'false'}
+          />
+        )}
         <IconButton
           icon={<SquareTerminal size={17} strokeWidth={1.9} />}
           label={t('tabs.openTerminal')}
@@ -612,7 +623,7 @@ export function TabBar() {
           pressed={isTerminalPanelOpen}
           data-active={isTerminalPanelOpen ? 'true' : 'false'}
         />
-        {isActiveSessionTab && activeTabId && (
+        {isActiveSessionTab && activeTabId && !hasAgentTeamsWorkbench && (
           <IconButton
             icon={isWorkspacePanelOpen ? <FolderOpen size={18} strokeWidth={1.9} /> : <Folder size={18} strokeWidth={1.9} />}
             label={t(isWorkspacePanelOpen ? 'tabs.hideWorkspace' : 'tabs.showWorkspace')}

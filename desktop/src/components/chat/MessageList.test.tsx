@@ -6059,6 +6059,42 @@ describe('MessageList nested tool calls', () => {
     expect(screen.queryByText('first.ts')).toBeNull()
   })
 
+  it('does not call parent-session checkpoint APIs for a completed SubAgent conversation', async () => {
+    const subagentTabId = '__subagent__parent-session__agent-tool-1'
+    const getTurnCheckpoints = vi.spyOn(sessionsApi, 'getTurnCheckpoints')
+      .mockRejectedValue(new Error(`Session not found: ${subagentTabId}`))
+    useTabStore.setState({
+      activeTabId: subagentTabId,
+      tabs: [{
+        sessionId: subagentTabId,
+        title: 'Completed reviewer',
+        type: 'subagent',
+        status: 'idle',
+        sourceSessionId: 'parent-session',
+        subagentToolUseId: 'agent-tool-1',
+      }],
+    })
+    useChatStore.setState({
+      sessions: {
+        [subagentTabId]: makeSessionState({
+          messages: [
+            { id: 'user-1', type: 'user_text', content: 'Review the patch', timestamp: 1 },
+            { id: 'assistant-1', type: 'assistant_text', content: 'Review complete', timestamp: 2 },
+          ],
+        }),
+      },
+    })
+
+    render(<MessageList sessionId={subagentTabId} />)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(getTurnCheckpoints).not.toHaveBeenCalled()
+    expect(screen.queryByText(`Session not found: ${subagentTabId}`)).toBeNull()
+  })
+
   it('confirms before rewinding to an earlier turn from a historical change card', async () => {
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
       checkpoints: [
@@ -6747,5 +6783,83 @@ describe('workspace panel origin visibility', () => {
     vi.spyOn(item, 'getBoundingClientRect').mockReturnValue({ top: 80, bottom: 460, left: 60, right: 620 } as DOMRect)
 
     expect(isRenderItemFullyVisibleInChatScroller(item)).toBe(false)
+  })
+})
+
+describe('Agent Teams chat projection', () => {
+  function sendMessageRun(
+    id: string,
+    result: unknown,
+    isError = false,
+    input: unknown = { to: 'worker', message: 'Review task #2' },
+  ): UIMessage[] {
+    return [
+      {
+        id: `tool-${id}`,
+        type: 'tool_use',
+        toolName: 'SendMessage',
+        toolUseId: id,
+        input,
+        timestamp: 1,
+      },
+      {
+        id: `result-${id}`,
+        type: 'tool_result',
+        toolUseId: id,
+        content: result,
+        isError,
+        timestamp: 2,
+      },
+    ]
+  }
+
+  it('hides a successful routed teammate message only in a lead workbench session', () => {
+    const messages = sendMessageRun('team-message', {
+      routing: {
+        sender: 'team-lead',
+        target: 'worker',
+        content: 'Review task #2',
+      },
+    })
+
+    expect(buildRenderModel(messages).renderItems).toHaveLength(1)
+    expect(buildRenderModel(messages, null, {
+      hideTeamCoordinationTools: true,
+      teamMemberNames: new Set(['worker']),
+    }).renderItems).toHaveLength(0)
+  })
+
+  it('hides successful team messages from their real input shape when the transport omits routing', () => {
+    const direct = sendMessageRun('direct', 'Message sent to worker inbox')
+    const broadcast = sendMessageRun('broadcast', 'Message broadcast to 4 teammates', false, {
+      to: '*',
+      message: 'Start the dependency graph',
+    })
+    const messages = [...direct, ...broadcast]
+
+    expect(buildRenderModel(messages, null, {
+      hideTeamCoordinationTools: true,
+      teamMemberNames: new Set(['worker']),
+    }).renderItems).toHaveLength(0)
+  })
+
+  it('keeps ordinary agent continuation and failed team SendMessage calls visible', () => {
+    const ordinary = sendMessageRun(
+      'ordinary',
+      'Message queued to async agent a1',
+      false,
+      { to: 'async-agent-a1', message: 'Continue' },
+    )
+    const failed = sendMessageRun('failed', {
+      routing: { sender: 'team-lead', target: 'missing-worker' },
+    }, true)
+
+    expect(buildRenderModel(ordinary, null, {
+      hideTeamCoordinationTools: true,
+      teamMemberNames: new Set(['worker']),
+    }).renderItems).toHaveLength(1)
+    expect(buildRenderModel(failed, null, {
+      hideTeamCoordinationTools: true,
+    }).renderItems).toHaveLength(1)
   })
 })

@@ -4,6 +4,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import {
   getSubagentRunByTool,
+  mergeTeammateTranscriptFragments,
   resolveSubagentRunFromMessages,
   truncateSubagentMessages,
 } from './subagentRunService.js'
@@ -48,6 +49,26 @@ async function writeSubagentTranscriptFile(
     `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
     'utf-8',
   )
+}
+
+async function writeSubagentMetadata(
+  projectDir: string,
+  sessionId: string,
+  agentId: string,
+  agentType: string,
+  modifiedAt: number,
+): Promise<void> {
+  if (!tmpDir) throw new Error('tmpDir not initialized')
+  const dir = path.join(tmpDir, 'projects', projectDir, sessionId, 'subagents')
+  const normalizedAgentId = agentId.startsWith('agent-') ? agentId : `agent-${agentId}`
+  const transcriptPath = path.join(dir, `${normalizedAgentId}.jsonl`)
+  await fs.writeFile(
+    path.join(dir, `${normalizedAgentId}.meta.json`),
+    JSON.stringify({ agentType }),
+    'utf-8',
+  )
+  const modifiedDate = new Date(modifiedAt)
+  await fs.utimes(transcriptPath, modifiedDate, modifiedDate)
 }
 
 function makeAgentToolUseEntry(toolUseId: string): Record<string, unknown> {
@@ -121,6 +142,25 @@ function makeTaskNotificationEntry(
 }
 
 describe('subagentRunService helpers', () => {
+  it('deduplicates copied transcript history by upstream id while retaining legitimate repeated messages', () => {
+    const repeated = (id: string): MessageEntry => ({
+      id,
+      type: 'assistant',
+      content: 'same reply',
+      timestamp: '2026-01-01T00:00:02.000Z',
+    })
+    const copied = repeated('shared-message-id')
+
+    expect(mergeTeammateTranscriptFragments([
+      { messages: [copied, repeated('legitimate-repeat-1')] },
+      { messages: [{ ...copied }, repeated('legitimate-repeat-2')] },
+    ])).toEqual([
+      copied,
+      repeated('legitimate-repeat-1'),
+      repeated('legitimate-repeat-2'),
+    ])
+  })
+
   it('resolves agentId, description, and prompt from parent Agent messages by toolUseId', () => {
     const messages = [
       {
@@ -363,6 +403,58 @@ describe('getSubagentRunByTool', () => {
       source: 'subagent-jsonl',
     })
     expect(result?.messages).toHaveLength(2)
+  })
+
+  it('aggregates resumed named teammate fragments and returns the latest resumable transcript id', async () => {
+    await setupTmpConfigDir()
+    const sessionId = '11111111-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const projectDir = '-tmp-subagent-run'
+    const toolUseId = 'tool-team-1'
+    await writeSessionFile(projectDir, sessionId, [
+      makeAgentToolUseEntry(toolUseId),
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: [{
+              type: 'text',
+              text: 'Spawned successfully.\nagent_id: id-worker-a@workbench-id-0808\nname: id-worker-a\nteam_name: workbench-id-0808',
+            }],
+          }],
+        },
+        uuid: 'team-agent-result',
+        timestamp: '2026-01-01T00:00:02.000Z',
+      },
+    ])
+    await writeSubagentTranscriptFile(projectDir, sessionId, 'older123', [{
+      type: 'assistant',
+      message: { role: 'assistant', content: 'First teammate turn' },
+      uuid: 'older-message',
+      timestamp: '2026-01-01T00:00:03.000Z',
+    }])
+    await writeSubagentMetadata(projectDir, sessionId, 'older123', 'id-worker-a', 1_000)
+    await writeSubagentTranscriptFile(projectDir, sessionId, 'latest456', [{
+      type: 'assistant',
+      message: { role: 'assistant', content: 'Resumed teammate turn' },
+      uuid: 'latest-message',
+      timestamp: '2026-01-01T00:00:04.000Z',
+    }])
+    await writeSubagentMetadata(projectDir, sessionId, 'latest456', 'id-worker-a', 2_000)
+
+    const result = await getSubagentRunByTool(sessionId, toolUseId)
+
+    expect(result).toMatchObject({
+      agentId: 'latest456',
+      status: 'completed',
+      source: 'subagent-jsonl',
+    })
+    expect(result?.messages.map((message) => message.content)).toEqual([
+      'First teammate turn',
+      'Resumed teammate turn',
+    ])
   })
 
   it('keeps an async launch acknowledgement running until a terminal notification arrives', async () => {

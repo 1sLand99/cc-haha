@@ -72,6 +72,26 @@ type TruncateResult = {
   truncated: boolean
 }
 
+export function mergeTeammateTranscriptFragments(
+  fragments: Array<{ messages: MessageEntry[] }>,
+): MessageEntry[] {
+  const seenMessageIds = new Set<string>()
+  const messages: MessageEntry[] = []
+
+  for (const message of fragments.flatMap((fragment) => fragment.messages)) {
+    if (seenMessageIds.has(message.id)) continue
+    seenMessageIds.add(message.id)
+    messages.push(message)
+  }
+
+  return messages.sort((left, right) => {
+    const leftTime = Date.parse(left.timestamp)
+    const rightTime = Date.parse(right.timestamp)
+    return (Number.isFinite(leftTime) ? leftTime : 0) -
+      (Number.isFinite(rightTime) ? rightTime : 0)
+  })
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
@@ -102,7 +122,7 @@ function textFromContent(content: unknown): string {
 }
 
 function extractAgentId(text: string): string | null {
-  return text.match(/(?:^|\n)\s*agentId:\s*([A-Za-z0-9_-]+)/)?.[1] ?? null
+  return text.match(/(?:^|\n)\s*(?:agentId|agent_id):\s*([A-Za-z0-9_@.-]+)/)?.[1] ?? null
 }
 
 function normalizeAgentIdHint(value: string | undefined): string | undefined {
@@ -119,7 +139,7 @@ function cleanedAgentResultText(text: string): string | undefined {
   const cleaned = text
     .replace(/<usage>[\s\S]*?<\/usage>/gi, '')
     .split('\n')
-    .filter((line) => !/^\s*agentId:\s*[A-Za-z0-9_-]+/.test(line))
+    .filter((line) => !/^\s*(?:agentId|agent_id):\s*[A-Za-z0-9_@.-]+/.test(line))
     .join('\n')
     .trim()
 
@@ -326,11 +346,22 @@ export async function getSubagentRunByTool(
 
   const notification = taskNotifications.find((candidate) => candidate.toolUseId === toolUseId)
   const safeLiveTaskId = normalizeAgentIdHint(liveTaskId)
-  const transcript = await resolveTranscript(sessionId, [
-    resolution.agentId,
-    safeLiveTaskId,
-    notification?.taskId,
-  ])
+  const teammateName = resolution.agentId?.includes('@')
+    ? resolution.agentId.split('@')[0]
+    : undefined
+  const teammateFragments = teammateName
+    ? await sessionService.getSubagentTranscriptFragmentsByAgentType(sessionId, teammateName)
+    : []
+  const transcript = teammateFragments.length > 0
+    ? {
+        agentId: teammateFragments[teammateFragments.length - 1]!.agentId,
+        messages: mergeTeammateTranscriptFragments(teammateFragments),
+      }
+    : await resolveTranscript(sessionId, [
+        resolution.agentId,
+        safeLiveTaskId,
+        notification?.taskId,
+      ])
   const transcriptMessages = transcript.messages
   const truncated = truncateSubagentMessages(transcriptMessages)
   const transcriptUsage = usageFromTranscriptMessages(transcriptMessages)
@@ -346,7 +377,7 @@ export async function getSubagentRunByTool(
   return {
     sessionId,
     toolUseId,
-    agentId: resolution.agentId ?? transcript.agentId,
+    agentId: transcript.agentId ?? normalizeAgentIdHint(resolution.agentId ?? undefined) ?? null,
     ...(notification?.taskId || safeLiveTaskId
       ? { taskId: notification?.taskId || safeLiveTaskId }
       : {}),
