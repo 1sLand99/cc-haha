@@ -10,6 +10,7 @@ import type {
 } from '../types/team'
 import { AGENT_COLORS } from '../types/team'
 import type { TeamMemberStatus, UIMessage } from '../types/chat'
+import { runningTaskForMember } from '../components/agentTeams/agentTeamsModel'
 import { useChatStore, mapHistoryMessagesToUiMessages } from './chatStore'
 import { useTabStore } from './tabStore'
 
@@ -33,6 +34,12 @@ const memberTranscriptCursors = new Map<string, {
 const memberRefreshGenerations = new Map<string, number>()
 const initialMemberSessionLoads = new Map<string, Promise<void>>()
 const workbenchRefreshGenerations = new Map<string, number>()
+type AwaitingMemberReply = {
+  content: string
+  sentAt: number
+  baselineMessageKeys: Set<string>
+}
+const awaitingMemberReplies = new Map<string, AwaitingMemberReply[]>()
 
 function createMemberSessionState() {
   return {
@@ -124,16 +131,24 @@ function isPendingMemberMessage(message: UIMessage): message is Extract<UIMessag
   return message.type === 'user_text' && message.pending === true
 }
 
-function transcriptAlreadyContainsMessage(
+function pendingMessagesWithoutTranscriptEcho(
+  pendingMessages: Array<Extract<UIMessage, { type: 'user_text' }> & { pending: true }>,
   transcriptMessages: UIMessage[],
-  pendingMessage: Extract<UIMessage, { type: 'user_text' }> & { pending: true },
-): boolean {
-  return transcriptMessages.some((message) => (
+): UIMessage[] {
+  const availableEchoes = transcriptMessages.filter((message): message is Extract<UIMessage, { type: 'user_text' }> => (
     message.type === 'user_text' &&
     message.pending !== true &&
-    message.content === pendingMessage.content &&
-    Math.abs(message.timestamp - pendingMessage.timestamp) <= MEMBER_TRANSCRIPT_MATCH_WINDOW_MS
+    !message.teammateFrom
   ))
+  return pendingMessages.filter((pendingMessage) => {
+    const matchIndex = availableEchoes.findIndex((message) => (
+      message.content === pendingMessage.content &&
+      Math.abs(message.timestamp - pendingMessage.timestamp) <= MEMBER_TRANSCRIPT_MATCH_WINDOW_MS
+    ))
+    if (matchIndex < 0) return true
+    availableEchoes.splice(matchIndex, 1)
+    return false
+  })
 }
 
 export function mergeMemberTranscriptMessages(
@@ -146,8 +161,9 @@ export function mergeMemberTranscriptMessages(
     seenIds.add(message.id)
     return true
   })
-  const pendingMessages = existingMessages.filter(isPendingMemberMessage).filter(
-    (message) => !transcriptAlreadyContainsMessage(durableMessages, message),
+  const pendingMessages = pendingMessagesWithoutTranscriptEcho(
+    existingMessages.filter(isPendingMemberMessage),
+    durableMessages,
   )
 
   return pendingMessages.length > 0
@@ -166,18 +182,134 @@ export function mergeMemberTranscriptDelta(
     existingIds.add(message.id)
     return true
   })
-  const pendingMessages = existingMessages.filter(isPendingMemberMessage).filter(
-    message => !transcriptAlreadyContainsMessage(deltaMessages, message),
+  const pendingMessages = pendingMessagesWithoutTranscriptEcho(
+    existingMessages.filter(isPendingMemberMessage),
+    appended,
   )
   return [...durableMessages, ...appended, ...pendingMessages]
 }
 
+function latestWorkbenchSnapshotForTeam(
+  workbenchesBySession: Record<string, TeamWorkbenchTimeline | undefined>,
+  team: TeamDetail,
+): TeamWorkbenchSnapshot | undefined {
+  const leadTimeline = team.leadSessionId
+    ? workbenchesBySession[team.leadSessionId]
+    : undefined
+  if (leadTimeline?.teamName === team.name) {
+    return leadTimeline.snapshots.at(-1)
+  }
+  return Object.values(workbenchesBySession)
+    .find((timeline) => timeline?.teamName === team.name)
+    ?.snapshots.at(-1)
+}
+
+function memberHasActiveTask(
+  member: TeamMember,
+  snapshot: TeamWorkbenchSnapshot | undefined,
+): boolean {
+  if (member.status === 'completed' || member.status === 'error' || snapshot?.deletedAt) {
+    return false
+  }
+  if (!snapshot) return member.status === 'running'
+
+  return Boolean(runningTaskForMember(snapshot.tasks, member))
+}
+
+function memberMessageKey(message: UIMessage): string {
+  const transcriptMessageId = 'transcriptMessageId' in message
+    ? message.transcriptMessageId
+    : undefined
+  return `${message.type}:${transcriptMessageId ?? message.id}`
+}
+
+function isMemberTurnMessage(message: UIMessage): boolean {
+  return message.type === 'user_text' ||
+    message.type === 'assistant_text' ||
+    message.type === 'thinking' ||
+    message.type === 'tool_use' ||
+    message.type === 'tool_result' ||
+    message.type === 'permission_request' ||
+    message.type === 'error'
+}
+
+function memberReplySettlement(
+  messages: UIMessage[],
+  awaiting: AwaitingMemberReply,
+): { settled: boolean; promptKey?: string } {
+  let promptIndex = -1
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]!
+    if (
+      message.type === 'user_text' &&
+      message.pending !== true &&
+      !message.teammateFrom &&
+      !awaiting.baselineMessageKeys.has(memberMessageKey(message)) &&
+      message.content === awaiting.content &&
+      Math.abs(message.timestamp - awaiting.sentAt) <= MEMBER_TRANSCRIPT_MATCH_WINDOW_MS
+    ) {
+      promptIndex = index
+      break
+    }
+  }
+  if (promptIndex < 0) return { settled: false }
+
+  let turnEnd = messages.length
+  const nextPromptOffset = messages.slice(promptIndex + 1).findIndex((message) => (
+    message.type === 'user_text' &&
+    !message.teammateFrom
+  ))
+  if (nextPromptOffset >= 0) {
+    turnEnd = promptIndex + 1 + nextPromptOffset
+  }
+  const turnMessages = messages
+    .slice(promptIndex + 1, turnEnd)
+    .filter(isMemberTurnMessage)
+  const lastMessage = turnMessages.at(-1)
+  return {
+    settled: lastMessage?.type === 'assistant_text' || lastMessage?.type === 'error',
+    promptKey: memberMessageKey(messages[promptIndex]!),
+  }
+}
+
+function removeAwaitingMemberReply(sessionId: string, reply: AwaitingMemberReply) {
+  const remainingReplies = (awaitingMemberReplies.get(sessionId) ?? [])
+    .filter((candidate) => candidate !== reply)
+  if (remainingReplies.length > 0) awaitingMemberReplies.set(sessionId, remainingReplies)
+  else awaitingMemberReplies.delete(sessionId)
+}
+
 function syncMemberSessionMessages(
   sessionId: string,
-  memberStatus: TeamMember['status'],
+  member: TeamMember,
+  snapshot: TeamWorkbenchSnapshot | undefined,
   messages: UIMessage[],
 ) {
-  const hasPendingMessages = messages.some(isPendingMemberMessage)
+  const isTerminal = member.status === 'completed' ||
+    member.status === 'error' ||
+    Boolean(snapshot?.deletedAt)
+  const awaitingReplies = awaitingMemberReplies.get(sessionId) ?? []
+  const unsettledReplies: AwaitingMemberReply[] = []
+  if (!isTerminal) {
+    awaitingReplies.forEach((reply, index) => {
+      const settlement = memberReplySettlement(messages, reply)
+      if (settlement.promptKey) {
+        for (let laterIndex = index + 1; laterIndex < awaitingReplies.length; laterIndex += 1) {
+          awaitingReplies[laterIndex]!.baselineMessageKeys.add(settlement.promptKey)
+        }
+      }
+      if (!settlement.settled) unsettledReplies.push(reply)
+    })
+  }
+  if (unsettledReplies.length === 0) {
+    awaitingMemberReplies.delete(sessionId)
+  } else if (unsettledReplies.length !== awaitingReplies.length) {
+    awaitingMemberReplies.set(sessionId, unsettledReplies)
+  }
+  const isActive = !isTerminal && (
+    memberHasActiveTask(member, snapshot) ||
+    unsettledReplies.length > 0
+  )
   useChatStore.setState((state) => {
     const existing = state.sessions[sessionId]
     const nextState = existing ?? createMemberSessionState()
@@ -188,14 +320,24 @@ function syncMemberSessionMessages(
           ...nextState,
           messages,
           connectionState: 'connected',
-          chatState:
-            memberStatus === 'running' || hasPendingMessages
-              ? 'thinking'
-              : 'idle',
+          chatState: isActive ? 'thinking' : 'idle',
         },
       },
     }
   })
+}
+
+function syncTeamMemberSessions(
+  team: TeamDetail,
+  snapshot: TeamWorkbenchSnapshot | undefined,
+) {
+  const sessions = useChatStore.getState().sessions
+  for (const member of team.members) {
+    const sessionId = memberSessionId(member.agentId)
+    const session = sessions[sessionId]
+    if (!session) continue
+    syncMemberSessionMessages(sessionId, member, snapshot, session.messages)
+  }
 }
 
 type TeamStore = {
@@ -251,6 +393,10 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
       const raw = await teamsApi.get(name) as Record<string, unknown>
       const detail = toTeamDetail(raw)
       set({ activeTeam: detail, memberColors: memberColorsForTeam(detail) })
+      syncTeamMemberSessions(
+        detail,
+        latestWorkbenchSnapshotForTeam(get().workbenchesBySession, detail),
+      )
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err) })
     }
@@ -279,6 +425,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
           },
         },
       }))
+      syncTeamMemberSessions(detail, latest)
     } catch {
       // Workbench discovery supplements the session; an ordinary conversation
       // or a legacy sidecar must still open without an error surface.
@@ -322,6 +469,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
           ),
         },
       }))
+      syncTeamMemberSessions(team, snapshot)
     } catch (err) {
       if (workbenchRefreshGenerations.get(teamName) !== generation) return
       const message = err instanceof Error ? err.message : String(err)
@@ -421,11 +569,25 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
       } else {
         memberTranscriptCursors.delete(sessionId)
       }
-      syncMemberSessionMessages(sessionId, member.status, mergedMessages)
+      const snapshot = latestWorkbenchSnapshotForTeam(
+        get().workbenchesBySession,
+        currentTeam,
+      )
+      syncMemberSessionMessages(sessionId, currentMember, snapshot, mergedMessages)
     } catch {
       if (memberRefreshGenerations.get(sessionId) !== generation) return
+      const currentTeam = get().activeTeam
+      const currentMember = get().getMemberBySessionId(sessionId)
+      if (
+        currentTeam?.name !== team.name ||
+        currentMember?.agentId !== member.agentId
+      ) return
       const existingMessages = useChatStore.getState().sessions[sessionId]?.messages ?? []
-      syncMemberSessionMessages(sessionId, member.status, existingMessages)
+      const snapshot = latestWorkbenchSnapshotForTeam(
+        get().workbenchesBySession,
+        currentTeam,
+      )
+      syncMemberSessionMessages(sessionId, currentMember, snapshot, existingMessages)
     }
   },
 
@@ -476,9 +638,46 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
       throw new Error('Team member session is no longer available')
     }
 
-    await teamsApi.sendMemberMessage(team.name, member.agentId, content)
-    get().startMemberPolling(sessionId, true)
-    await get().refreshMemberSession(sessionId)
+    const messages = useChatStore.getState().sessions[sessionId]?.messages ?? []
+    const optimisticMessage = [...messages].reverse().find((message) => (
+      isPendingMemberMessage(message) && message.content === content
+    ))
+    const awaitingReply: AwaitingMemberReply = {
+      content,
+      sentAt: optimisticMessage?.timestamp ?? Date.now(),
+      baselineMessageKeys: new Set(
+        messages
+          .filter((message) => message.id !== optimisticMessage?.id)
+          .map(memberMessageKey),
+      ),
+    }
+    awaitingMemberReplies.set(sessionId, [
+      ...(awaitingMemberReplies.get(sessionId) ?? []),
+      awaitingReply,
+    ])
+
+    try {
+      await teamsApi.sendMemberMessage(team.name, member.agentId, content)
+      const currentTeam = get().activeTeam
+      const currentMember = get().getMemberBySessionId(sessionId)
+      const snapshot = currentTeam
+        ? latestWorkbenchSnapshotForTeam(get().workbenchesBySession, currentTeam)
+        : undefined
+      const sessionIsAvailable = currentTeam?.name === team.name &&
+        currentMember?.agentId === member.agentId &&
+        currentMember.status !== 'completed' &&
+        currentMember.status !== 'error' &&
+        !snapshot?.deletedAt
+      if (!sessionIsAvailable) {
+        removeAwaitingMemberReply(sessionId, awaitingReply)
+        return
+      }
+      get().startMemberPolling(sessionId, true)
+      await get().refreshMemberSession(sessionId)
+    } catch (error) {
+      removeAwaitingMemberReply(sessionId, awaitingReply)
+      throw error
+    }
   },
 
   startMemberPolling: (sessionId, force = false) => {
@@ -516,6 +715,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
     memberRefreshGenerations.clear()
     initialMemberSessionLoads.clear()
     workbenchRefreshGenerations.clear()
+    awaitingMemberReplies.clear()
     set({
       activeTeam: null,
       memberColors: new Map(),
@@ -573,7 +773,12 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
           }
         }),
       ]
-      set({ activeTeam: { ...team, members: updatedMembers } })
+      const updatedTeam = { ...team, members: updatedMembers }
+      set({ activeTeam: updatedTeam })
+      syncTeamMemberSessions(
+        updatedTeam,
+        latestWorkbenchSnapshotForTeam(get().workbenchesBySession, updatedTeam),
+      )
 
       const currentTabId = useTabStore.getState().activeTabId
       if (currentTabId) {
@@ -596,6 +801,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
     memberTranscriptCursors.clear()
     memberRefreshGenerations.clear()
     workbenchRefreshGenerations.delete(teamName)
+    awaitingMemberReplies.clear()
     set((state) => {
       const deletedAt = new Date().toISOString()
       const workbenchesBySession = { ...state.workbenchesBySession }
@@ -633,5 +839,12 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
         workbenchesBySession,
       }
     })
+    const completedTeam = get().activeTeam
+    if (completedTeam?.name === teamName) {
+      syncTeamMemberSessions(
+        completedTeam,
+        latestWorkbenchSnapshotForTeam(get().workbenchesBySession, completedTeam),
+      )
+    }
   },
 }))

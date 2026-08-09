@@ -7,6 +7,7 @@ import { openPreviewLink } from '../../lib/openPreviewLink'
 import { splitTextByUrls } from '../../lib/urlBoundary'
 import { AttachmentGallery } from './AttachmentGallery'
 import { MessageActionBar, type MessageBranchAction } from './MessageActionBar'
+import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 
 type Props = {
   content: string
@@ -35,15 +36,17 @@ export const UserMessage = memo(function UserMessage({
   const t = useTranslation()
   const hasText = content.trim().length > 0
 
-  // The prompt is literal text, NOT markdown — `**`, `#` and file paths have to
-  // stay exactly as the user typed them. So instead of running it through the
-  // markdown renderer we only split the bare URLs out and wrap those.
+  // The operator's prompt is literal text, NOT markdown — `**`, `#` and file
+  // paths have to stay exactly as typed. Teammate traffic is rendered separately
+  // below because agent-to-agent messages intentionally use Markdown.
   const segments = useMemo(() => splitTextByUrls(content), [content])
 
   const handleLinkClick = useCallback(
-    (event: ReactMouseEvent<HTMLAnchorElement>, href: string) => {
-      if (!sessionId) return
-      if (openPreviewLink(href, sessionId)) event.preventDefault()
+    (href: string, event: ReactMouseEvent<HTMLElement>): boolean => {
+      if (!sessionId) return false
+      const handled = openPreviewLink(href, sessionId)
+      if (handled) event.preventDefault()
+      return handled
     },
     [sessionId],
   )
@@ -56,7 +59,7 @@ export const UserMessage = memo(function UserMessage({
         target="_blank"
         rel="noreferrer noopener"
         className="text-[var(--color-text-accent)] underline decoration-[1px] underline-offset-[3px] decoration-[var(--color-text-accent)] [overflow-wrap:anywhere] hover:decoration-[2px]"
-        onClick={(event) => handleLinkClick(event, segment.value)}
+        onClick={(event) => handleLinkClick(segment.value, event)}
       >
         {segment.value}
       </a>
@@ -112,10 +115,14 @@ export const UserMessage = memo(function UserMessage({
             {hasText && (
               <div
                 data-message-body="teammate"
-                className="min-w-0 max-w-full whitespace-pre-wrap break-words rounded-[var(--radius-lg)] border-l-2 border-[var(--color-brand)] bg-[var(--color-surface-container)] px-[16px] py-[12px] text-[14px] leading-relaxed text-[var(--color-text-primary)]"
+                className="min-w-0 max-w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container)] px-[16px] py-[12px] text-[14px] leading-relaxed text-[var(--color-text-primary)]"
                 style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
               >
-                {body}
+                <MarkdownRenderer
+                  content={content}
+                  onLinkClick={sessionId ? handleLinkClick : undefined}
+                  className="[&>:first-child]:mt-0 [&>:last-child]:mb-0 [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_h4]:text-sm"
+                />
               </div>
             )}
           </div>

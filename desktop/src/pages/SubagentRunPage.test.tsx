@@ -5,8 +5,9 @@ import type { SubagentRunResponse } from '../api/subagents'
 import { useSettingsStore } from '../stores/settingsStore'
 import { setComposerText } from '../components/chat/composerTestUtils'
 
-const { getMemberTranscriptMock, sendMemberMessageMock } = vi.hoisted(() => ({
+const { getMemberTranscriptMock, getWorkbenchMock, sendMemberMessageMock } = vi.hoisted(() => ({
   getMemberTranscriptMock: vi.fn(),
+  getWorkbenchMock: vi.fn(),
   sendMemberMessageMock: vi.fn(),
 }))
 
@@ -26,7 +27,7 @@ vi.mock('../api/teams', () => ({
     getMemberTranscript: getMemberTranscriptMock,
     sendMemberMessage: sendMemberMessageMock,
     getWorkbenchForSession: vi.fn(),
-    getWorkbench: vi.fn(),
+    getWorkbench: getWorkbenchMock,
     get: vi.fn(),
     list: vi.fn(),
     delete: vi.fn(),
@@ -87,6 +88,7 @@ describe('SubagentRunPage', () => {
     useTabStore.setState({ tabs: [], activeTabId: null })
     useTeamStore.getState().clearTeam()
     getMemberTranscriptMock.mockReset()
+    getWorkbenchMock.mockReset()
     sendMemberMessageMock.mockReset()
     sendMemberMessageMock.mockResolvedValue({ ok: true })
     localStorage.clear()
@@ -165,6 +167,12 @@ describe('SubagentRunPage', () => {
       status: 'running' as const,
       currentTask: 'Review auth changes',
     }
+    const peer = {
+      agentId: 'api-reviewer@review-team',
+      name: 'api-reviewer',
+      role: 'api-reviewer',
+      status: 'running' as const,
+    }
     const snapshot = {
       version: 'v1',
       generatedAt: '2026-08-09T00:00:00.000Z',
@@ -172,7 +180,7 @@ describe('SubagentRunPage', () => {
         name: 'review-team',
         leadAgentId: 'lead@review-team',
         leadSessionId: 'lead-session',
-        members: [member],
+        members: [member, peer],
       },
       tasks: [],
       messages: [],
@@ -182,7 +190,13 @@ describe('SubagentRunPage', () => {
         {
           id: 'lead-message',
           type: 'user',
-          content: '<teammate-message teammate_id="team-lead">Prioritize the auth flow.</teammate-message>',
+          content: '<teammate-message teammate_id="team-lead">**Prioritize** the auth flow.\n\n- Verify sessions</teammate-message>',
+          timestamp: TRANSCRIPT_TIMESTAMP,
+        },
+        {
+          id: 'peer-message',
+          type: 'user',
+          content: '<teammate-message teammate_id="api-reviewer">Check `src/auth.ts` before merge.</teammate-message>',
           timestamp: TRANSCRIPT_TIMESTAMP,
         },
         {
@@ -219,8 +233,24 @@ describe('SubagentRunPage', () => {
     )
 
     expect(await screen.findByTestId('team-member-conversation')).toHaveTextContent('Auth review is in progress.')
-    expect(screen.getByTestId('team-member-conversation')).toHaveTextContent('Prioritize the auth flow.')
-    expect(screen.getByTestId('teammate-message-avatar')).toHaveAttribute('data-avatar-key', 'team-lead')
+    const transcript = screen.getByTestId('team-member-conversation')
+    expect(transcript).toHaveTextContent('Prioritize the auth flow.')
+    expect(transcript).toHaveTextContent('Check src/auth.ts before merge.')
+    // Drive the real transcript adapter: both lead-to-member and member-to-member
+    // communication must arrive at the shared message renderer as Markdown.
+    expect(screen.getByText('Prioritize').tagName).toBe('STRONG')
+    expect(screen.getByText('src/auth.ts').tagName).toBe('CODE')
+    expect(transcript.querySelectorAll('[data-message-body="teammate"]')).toHaveLength(2)
+    const leadShell = transcript.querySelector<HTMLElement>(
+      '[data-message-shell="teammate"][data-teammate-from="team-lead"]',
+    )
+    const peerShell = transcript.querySelector<HTMLElement>(
+      '[data-message-shell="teammate"][data-teammate-from="api-reviewer"]',
+    )
+    expect(leadShell).toBeTruthy()
+    expect(peerShell).toBeTruthy()
+    expect(leadShell?.querySelector('[data-testid="teammate-message-avatar"]'))
+      .toHaveAttribute('data-avatar-key', 'team-lead')
     expect(screen.getByTestId('agent-run-desktop')).toHaveAttribute('data-agent-run-kind', 'team-member')
     expect(screen.getByText('Review auth changes')).toBeInTheDocument()
     expect(screen.queryByTestId('team-member-readonly-note')).not.toBeInTheDocument()
@@ -272,6 +302,196 @@ describe('SubagentRunPage', () => {
     transcript.resolve({ messages: [] })
     expect(await screen.findByTestId('team-member-conversation')).toBeInTheDocument()
     expect(getMemberTranscriptMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('settles a completed member task without losing direct-message activity', async () => {
+    const member = {
+      agentId: 'ui-designer@review-team',
+      name: 'ui-designer',
+      role: 'ui-designer',
+      status: 'running' as const,
+    }
+    const workbench = (
+      version: string,
+      taskStatus: 'in_progress' | 'completed',
+      owner: string | null = 'ui-designer',
+    ) => ({
+      version,
+      generatedAt: `2026-08-09T00:00:0${version.slice(-1)}.000Z`,
+      team: {
+        name: 'review-team',
+        leadSessionId: 'lead-session',
+        members: [member],
+      },
+      tasks: [{
+        id: 'design-system',
+        subject: 'Build the design system',
+        description: 'Create the shared primitives',
+        ...(owner ? { owner } : {}),
+        status: taskStatus,
+        blocks: [],
+        blockedBy: [],
+        taskListId: 'review-team',
+      }],
+      messages: [],
+    })
+    const directReply = deferred<{ ok: true }>()
+    const directMessageTimestamp = new Date().toISOString()
+    const initialTranscriptMessage = {
+      id: 'initial-progress',
+      type: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'Check the token architecture before delivery.' },
+        { type: 'text', text: 'The design system is in progress.' },
+      ],
+      timestamp: TRANSCRIPT_TIMESTAMP,
+    }
+
+    getWorkbenchMock
+      .mockResolvedValueOnce(workbench('v1', 'in_progress'))
+      .mockResolvedValueOnce(workbench('v2', 'completed'))
+      .mockResolvedValueOnce(workbench('v3', 'in_progress', null))
+    getMemberTranscriptMock
+      .mockResolvedValueOnce({
+        messages: [initialTranscriptMessage],
+        signature: 'signature-1',
+        cursor: 'cursor-1',
+        afterOrdinal: 0,
+      })
+      .mockResolvedValueOnce({
+        messages: [
+          initialTranscriptMessage,
+          {
+            id: 'full-reset-marker',
+            type: 'assistant',
+            content: [{ type: 'text', text: 'Historical reset marker.' }],
+            timestamp: TRANSCRIPT_TIMESTAMP,
+          },
+        ],
+        reset: true,
+        signature: 'signature-2',
+        cursor: 'cursor-2',
+        afterOrdinal: 0,
+      })
+      .mockResolvedValueOnce({
+        messages: [{
+          id: 'direct-message-echo',
+          type: 'user',
+          content: 'Please verify the final tokens.',
+          timestamp: directMessageTimestamp,
+        }],
+        signature: 'signature-3',
+        cursor: 'cursor-3',
+        afterOrdinal: 1,
+      })
+      .mockResolvedValueOnce({
+        messages: [{
+          id: 'direct-message-reply',
+          type: 'assistant',
+          content: [{ type: 'text', text: 'The final tokens are verified.' }],
+          timestamp: directMessageTimestamp,
+        }],
+        signature: 'signature-4',
+        cursor: 'cursor-4',
+        afterOrdinal: 2,
+      })
+    sendMemberMessageMock.mockReturnValue(directReply.promise)
+
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('review-team')
+    })
+    expect(
+      useTeamStore.getState().workbenchesBySession['lead-session']?.snapshots.at(-1)
+        ?.tasks[0]?.status,
+    ).toBe('in_progress')
+    useTeamStore.getState().openMemberSession(member)
+
+    render(
+      <TeamMemberRunPage
+        tabId="team-member:ui-designer@review-team"
+        leadSessionId="lead-session"
+        agentId={member.agentId}
+        title="ui-designer"
+      />,
+    )
+
+    expect(await screen.findByTestId('turn-status-indicator')).toHaveTextContent('Thinking...')
+    useTeamStore.getState().stopMemberPolling()
+
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('review-team')
+    })
+    expect(
+      useTeamStore.getState().workbenchesBySession['lead-session']?.snapshots.at(-1)
+        ?.tasks[0]?.status,
+    ).toBe('completed')
+    await waitFor(() => {
+      expect(screen.queryByTestId('turn-status-indicator')).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('button', { name: /Thought/ })).toBeInTheDocument()
+
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('review-team')
+    })
+    expect(
+      useTeamStore.getState().workbenchesBySession['lead-session']?.snapshots.at(-1)
+        ?.tasks[0]?.owner,
+    ).toBeUndefined()
+    expect(screen.queryByTestId('turn-status-indicator')).not.toBeInTheDocument()
+
+    setComposerText('Please verify the final tokens.', 31)
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+    await waitFor(() => {
+      expect(sendMemberMessageMock).toHaveBeenCalledWith(
+        'review-team',
+        member.agentId,
+        'Please verify the final tokens.',
+      )
+    })
+    const memberSessionId = 'team-member:ui-designer@review-team'
+    await waitFor(() => {
+      const matchingPrompts = useChatStore.getState().sessions[memberSessionId]?.messages
+        .filter((message) => message.type === 'user_text' && message.content === 'Please verify the final tokens.')
+      expect(matchingPrompts).toHaveLength(1)
+      expect(matchingPrompts?.[0]).toMatchObject({ pending: true })
+    })
+    expect(screen.getByText('Please verify the final tokens.')).toBeInTheDocument()
+    expect(screen.getByTestId('turn-status-indicator')).toHaveTextContent('Thinking...')
+
+    await act(async () => {
+      directReply.resolve({ ok: true })
+      await directReply.promise
+    })
+    await waitFor(() => expect(getMemberTranscriptMock).toHaveBeenCalledTimes(2))
+    useTeamStore.getState().stopMemberPolling()
+    expect(await screen.findByText('Historical reset marker.')).toBeInTheDocument()
+    expect(screen.getByTestId('turn-status-indicator')).toHaveTextContent('Thinking...')
+    expect(
+      useChatStore.getState().sessions[memberSessionId]?.messages
+        .find((message) => message.type === 'user_text' && message.content === 'Please verify the final tokens.'),
+    ).toMatchObject({ pending: true })
+
+    await act(async () => {
+      await useTeamStore.getState().refreshMemberSession(memberSessionId)
+    })
+    await waitFor(() => {
+      const matchingPrompts = useChatStore.getState().sessions[memberSessionId]?.messages
+        .filter((message) => message.type === 'user_text' && message.content === 'Please verify the final tokens.')
+      expect(matchingPrompts).toHaveLength(1)
+      expect(matchingPrompts?.[0]).toMatchObject({ id: 'direct-message-echo' })
+      expect(matchingPrompts?.[0]?.type === 'user_text' && matchingPrompts[0].pending)
+        .not.toBe(true)
+    })
+    expect(screen.getByTestId('turn-status-indicator')).toHaveTextContent('Thinking...')
+
+    await act(async () => {
+      await useTeamStore.getState().refreshMemberSession(memberSessionId)
+    })
+    expect(await screen.findByText('The final tokens are verified.')).toBeInTheDocument()
+    expect(getMemberTranscriptMock).toHaveBeenCalledTimes(4)
+    await waitFor(() => {
+      expect(screen.queryByTestId('turn-status-indicator')).not.toBeInTheDocument()
+    })
   })
 
   it('hides the composer for a one-shot SubAgent and explains why', async () => {

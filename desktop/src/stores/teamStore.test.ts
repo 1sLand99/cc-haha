@@ -14,11 +14,13 @@ const {
   getWorkbenchForSessionMock,
   getWorkbenchMock,
   getTeamMock,
+  sendMemberMessageMock,
 } = vi.hoisted(() => ({
   getMemberTranscriptMock: vi.fn(),
   getWorkbenchForSessionMock: vi.fn(),
   getWorkbenchMock: vi.fn(),
   getTeamMock: vi.fn(),
+  sendMemberMessageMock: vi.fn(),
 }))
 
 vi.mock('../api/teams', () => ({
@@ -28,7 +30,7 @@ vi.mock('../api/teams', () => ({
     getWorkbench: getWorkbenchMock,
     list: vi.fn(),
     get: getTeamMock,
-    sendMemberMessage: vi.fn(),
+    sendMemberMessage: sendMemberMessageMock,
     delete: vi.fn(),
   },
 }))
@@ -41,6 +43,14 @@ function userMessage(id: string, content: string, timestamp: number, pending = f
     timestamp,
     ...(pending ? { pending: true } : {}),
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve
+  })
+  return { promise, resolve }
 }
 
 function workbench(version: string, taskStatus: 'pending' | 'in_progress' | 'completed'): TeamWorkbenchSnapshot {
@@ -76,6 +86,8 @@ describe('teamStore incremental transcript polling', () => {
     getWorkbenchForSessionMock.mockReset()
     getWorkbenchMock.mockReset()
     getTeamMock.mockReset()
+    sendMemberMessageMock.mockReset()
+    sendMemberMessageMock.mockResolvedValue({ ok: true })
     useTeamStore.getState().clearTeam()
     useChatStore.setState({ sessions: {} })
   })
@@ -98,6 +110,20 @@ describe('teamStore incremental transcript polling', () => {
     const merged = mergeMemberTranscriptDelta(existing, delta)
 
     expect(merged.map(message => message.id)).toEqual(['durable-1', 'server-1'])
+  })
+
+  it('consumes one durable echo for only one repeated pending message', () => {
+    const existing = [
+      userMessage('pending-1', 'repeat this', 1_000, true),
+      userMessage('pending-2', 'repeat this', 1_001, true),
+    ]
+
+    const merged = mergeMemberTranscriptDelta(
+      existing,
+      [userMessage('server-1', 'repeat this', 1_100)],
+    )
+
+    expect(merged.map(message => message.id)).toEqual(['server-1', 'pending-2'])
   })
 
   it('deduplicates a full transcript by identity without dropping a genuine repeat', () => {
@@ -335,6 +361,118 @@ describe('teamStore incremental transcript polling', () => {
     await vi.advanceTimersByTimeAsync(2_000)
     expect(getMemberTranscriptMock).toHaveBeenCalledTimes(1)
     useTabStore.getState().closeTab('team-member:reviewer@archived-team')
+  })
+
+  it('keeps concurrent direct turns active until every durable reply arrives', async () => {
+    const firstDelivery = deferred<{ ok: true }>()
+    const secondDelivery = deferred<{ ok: true }>()
+    const timestamp = new Date().toISOString()
+    sendMemberMessageMock
+      .mockReturnValueOnce(firstDelivery.promise)
+      .mockReturnValueOnce(secondDelivery.promise)
+    getWorkbenchMock.mockResolvedValue(workbench('v1', 'completed'))
+    getMemberTranscriptMock
+      .mockResolvedValueOnce({
+        messages: [],
+        signature: 'signature-0',
+        cursor: 'cursor-0',
+        afterOrdinal: 0,
+      })
+      .mockResolvedValueOnce({
+        messages: [
+          { id: 'first-echo', type: 'user', content: 'Repeat follow-up', timestamp },
+          {
+            id: 'first-reply',
+            type: 'assistant',
+            content: [{ type: 'text', text: 'First reply' }],
+            timestamp,
+          },
+        ],
+        signature: 'signature-1',
+        cursor: 'cursor-1',
+        afterOrdinal: 2,
+      })
+      .mockResolvedValueOnce({
+        messages: [{ id: 'second-echo', type: 'user', content: 'Repeat follow-up', timestamp }],
+        signature: 'signature-2',
+        cursor: 'cursor-2',
+        afterOrdinal: 3,
+      })
+      .mockResolvedValueOnce({
+        messages: [{
+          id: 'second-reply',
+          type: 'assistant',
+          content: [{ type: 'text', text: 'Second reply' }],
+          timestamp,
+        }],
+        signature: 'signature-3',
+        cursor: 'cursor-3',
+        afterOrdinal: 4,
+      })
+
+    await useTeamStore.getState().fetchWorkbench('team-workbench')
+    const sessionId = 'team-member:worker@team-workbench'
+    await useTeamStore.getState().refreshMemberSession(sessionId)
+
+    useChatStore.getState().sendMessage(sessionId, 'Repeat follow-up')
+    useChatStore.getState().sendMessage(sessionId, 'Repeat follow-up')
+    expect(useChatStore.getState().sessions[sessionId]?.chatState).toBe('thinking')
+
+    firstDelivery.resolve({ ok: true })
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().sessions[sessionId]?.messages
+          .some((message) => message.type === 'assistant_text' && message.content === 'First reply'),
+      ).toBe(true)
+    })
+    expect(useChatStore.getState().sessions[sessionId]?.chatState).toBe('thinking')
+    expect(
+      useChatStore.getState().sessions[sessionId]?.messages
+        .filter((message) => message.type === 'user_text' && message.content === 'Repeat follow-up'),
+    ).toHaveLength(2)
+    expect(
+      useChatStore.getState().sessions[sessionId]?.messages
+        .filter((message) => message.type === 'user_text' && message.pending === true),
+    ).toHaveLength(1)
+
+    secondDelivery.resolve({ ok: true })
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().sessions[sessionId]?.messages
+          .some((message) => message.id === 'second-echo'),
+      ).toBe(true)
+    })
+    useTeamStore.getState().stopMemberPolling()
+    expect(useChatStore.getState().sessions[sessionId]?.chatState).toBe('thinking')
+
+    await useTeamStore.getState().refreshMemberSession(sessionId)
+    expect(useChatStore.getState().sessions[sessionId]?.chatState).toBe('idle')
+    expect(
+      useChatStore.getState().sessions[sessionId]?.messages
+        .filter((message) => message.type === 'assistant_text')
+        .map((message) => message.content),
+    ).toEqual(['First reply', 'Second reply'])
+  })
+
+  it('does not restart a deleted member session after an in-flight delivery resolves', async () => {
+    vi.useFakeTimers()
+    const delivery = deferred<{ ok: true }>()
+    sendMemberMessageMock.mockReturnValue(delivery.promise)
+    getWorkbenchMock.mockResolvedValue(workbench('v1', 'in_progress'))
+    getMemberTranscriptMock.mockResolvedValue({ messages: [] })
+
+    await useTeamStore.getState().fetchWorkbench('team-workbench')
+    const sessionId = 'team-member:worker@team-workbench'
+    await useTeamStore.getState().refreshMemberSession(sessionId)
+    const send = useTeamStore.getState().sendMessageToMember(sessionId, 'Final check')
+
+    useTeamStore.getState().handleTeamDeleted('team-workbench')
+    delivery.resolve({ ok: true })
+    await send
+    await vi.advanceTimersByTimeAsync(1_500)
+
+    expect(getMemberTranscriptMock).toHaveBeenCalledTimes(1)
+    expect(useChatStore.getState().sessions[sessionId]?.chatState).toBe('idle')
   })
 })
 
