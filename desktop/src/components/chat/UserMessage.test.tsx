@@ -139,6 +139,23 @@ describe('UserMessage bare-URL linkify', () => {
     expect(container.firstElementChild?.className).toContain('justify-start')
   })
 
+  it('uses the teammate character supplied by the Agent Teams identity map', () => {
+    render(
+      <UserMessage
+        content="Review the auth diff."
+        teammateFrom="team-lead"
+        teammateAvatarSrc="/agent-teams/team-lead.png"
+        teammateAvatarKey="team-lead"
+        teammateAccent="var(--color-brand)"
+      />,
+    )
+
+    const avatar = screen.getByTestId('teammate-message-avatar')
+    expect(avatar.getAttribute('data-avatar-key')).toBe('team-lead')
+    expect(avatar.querySelector('img')?.getAttribute('src')).toBe('/agent-teams/team-lead.png')
+    expect(avatar.querySelector('span')?.style.background).toBe('var(--color-brand)')
+  })
+
   it('keeps an ordinary prompt in the right-aligned user bubble', () => {
     const { container } = render(<UserMessage content="Review the auth diff." />)
 

@@ -16,9 +16,22 @@ type Props = {
   sessionId?: string
   /** Set when this turn came from another agent rather than from the user. */
   teammateFrom?: string
+  teammateAvatarSrc?: string
+  teammateAvatarKey?: string
+  teammateAccent?: string
 }
 
-export const UserMessage = memo(function UserMessage({ content, attachments, branchAction, timestamp, sessionId, teammateFrom }: Props) {
+export const UserMessage = memo(function UserMessage({
+  content,
+  attachments,
+  branchAction,
+  timestamp,
+  sessionId,
+  teammateFrom,
+  teammateAvatarSrc,
+  teammateAvatarKey,
+  teammateAccent,
+}: Props) {
   const t = useTranslation()
   const hasText = content.trim().length > 0
 
@@ -64,8 +77,28 @@ export const UserMessage = memo(function UserMessage({ content, attachments, bra
           data-teammate-from={teammateFrom}
           className="group flex min-w-0 max-w-[82%] flex-col items-start sm:max-w-[78%] lg:max-w-[680px]"
         >
-          <div className="mb-1 flex min-w-0 items-center gap-1.5 px-0.5 text-[11px] text-[var(--color-text-tertiary)]">
-            <UsersRound size={12} strokeWidth={2.2} aria-hidden="true" className="shrink-0 text-[var(--color-brand)]" />
+          <div className="mb-1 flex min-w-0 items-center gap-2 px-0.5 text-[11px] text-[var(--color-text-tertiary)]">
+            {teammateAvatarSrc ? (
+              <span
+                data-testid="teammate-message-avatar"
+                data-avatar-key={teammateAvatarKey}
+                aria-hidden="true"
+                className="relative h-8 w-7 shrink-0"
+              >
+                <img
+                  src={teammateAvatarSrc}
+                  alt=""
+                  draggable={false}
+                  className="h-full w-full select-none object-contain drop-shadow-[0_2px_2px_rgba(0,0,0,0.14)]"
+                />
+                <span
+                  className="absolute bottom-0 left-1/2 h-1 w-4 -translate-x-1/2 rounded-full border border-[var(--color-surface)]"
+                  style={{ background: teammateAccent }}
+                />
+              </span>
+            ) : (
+              <UsersRound size={12} strokeWidth={2.2} aria-hidden="true" className="shrink-0 text-[var(--color-brand)]" />
+            )}
             <span className="min-w-0 truncate font-mono font-bold text-[var(--color-text-secondary)]">
               {teammateFrom}
             </span>

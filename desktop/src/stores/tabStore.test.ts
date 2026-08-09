@@ -184,6 +184,34 @@ describe('tabStore', () => {
     }))
   })
 
+  it('returns an ephemeral Agent Teams member to its workbench tab', () => {
+    useTabStore.getState().openTab('session-1', 'Lead session')
+    const workbenchTabId = useTabStore.getState().openTeamWorkbenchTab('session-1', 'Review team')
+    const memberTabId = useTabStore.getState().openTeamMemberTab(
+      'session-1',
+      'reviewer@review-team',
+      'Reviewer',
+      workbenchTabId,
+    )
+
+    expect(useTabStore.getState().tabs.find((tab) => tab.sessionId === memberTabId)).toMatchObject({
+      type: 'team-member',
+      sourceSessionId: 'session-1',
+      teamLeadSessionId: 'session-1',
+      teamMemberAgentId: 'reviewer@review-team',
+      returnTabId: workbenchTabId,
+    })
+    expect(localStorage.getItem('cc-haha-open-tabs')).toBe(JSON.stringify({
+      openTabs: [{ sessionId: 'session-1', title: 'Lead session', type: 'session' }],
+      activeTabId: 'session-1',
+    }))
+
+    useTabStore.getState().returnFromTeamMember(memberTabId)
+
+    expect(useTabStore.getState().activeTabId).toBe(workbenchTabId)
+    expect(useTabStore.getState().tabs.some((tab) => tab.sessionId === memberTabId)).toBe(false)
+  })
+
   it('does not let async tab restore overwrite tabs opened while restore is in flight', async () => {
     let resolveSessions: (value: unknown) => void = () => {}
     vi.mocked(sessionsApi.list).mockReturnValueOnce(new Promise((resolve) => {

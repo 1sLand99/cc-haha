@@ -457,7 +457,7 @@ describe('TabBar', () => {
     expect(useActivityPanelStore.getState().isOpen(sessionId)).toBe(true)
   })
 
-  it('leaves the team entry to the session-header strip and only reacts to the open state', async () => {
+  it('leaves the team entry to the session-header strip', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')
     const { useChatStore } = await import('../../stores/chatStore')
@@ -504,21 +504,10 @@ describe('TabBar', () => {
     // workspace entry stays reachable.
     expect(screen.getByRole('button', { name: 'Show Workspace' })).toBeInTheDocument()
 
-    await act(async () => {
-      useTeamStore.getState().setWorkbenchOpen(sessionId, true)
-    })
-
-    // Only an open report suppresses the activity rail — the two would
-    // otherwise fight over the same edge of the window.
-    expect(screen.queryByRole('button', { name: /activity/i })).not.toBeInTheDocument()
-
-    await act(async () => {
-      useTeamStore.getState().setWorkbenchOpen(sessionId, false)
-    })
-    expect(useTeamStore.getState().workbenchOpenBySession[sessionId]).toBe(false)
+    expect(useTeamStore.getState().workbenchesBySession[sessionId]?.snapshots).toHaveLength(1)
   })
 
-  it('lets the workspace panel evict an open team workbench from the shared slot', async () => {
+  it('opens the workspace panel without mutating the team workbench timeline', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')
     const { useChatStore } = await import('../../stores/chatStore')
@@ -540,7 +529,6 @@ describe('TabBar', () => {
     } as Partial<ReturnType<typeof useChatStore.getState>>)
     useTeamStore.setState({
       workbenchesBySession: { [sessionId]: teamWorkbenchTimeline(sessionId) },
-      workbenchOpenBySession: { [sessionId]: true },
     } as Partial<ReturnType<typeof useTeamStore.getState>>)
 
     await act(async () => {
@@ -549,8 +537,8 @@ describe('TabBar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Show Workspace' }))
 
-    expect(useTeamStore.getState().workbenchOpenBySession[sessionId]).toBe(false)
     expect(useWorkspacePanelStore.getState().isPanelOpen(sessionId)).toBe(true)
+    expect(useTeamStore.getState().workbenchesBySession[sessionId]?.snapshots).toHaveLength(1)
   })
 
   it('hides team-only activity when the active team belongs to another session', async () => {

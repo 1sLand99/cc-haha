@@ -5,6 +5,8 @@ import {
   SETTINGS_TAB_ID,
   MARKET_TAB_ID,
   SUBAGENT_TAB_PREFIX,
+  TEAM_MEMBER_TAB_PREFIX,
+  TEAM_TAB_PREFIX,
   TERMINAL_TAB_PREFIX,
   TRACE_LIST_TAB_ID,
   TRACE_TAB_PREFIX,
@@ -19,7 +21,6 @@ import { isPlaceholderSessionTitle } from '../../lib/sessionTitle'
 import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
 import { useTerminalPanelStore } from '../../stores/terminalPanelStore'
 import { useCLITaskStore } from '../../stores/cliTaskStore'
-import { isAgentTeamsWorkbenchOpen as isAgentTeamsWorkbenchOpenFor, useTeamStore } from '../../stores/teamStore'
 import { StatusDot } from '@/components/ui/Badge'
 import { IconButton } from '@/components/ui/IconButton'
 import { useDismissable } from '@/hooks/useDismissable'
@@ -66,6 +67,8 @@ const TAB_TYPE_ICON: Partial<Record<TabType, string>> = {
   traces: 'account_tree',
   workbench: 'view_sidebar',
   subagent: 'smart_toy',
+  team: 'account_tree',
+  'team-member': 'smart_toy',
 }
 const TAB_TYPE_ICON_FALLBACK = 'tab'
 const desktopHost = getDesktopHost()
@@ -94,7 +97,9 @@ function isSessionTabId(tabId: string | null) {
     !tabId.startsWith(TERMINAL_TAB_PREFIX) &&
     !tabId.startsWith(TRACE_TAB_PREFIX) &&
     !tabId.startsWith(WORKBENCH_TAB_PREFIX) &&
-    !tabId.startsWith(SUBAGENT_TAB_PREFIX)
+    !tabId.startsWith(SUBAGENT_TAB_PREFIX) &&
+    !tabId.startsWith(TEAM_TAB_PREFIX) &&
+    !tabId.startsWith(TEAM_MEMBER_TAB_PREFIX)
 }
 
 export function TabBar() {
@@ -131,10 +136,7 @@ export function TabBar() {
   const workbenchMode = useWorkspacePanelStore((state) =>
     activeTabId && isActiveSessionTab ? state.getMode(activeTabId) : 'workspace',
   )
-  const isAgentTeamsWorkbenchOpen = useTeamStore((state) =>
-    isAgentTeamsWorkbenchOpenFor(state, activeTabId),
-  )
-  const isWorkspacePanelOpen = !isAgentTeamsWorkbenchOpen && isWorkbenchOpen && workbenchMode === 'workspace'
+  const isWorkspacePanelOpen = isWorkbenchOpen && workbenchMode === 'workspace'
   const isTerminalPanelOpen = useTerminalPanelStore((state) =>
     activeTabId && isActiveSessionTab ? state.isPanelOpen(activeTabId) : false,
   )
@@ -173,8 +175,7 @@ export function TabBar() {
   }))
   const showActivityButton = activeTabId &&
     activityState.hasVisibleActivity &&
-    !isWorkbenchOpen &&
-    !isAgentTeamsWorkbenchOpen
+    !isWorkbenchOpen
 
   const moveTab = useTabStore((s) => s.moveTab)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -593,10 +594,7 @@ export function TabBar() {
         {isDesktopRuntime && isActiveSessionTab && (
           <OpenProjectMenu path={openProjectPath} />
         )}
-        {/* No team toggle here: AgentTeamsStrip in the session header is the
-            entry point, and it carries the team name, roster and progress that
-            a bare icon cannot. Both render under exactly the same condition,
-            so a second toggle was only ever a duplicate. */}
+        {/* AgentTeamsStrip in the session header opens the full workbench. */}
         <IconButton
           icon={<SquareTerminal size={17} strokeWidth={1.9} />}
           label={t('tabs.openTerminal')}
@@ -621,7 +619,6 @@ export function TabBar() {
               if (workbench.isPanelOpen(activeTabId) && workbench.getMode(activeTabId) === 'workspace') {
                 workbench.closePanel(activeTabId)
               } else {
-                useTeamStore.getState().setWorkbenchOpen(activeTabId, false)
                 workbench.setMode(activeTabId, 'workspace')
                 workbench.openPanel(activeTabId)
               }

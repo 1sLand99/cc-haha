@@ -2200,9 +2200,9 @@ body.sidebar-resizing * {
   display: flow-root;
   /* Owned here rather than on the message components, so a turn's internal
      rhythm is retunable in one place — and so every surface that shows a
-     transcript inherits it. SubagentRunPage and AgentTeamsMemberView both
-     render MessageList itself, so blocks carry no bottom margin of their own
-     and nothing downstream has to re-derive the spacing. */
+     transcript inherits it. The shared agent run desktop renders MessageList
+     itself, so blocks carry no bottom margin of their own and nothing
+     downstream has to re-derive the spacing. */
   padding-bottom: 8px;
 }
 
