@@ -41,6 +41,7 @@ import { AgentTeamsReport } from '../components/agentTeams/AgentTeamsReport'
 import { AgentTeamsStrip } from '../components/agentTeams/AgentTeamsSummary'
 import { SessionActivityPanel } from '../components/activity/SessionActivityPanel'
 import { buildSessionActivityModel, hasVisibleSessionActivity } from '../components/activity/sessionActivityModel'
+import { runsForSession, useWorkflowStore } from '../stores/workflowStore'
 import { TerminalSettings } from './TerminalSettings'
 import type { SessionListItem } from '../types/session'
 import type { ActiveGoalState, TokenUsage } from '../types/chat'
@@ -519,6 +520,14 @@ export function ActiveSession() {
     [dismissedBackgroundTaskKeyList],
   )
   const agentTaskNotifications = sessionState?.agentTaskNotifications ?? EMPTY_AGENT_TASK_NOTIFICATIONS
+  // Subscribe to the stable `runs` record and derive the per-session list here:
+  // a selector that filtered would allocate a new array on every store read,
+  // which zustand compares by identity and would re-render forever.
+  const allWorkflowRuns = useWorkflowStore(state => state.runs)
+  const workflowRuns = useMemo(
+    () => (activeTabId ? runsForSession({ runs: allWorkflowRuns }, activeTabId) : []),
+    [allWorkflowRuns, activeTabId],
+  )
   const activeGoal = sessionState?.activeGoal ?? null
   const isEmpty =
     messages.length === 0 &&
@@ -570,6 +579,7 @@ export function ActiveSession() {
       backgroundTasks,
       dismissedBackgroundTaskKeys,
       agentNotifications: Object.values(agentTaskNotifications),
+      workflowRuns,
     })
   }, [
     activeTabId,
@@ -581,6 +591,7 @@ export function ActiveSession() {
     dismissedBackgroundTaskKeys,
     messages,
     trackedTaskSessionId,
+    workflowRuns,
   ])
   const hasVisibleActivity = activityModel ? hasVisibleSessionActivity(activityModel) : false
   const hasAutoOpenActivity = activityModel ? activityModel.badgeCount > 0 : false

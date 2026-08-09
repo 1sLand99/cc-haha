@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, RefreshCw } from 'lucide-react'
 import {
+  isAgentIdRef,
+  readAgentIdRef,
   subagentsApi,
   type SubagentRunResponse,
   type SubagentRunStatus,
@@ -68,7 +70,11 @@ export function SubagentRunPage({
     setError(null)
     if (options?.resetData) setData(null)
     try {
-      const nextData = await subagentsApi.getRunByTool(sourceSessionId, toolUseId, resolvedTaskId)
+      // A workflow agent has no parent Agent tool call, so it is addressed by
+      // agent id. Everything downstream of this line is identical.
+      const nextData = isAgentIdRef(toolUseId)
+        ? await subagentsApi.getRunByAgent(sourceSessionId, readAgentIdRef(toolUseId))
+        : await subagentsApi.getRunByTool(sourceSessionId, toolUseId, resolvedTaskId)
       if (requestIdRef.current !== requestId) return
       setData(nextData)
     } catch (err) {

@@ -1720,3 +1720,110 @@ describe('buildSessionActivityModel', () => {
     expect(model.badgeCount).toBe(1)
   })
 })
+
+describe('workflow section', () => {
+  const AGENTS = [
+    { type: 'workflow_agent', index: 1, label: 'survey response.js', state: 'done', phaseIndex: 1, phaseTitle: 'Survey', agentId: 'a11', tokens: 24_100 },
+    { type: 'workflow_agent', index: 2, label: 'survey request.js', state: 'done', phaseIndex: 1, phaseTitle: 'Survey', agentId: 'a12' },
+    { type: 'workflow_agent', index: 3, label: 'check response #1', state: 'progress', phaseIndex: 2, phaseTitle: 'Cross-check', agentId: 'a13' },
+    // Queued: accepted by the runtime but never given a slot, so no transcript.
+    { type: 'workflow_agent', index: 4, label: 'check response #2', state: 'start', phaseIndex: 2, phaseTitle: 'Cross-check' },
+  ]
+
+  function run(overrides: Record<string, unknown> = {}) {
+    return {
+      taskId: 'w1',
+      sessionId: 'session-1',
+      workflowName: 'route-survey',
+      status: 'running',
+      startedAt: 0,
+      updatedAt: 0,
+      agentCount: 4,
+      totalTokens: 0,
+      toolCalls: 0,
+      progress: [
+        { type: 'workflow_phase', index: 1, title: 'Survey' },
+        { type: 'workflow_phase', index: 2, title: 'Cross-check' },
+        ...AGENTS,
+      ],
+      ...overrides,
+    } as never
+  }
+
+  function build() {
+    return buildSessionActivityModel({
+      sessionId: 'session-1',
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+      workflowRuns: [run()],
+    })
+  }
+
+  it('lays each phase out as a header followed by its agents', () => {
+    const rows = build().sections.workflow.rows
+    expect(rows.map((row) => [row.label, row.groupProgress ? 'phase' : row.group])).toEqual([
+      ['Survey', 'phase'],
+      ['survey response.js', 'Survey'],
+      ['survey request.js', 'Survey'],
+      ['Cross-check', 'phase'],
+      ['check response #1', 'Cross-check'],
+      ['check response #2', 'Cross-check'],
+    ])
+  })
+
+  it('counts settled agents on the phase header', () => {
+    const headers = build().sections.workflow.rows.filter((row) => row.groupProgress)
+    expect(headers[0]!.groupProgress).toEqual({ done: 2, total: 2 })
+    expect(headers[0]!.status).toBe('completed')
+    expect(headers[1]!.groupProgress).toEqual({ done: 0, total: 2 })
+    expect(headers[1]!.status).toBe('running')
+  })
+
+  it('opens each agent through the ordinary subagent route', () => {
+    // A workflow agent is a subagent run by the same runner, so the row carries
+    // the reference the existing page opens with rather than anything bespoke.
+    const rows = build().sections.workflow.rows
+    const running = rows.find((row) => row.label === 'check response #1')!
+    expect(running.openable).toBe(true)
+    expect(running.toolUseId).toBe('agent:a13')
+
+    // Queued agents have no transcript yet — offering to open one would 404.
+    const queued = rows.find((row) => row.label === 'check response #2')!
+    expect(queued.openable).toBe(false)
+    expect(queued.toolUseId).toBeUndefined()
+  })
+
+  it('labels an unphased group with the run name instead of "Phase 0"', () => {
+    // Runs recorded before phases were persisted come back ungrouped. The
+    // workflow name identifies them; a bare index does not.
+    const model = buildSessionActivityModel({
+      sessionId: 'session-1',
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+      workflowRuns: [run({
+        workflowName: 'review-last-month',
+        progress: [
+          { type: 'workflow_agent', index: 1, label: 'review:security', state: 'done', phaseIndex: 0, agentId: 'a1' },
+        ],
+      })],
+    })
+    const header = model.sections.workflow.rows.find((row) => row.groupProgress)!
+    expect(header.label).toBe('review-last-month')
+  })
+
+  it('badges only the agents, never the phase headers', () => {
+    // One running plus one queued agent. The Cross-check header is also
+    // "running", but counting it would double-count the very agents beneath
+    // it — the badge is a count of work, not of headings.
+    expect(build().badgeCount).toBe(2)
+  })
+
+  it('shows the workflow above the individual subagents it spawned', () => {
+    const order = getVisibleActivitySections(build()).map((section) => section.id)
+    expect(order).toEqual(['workflow'])
+  })
+})

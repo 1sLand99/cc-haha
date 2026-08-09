@@ -59,10 +59,9 @@ import { createUserMessage } from '../../utils/messages.js'
 import { getAgentModel } from '../../utils/model/agent.js'
 import type { ModelAlias } from '../../utils/model/aliases.js'
 import {
-  clearAgentTranscriptSubdir,
   recordSidechainTranscript,
-  setAgentTranscriptSubdir,
   writeAgentMetadata,
+  type AgentMetadata,
 } from '../../utils/sessionStorage.js'
 import {
   isRestrictedToPluginOnly,
@@ -311,7 +310,7 @@ export async function* runAgent({
   spawningToolUseId,
   persistedAgentType,
   alreadyPersistedMessageCount,
-  transcriptSubdir,
+  workflow,
   onQueryProgress,
 }: {
   agentDefinition: AgentDefinition
@@ -379,7 +378,8 @@ export async function* runAgent({
   alreadyPersistedMessageCount?: number
   /** Optional subdirectory under subagents/ to group this agent's transcript
    * with related ones (e.g. workflows/<runId> for workflow subagents). */
-  transcriptSubdir?: string
+  /** Set when this agent is one step of a dynamic workflow run. */
+  workflow?: AgentMetadata['workflow']
   /** Optional callback fired on every message yielded by query() — including
    * stream_event deltas that runAgent otherwise drops. Use to detect liveness
    * during long single-block streams (e.g. thinking) where no assistant
@@ -404,12 +404,6 @@ export async function* runAgent({
   )
 
   const agentId = override?.agentId ? override.agentId : createAgentId()
-
-  // Route this agent's transcript into a grouping subdirectory if requested
-  // (e.g. workflow subagents write to subagents/workflows/<runId>/).
-  if (transcriptSubdir) {
-    setAgentTranscriptSubdir(agentId, transcriptSubdir)
-  }
 
   // Register agent in Perfetto trace for hierarchy visualization
   if (isPerfettoTracingEnabled()) {
@@ -826,6 +820,7 @@ export async function* runAgent({
     ...(worktreePath && { worktreePath }),
     ...(description && { description }),
     ...(spawningToolUseId && { toolUseId: spawningToolUseId }),
+    ...(workflow && { workflow }),
   }).catch(_err => logForDebugging(`Failed to write agent metadata: ${_err}`))
 
   // Track the last recorded message UUID for parent chain continuity
@@ -918,7 +913,6 @@ export async function* runAgent({
     // Release perfetto agent registry entry
     unregisterPerfettoAgent(agentId)
     // Release transcript subdir mapping
-    clearAgentTranscriptSubdir(agentId)
     // Release this agent's todos entry. Without this, every subagent that
     // called TodoWrite leaves a key in AppState.todos forever (even after all
     // items complete, the value is [] but the key stays). Whale sessions

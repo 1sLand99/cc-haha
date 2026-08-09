@@ -34,6 +34,7 @@ vi.mock('../../i18n', () => ({
       'session.activity.details.usage': 'Usage',
       'session.activity.section.tasks': 'Tasks',
       'session.activity.section.team': 'Team',
+      'session.activity.section.workflow': 'Workflow',
       'session.activity.section.backgroundTasks': 'Background Tasks',
       'session.activity.section.subagents': 'SubAgents',
       'session.activity.section.sources': 'Sources',
@@ -75,6 +76,7 @@ function model(overrides: Partial<SessionActivityModel> = {}): SessionActivityMo
     badgeCount: 1,
     sections: {
       output: { id: 'output', title: 'Output', emptyLabel: 'No output', rows: [] },
+      workflow: { id: 'workflow', title: 'Workflow', emptyLabel: 'No workflow running', rows: [] },
       tasks: {
         id: 'tasks',
         title: 'Tasks',
@@ -842,6 +844,73 @@ describe('SessionActivityPanel', () => {
     expect(screen.queryByRole('button', { name: /open run local agent/i })).not.toBeInTheDocument()
     expect(screen.getByText('Local agent')).toBeInTheDocument()
     expect(onOpenSubagent).not.toHaveBeenCalled()
+  })
+
+  it('renders a workflow as phase headers with their agents, each opening the subagent page', () => {
+    const onOpenSubagent = vi.fn()
+    render(
+      <SessionActivityPanel
+        model={model({
+          sections: {
+            ...model().sections,
+            tasks: { id: 'tasks', title: 'Tasks', emptyLabel: 'No tasks', rows: [] },
+            workflow: {
+              id: 'workflow',
+              title: 'Workflow',
+              emptyLabel: 'No workflow running',
+              rows: [
+                {
+                  id: 'w1-phase-1',
+                  section: 'workflow',
+                  label: 'Survey',
+                  status: 'completed',
+                  groupProgress: { done: 2, total: 2 },
+                  openable: false,
+                },
+                {
+                  id: 'w1-agent-1',
+                  section: 'workflow',
+                  label: 'survey response.js',
+                  status: 'completed',
+                  group: 'Survey',
+                  toolUseId: 'agent:a11',
+                  openable: true,
+                },
+                {
+                  id: 'w1-agent-4',
+                  section: 'workflow',
+                  label: 'check response #2',
+                  status: 'pending',
+                  group: 'Cross-check',
+                  openable: false,
+                },
+              ],
+            },
+          },
+        })}
+        open
+        onClose={vi.fn()}
+        onOpenSubagent={onOpenSubagent}
+      />,
+    )
+
+    // The phase is a heading, not something you can open.
+    const header = screen.getByTestId('workflow-phase-header')
+    expect(header).toHaveTextContent('Survey')
+    expect(header).toHaveTextContent('2/2')
+
+    // Its agent opens the ordinary subagent page, addressed by agent id
+    // because a workflow agent has no parent Agent tool call.
+    fireEvent.click(screen.getByRole('button', { name: /open run survey response\.js/i }))
+    expect(onOpenSubagent).toHaveBeenCalledWith(
+      expect.objectContaining({ toolUseId: 'agent:a11', title: 'survey response.js' }),
+    )
+
+    // A queued agent has no transcript yet, so it must not offer to open one.
+    expect(
+      screen.queryByRole('button', { name: /open run check response #2/i }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText('check response #2')).toBeInTheDocument()
   })
 
   it('does not render when closed', () => {

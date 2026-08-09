@@ -311,6 +311,8 @@ function getStatusText(status: TaskStatus): string {
       return 'was stopped'
     case 'running':
       return 'is running'
+    case 'paused':
+      return 'is paused'
     case 'pending':
       return 'is pending'
   }

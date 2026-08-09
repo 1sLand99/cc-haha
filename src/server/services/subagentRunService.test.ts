@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import {
+  getSubagentRunByAgentId,
   getSubagentRunByTool,
   mergeTeammateTranscriptFragments,
   resolveSubagentRunFromMessages,
@@ -735,5 +736,59 @@ describe('getSubagentRunByTool', () => {
     ])
 
     await expect(getSubagentRunByTool(sessionId, 'tool-1')).resolves.toBeNull()
+  })
+})
+
+describe('getSubagentRunByAgentId', () => {
+  afterEach(async () => {
+    if (tmpDir) {
+      await fs.rm(tmpDir, { recursive: true, force: true })
+      tmpDir = null
+    }
+    delete process.env.CLAUDE_CONFIG_DIR
+  })
+
+  it('reads a run that has no parent Agent tool call', async () => {
+    await setupTmpConfigDir()
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-ffffffffffff'
+    const projectDir = '-tmp-workflow-agent'
+    const agentId = 'wfagent1'
+
+    // A workflow agent is spawned by the workflow runtime, so the parent
+    // session has no Agent tool_use to key off — only the transcript exists.
+    await writeSessionFile(projectDir, sessionId, [])
+    await writeSubagentTranscriptFile(projectDir, sessionId, agentId, [
+      {
+        type: 'user',
+        message: { role: 'user', content: 'Survey lib/response.js' },
+        uuid: 'wf-user',
+        timestamp: '2026-01-01T00:00:05.000Z',
+      },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'res.send(403) sends a JSON body' }],
+          usage: { input_tokens: 11, output_tokens: 7 },
+        },
+        uuid: 'wf-assistant',
+        timestamp: '2026-01-01T00:00:06.000Z',
+      },
+    ])
+
+    const result = await getSubagentRunByAgentId(sessionId, agentId)
+
+    expect(result).toMatchObject({ sessionId, agentId, source: 'subagent-jsonl' })
+    expect(result?.messages.length).toBeGreaterThan(0)
+    // A workflow agent answers once into its script; there is no inbox.
+    expect(result?.canSendMessage).toBe(false)
+  })
+
+  it('returns null when no transcript exists for that agent', async () => {
+    await setupTmpConfigDir()
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-000000000000'
+    await writeSessionFile('-tmp-workflow-missing', sessionId, [])
+
+    expect(await getSubagentRunByAgentId(sessionId, 'nope')).toBeNull()
   })
 })

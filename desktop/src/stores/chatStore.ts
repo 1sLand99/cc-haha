@@ -5,6 +5,7 @@ import { subagentsApi } from '../api/subagents'
 import { useTeamStore } from './teamStore'
 import { useSessionStore } from './sessionStore'
 import { useCLITaskStore } from './cliTaskStore'
+import { useWorkflowStore } from './workflowStore'
 import { useSessionRuntimeStore } from './sessionRuntimeStore'
 import { useTabStore } from './tabStore'
 import { randomSpinnerVerb } from '../config/spinnerVerbs'
@@ -1796,6 +1797,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const existingLoad = historyLoadsInFlight.get(sessionId)
     if (existingLoad) return existingLoad
 
+    // Workflow runs are rebuilt from disk alongside the transcript. Without
+    // this, reopening a session that ran a workflow showed no trace of it —
+    // the progress stream that populates the panel is live-only.
+    void useWorkflowStore.getState().hydrateSession(sessionId)
+
     const requestedMutationEpoch = get().sessions[sessionId]?.historyMutationEpoch ?? 0
     let load!: Promise<void>
     load = (async () => {
@@ -3276,6 +3282,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           clearPendingTaskToolUseIds(sessionId)
           clearPendingToolParentUseIds(sessionId)
           useCLITaskStore.getState().clearTasks(sessionId)
+          useWorkflowStore.getState().clearSession(sessionId)
           useSessionStore.getState().updateSessionTitle(sessionId, 'New Session')
           useSessionStore.getState().updateSessionMessageCount(sessionId, 0)
           useTabStore.getState().updateTabTitle(sessionId, 'New Session')
@@ -3355,6 +3362,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }
         }
         if ((msg.subtype === 'task_started' || msg.subtype === 'task_progress') && msg.data && typeof msg.data === 'object') {
+          // Workflow runs also flow through the generic background-task path
+          // below; the workflow store keeps the phase/agent detail that the
+          // generic task shape has nowhere to put.
+          useWorkflowStore.getState().handleTaskEvent(sessionId, msg.subtype, msg.data)
           const taskEvent = normalizeBackgroundAgentTaskEvent(msg.data, msg.subtype)
           if (taskEvent) {
             const now = Date.now()
@@ -3393,6 +3404,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }
         }
         if (msg.subtype === 'task_notification' && msg.data && typeof msg.data === 'object') {
+          useWorkflowStore.getState().handleTaskEvent(sessionId, 'task_notification', msg.data)
           const data = msg.data as Record<string, unknown>
           const taskEvent = normalizeBackgroundAgentTaskEvent(data, 'task_notification')
           const toolUseId =

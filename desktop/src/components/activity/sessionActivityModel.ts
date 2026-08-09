@@ -3,10 +3,12 @@ import type { TaskSummaryItem, UIMessage } from '../../types/chat'
 import type { CLITask, TaskStatus } from '../../types/cliTask'
 import type { TeamMember } from '../../types/team'
 import { createBackgroundTaskDismissKey } from '../../lib/backgroundTasks'
+import { toAgentIdRef } from '../../api/subagents'
+import type { WorkflowAgentEvent, WorkflowRun } from '../../types/workflow'
 
 export type ActivityStatus = TaskStatus | BackgroundAgentTask['status'] | TeamMember['status']
 
-export type ActivitySectionId = 'output' | 'tasks' | 'team' | 'backgroundTasks' | 'subagents' | 'sources'
+export type ActivitySectionId = 'output' | 'tasks' | 'team' | 'workflow' | 'backgroundTasks' | 'subagents' | 'sources'
 
 export type ActivityRow = {
   id: string
@@ -16,6 +18,14 @@ export type ActivityRow = {
   description?: string
   summary?: string
   toolUseId?: string
+  /**
+   * Phase this row belongs to, for sections that group. A workflow is phases
+   * of N agents, and the grouping is the only thing that makes a fan-out
+   * readable — twelve flat rows say nothing about which stage they belong to.
+   */
+  group?: string
+  /** Set on a group's header row; agents under it carry `group` instead. */
+  groupProgress?: { done: number; total: number }
   taskId?: string
   taskType?: BackgroundAgentTask['taskType']
   workflowName?: string
@@ -55,6 +65,8 @@ export type BuildSessionActivityModelInput = {
   dismissedBackgroundTaskKeys?: Set<string>
   agentNotifications: AgentTaskNotification[]
   teamMembers?: TeamMember[]
+  /** Live workflow runs for this session, newest first. */
+  workflowRuns?: WorkflowRun[]
 }
 
 /**
@@ -64,6 +76,9 @@ export type BuildSessionActivityModelInput = {
  */
 export const VISIBLE_ACTIVITY_SECTION_ORDER = [
   'tasks',
+  // A running workflow is the turn's whole shape, so it sits above the
+  // individual agents it spawned rather than among them.
+  'workflow',
   'subagents',
   'team',
   'backgroundTasks',
@@ -76,6 +91,7 @@ const SECTION_META: Record<ActivitySectionId, Pick<ActivitySection, 'title' | 'e
   output: { title: 'Output', emptyLabel: 'No output' },
   tasks: { title: 'Tasks', emptyLabel: 'No tasks' },
   team: { title: 'Team', emptyLabel: 'No team members' },
+  workflow: { title: 'Workflow', emptyLabel: 'No workflow running' },
   backgroundTasks: { title: 'Background Tasks', emptyLabel: 'No background tasks' },
   subagents: { title: 'SubAgents', emptyLabel: 'No SubAgents' },
   sources: { title: 'Sources', emptyLabel: 'No sources' },
@@ -86,6 +102,7 @@ function createEmptySections(): Record<ActivitySectionId, ActivitySection> {
     output: createSection('output'),
     tasks: createSection('tasks'),
     team: createSection('team'),
+    workflow: createSection('workflow'),
     backgroundTasks: createSection('backgroundTasks'),
     subagents: createSection('subagents'),
     sources: createSection('sources'),
@@ -764,6 +781,96 @@ function mergeNotificationRow(existing: ActivityRow | undefined, notification: A
   }
 }
 
+/**
+ * Flatten a workflow run into phase headers each followed by its agents.
+ *
+ * The agents are ordinary subagents, so every row carries the reference the
+ * existing subagent page opens with — there is nothing workflow-specific to
+ * render for one of them. An agent that has not been given a concurrency slot
+ * yet has no transcript to open, so it is listed but not openable.
+ */
+function buildWorkflowRows(run: WorkflowRun): ActivityRow[] {
+  const phaseTitles = new Map<number, string>()
+  const agentsByPhase = new Map<number, WorkflowAgentEvent[]>()
+
+  for (const event of run.progress) {
+    if (event.type === 'workflow_phase') {
+      if (!phaseTitles.has(event.index)) phaseTitles.set(event.index, event.title)
+      if (!agentsByPhase.has(event.index)) agentsByPhase.set(event.index, [])
+      continue
+    }
+    const phaseIndex = event.phaseIndex ?? 0
+    if (!phaseTitles.has(phaseIndex)) {
+      phaseTitles.set(phaseIndex, event.phaseTitle ?? '')
+    }
+    const bucket = agentsByPhase.get(phaseIndex) ?? []
+    bucket.push(event)
+    agentsByPhase.set(phaseIndex, bucket)
+  }
+
+  const rows: ActivityRow[] = []
+  for (const [phaseIndex, title] of [...phaseTitles.entries()].sort(([a], [b]) => a - b)) {
+    const agents = (agentsByPhase.get(phaseIndex) ?? [])
+      .slice()
+      .sort((a, b) => a.index - b.index)
+    if (agents.length === 0 && !title) continue
+    // Agents emitted before any `phase()` call — and every agent of a run
+    // recorded before phases were persisted — have no title. The run's name
+    // says more about them than "Phase 0" does, and it also tells two runs in
+    // the same session apart.
+    const groupLabel = title || run.workflowName
+    const done = agents.filter(
+      agent => agent.state === 'done' || agent.state === 'error',
+    ).length
+
+    rows.push({
+      id: `${run.taskId}-phase-${phaseIndex}`,
+      section: 'workflow',
+      label: groupLabel,
+      status: workflowPhaseStatus(agents),
+      groupProgress: { done, total: agents.length },
+      workflowName: run.workflowName,
+      openable: false,
+    })
+
+    for (const agent of agents) {
+      rows.push({
+        id: `${run.taskId}-agent-${agent.index}`,
+        section: 'workflow',
+        label: agent.label,
+        status: workflowAgentStatus(agent),
+        group: groupLabel,
+        summary: agent.resultPreview,
+        toolUseId: agent.agentId ? toAgentIdRef(agent.agentId) : undefined,
+        taskType: 'local_agent',
+        workflowName: run.workflowName,
+        usage: agent.tokens ? { totalTokens: agent.tokens } : undefined,
+        openable: Boolean(agent.agentId),
+      })
+    }
+  }
+
+  return rows
+}
+
+function workflowAgentStatus(agent: WorkflowAgentEvent): ActivityStatus {
+  if (agent.state === 'done') return 'completed'
+  if (agent.state === 'error') return 'failed'
+  if (agent.state === 'progress') return 'running'
+  return 'pending'
+}
+
+function workflowPhaseStatus(agents: WorkflowAgentEvent[]): ActivityStatus {
+  if (agents.length === 0) return 'pending'
+  if (agents.some(agent => agent.state === 'progress')) return 'running'
+  if (agents.every(agent => agent.state === 'done' || agent.state === 'error')) {
+    return agents.some(agent => agent.state === 'error') ? 'failed' : 'completed'
+  }
+  return agents.some(agent => agent.state === 'done' || agent.state === 'error')
+    ? 'running'
+    : 'pending'
+}
+
 function buildOutputRow(key: string, outputFile: string): ActivityRow {
   return {
     id: `output-${key}`,
@@ -784,6 +891,15 @@ export function buildSessionActivityModel(input: BuildSessionActivityModelInput)
     : taskRows
   for (const row of sections.tasks.rows) {
     if (isBadgeStatus(row.status)) {
+      badgeCount += 1
+    }
+  }
+
+  for (const run of input.workflowRuns ?? []) {
+    sections.workflow.rows.push(...buildWorkflowRows(run))
+  }
+  for (const row of sections.workflow.rows) {
+    if (isBadgeStatus(row.status) && !row.groupProgress) {
       badgeCount += 1
     }
   }

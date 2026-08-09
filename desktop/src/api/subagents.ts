@@ -35,7 +35,36 @@ export type SubagentRunResponse = {
   canSendMessage?: boolean
 }
 
+/**
+ * Marks a subagent addressed by agent id rather than by the `Agent` tool call
+ * that spawned it.
+ *
+ * Workflow agents are spawned by the workflow runtime, so no such tool call
+ * exists. Carrying the distinction in the identifier means the tab id, the
+ * page, and the return path all stay exactly as they are for every other
+ * subagent — only the fetch differs.
+ */
+export const AGENT_ID_REF_PREFIX = 'agent:'
+
+export function isAgentIdRef(ref: string): boolean {
+  return ref.startsWith(AGENT_ID_REF_PREFIX)
+}
+
+export function toAgentIdRef(agentId: string): string {
+  return `${AGENT_ID_REF_PREFIX}${agentId}`
+}
+
+export function readAgentIdRef(ref: string): string {
+  return ref.slice(AGENT_ID_REF_PREFIX.length)
+}
+
 export const subagentsApi = {
+  getRunByAgent(sessionId: string, agentId: string) {
+    return api.get<SubagentRunResponse>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/subagents/by-agent/${encodeURIComponent(agentId)}`,
+    )
+  },
+
   getRunByTool(sessionId: string, toolUseId: string, taskId?: string) {
     const query = taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''
     return api.get<SubagentRunResponse>(

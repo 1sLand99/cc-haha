@@ -1,0 +1,356 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const sessionRunsMock = vi.hoisted(() => vi.fn())
+vi.mock('../api/workflows', async importOriginal => {
+  const actual = await importOriginal<typeof import('../api/workflows')>()
+  return {
+    ...actual,
+    workflowsApi: { ...actual.workflowsApi, sessionRuns: sessionRunsMock },
+  }
+})
+import {
+  activeRunForSession,
+  groupRunPhases,
+  runCompletion,
+  runsForSession,
+  useWorkflowStore,
+} from './workflowStore'
+
+const SESSION = 'session-1'
+const TASK = 'w1234abcd'
+
+function taskStarted(overrides: Record<string, unknown> = {}) {
+  return {
+    task_id: TASK,
+    task_type: 'local_workflow',
+    workflow_name: 'audit-routes',
+    description: 'Audit every route handler',
+    ...overrides,
+  }
+}
+
+function progress(
+  rows: Array<Record<string, unknown>>,
+  usage?: { total_tokens?: number; tool_uses?: number },
+) {
+  return {
+    task_id: TASK,
+    workflow_progress: rows,
+    ...(usage ? { usage } : {}),
+  }
+}
+
+function agentRow(
+  index: number,
+  state: string,
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    type: 'workflow_agent',
+    index,
+    label: `agent ${index}`,
+    state,
+    ...extra,
+  }
+}
+
+describe('workflowStore', () => {
+  beforeEach(() => {
+    useWorkflowStore.setState({
+      runs: {},
+      definitions: [],
+      definitionsLoading: false,
+      definitionsError: null,
+      history: [],
+      historyLoading: false,
+      openRunId: null,
+    })
+  })
+
+  const store = () => useWorkflowStore.getState()
+
+  it('creates a run from task_started and tracks it for the session', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    const runs = runsForSession(useWorkflowStore.getState(), SESSION)
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({
+      taskId: TASK,
+      workflowName: 'audit-routes',
+      description: 'Audit every route handler',
+      status: 'running',
+    })
+    expect(activeRunForSession(useWorkflowStore.getState(), SESSION)?.taskId).toBe(
+      TASK,
+    )
+  })
+
+  it('still ignores a bare notification for a task it never tracked', () => {
+    store().handleTaskEvent(SESSION, 'task_notification', {
+      task_id: 'b0000009',
+      status: 'completed',
+    })
+    expect(runsForSession(useWorkflowStore.getState(), SESSION)).toHaveLength(0)
+  })
+
+  it('ignores task events that are not workflows', () => {
+    store().handleTaskEvent(SESSION, 'task_started', {
+      task_id: 'b0000001',
+      task_type: 'local_bash',
+      description: 'npm test',
+    })
+    expect(runsForSession(useWorkflowStore.getState(), SESSION)).toHaveLength(0)
+  })
+
+  it('replaces an agent row in place instead of appending a new one', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    store().handleTaskEvent(
+      SESSION,
+      'task_progress',
+      progress([agentRow(1, 'progress', { tokens: 100 })]),
+    )
+    store().handleTaskEvent(
+      SESSION,
+      'task_progress',
+      progress([agentRow(1, 'done', { tokens: 400 })]),
+    )
+
+    const run = useWorkflowStore.getState().runs[TASK]!
+    const agents = run.progress.filter(row => row.type === 'workflow_agent')
+    expect(agents).toHaveLength(1)
+    expect(agents[0]).toMatchObject({ index: 1, state: 'done', tokens: 400 })
+    expect(run.agentCount).toBe(1)
+  })
+
+  it('keeps the object identity stable when an event changes nothing', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    const before = useWorkflowStore.getState().runs[TASK]
+    store().handleTaskEvent(SESSION, 'task_progress', progress([]))
+    expect(useWorkflowStore.getState().runs[TASK]).toBe(before)
+  })
+
+  it('carries usage totals from the event', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    store().handleTaskEvent(
+      SESSION,
+      'task_progress',
+      progress([agentRow(1, 'done')], { total_tokens: 1234, tool_uses: 7 }),
+    )
+    expect(useWorkflowStore.getState().runs[TASK]).toMatchObject({
+      totalTokens: 1234,
+      toolCalls: 7,
+    })
+  })
+
+  it('settles the run on task_notification and records the result', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    // The CLI's terminal notification carries no task_type / workflow_name /
+    // workflow_progress — only the task id. Dropping it here is what left the
+    // dock reading "1 running" after a finished run.
+    store().handleTaskEvent(SESSION, 'task_notification', {
+      task_id: TASK,
+      status: 'completed',
+      result: '["ALPHA","BETA"]',
+      summary: 'Dynamic workflow "route-survey" completed',
+    })
+    const run = useWorkflowStore.getState().runs[TASK]!
+    expect(run.status).toBe('completed')
+    expect(run.result).toBe('["ALPHA","BETA"]')
+    expect(run.endedAt).toBeGreaterThan(0)
+    expect(activeRunForSession(useWorkflowStore.getState(), SESSION)).toBeNull()
+  })
+
+  it('a late progress event does not revive a settled run', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    store().handleTaskEvent(SESSION, 'task_notification', {
+      task_id: TASK,
+      status: 'failed',
+      error: 'boom',
+    })
+    store().handleTaskEvent(
+      SESSION,
+      'task_progress',
+      progress([agentRow(2, 'progress')]),
+    )
+    const run = useWorkflowStore.getState().runs[TASK]!
+    expect(run.status).toBe('failed')
+    expect(run.error).toBe('boom')
+  })
+
+  it('surfaces a failure reason that only arrived in the summary', () => {
+    // Seen on a real failed run: the CLI's terminal event has no `error`
+    // field, so the reason only ever comes through `summary`. Reading it as
+    // the description put it in a truncated one-liner and left the error
+    // banner empty — a red "failed" badge with no explanation.
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    store().handleTaskEvent(SESSION, 'task_notification', {
+      task_id: TASK,
+      status: 'failed',
+      summary:
+        'Dynamic workflow "audit-routes" failed: deliberate failure after the probe settled',
+    })
+    const run = useWorkflowStore.getState().runs[TASK]!
+    expect(run.error).toContain('deliberate failure after the probe settled')
+    // The run's own description must survive the notification.
+    expect(run.description).toBe('Audit every route handler')
+  })
+
+  it('keeps the description when a run completes', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    store().handleTaskEvent(SESSION, 'task_notification', {
+      task_id: TASK,
+      status: 'completed',
+      summary: 'Dynamic workflow "audit-routes" completed',
+      result: '{}',
+    })
+    const run = useWorkflowStore.getState().runs[TASK]!
+    expect(run.description).toBe('Audit every route handler')
+    // Boilerplate completion text is not an error.
+    expect(run.error).toBeUndefined()
+  })
+
+  it('maps a killed CLI status onto stopped', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    store().handleTaskEvent(SESSION, 'task_notification', {
+      task_id: TASK,
+      status: 'killed',
+    })
+    expect(useWorkflowStore.getState().runs[TASK]?.status).toBe('stopped')
+  })
+
+  it('clearSession drops only that session and closes an open run', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    store().handleTaskEvent('other', 'task_started', taskStarted({ task_id: 'w9' }))
+    store().openRun(TASK)
+
+    store().clearSession(SESSION)
+    expect(runsForSession(useWorkflowStore.getState(), SESSION)).toHaveLength(0)
+    expect(runsForSession(useWorkflowStore.getState(), 'other')).toHaveLength(1)
+    expect(useWorkflowStore.getState().openRunId).toBeNull()
+  })
+
+  it('groups agents under the phase they reported', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    store().handleTaskEvent(
+      SESSION,
+      'task_progress',
+      progress([
+        { type: 'workflow_phase', index: 1, title: 'Review', kind: 'meta' },
+        { type: 'workflow_phase', index: 2, title: 'Verify', kind: 'script' },
+        agentRow(1, 'done', { phaseIndex: 1, phaseTitle: 'Review' }),
+        agentRow(2, 'progress', { phaseIndex: 2, phaseTitle: 'Verify' }),
+        agentRow(3, 'done'),
+      ]),
+    )
+    const run = useWorkflowStore.getState().runs[TASK]!
+    const { phases, ungrouped } = groupRunPhases(run)
+    expect(phases.map(phase => phase.title)).toEqual(['Review', 'Verify'])
+    expect(phases[0]?.agents.map(agent => agent.index)).toEqual([1])
+    expect(phases[1]?.agents.map(agent => agent.index)).toEqual([2])
+    expect(ungrouped.map(agent => agent.index)).toEqual([3])
+  })
+
+  it('reports completion as the settled fraction of agents', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    store().handleTaskEvent(
+      SESSION,
+      'task_progress',
+      progress([
+        agentRow(1, 'done'),
+        agentRow(2, 'error'),
+        agentRow(3, 'progress'),
+        agentRow(4, 'start'),
+      ]),
+    )
+    expect(runCompletion(useWorkflowStore.getState().runs[TASK]!)).toBe(0.5)
+  })
+
+  it('recognises a workflow from workflow_progress even without task_type', () => {
+    store().handleTaskEvent(
+      SESSION,
+      'task_progress',
+      progress([agentRow(1, 'progress')]),
+    )
+    expect(runsForSession(useWorkflowStore.getState(), SESSION)).toHaveLength(1)
+  })
+})
+
+describe('hydrateSession', () => {
+  const RECONSTRUCTED = {
+    runId: 'wf_06ee51bf-6b1',
+    workflowName: 'review-last-month',
+    startedAt: 1_700_000_000_000,
+    agents: [
+      { agentId: 'a1', label: 'review:imagegen', phaseIndex: 1, phaseTitle: '维度审查', agentIndex: 1 },
+      { agentId: 'a2', label: 'review:security', phaseIndex: 1, phaseTitle: '维度审查', agentIndex: 2 },
+      { agentId: 'a3', label: 'verify:security', phaseIndex: 2, phaseTitle: '对抗验证', agentIndex: 3 },
+    ],
+  }
+
+  beforeEach(() => {
+    sessionRunsMock.mockReset()
+    useWorkflowStore.setState({ runs: {}, openRunId: null })
+  })
+
+  it('rebuilds a finished run so a reopened session still shows it', async () => {
+    // The whole point: the live progress stream is gone by now.
+    sessionRunsMock.mockResolvedValue({ runs: [RECONSTRUCTED] })
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+
+    const runs = runsForSession(useWorkflowStore.getState(), SESSION)
+    expect(runs).toHaveLength(1)
+    const { phases } = groupRunPhases(runs[0]!)
+    expect(phases.map(phase => phase.title)).toEqual(['维度审查', '对抗验证'])
+    expect(phases[0]!.agents.map(agent => agent.label)).toEqual([
+      'review:imagegen',
+      'review:security',
+    ])
+    // Every reconstructed agent has a transcript, so it is openable.
+    expect(phases[0]!.agents.every(agent => agent.agentId)).toBe(true)
+  })
+
+  it('leaves an unrecorded phase title empty rather than inventing one', () => {
+    // The renderer falls back to the run name; filling in "Phase 0" here made
+    // that impossible and showed a meaningless heading.
+    sessionRunsMock.mockResolvedValue({
+      runs: [{
+        ...RECONSTRUCTED,
+        agents: [{ agentId: 'a1', label: 'review:security', phaseIndex: 0, agentIndex: 1 }],
+      }],
+    })
+    return useWorkflowStore.getState().hydrateSession(SESSION).then(() => {
+      const run = runsForSession(useWorkflowStore.getState(), SESSION)[0]!
+      const phase = run.progress.find((row) => row.type === 'workflow_phase')!
+      expect(phase.title).toBe('')
+    })
+  })
+
+  it('never overwrites a run that is still streaming live', async () => {
+    useWorkflowStore.getState().handleTaskEvent(SESSION, 'task_started', {
+      task_id: TASK,
+      task_type: 'local_workflow',
+      workflow_name: 'review-last-month',
+      workflow_run_id: RECONSTRUCTED.runId,
+    })
+    useWorkflowStore.getState().handleTaskEvent(
+      SESSION,
+      'task_progress',
+      progress([agentRow(1, 'progress')]),
+    )
+    sessionRunsMock.mockResolvedValue({ runs: [RECONSTRUCTED] })
+
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+
+    const runs = runsForSession(useWorkflowStore.getState(), SESSION)
+    // One run, still the live one — a reconstruction would have marked its
+    // in-flight agent as done.
+    expect(runs).toHaveLength(1)
+    expect(runs[0]!.status).toBe('running')
+    expect(runs[0]!.taskId).toBe(TASK)
+  })
+
+  it('stays quiet when the server cannot rebuild anything', async () => {
+    sessionRunsMock.mockRejectedValue(new Error('offline'))
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+    expect(runsForSession(useWorkflowStore.getState(), SESSION)).toHaveLength(0)
+  })
+})

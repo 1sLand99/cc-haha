@@ -5,9 +5,13 @@ import type { SubagentRunResponse } from '../api/subagents'
 import { useSettingsStore } from '../stores/settingsStore'
 import { setComposerText } from '../components/chat/composerTestUtils'
 
-vi.mock('../api/subagents', () => ({
+vi.mock('../api/subagents', async (importOriginal) => ({
+  // Keep the real ref helpers: they decide whether the page fetches by tool
+  // call or by agent id, so stubbing them would test a fiction.
+  ...(await importOriginal<typeof import('../api/subagents')>()),
   subagentsApi: {
     getRunByTool: vi.fn(),
+    getRunByAgent: vi.fn(),
     sendMessage: vi.fn(),
   },
 }))
@@ -70,6 +74,7 @@ describe('SubagentRunPage', () => {
     cleanup()
     vi.useRealTimers()
     vi.mocked(subagentsApi.getRunByTool).mockReset()
+    vi.mocked(subagentsApi.getRunByAgent).mockReset()
     vi.mocked(subagentsApi.sendMessage).mockReset()
   })
 
@@ -84,6 +89,25 @@ describe('SubagentRunPage', () => {
 
     expect(useTabStore.getState().activeTabId).toBe('session-1')
     expect(useTabStore.getState().tabs.map((tab) => tab.sessionId)).toEqual(['session-1'])
+  })
+
+  it('fetches a workflow agent by agent id, not by tool call', async () => {
+    // Workflow agents are spawned by the workflow runtime, so no parent Agent
+    // tool call exists to look them up by. Same page, same rendering — only
+    // the lookup differs.
+    vi.mocked(subagentsApi.getRunByAgent).mockResolvedValue(subagentRun())
+
+    render(
+      <SubagentRunPage
+        sourceSessionId="session-1"
+        toolUseId="agent:wfagent1"
+        title="survey response.js"
+      />,
+    )
+
+    expect(await screen.findByText('survey response.js')).toBeInTheDocument()
+    expect(subagentsApi.getRunByAgent).toHaveBeenCalledWith('session-1', 'wfagent1')
+    expect(subagentsApi.getRunByTool).not.toHaveBeenCalled()
   })
 
   it('renders SubAgent run details', async () => {

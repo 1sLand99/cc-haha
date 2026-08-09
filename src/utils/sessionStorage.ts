@@ -278,6 +278,23 @@ export type AgentMetadata = {
    * agent's activity and completion under the wrong card. Optional —
    * older metadata files lack this field. */
   toolUseId?: string
+  /**
+   * Which workflow run and phase this agent belongs to.
+   *
+   * A workflow's shape — phases, and which agents ran in each — exists only in
+   * the live progress stream, so reopening a finished session had nothing to
+   * rebuild it from. This sidecar is written before the agent starts and
+   * outlives the process, which makes it the record. Absent for ordinary
+   * subagents and for workflow runs from before this was added.
+   */
+  workflow?: {
+    runId: string
+    name: string
+    phaseIndex: number
+    phaseTitle?: string
+    /** The runtime's sequential agent number within the run. */
+    agentIndex: number
+  }
 }
 
 /**

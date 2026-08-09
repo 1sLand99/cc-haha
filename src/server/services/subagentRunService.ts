@@ -340,6 +340,55 @@ async function resolveTranscript(
   return { agentId: null, messages: [] }
 }
 
+/**
+ * Read a subagent run straight from its transcript.
+ *
+ * {@link getSubagentRunByTool} starts from an `Agent` tool call in the parent
+ * conversation, which is how an agent the assistant dispatched is found. A
+ * workflow's agents are spawned by the workflow runtime instead, so no such
+ * tool call exists and that lookup can never resolve them — but they are
+ * ordinary subagents written by the same runner to the same place, so their
+ * `agent-<id>.jsonl` is all that is needed.
+ */
+export async function getSubagentRunByAgentId(
+  sessionId: string,
+  agentId: string,
+): Promise<SubagentRunResponse | null> {
+  const normalized = normalizeAgentIdHint(agentId)
+  if (!normalized) return null
+
+  const transcript = await resolveTranscript(sessionId, [normalized])
+  if (!transcript.agentId) return null
+
+  const messages = transcript.messages
+  const truncated = truncateSubagentMessages(messages)
+  const usage = usageFromTranscriptMessages(messages)
+  const updatedAt = latestTimestamp(
+    ...messages.map(message =>
+      isRecord(message) && typeof message.timestamp === 'string'
+        ? message.timestamp
+        : undefined,
+    ),
+  )
+
+  return {
+    sessionId,
+    // The caller addressed this run by agent id; echoing it keeps the response
+    // self-describing without inventing a tool call that never happened.
+    toolUseId: normalized,
+    agentId: transcript.agentId,
+    status: 'completed',
+    ...(usage ? { usage } : {}),
+    messages: truncated.messages,
+    truncated: truncated.truncated,
+    ...(updatedAt ? { updatedAt } : {}),
+    source: 'subagent-jsonl',
+    // A workflow agent answers once into its script and is gone; there is no
+    // inbox a follow-up could reach.
+    canSendMessage: false,
+  }
+}
+
 export async function getSubagentRunByTool(
   sessionId: string,
   toolUseId: string,
