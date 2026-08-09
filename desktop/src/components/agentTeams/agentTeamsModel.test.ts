@@ -8,6 +8,7 @@ import {
   getMemberAvatarKey,
   layoutWorkbenchTasks,
   parseWorkbenchMessageBody,
+  resolveTeamMemberIdentity,
   runningTaskForMember,
   taskOwnedByMember,
   WORKBENCH_TASK_WIDTH,
@@ -123,6 +124,26 @@ describe('Agent Teams workbench model', () => {
     expect(getMemberAvatarKey(member('release-auditor@team-a', 'release'))).toBe('release-engineer')
     expect(getMemberAvatarKey(member('unknown-specialist@team-a', 'general-purpose')))
       .toBe(getMemberAvatarKey(member('unknown-specialist@team-a', 'general-purpose')))
+  })
+
+  it('resolves bare transcript senders to the same full teammate identity as the workbench', () => {
+    const team = {
+      name: 'team-a',
+      leadAgentId: 'team-lead@team-a',
+      members: [
+        { agentId: 'team-lead@team-a', name: 'team-lead', role: 'orchestrator', status: 'running' as const },
+        { agentId: 'server-reviewer@team-a', name: 'server-reviewer', role: 'server engineer', status: 'idle' as const },
+      ],
+    }
+
+    const lead = resolveTeamMemberIdentity(team, 'team-lead')
+    const reviewer = resolveTeamMemberIdentity(team, 'server-reviewer@team-a')
+
+    expect(lead.member.agentId).toBe('team-lead@team-a')
+    expect(lead.isLead).toBe(true)
+    expect(getMemberAvatarKey(lead.member, lead.isLead)).toBe('team-lead')
+    expect(reviewer.member.agentId).toBe('server-reviewer@team-a')
+    expect(getMemberAvatarKey(reviewer.member, reviewer.isLead)).toBe('security-reviewer')
   })
 
   it('derives forming, running, finishing, and completed phases from real transitions', () => {

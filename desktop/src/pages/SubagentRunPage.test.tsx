@@ -5,6 +5,11 @@ import type { SubagentRunResponse } from '../api/subagents'
 import { useSettingsStore } from '../stores/settingsStore'
 import { setComposerText } from '../components/chat/composerTestUtils'
 
+const { getMemberTranscriptMock, sendMemberMessageMock } = vi.hoisted(() => ({
+  getMemberTranscriptMock: vi.fn(),
+  sendMemberMessageMock: vi.fn(),
+}))
+
 vi.mock('../api/subagents', () => ({
   subagentsApi: {
     getRunByTool: vi.fn(),
@@ -12,10 +17,23 @@ vi.mock('../api/subagents', () => ({
   },
 }))
 
+vi.mock('../api/teams', () => ({
+  teamsApi: {
+    getMemberTranscript: getMemberTranscriptMock,
+    sendMemberMessage: sendMemberMessageMock,
+    getWorkbenchForSession: vi.fn(),
+    getWorkbench: vi.fn(),
+    get: vi.fn(),
+    list: vi.fn(),
+    delete: vi.fn(),
+  },
+}))
+
 import { subagentsApi } from '../api/subagents'
 import { useChatStore } from '../stores/chatStore'
 import { useTabStore } from '../stores/tabStore'
-import { SubagentRunPage } from './SubagentRunPage'
+import { useTeamStore } from '../stores/teamStore'
+import { SubagentRunPage, TeamMemberRunPage } from './SubagentRunPage'
 
 const TRANSCRIPT_TIMESTAMP = '2026-07-03T10:20:11.000Z'
 
@@ -63,6 +81,10 @@ describe('SubagentRunPage', () => {
     useSettingsStore.setState({ locale: 'en' })
     useChatStore.setState({ sessions: {} })
     useTabStore.setState({ tabs: [], activeTabId: null })
+    useTeamStore.getState().clearTeam()
+    getMemberTranscriptMock.mockReset()
+    sendMemberMessageMock.mockReset()
+    sendMemberMessageMock.mockResolvedValue({ ok: true })
     localStorage.clear()
   })
 
@@ -71,6 +93,7 @@ describe('SubagentRunPage', () => {
     vi.useRealTimers()
     vi.mocked(subagentsApi.getRunByTool).mockReset()
     vi.mocked(subagentsApi.sendMessage).mockReset()
+    useTeamStore.getState().clearTeam()
   })
 
   it('returns to the parent session and closes its own tab via the back button', async () => {
@@ -107,6 +130,124 @@ describe('SubagentRunPage', () => {
     expect(transcript).toHaveTextContent('Read files')
     expect(transcript).toHaveTextContent('Finding')
     expect(transcript).not.toHaveTextContent('assistant_text')
+    expect(screen.getByTestId('agent-run-desktop')).toHaveAttribute('data-agent-run-kind', 'subagent')
+  })
+
+  it('renders an Agent Teams member in the shared run desktop and returns to the workbench', async () => {
+    const member = {
+      agentId: 'reviewer@review-team',
+      name: 'reviewer',
+      role: 'security-reviewer',
+      status: 'running' as const,
+      currentTask: 'Review auth changes',
+    }
+    const snapshot = {
+      version: 'v1',
+      generatedAt: '2026-08-09T00:00:00.000Z',
+      team: {
+        name: 'review-team',
+        leadAgentId: 'lead@review-team',
+        leadSessionId: 'lead-session',
+        members: [member],
+      },
+      tasks: [],
+      messages: [],
+    }
+    getMemberTranscriptMock.mockResolvedValue({
+      messages: [
+        {
+          id: 'lead-message',
+          type: 'user',
+          content: '<teammate-message teammate_id="team-lead">Prioritize the auth flow.</teammate-message>',
+          timestamp: TRANSCRIPT_TIMESTAMP,
+        },
+        {
+          id: 'member-message',
+          type: 'assistant',
+          content: [{ type: 'text', text: 'Auth review is in progress.' }],
+          timestamp: TRANSCRIPT_TIMESTAMP,
+        },
+      ],
+    })
+    useTeamStore.setState({
+      activeTeam: snapshot.team,
+      workbenchesBySession: {
+        'lead-session': {
+          teamName: 'review-team',
+          snapshots: [snapshot],
+          loading: false,
+          error: null,
+        },
+      },
+    })
+    useTabStore.getState().openTab('lead-session', 'Lead session')
+    const workbenchTabId = useTabStore.getState().openTeamWorkbenchTab('lead-session', 'review-team')
+    useTeamStore.getState().openMemberSession(member, snapshot.team)
+    const tabId = 'team-member:reviewer@review-team'
+
+    render(
+      <TeamMemberRunPage
+        tabId={tabId}
+        leadSessionId="lead-session"
+        agentId={member.agentId}
+        title="reviewer"
+      />,
+    )
+
+    expect(await screen.findByTestId('team-member-conversation')).toHaveTextContent('Auth review is in progress.')
+    expect(screen.getByTestId('team-member-conversation')).toHaveTextContent('Prioritize the auth flow.')
+    expect(screen.getByTestId('teammate-message-avatar')).toHaveAttribute('data-avatar-key', 'team-lead')
+    expect(screen.getByTestId('agent-run-desktop')).toHaveAttribute('data-agent-run-kind', 'team-member')
+    expect(screen.getByText('Review auth changes')).toBeInTheDocument()
+    expect(screen.queryByTestId('team-member-readonly-note')).not.toBeInTheDocument()
+
+    setComposerText('Please check the regression path.', 33)
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+    await waitFor(() => {
+      expect(sendMemberMessageMock).toHaveBeenCalledWith(
+        'review-team',
+        'reviewer@review-team',
+        'Please check the regression path.',
+      )
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to team overview' }))
+    expect(useTabStore.getState().activeTabId).toBe(workbenchTabId)
+    expect(useTabStore.getState().tabs.some((tab) => tab.sessionId === tabId)).toBe(false)
+  })
+
+  it('shows transcript loading immediately instead of an empty member conversation', async () => {
+    const transcript = deferred<Awaited<ReturnType<typeof getMemberTranscriptMock>>>()
+    const member = {
+      agentId: 'slow-reviewer@review-team',
+      name: 'slow-reviewer',
+      role: 'security-reviewer',
+      status: 'running' as const,
+    }
+    const team = {
+      name: 'review-team',
+      leadSessionId: 'lead-session',
+      members: [member],
+    }
+    getMemberTranscriptMock.mockReturnValue(transcript.promise)
+    useTeamStore.setState({ activeTeam: team })
+    useTeamStore.getState().openMemberSession(member, team)
+
+    render(
+      <TeamMemberRunPage
+        tabId="team-member:slow-reviewer@review-team"
+        leadSessionId="lead-session"
+        agentId={member.agentId}
+        title="slow-reviewer"
+      />,
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading member transcript...')
+    expect(screen.queryByTestId('team-member-conversation')).not.toBeInTheDocument()
+
+    transcript.resolve({ messages: [] })
+    expect(await screen.findByTestId('team-member-conversation')).toBeInTheDocument()
+    expect(getMemberTranscriptMock).toHaveBeenCalledTimes(1)
   })
 
   it('hides the composer for a one-shot SubAgent and explains why', async () => {

@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { isAgentTeamsWorkbenchOpen, mergeMemberTranscriptDelta, useTeamStore } from './teamStore'
+import {
+  mergeMemberTranscriptDelta,
+  mergeMemberTranscriptMessages,
+  useTeamStore,
+} from './teamStore'
 import { useChatStore } from './chatStore'
 import { useTabStore } from './tabStore'
 import type { UIMessage } from '../types/chat'
@@ -94,6 +98,43 @@ describe('teamStore incremental transcript polling', () => {
     const merged = mergeMemberTranscriptDelta(existing, delta)
 
     expect(merged.map(message => message.id)).toEqual(['durable-1', 'server-1'])
+  })
+
+  it('deduplicates a full transcript by identity without dropping a genuine repeat', () => {
+    const transcript = [
+      userMessage('server-1', 'same content', 1_000),
+      userMessage('server-1', 'same content', 1_000),
+      userMessage('server-2', 'same content', 1_100),
+    ]
+
+    const merged = mergeMemberTranscriptMessages([], transcript)
+
+    expect(merged.map(message => message.id)).toEqual(['server-1', 'server-2'])
+  })
+
+  it('starts the first transcript read on member selection and shares it with the mounted page', async () => {
+    let resolveTranscript!: (value: { messages: [] }) => void
+    getMemberTranscriptMock.mockReturnValue(new Promise((resolve) => {
+      resolveTranscript = resolve
+    }))
+    const member = {
+      agentId: 'worker@prefetch-team',
+      name: 'worker',
+      role: 'reviewer',
+      status: 'running' as const,
+    }
+    const team = {
+      name: 'prefetch-team',
+      leadSessionId: 'prefetch-lead',
+      members: [member],
+    }
+
+    useTeamStore.getState().openMemberSession(member, team)
+    const pageLoad = useTeamStore.getState().ensureMemberSession('team-member:worker@prefetch-team')
+
+    expect(getMemberTranscriptMock).toHaveBeenCalledTimes(1)
+    resolveTranscript({ messages: [] })
+    await pageLoad
   })
 
   it('ignores a stale transcript response that resolves after a newer poll', async () => {
@@ -241,7 +282,8 @@ describe('teamStore incremental transcript polling', () => {
 
     await useTeamStore.getState().fetchTeamDetail('team-idle')
     useTeamStore.getState().openMemberSession(member)
-    await vi.advanceTimersByTimeAsync(0)
+    await useTeamStore.getState().ensureMemberSession('team-member:idle-worker@team-idle')
+    useTeamStore.getState().startMemberPolling('team-member:idle-worker@team-idle')
     expect(getMemberTranscriptMock).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(1_500)
@@ -283,7 +325,7 @@ describe('teamStore incremental transcript polling', () => {
     })
 
     useTeamStore.getState().openMemberSession(member)
-    await vi.advanceTimersByTimeAsync(0)
+    await useTeamStore.getState().ensureMemberSession('team-member:reviewer@archived-team')
 
     expect(getMemberTranscriptMock).toHaveBeenCalledWith(
       'archived-team',
@@ -355,7 +397,7 @@ describe('teamStore workbench timeline', () => {
     expect(snapshots[1]?.deletedAt).toBeTruthy()
   })
 
-  it('restores an archived workbench by lead session without forcing it open', async () => {
+  it('restores an archived workbench by lead session without changing tabs', async () => {
     const archived = {
       ...workbench('v9', 'completed'),
       deletedAt: '2026-08-08T00:10:00.000Z',
@@ -376,38 +418,7 @@ describe('teamStore workbench timeline', () => {
       snapshots: [expect.objectContaining({ version: 'v9', deletedAt: archived.deletedAt })],
     })
     expect(state.activeTeam?.name).toBe('team-workbench')
-    // Discovery must not open the panel — that is the header strip's job, and
-    // auto-opening evicted the workspace panel and compacted the transcript.
-    expect(isAgentTeamsWorkbenchOpen(state, 'lead-session')).toBe(false)
-
-    state.setWorkbenchOpen('lead-session', true)
-    expect(isAgentTeamsWorkbenchOpen(useTeamStore.getState(), 'lead-session')).toBe(true)
-  })
-
-  it('never reports the workbench open for a session that has no timeline', () => {
-    const state = useTeamStore.getState()
-    state.setWorkbenchOpen('session-without-team', true)
-
-    expect(isAgentTeamsWorkbenchOpen(useTeamStore.getState(), 'session-without-team')).toBe(false)
-    expect(isAgentTeamsWorkbenchOpen(useTeamStore.getState(), null)).toBe(false)
-  })
-
-  it('keeps a restored workbench available after closing and reopening it', async () => {
-    getWorkbenchForSessionMock.mockResolvedValue({
-      sessionId: 'lead-session',
-      teamName: 'team-workbench',
-      source: 'transcript',
-      snapshots: [workbench('v8', 'completed')],
-    })
-    await useTeamStore.getState().fetchTeamForSession('lead-session')
-
-    useTeamStore.getState().setWorkbenchOpen('lead-session', false)
-    expect(useTeamStore.getState().workbenchOpenBySession['lead-session']).toBe(false)
-    expect(useTeamStore.getState().workbenchesBySession['lead-session']?.snapshots).toHaveLength(1)
-
-    useTeamStore.getState().toggleWorkbench('lead-session')
-    expect(useTeamStore.getState().workbenchOpenBySession['lead-session']).toBe(true)
-    expect(useTeamStore.getState().workbenchesBySession['lead-session']?.snapshots[0]?.version).toBe('v8')
+    expect(useTabStore.getState().tabs.some((tab) => tab.type === 'team')).toBe(false)
   })
 
   it('does not mistake the lead session for the synthetic team-lead conversation', () => {

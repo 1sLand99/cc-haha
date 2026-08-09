@@ -43,12 +43,6 @@ vi.mock('../components/workbench/WorkbenchPanel', () => ({
   ),
 }))
 
-vi.mock('../components/agentTeams/AgentTeamsReport', () => ({
-  AgentTeamsReport: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid="agent-teams-report">agent-teams:{sessionId}</div>
-  ),
-}))
-
 vi.mock('../api/teams', () => ({
   teamsApi: {
     getMemberTranscript: vi.fn(() => Promise.resolve({ messages: [] })),
@@ -1210,7 +1204,7 @@ describe('ActiveSession task polling', () => {
     expect(useTabStore.getState().activeTabId).toBe('__subagent__activity-subagent-open-session__agent-tool-1')
   })
 
-  it('keeps the team workbench closed behind the header strip until it is opened', () => {
+  it('opens the full team workbench directly from the header strip', () => {
     const sessionId = 'team-activity-panel-session'
 
     useActivityPanelStore.getState().open(sessionId)
@@ -1313,7 +1307,6 @@ describe('ActiveSession task polling', () => {
     // Discovering a team must not seize the right-hand slot or compact the
     // transcript; the header strip is the whole of its main-session footprint.
     const strip = screen.getByTestId('agent-teams-strip')
-    expect(strip).toHaveAttribute('data-open', 'false')
     expect(screen.queryByTestId('agent-teams-workbench-panel')).not.toBeInTheDocument()
     expect(screen.getByTestId('message-list')).toHaveAttribute('data-compact', 'false')
 
@@ -1321,23 +1314,13 @@ describe('ActiveSession task polling', () => {
       fireEvent.click(strip)
     })
 
-    expect(screen.queryByTestId('session-activity-panel')).not.toBeInTheDocument()
-    expect(screen.getByTestId('agent-teams-workbench-panel')).toHaveClass('bg-[var(--color-surface)]')
-    // The split needs a resting seam. The drag affordance inside the handle
-    // still only appears on hover, so the border has to come from the panel —
-    // without it the transcript and the report bleed into each other.
-    expect(screen.getByTestId('agent-teams-workbench-panel')).toHaveClass('border-l')
-    expect(screen.getByTestId('agent-teams-resize-handle')).not.toHaveClass('border-x')
-    expect(screen.getByTestId('agent-teams-resize-handle').firstElementChild).toHaveClass('opacity-0')
-    expect(screen.getByTestId('agent-teams-report')).toHaveTextContent(`agent-teams:${sessionId}`)
-    expect(screen.getByTestId('message-list')).toHaveAttribute('data-compact', 'true')
-    expect(screen.getByTestId('agent-teams-strip')).toHaveAttribute('data-open', 'true')
-    expect(useActivityPanelStore.getState().isOpen(sessionId)).toBe(false)
-
-    act(() => {
-      fireEvent.click(screen.getByTestId('agent-teams-strip'))
+    const teamTabId = `__team__${sessionId}`
+    expect(useTabStore.getState().activeTabId).toBe(teamTabId)
+    expect(useTabStore.getState().tabs.find((tab) => tab.sessionId === teamTabId)).toMatchObject({
+      type: 'team',
+      teamLeadSessionId: sessionId,
+      title: 'test-team',
     })
-
     expect(screen.queryByTestId('agent-teams-workbench-panel')).not.toBeInTheDocument()
     expect(useTeamStore.getState().workbenchesBySession[sessionId]?.snapshots).toHaveLength(1)
   })
@@ -1624,101 +1607,6 @@ describe('ActiveSession task polling', () => {
     useCLITaskStore.setState(originalCliTaskState)
   })
 
-  it('keeps live member sessions interactive, makes archived execution read-only, and skips leader task polling', () => {
-    const memberSessionId = 'team-member:security-reviewer@test-team'
-    const originalCliTaskState = useCLITaskStore.getState()
-    const fetchSessionTasks = vi.fn().mockResolvedValue(undefined)
-
-    useCLITaskStore.setState({
-      sessionId: null,
-      tasks: [],
-      fetchSessionTasks,
-    })
-
-    useTeamStore.setState({
-      teams: [],
-      activeTeam: {
-        name: 'test-team',
-        leadAgentId: 'team-lead@test-team',
-        leadSessionId: 'leader-session',
-        members: [
-          {
-            agentId: 'team-lead@test-team',
-            role: 'team-lead',
-            status: 'running',
-            sessionId: 'leader-session',
-          },
-          {
-            agentId: 'security-reviewer@test-team',
-            role: 'security-reviewer',
-            status: 'running',
-          },
-        ],
-      },
-      memberColors: new Map(),
-      error: null,
-    })
-
-    useTabStore.setState({
-      tabs: [{ sessionId: memberSessionId, title: 'security-reviewer', type: 'session', status: 'idle' }],
-      activeTabId: memberSessionId,
-    })
-
-    useChatStore.setState({
-      sessions: {
-        [memberSessionId]: {
-          messages: [],
-          chatState: 'thinking',
-          connectionState: 'connected',
-          streamingText: '',
-          streamingToolInput: '',
-          activeToolUseId: null,
-          activeToolName: null,
-          activeThinkingId: null,
-          pendingPermission: null,
-          pendingComputerUsePermission: null,
-          tokenUsage: { input_tokens: 0, output_tokens: 0 },
-          streamingResponseChars: 0,
-          elapsedSeconds: 0,
-          statusVerb: '',
-          slashCommands: [],
-          agentTaskNotifications: {},
-          elapsedTimer: null,
-        },
-      },
-    })
-    useActivityPanelStore.getState().open(memberSessionId)
-
-    const { queryByTestId, unmount } = render(<ActiveSession />)
-
-    expect(queryByTestId('chat-input')).toBeInTheDocument()
-    expect(queryByTestId('member-session-readonly')).not.toBeInTheDocument()
-    expect(queryByTestId('session-task-bar')).not.toBeInTheDocument()
-    expect(queryByTestId('session-activity-panel')).not.toBeInTheDocument()
-    expect(fetchSessionTasks).not.toHaveBeenCalled()
-
-    act(() => {
-      useTeamStore.setState((state) => ({
-        activeTeam: state.activeTeam
-          ? {
-              ...state.activeTeam,
-              members: state.activeTeam.members.map((member) => (
-                member.agentId === 'security-reviewer@test-team'
-                  ? { ...member, status: 'completed' as const }
-                  : member
-              )),
-            }
-          : null,
-      }))
-    })
-
-    expect(queryByTestId('chat-input')).not.toBeInTheDocument()
-    expect(queryByTestId('member-session-readonly')).toHaveTextContent('This archived execution is read-only')
-
-    unmount()
-    useCLITaskStore.setState(originalCliTaskState)
-  })
-
   it('renders the workspace panel to the right of chat and supports resizing', () => {
     const sessionId = 'workspace-session'
 
@@ -1824,7 +1712,7 @@ describe('ActiveSession task polling', () => {
     expect(useWorkspacePanelStore.getState().width).toBe(526)
   })
 
-  it('does not render the workspace panel when closed or for member sessions', () => {
+  it('does not render the workspace panel when closed', () => {
     const regularSessionId = 'regular-session'
 
     useSessionStore.setState({
@@ -1870,67 +1758,8 @@ describe('ActiveSession task polling', () => {
       },
     })
 
-    const { rerender } = render(<ActiveSession />)
+    render(<ActiveSession />)
     expect(screen.queryByTestId('workspace-panel')).not.toBeInTheDocument()
-
-    const memberSessionId = 'team-member:security-reviewer@test-team'
-    act(() => {
-      useTeamStore.setState({
-        teams: [],
-        activeTeam: {
-          name: 'test-team',
-          leadAgentId: 'team-lead@test-team',
-          leadSessionId: 'leader-session',
-          members: [
-            {
-              agentId: 'team-lead@test-team',
-              role: 'team-lead',
-              status: 'running',
-              sessionId: 'leader-session',
-            },
-            {
-              agentId: 'security-reviewer@test-team',
-              role: 'security-reviewer',
-              status: 'running',
-            },
-          ],
-        },
-        memberColors: new Map(),
-        error: null,
-      })
-      useTabStore.setState({
-        tabs: [{ sessionId: memberSessionId, title: 'security-reviewer', type: 'session', status: 'idle' }],
-        activeTabId: memberSessionId,
-      })
-      useChatStore.setState({
-        sessions: {
-          [memberSessionId]: {
-            messages: [{ id: 'msg-2', type: 'assistant_text', content: 'hello', timestamp: 1 }],
-            chatState: 'idle',
-            connectionState: 'connected',
-            streamingText: '',
-            streamingToolInput: '',
-            activeToolUseId: null,
-            activeToolName: null,
-            activeThinkingId: null,
-            pendingPermission: null,
-            pendingComputerUsePermission: null,
-            tokenUsage: { input_tokens: 0, output_tokens: 0 },
-            streamingResponseChars: 0,
-            elapsedSeconds: 0,
-            statusVerb: '',
-            slashCommands: [],
-            agentTaskNotifications: {},
-            elapsedTimer: null,
-          },
-        },
-      })
-      useWorkspacePanelStore.getState().openPanel(memberSessionId)
-      rerender(<ActiveSession />)
-    })
-
-    expect(screen.queryByTestId('workspace-panel')).not.toBeInTheDocument()
-    expect(screen.getByTestId('message-list')).toBeInTheDocument()
   })
 
   it('keeps chat as the primary surface on mobile by hiding workspace and terminal panels', () => {

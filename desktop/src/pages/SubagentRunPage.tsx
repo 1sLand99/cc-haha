@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeft, RefreshCw } from 'lucide-react'
 import {
   subagentsApi,
@@ -17,6 +17,7 @@ import {
   useChatStore,
 } from '../stores/chatStore'
 import { SUBAGENT_TAB_PREFIX, useTabStore } from '../stores/tabStore'
+import { memberSessionId, useTeamStore } from '../stores/teamStore'
 import type { UIMessage } from '../types/chat'
 
 type TranslationFn = ReturnType<typeof useTranslation>
@@ -123,17 +124,172 @@ export function SubagentRunPage({
   }, [data, tabId])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface)] text-[var(--color-text-primary)]">
+    <AgentRunDesktop
+      kind="subagent"
+      sessionId={tabId}
+      title={title}
+      status={data?.status}
+      identity={`${sourceSessionId} / ${toolUseId}`}
+      details={data ? (
+        <>
+          <span>{t('subagentRun.agent')}: {data.agentId ?? t('subagentRun.unknown')}</span>
+          {data.description ? <span>{data.description}</span> : null}
+          {data.outputFile ? <span>{t('subagentRun.output')}: {data.outputFile}</span> : null}
+        </>
+      ) : null}
+      backLabel={t('subagentRun.backToParent')}
+      onBack={handleReturn}
+      refreshLabel={t('subagentRun.refresh')}
+      onRefresh={() => void load()}
+      loading={loading}
+      loadingLabel={t('subagentRun.loading')}
+      error={error}
+      ready={Boolean(data)}
+      canSendMessage={data?.canSendMessage === true}
+      readOnlyLabel={t('subagentRun.readOnly')}
+      conversationTestId="subagent-conversation"
+      readOnlyTestId="subagent-readonly-note"
+    />
+  )
+}
+
+/**
+ * Agent Teams members use the exact same run desktop as SubAgents. Only the
+ * transcript adapter, return target and inbox capability differ.
+ */
+export function TeamMemberRunPage({
+  tabId,
+  leadSessionId,
+  agentId,
+  title,
+}: {
+  tabId: string
+  leadSessionId: string
+  agentId: string
+  title: string
+}) {
+  const t = useTranslation()
+  const member = useTeamStore((state) => state.getMemberBySessionId(tabId))
+  const snapshot = useTeamStore((state) => state.workbenchesBySession[leadSessionId]?.snapshots.at(-1))
+  const refreshMemberSession = useTeamStore((state) => state.refreshMemberSession)
+  const ensureMemberSession = useTeamStore((state) => state.ensureMemberSession)
+  const startMemberPolling = useTeamStore((state) => state.startMemberPolling)
+  const stopMemberPolling = useTeamStore((state) => state.stopMemberPolling)
+  const runSessionId = memberSessionId(agentId)
+  const hasConversationSnapshot = useChatStore((state) => Boolean(state.sessions[runSessionId]))
+  const [loading, setLoading] = useState(!hasConversationSnapshot)
+
+  const refresh = useCallback(async (initial = false) => {
+    setLoading(true)
+    if (initial) await ensureMemberSession(tabId)
+    else await refreshMemberSession(tabId)
+    setLoading(false)
+  }, [ensureMemberSession, refreshMemberSession, tabId])
+
+  useEffect(() => {
+    void refresh(true)
+    if (member?.status === 'running' || member?.status === 'idle') {
+      startMemberPolling(tabId)
+    }
+    return () => stopMemberPolling()
+  }, [member?.agentId, member?.status, refresh, startMemberPolling, stopMemberPolling, tabId])
+
+  const status: SubagentRunStatus = snapshot?.deletedAt || member?.status === 'completed'
+    ? 'completed'
+    : member?.status === 'error'
+      ? 'failed'
+      : member?.status === 'running'
+        ? 'running'
+        : 'unknown'
+  const teamName = snapshot?.team.name ?? useTeamStore.getState().activeTeam?.name
+  const canSendMessage = Boolean(member && !snapshot?.deletedAt && member.status !== 'completed')
+
+  return (
+    <AgentRunDesktop
+      kind="team-member"
+      sessionId={runSessionId}
+      title={member?.name || member?.role || title}
+      status={status}
+      identity={`${teamName ?? leadSessionId} / ${agentId}`}
+      details={member ? (
+        <>
+          <span>{t('subagentRun.agent')}: {member.agentId}</span>
+          <span>{member.role}</span>
+          {member.currentTask ? <span>{member.currentTask}</span> : null}
+        </>
+      ) : null}
+      backLabel={t('agentTeams.backToOverview')}
+      onBack={() => useTabStore.getState().returnFromTeamMember(tabId)}
+      refreshLabel={t('subagentRun.refresh')}
+      onRefresh={() => void refresh()}
+      loading={loading}
+      loadingLabel={t('agentTeams.memberTranscriptLoading')}
+      error={member ? null : t('agentTeams.loading')}
+      ready={Boolean(member) && (hasConversationSnapshot || !loading)}
+      canSendMessage={canSendMessage}
+      readOnlyLabel={t('teams.archivedMemberReadOnly')}
+      conversationTestId="team-member-conversation"
+      readOnlyTestId="team-member-readonly-note"
+    />
+  )
+}
+
+function AgentRunDesktop({
+  kind,
+  sessionId,
+  title,
+  status,
+  identity,
+  details,
+  backLabel,
+  onBack,
+  refreshLabel,
+  onRefresh,
+  loading,
+  loadingLabel,
+  error,
+  ready,
+  canSendMessage,
+  readOnlyLabel,
+  conversationTestId,
+  readOnlyTestId,
+}: {
+  kind: 'subagent' | 'team-member'
+  sessionId: string
+  title: string
+  status?: SubagentRunStatus
+  identity: string
+  details?: ReactNode
+  backLabel: string
+  onBack: () => void
+  refreshLabel: string
+  onRefresh: () => void
+  loading: boolean
+  loadingLabel: string
+  error: string | null
+  ready: boolean
+  canSendMessage: boolean
+  readOnlyLabel: string
+  conversationTestId: string
+  readOnlyTestId: string
+}) {
+  const t = useTranslation()
+  return (
+    <div
+      data-testid="agent-run-desktop"
+      data-agent-run-kind={kind}
+      className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface)] text-[var(--color-text-primary)]"
+    >
       <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--color-border)] px-5 py-3">
         <div className="flex min-w-0 items-start gap-2">
           <Button
             variant="ghost"
             size="base"
-            onClick={handleReturn}
+            onClick={onBack}
             icon={<ArrowLeft size={15} strokeWidth={2} aria-hidden="true" />}
             className="mt-0.5 shrink-0"
           >
-            {t('subagentRun.backToParent')}
+            {backLabel}
           </Button>
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -143,58 +299,53 @@ export function SubagentRunPage({
               >
                 {title}
               </h1>
-              {data ? <StatusBadge status={data.status} t={t} /> : null}
+              {status ? <StatusBadge status={status} t={t} /> : null}
             </div>
             <p className="mt-1 truncate font-mono text-[11px] text-[var(--color-text-tertiary)]">
-              {sourceSessionId} / {toolUseId}
+              {identity}
             </p>
-            {data ? (
+            {details ? (
               <p className="mt-1 flex min-w-0 flex-wrap gap-x-2 text-[11px] text-[var(--color-text-tertiary)]">
-                <span>{t('subagentRun.agent')}: {data.agentId ?? t('subagentRun.unknown')}</span>
-                {data.description ? <span>{data.description}</span> : null}
-                {data.outputFile ? <span>{t('subagentRun.output')}: {data.outputFile}</span> : null}
+                {details}
               </p>
             ) : null}
           </div>
         </div>
-        {/* The icon spins in place while loading rather than using IconButton's
-            `loading` prop, which would swap RefreshCw for the generic Spinner. */}
+        {/* The icon spins in place while loading rather than swapping to the
+            generic spinner, so SubAgents and teammates share identical chrome. */}
         <IconButton
           icon={<RefreshCw size={15} strokeWidth={2.2} aria-hidden="true" className={loading ? 'animate-spin' : undefined} />}
-          label={t('subagentRun.refresh')}
+          label={refreshLabel}
           showTooltip={false}
           size="md"
           tone="muted"
-          onClick={() => void load()}
+          onClick={onRefresh}
           disabled={loading}
         />
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col">
-        {loading && !data ? (
-          <div role="status" className="flex flex-1 items-center justify-center text-sm text-[var(--color-text-tertiary)]">{t('subagentRun.loading')}</div>
+        {loading && !ready ? (
+          <div role="status" className="flex flex-1 items-center justify-center text-sm text-[var(--color-text-tertiary)]">{loadingLabel}</div>
         ) : null}
         {error ? (
           <div role="alert" className="mx-5 mt-4 rounded-[var(--radius-md)] border border-[var(--color-error)] bg-[var(--color-error-container)] px-3 py-2 text-sm text-[var(--color-on-error-container)]">
             {error}
           </div>
         ) : null}
-        {data ? (
-          <div data-testid="subagent-conversation" className="flex min-h-0 flex-1 flex-col">
-            <MessageList sessionId={tabId} />
+        {ready ? (
+          <div data-testid={conversationTestId} className="flex min-h-0 flex-1 flex-col">
+            <MessageList sessionId={sessionId} />
           </div>
         ) : null}
       </main>
-      {/* A one-shot subagent has no inbox: the parent turn already collected
-          its answer, so a message here would only fork a detached background
-          copy. Only teammates and in-flight background agents get a composer. */}
-      {data?.canSendMessage ? <ChatInput /> : null}
-      {data && !data.canSendMessage ? (
+      {ready && canSendMessage ? <ChatInput /> : null}
+      {ready && !canSendMessage ? (
         <p
-          data-testid="subagent-readonly-note"
+          data-testid={readOnlyTestId}
           className="shrink-0 border-t border-[var(--color-border)] px-5 py-3 text-center text-[11.5px] text-[var(--color-text-tertiary)]"
         >
-          {t('subagentRun.readOnly')}
+          {readOnlyLabel}
         </p>
       ) : null}
     </div>
