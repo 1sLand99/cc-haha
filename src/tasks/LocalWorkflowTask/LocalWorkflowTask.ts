@@ -7,6 +7,7 @@ import {
   TASK_NOTIFICATION_TAG,
   TASK_TYPE_TAG,
   TOOL_USE_ID_TAG,
+  WORKFLOW_RUN_ID_TAG,
 } from '../../constants/xml.js'
 import type { SetAppState, Task, TaskStateBase } from '../../Task.js'
 import { createTaskStateBase } from '../../Task.js'
@@ -450,6 +451,7 @@ export function buildWorkflowNotification(params: {
   return `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>${toolUseIdLine}
 <${TASK_TYPE_TAG}>local_workflow</${TASK_TYPE_TAG}>
+<${WORKFLOW_RUN_ID_TAG}>${workflowRunId ?? ''}</${WORKFLOW_RUN_ID_TAG}>
 <${OUTPUT_FILE_TAG}>${getTaskOutputPath(taskId)}</${OUTPUT_FILE_TAG}>
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
 <${SUMMARY_TAG}>${headline}</${SUMMARY_TAG}>${resultSection}${sections.join('')}

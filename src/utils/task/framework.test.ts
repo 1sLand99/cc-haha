@@ -10,6 +10,7 @@ import type { TaskState } from '../../tasks/types.js'
 import type { SessionId } from '../../types/ids.js'
 import { drainSdkEvents } from '../sdkEventQueue.js'
 import { registerTask } from './framework.js'
+import { emitTaskProgress } from './sdkProgress.js'
 
 beforeEach(() => {
   resetStateForTests()
@@ -125,6 +126,47 @@ test('still exposes a local agent task in the session activity stream', () => {
     task_id: 'subagent-task',
     tool_use_id: 'agent-tool',
     task_type: 'local_agent',
+  }))
+})
+
+test('includes the stable run id in workflow start events', () => {
+  const harness = makeHarness()
+  const task = makeTask({
+    id: 'workflow-task-1',
+    type: 'local_workflow',
+    workflowName: 'review-codebase',
+    workflowRunId: 'wf_shared-run-1',
+  } as Partial<TaskState> & Pick<TaskState, 'id' | 'type'>)
+
+  registerTask(task, harness.setAppState)
+
+  expect(drainSdkEvents()).toContainEqual(expect.objectContaining({
+    type: 'system',
+    subtype: 'task_started',
+    task_id: 'workflow-task-1',
+    task_type: 'local_workflow',
+    workflow_name: 'review-codebase',
+    workflow_run_id: 'wf_shared-run-1',
+  }))
+})
+
+test('includes the stable run id in workflow progress events', () => {
+  emitTaskProgress({
+    taskId: 'workflow-task-1',
+    toolUseId: 'workflow-tool-1',
+    description: 'Verify: verify:3',
+    startTime: Date.now(),
+    totalTokens: 1200,
+    toolUses: 4,
+    workflowRunId: 'wf_shared-run-1',
+    workflowProgress: [],
+  })
+
+  expect(drainSdkEvents()).toContainEqual(expect.objectContaining({
+    type: 'system',
+    subtype: 'task_progress',
+    task_id: 'workflow-task-1',
+    workflow_run_id: 'wf_shared-run-1',
   }))
 })
 

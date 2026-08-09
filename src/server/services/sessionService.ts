@@ -221,6 +221,7 @@ export type SessionTaskNotification = {
   taskId: string
   toolUseId: string
   status: 'completed' | 'failed' | 'stopped'
+  workflowRunId?: string
   summary?: string
   result?: string
   outputFile?: string
@@ -1743,6 +1744,7 @@ export class SessionService {
     }
 
     const taskId = this.readXmlTag(xml, 'task-id') || toolUseId
+    const workflowRunId = this.readXmlTag(xml, 'workflow-run-id')
     const summary = this.readXmlTag(xml, 'summary')
     const result = this.readXmlTag(xml, 'result')
     const outputFile = this.readXmlTag(xml, 'output-file')
@@ -1750,6 +1752,7 @@ export class SessionService {
       taskId,
       toolUseId,
       status,
+      ...(workflowRunId ? { workflowRunId } : {}),
       ...(summary ? { summary } : {}),
       ...(result ? { result } : {}),
       ...(outputFile ? { outputFile } : {}),
@@ -1778,10 +1781,12 @@ export class SessionService {
       typeof notification[key] === 'string' && notification[key]
         ? notification[key] as string
         : undefined
+    const workflowRunId = optionalString('workflowRunId')
     return {
       taskId: optionalString('taskId') ?? toolUseId,
       toolUseId,
       status,
+      ...(workflowRunId ? { workflowRunId } : {}),
       ...(optionalString('summary') ? { summary: optionalString('summary') } : {}),
       ...(optionalString('result') ? { result: optionalString('result') } : {}),
       ...(optionalString('outputFile') ? { outputFile: optionalString('outputFile') } : {}),

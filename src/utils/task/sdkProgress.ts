@@ -16,6 +16,7 @@ export function emitTaskProgress(params: {
   toolUses: number
   lastToolName?: string
   summary?: string
+  workflowRunId?: string
   workflowProgress?: SdkWorkflowProgress[]
 }): void {
   enqueueSdkEvent({
@@ -31,6 +32,7 @@ export function emitTaskProgress(params: {
     },
     last_tool_name: params.lastToolName,
     summary: params.summary,
+    workflow_run_id: params.workflowRunId,
     workflow_progress: params.workflowProgress,
   })
 }

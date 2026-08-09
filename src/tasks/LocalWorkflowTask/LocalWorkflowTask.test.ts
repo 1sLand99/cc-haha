@@ -143,6 +143,7 @@ describe('buildWorkflowNotification', () => {
       result: ['ALPHA'],
     })
     expect(message).toContain('<status>completed</status>')
+    expect(message).toContain('<workflow-run-id>wf_abc12345-def</workflow-run-id>')
     expect(message).toContain('/tmp/run/journal.jsonl')
     expect(message).toContain(
       "Workflow({scriptPath: '/tmp/demo.wf_abc12345-def.js', resumeFromRunId: 'wf_abc12345-def'})",

@@ -329,6 +329,7 @@ function createProgressBatcher(params: {
       lastToolName:
         lastAgent?.type === 'workflow_agent' ? lastAgent.label : undefined,
       summary: params.summary,
+      workflowRunId: task.workflowRunId,
       workflowProgress: task.workflowProgress.filter(isDurableWorkflowEvent),
     })
   }

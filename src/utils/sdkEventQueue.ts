@@ -12,6 +12,7 @@ type TaskStartedEvent = {
   task_type?: string
   remote_session_id?: string
   workflow_name?: string
+  workflow_run_id?: string
   prompt?: string
 }
 
@@ -28,6 +29,7 @@ type TaskProgressEvent = {
   }
   last_tool_name?: string
   summary?: string
+  workflow_run_id?: string
   // Delta batch of workflow state changes. Clients upsert by
   // `${type}:${index}` then group by phaseIndex to rebuild the phase tree,
   // same fold as collectFromEvents + groupByPhase in PhaseProgress.tsx.
@@ -48,6 +50,7 @@ type TaskNotificationSdkEvent = {
   output_file: string
   summary: string
   result?: string
+  workflow_run_id?: string
   usage?: {
     total_tokens: number
     tool_uses: number
@@ -156,6 +159,7 @@ export function emitTaskTerminatedSdk(
     toolUseId?: string
     summary?: string
     outputFile?: string
+    workflowRunId?: string
     usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
   },
 ): void {
@@ -167,6 +171,7 @@ export function emitTaskTerminatedSdk(
     status,
     output_file: opts?.outputFile ?? '',
     summary: opts?.summary ?? '',
+    workflow_run_id: opts?.workflowRunId,
     usage: opts?.usage,
   })
 }

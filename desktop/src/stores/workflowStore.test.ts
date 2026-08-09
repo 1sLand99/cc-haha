@@ -84,6 +84,69 @@ describe('workflowStore', () => {
     )
   })
 
+  it('replaces a running task when the same workflow run resumes before its terminal arrives', () => {
+    const runId = 'wf_resumed-run-1'
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted({
+      workflow_run_id: runId,
+    }))
+    store().handleTaskEvent(
+      SESSION,
+      'task_progress',
+      progress([
+        { type: 'workflow_phase', index: 1, title: 'Map' },
+        agentRow(1, 'done', { phaseIndex: 1, phaseTitle: 'Map' }),
+      ]),
+    )
+    store().openRun(TASK)
+
+    const resumedTaskId = 'w-resumed'
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted({
+      task_id: resumedTaskId,
+      workflow_run_id: runId,
+    }))
+    store().handleTaskEvent(SESSION, 'task_progress', {
+      ...progress([
+        { type: 'workflow_phase', index: 2, title: 'Verify' },
+        agentRow(1, 'progress', { phaseIndex: 2, phaseTitle: 'Verify' }),
+      ]),
+      task_id: resumedTaskId,
+      workflow_run_id: runId,
+    })
+    store().handleTaskEvent(SESSION, 'task_notification', {
+      task_id: TASK,
+      workflow_run_id: runId,
+      status: 'completed',
+      summary: 'Late terminal event for the original task',
+    })
+
+    const runs = runsForSession(useWorkflowStore.getState(), SESSION)
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({
+      taskId: resumedTaskId,
+      runId,
+      status: 'running',
+    })
+    expect(useWorkflowStore.getState().openRunId).toBe(resumedTaskId)
+    expect(groupRunPhases(runs[0]!).phases.map(phase => phase.title)).toEqual([
+      'Verify',
+    ])
+  })
+
+  it('keeps independent runs that share a workflow name', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted({
+      task_id: 'w-first',
+      workflow_run_id: 'wf_first',
+    }))
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted({
+      task_id: 'w-second',
+      workflow_run_id: 'wf_second',
+    }))
+
+    expect(
+      runsForSession(useWorkflowStore.getState(), SESSION).map(run => run.taskId),
+    ).toEqual(expect.arrayContaining(['w-first', 'w-second']))
+  })
+
   it('still ignores a bare notification for a task it never tracked', () => {
     store().handleTaskEvent(SESSION, 'task_notification', {
       task_id: 'b0000009',

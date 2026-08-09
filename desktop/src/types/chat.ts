@@ -237,6 +237,7 @@ export type AgentTaskNotification = {
   taskId: string
   toolUseId: string
   status: 'completed' | 'failed' | 'stopped'
+  workflowRunId?: string
   summary?: string
   result?: string
   outputFile?: string
@@ -257,6 +258,7 @@ export type BackgroundAgentTask = {
   description?: string
   taskType?: string
   workflowName?: string
+  workflowRunId?: string
   prompt?: string
   result?: string
   summary?: string

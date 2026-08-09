@@ -62,6 +62,41 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
     if (!event) return
     set(state => {
       const existing = state.runs[event.taskId]
+      if (!existing && event.runId) {
+        const sameRunEntries = Object.entries(state.runs).filter(
+          ([taskId, run]) =>
+            taskId !== event.taskId &&
+            run.sessionId === event.sessionId &&
+            run.runId === event.runId,
+        )
+        if (sameRunEntries.length > 0) {
+          // A resume keeps the logical run id but receives a fresh task id.
+          // task_started is the authoritative attempt boundary even when the
+          // old terminal event is still waiting on server persistence. A
+          // progress snapshot may establish the boundary after reconnect, but
+          // only once the previously known attempt has settled.
+          const startsReplacement =
+            event.subtype === 'task_started' ||
+            (event.subtype === 'task_progress' &&
+              sameRunEntries.every(([, run]) => run.status !== 'running'))
+          if (!startsReplacement) return state
+
+          const runs = { ...state.runs }
+          const replacedTaskIds = new Set<string>()
+          for (const [taskId] of sameRunEntries) {
+            replacedTaskIds.add(taskId)
+            delete runs[taskId]
+          }
+          runs[event.taskId] = mergeRun(undefined, event)
+          return {
+            runs,
+            openRunId:
+              state.openRunId && replacedTaskIds.has(state.openRunId)
+                ? event.taskId
+                : state.openRunId,
+          }
+        }
+      }
       const merged = mergeRun(existing, event)
       if (merged === existing) return state
       return { runs: { ...state.runs, [event.taskId]: merged } }
@@ -288,6 +323,7 @@ export function runCompletion(run: WorkflowRun): number {
 // ── Event parsing ────────────────────────────────────────────────────────────
 
 type ParsedEvent = {
+  subtype: 'task_started' | 'task_progress' | 'task_notification'
   taskId: string
   sessionId: string
   runId?: string
@@ -323,11 +359,13 @@ export function parseWorkflowTaskEvent(
 
   const taskType = readString(payload.task_type)
   const workflowName = readString(payload.workflow_name)
+  const runId = readString(payload.workflow_run_id)
   const progress = readProgress(payload.workflow_progress)
   const isWorkflow =
     known ||
     taskType === 'local_workflow' ||
     Boolean(workflowName) ||
+    Boolean(runId) ||
     progress.length > 0
   if (!isWorkflow) return null
 
@@ -343,9 +381,10 @@ export function parseWorkflowTaskEvent(
   const summary = readString(payload.summary)
 
   return {
+    subtype,
     taskId,
     sessionId,
-    runId: readString(payload.workflow_run_id),
+    runId,
     workflowName,
     // A terminal notification's `summary` describes the outcome, not the run.
     // Letting it through as the description replaced "Survey Express

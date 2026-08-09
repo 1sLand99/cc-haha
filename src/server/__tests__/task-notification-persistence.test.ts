@@ -52,6 +52,7 @@ describe('background task notification persistence', () => {
       taskId: 'agent-task-1',
       toolUseId: 'agent-tool-1',
       status: 'completed',
+      workflowRunId: 'wf_persisted-run',
       summary: 'Agent completed after the foreground Skill output',
       result: 'Background verification passed',
       timestamp: '2026-07-18T00:01:00.000Z',
@@ -61,6 +62,7 @@ describe('background task notification persistence', () => {
       taskId: 'agent-task-1',
       toolUseId: 'agent-tool-1',
       status: 'completed',
+      workflowRunId: 'wf_persisted-run',
       summary: 'Agent completed after the foreground Skill output',
       result: 'Background verification passed',
       timestamp: '2026-07-18T00:01:00.000Z',
@@ -201,6 +203,32 @@ describe('background task notification persistence', () => {
     }])
   })
 
+  it('restores workflow run identity from task-notification transcript turns', async () => {
+    const sessionId = crypto.randomUUID()
+    const projectDir = path.join(configDir, 'projects', '-tmp-workflow-notification')
+    const transcriptPath = path.join(projectDir, `${sessionId}.jsonl`)
+    await fs.mkdir(projectDir, { recursive: true })
+    await fs.writeFile(transcriptPath, `${JSON.stringify({
+      type: 'user',
+      uuid: crypto.randomUUID(),
+      timestamp: '2026-07-17T00:00:00.000Z',
+      message: {
+        role: 'user',
+        content: '<task-notification>\n<task-id>workflow-task</task-id>\n<tool-use-id>workflow-tool</tool-use-id>\n<workflow-run-id>wf_transcript-run</workflow-run-id>\n<status>completed</status>\n<summary>Workflow completed</summary>\n</task-notification>',
+      },
+    })}\n`, 'utf8')
+
+    const service = new SessionService()
+    expect(await service.getSessionTaskNotifications(sessionId)).toEqual([{
+      taskId: 'workflow-task',
+      toolUseId: 'workflow-tool',
+      status: 'completed',
+      workflowRunId: 'wf_transcript-run',
+      summary: 'Workflow completed',
+      timestamp: '2026-07-17T00:00:00.000Z',
+    }])
+  })
+
   it('normalizes and persists one terminal SDK event for multiple observers', async () => {
     const append = spyOn(sessionService, 'appendSessionTaskNotification').mockResolvedValue()
     const sdkEvent = {
@@ -210,6 +238,7 @@ describe('background task notification persistence', () => {
       task_id: 'agent-task-1',
       tool_use_id: 'agent-tool-1',
       status: 'completed',
+      workflow_run_id: 'wf_sdk-run',
       summary: 'Agent completed',
       result: 'All checks passed',
       output_file: '/tmp/agent-task-1.output',
@@ -227,6 +256,7 @@ describe('background task notification persistence', () => {
       taskId: 'agent-task-1',
       toolUseId: 'agent-tool-1',
       status: 'completed',
+      workflowRunId: 'wf_sdk-run',
       summary: 'Agent completed',
       result: 'All checks passed',
       outputFile: '/tmp/agent-task-1.output',

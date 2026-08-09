@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MessageEntry } from '../types/session'
+import { buildSessionActivityModel } from '../components/activity/sessionActivityModel'
 import { useSessionRuntimeStore } from './sessionRuntimeStore'
 
 const {
@@ -151,6 +152,7 @@ vi.mock('./cliTaskStore', () => ({
 
 import { sessionsApi } from '../api/sessions'
 import { useSettingsStore } from './settingsStore'
+import { runsForSession, useWorkflowStore } from './workflowStore'
 import {
   mapHistoryMessagesToUiMessages,
   reconstructAgentNotifications,
@@ -433,6 +435,7 @@ describe('chatStore history mapping', () => {
     cliTaskStoreSnapshot.tasks = []
     cliTaskStoreSnapshot.sessionId = null
     useSessionRuntimeStore.setState({ selections: {} })
+    useWorkflowStore.setState(useWorkflowStore.getInitialState(), true)
     localStorage.clear()
     useSettingsStore.setState({ locale: 'en' })
     useChatStore.setState({
@@ -4121,6 +4124,313 @@ describe('chatStore history mapping', () => {
 
     expect(updateSessionPermissionModeMock).toHaveBeenCalledWith(TEST_SESSION_ID, 'auto')
     expect(sendMock).not.toHaveBeenCalled()
+  })
+
+  it('replaces a resumed workflow across the Activity stores by stable run id', () => {
+    const runId = 'wf_activity-resume-1'
+    useChatStore.setState({
+      ...initialState,
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'idle' }),
+      },
+    })
+
+    const sendTaskEvent = (
+      subtype: 'task_started' | 'task_progress' | 'task_notification',
+      data: Record<string, unknown>,
+    ) => {
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'system_notification',
+        subtype,
+        data,
+      })
+    }
+
+    sendTaskEvent('task_started', {
+      task_id: 'workflow-task-original',
+      tool_use_id: 'workflow-tool-original',
+      task_type: 'local_workflow',
+      workflow_name: 'review-codebase',
+      workflow_run_id: runId,
+      description: 'Review the codebase',
+    })
+    sendTaskEvent('task_progress', {
+      task_id: 'workflow-task-original',
+      tool_use_id: 'workflow-tool-original',
+      workflow_run_id: runId,
+      description: 'Synthesize: synthesize',
+      workflow_progress: [
+        { type: 'workflow_phase', index: 1, title: 'MAP' },
+        { type: 'workflow_agent', index: 1, label: 'map:domains', state: 'done', phaseIndex: 1, phaseTitle: 'MAP' },
+      ],
+    })
+    sendTaskEvent('task_started', {
+      task_id: 'workflow-task-resumed',
+      tool_use_id: 'workflow-tool-resumed',
+      task_type: 'local_workflow',
+      workflow_name: 'review-codebase',
+      workflow_run_id: runId,
+      description: 'Review the codebase',
+    })
+    sendTaskEvent('task_progress', {
+      task_id: 'workflow-task-resumed',
+      tool_use_id: 'workflow-tool-resumed',
+      workflow_run_id: runId,
+      description: 'Verify: verify:3',
+      workflow_progress: [
+        { type: 'workflow_phase', index: 2, title: 'VERIFY' },
+        { type: 'workflow_agent', index: 1, label: 'verify:3', state: 'progress', phaseIndex: 2, phaseTitle: 'VERIFY' },
+      ],
+    })
+    // Terminal delivery goes through persistence and can trail the resumed
+    // task_started event. A stale close for the superseded task must not put
+    // the old lifecycle back into Activity or settle the new one.
+    sendTaskEvent('task_notification', {
+      task_id: 'workflow-task-original',
+      tool_use_id: 'workflow-tool-original',
+      workflow_run_id: runId,
+      status: 'completed',
+      summary: 'Late terminal event for the original task',
+      output_file: '/tmp/original-workflow.output',
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]!
+    const workflowRuns = runsForSession(useWorkflowStore.getState(), TEST_SESSION_ID)
+    const model = buildSessionActivityModel({
+      sessionId: TEST_SESSION_ID,
+      messages: session.messages,
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: Object.values(session.backgroundAgentTasks ?? {}),
+      agentNotifications: Object.values(session.agentTaskNotifications),
+      workflowRuns,
+    })
+
+    expect(workflowRuns.map(run => run.taskId)).toEqual(['workflow-task-resumed'])
+    expect(
+      model.sections.workflow.rows
+        .filter(row => row.groupProgress)
+        .map(row => row.label),
+    ).toEqual(['VERIFY'])
+    expect(model.sections.backgroundTasks.rows.map(row => [row.id, row.taskId])).toEqual([
+      ['workflow-tool-resumed', 'workflow-task-resumed'],
+    ])
+    expect(session.backgroundAgentTasks?.['workflow-task-resumed']?.summary).toBeUndefined()
+    expect(session.backgroundAgentTasks?.['workflow-task-resumed']?.result).toBeUndefined()
+    expect(session.agentTaskNotifications).toEqual({})
+    expect(model.sections.output.rows).toEqual([])
+    expect(
+      session.messages.filter(message => message.type === 'background_task'),
+    ).toEqual([
+      expect.objectContaining({
+        task: expect.objectContaining({
+          taskId: 'workflow-task-resumed',
+          workflowRunId: runId,
+          status: 'running',
+          summary: undefined,
+        }),
+      }),
+    ])
+  })
+
+  it('clears a completed workflow output when the same run starts a new attempt', () => {
+    const runId = 'wf_activity-settled-resume'
+    useChatStore.setState({
+      ...initialState,
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'idle' }),
+      },
+    })
+    const sendTaskEvent = (
+      subtype: 'task_started' | 'task_notification',
+      data: Record<string, unknown>,
+    ) => {
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'system_notification',
+        subtype,
+        data,
+      })
+    }
+
+    sendTaskEvent('task_started', {
+      task_id: 'workflow-task-completed',
+      tool_use_id: 'workflow-tool-completed',
+      task_type: 'local_workflow',
+      workflow_run_id: runId,
+      description: 'First attempt',
+    })
+    sendTaskEvent('task_notification', {
+      task_id: 'workflow-task-completed',
+      tool_use_id: 'workflow-tool-completed',
+      workflow_run_id: runId,
+      status: 'completed',
+      summary: 'First attempt completed',
+      output_file: '/tmp/first-attempt.output',
+    })
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]
+        ?.agentTaskNotifications['workflow-tool-completed']?.outputFile,
+    ).toBe('/tmp/first-attempt.output')
+
+    sendTaskEvent('task_started', {
+      task_id: 'workflow-task-next',
+      tool_use_id: 'workflow-tool-next',
+      task_type: 'local_workflow',
+      workflow_run_id: runId,
+      description: 'Next attempt',
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]!
+    expect(session.agentTaskNotifications).toEqual({})
+    expect(Object.keys(session.backgroundAgentTasks ?? {})).toEqual([
+      'workflow-task-next',
+    ])
+  })
+
+  it('keeps independent same-name workflows separate in both Activity stores', () => {
+    useChatStore.setState({
+      ...initialState,
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'idle' }),
+      },
+    })
+
+    for (const [taskId, toolUseId, runId] of [
+      ['workflow-task-first', 'workflow-tool-first', 'wf_first'],
+      ['workflow-task-second', 'workflow-tool-second', 'wf_second'],
+    ]) {
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'system_notification',
+        subtype: 'task_started',
+        data: {
+          task_id: taskId,
+          tool_use_id: toolUseId,
+          task_type: 'local_workflow',
+          workflow_name: 'review-codebase',
+          workflow_run_id: runId,
+          description: 'Review the codebase',
+        },
+      })
+    }
+
+    expect(
+      runsForSession(useWorkflowStore.getState(), TEST_SESSION_ID).map(run => run.taskId),
+    ).toEqual(expect.arrayContaining(['workflow-task-first', 'workflow-task-second']))
+    expect(
+      Object.values(
+        useChatStore.getState().sessions[TEST_SESSION_ID]?.backgroundAgentTasks ?? {},
+      ).map(task => task.taskId),
+    ).toEqual(expect.arrayContaining(['workflow-task-first', 'workflow-task-second']))
+  })
+
+  it('restores only the latest terminal attempt for one workflow run', async () => {
+    const runId = 'wf_restored-resume'
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [],
+      taskNotifications: [
+        {
+          taskId: 'workflow-task-old',
+          toolUseId: 'workflow-tool-old',
+          workflowRunId: runId,
+          status: 'completed',
+          summary: 'Old attempt completed',
+          outputFile: '/tmp/old-attempt.output',
+          timestamp: '2026-08-09T00:00:00.000Z',
+        },
+        {
+          taskId: 'workflow-task-new',
+          toolUseId: 'workflow-tool-new',
+          workflowRunId: runId,
+          status: 'completed',
+          summary: 'New attempt completed',
+          outputFile: '/tmp/new-attempt.output',
+          timestamp: '2026-08-09T00:01:00.000Z',
+        },
+      ],
+    })
+    useChatStore.setState({
+      ...initialState,
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'idle' }),
+      },
+    })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]!
+    expect(Object.values(session.backgroundAgentTasks ?? {})).toEqual([
+      expect.objectContaining({
+        taskId: 'workflow-task-new',
+        workflowRunId: runId,
+        outputFile: '/tmp/new-attempt.output',
+      }),
+    ])
+    expect(Object.values(session.agentTaskNotifications)).toEqual([
+      expect.objectContaining({
+        taskId: 'workflow-task-new',
+        workflowRunId: runId,
+        outputFile: '/tmp/new-attempt.output',
+      }),
+    ])
+    expect(
+      session.messages
+        .filter(message => message.type === 'background_task')
+        .map(message => message.task.taskId),
+    ).toEqual(['workflow-task-new'])
+  })
+
+  it('does not restore an old workflow output over a newer live attempt', async () => {
+    const runId = 'wf_restore-race'
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [],
+      taskNotifications: [{
+        taskId: 'workflow-task-old',
+        toolUseId: 'workflow-tool-old',
+        workflowRunId: runId,
+        status: 'completed',
+        summary: 'Old attempt completed',
+        outputFile: '/tmp/old-attempt.output',
+        timestamp: '2026-08-09T00:00:00.000Z',
+      }],
+    })
+    const resumedAt = new Date('2026-08-10T00:00:00.000Z').getTime()
+    useChatStore.setState({
+      ...initialState,
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          backgroundAgentTasks: {
+            'workflow-task-resumed': {
+              taskId: 'workflow-task-resumed',
+              toolUseId: 'workflow-tool-resumed',
+              taskType: 'local_workflow',
+              workflowRunId: runId,
+              status: 'running',
+              description: 'Resumed attempt',
+              startedAt: resumedAt,
+              updatedAt: resumedAt,
+            },
+          },
+        }),
+      },
+    })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]!
+    expect(Object.keys(session.backgroundAgentTasks ?? {})).toEqual([
+      'workflow-task-resumed',
+    ])
+    expect(session.agentTaskNotifications).toEqual({})
+    const model = buildSessionActivityModel({
+      sessionId: TEST_SESSION_ID,
+      messages: session.messages,
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: Object.values(session.backgroundAgentTasks ?? {}),
+      agentNotifications: Object.values(session.agentTaskNotifications),
+    })
+    expect(model.sections.output.rows).toEqual([])
   })
 
   it('stores terminal task notifications for agent tool cards', () => {
