@@ -1640,7 +1640,7 @@ describe('ActiveSession task polling', () => {
     expect(useTeamStore.getState().workbenchesBySession[sessionId]?.snapshots).toHaveLength(1)
   })
 
-  it('updates the team strip without leaking the shared DAG into lead Activity', async () => {
+  it('moves the team strip and Activity from 1/4 to 4/4 through one workbench transition', async () => {
     const sessionId = 'team-activity-runtime-state-session'
     const teamName = 'runtime-state-team'
     const taskDefinitions = [
@@ -1816,12 +1816,10 @@ describe('ActiveSession task polling', () => {
 
     const panel = await screen.findByTestId('session-activity-panel')
     await waitFor(() => {
+      expect(within(panel).getByRole('progressbar', { name: 'Task progress 1/4' })).toBeInTheDocument()
       expect(within(screen.getByTestId('agent-teams-strip')).getByText(/1\/4/)).toBeInTheDocument()
       expect(within(panel).getByText('Summarize team delivery')).toBeInTheDocument()
     })
-    for (const { subject } of taskDefinitions) {
-      expect(within(panel).queryByText(subject)).not.toBeInTheDocument()
-    }
 
     act(() => {
       useChatStore.getState().handleServerMessage(sessionId, {
@@ -1831,12 +1829,11 @@ describe('ActiveSession task polling', () => {
     })
 
     await waitFor(() => {
+      expect(within(panel).getByRole('progressbar', { name: 'Task progress 4/4' })).toBeInTheDocument()
       expect(within(screen.getByTestId('agent-teams-strip')).getByText(/4\/4/)).toBeInTheDocument()
+      expect(within(panel).getAllByLabelText('Task completed')).toHaveLength(4)
       expect(within(panel).getByText('Summarize team delivery')).toBeInTheDocument()
     })
-    for (const { subject } of taskDefinitions) {
-      expect(within(panel).queryByText(subject)).not.toBeInTheDocument()
-    }
     const timeline = useTeamStore.getState().workbenchesBySession[sessionId]
     expect(timeline?.snapshots.map(current => current.version)).toEqual(['v1', 'v2'])
     expect(timeline?.snapshots.at(-1)?.messages).toEqual([

@@ -229,11 +229,18 @@ function getStatusTone(status: ActivityRow['status']): Tone {
   return 'neutral'
 }
 
-/** Visible rows only, so the ratio always matches what the section shows. */
+/** A canonical Team DAG owns the section ratio when present. Run-local rows
+ * remain visible beside it without changing the shared workbench progress. */
 function getTaskProgress(rows: ActivityRow[]): { completed: number; total: number; percent: number } | null {
   if (rows.length === 0) return null
-  const completed = rows.filter((row) => row.status === 'completed').length
-  return { completed, total: rows.length, percent: Math.round((completed / rows.length) * 100) }
+  const teamRows = rows.filter((row) => row.teamTaskListId !== undefined)
+  const progressRows = teamRows.length > 0 ? teamRows : rows
+  const completed = progressRows.filter((row) => row.status === 'completed').length
+  return {
+    completed,
+    total: progressRows.length,
+    percent: Math.round((completed / progressRows.length) * 100),
+  }
 }
 
 /**

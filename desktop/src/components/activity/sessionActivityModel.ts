@@ -28,6 +28,8 @@ export type ActivityRow = {
   /** Set on a group's header row; agents under it carry `group` instead. */
   groupProgress?: { done: number; total: number }
   taskId?: string
+  /** Structured owner for a canonical Agent Teams DAG row. */
+  teamTaskListId?: string
   taskType?: BackgroundAgentTask['taskType']
   workflowName?: string
   /** Persisted Agent Teams launch identity for routing this row to the
@@ -80,6 +82,11 @@ export type BuildSessionActivityModelInput = {
    * in history and truncated transcripts that no longer contain that call. */
   teamTaskWindows?: Array<{ startedAt: number; endedAt?: number }>
   tasks: CLITask[]
+  /** Canonical shared DAG for the team owned by this session. These rows sit
+   * beside run-local tasks while bypassing transcript reconstruction, so
+   * member updates cannot leak into the lead run and stale lead events cannot
+   * override runtime task status. */
+  teamTasks?: CLITask[]
   completedAndDismissed: boolean
   isForegroundTurnActive?: boolean
   backgroundTasks: BackgroundAgentTask[]
@@ -182,6 +189,14 @@ function buildTaskRow(task: CLITask): ActivityRow {
     description: task.description,
     taskId: task.id,
     openable: false,
+  }
+}
+
+function buildTeamTaskRow(task: CLITask): ActivityRow {
+  return {
+    ...buildTaskRow(task),
+    id: `team-task:${task.taskListId}:${task.id}`,
+    teamTaskListId: task.taskListId,
   }
 }
 
@@ -986,15 +1001,17 @@ export function buildSessionActivityModel(input: BuildSessionActivityModelInput)
   const sections = createEmptySections()
   let badgeCount = 0
   const runMessages = projectMessagesToRun(input.messages ?? [], input.runScope ?? 'session')
-  const taskRows = buildTaskRowsFromMessages(
+  const runTaskRows = buildTaskRowsFromMessages(
     runMessages,
     input.tasks,
     input.taskScope ?? 'run',
     input.teamTaskWindows ?? [],
   )
-  sections.tasks.rows = input.isForegroundTurnActive === false
-    ? sealUnfinishedTaskRows(taskRows)
-    : taskRows
+  const settledRunTaskRows = input.isForegroundTurnActive === false
+    ? sealUnfinishedTaskRows(runTaskRows)
+    : runTaskRows
+  const teamTaskRows = input.teamTasks?.map(buildTeamTaskRow) ?? []
+  sections.tasks.rows = [...settledRunTaskRows, ...teamTaskRows]
   for (const row of sections.tasks.rows) {
     if (isBadgeStatus(row.status)) {
       badgeCount += 1

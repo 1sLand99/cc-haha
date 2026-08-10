@@ -166,11 +166,18 @@ export function TabBar() {
     const sessionState = state.sessions[activeTabId]
     const includeCliTasks = cliTasksSessionId === activeTabId
     const teamTaskWindows = teamTaskWindowsForSnapshot(agentTeamsSnapshot, activeTeamStartedAt)
+    const teamTasks = agentTeamsSnapshot && (
+      !agentTeamsSnapshot.team.leadSessionId ||
+      agentTeamsSnapshot.team.leadSessionId === activeTabId
+    )
+      ? agentTeamsSnapshot.tasks
+      : undefined
 
     const model = buildSessionActivityModel({
       sessionId: activeTabId,
       messages: sessionState?.messages ?? [],
       tasks: includeCliTasks ? cliTasks : [],
+      teamTasks,
       taskScope: 'team-session',
       teamTaskWindows,
       completedAndDismissed: includeCliTasks ? cliTasksCompletedAndDismissed : false,

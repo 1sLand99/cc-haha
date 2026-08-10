@@ -910,6 +910,88 @@ describe('buildSessionActivityModel', () => {
     expect(model.badgeCount).toBe(2)
   })
 
+  it('maps authoritative team task failure and completion by structured task id', () => {
+    const messages: UIMessage[] = [
+      {
+        id: 'failed-update-a',
+        type: 'tool_use',
+        toolName: 'TaskUpdate',
+        toolUseId: 'failed-update-a-call',
+        input: { taskId: 'A', status: 'completed' },
+        timestamp: 1004,
+      },
+      {
+        id: 'failed-update-a-result',
+        type: 'tool_result',
+        toolUseId: 'failed-update-a-call',
+        content: 'same result text',
+        isError: true,
+        timestamp: 1005,
+      },
+      {
+        id: 'stale-update-b',
+        type: 'tool_use',
+        toolName: 'TaskUpdate',
+        toolUseId: 'stale-update-b-call',
+        input: { taskId: 'B', status: 'in_progress' },
+        timestamp: 1006,
+      },
+      {
+        id: 'stale-update-b-result',
+        type: 'tool_result',
+        toolUseId: 'stale-update-b-call',
+        content: 'same result text',
+        isError: false,
+        timestamp: 1007,
+      },
+    ]
+    const teamTasks = [
+      task({ id: 'A', subject: 'Review shared surface', taskListId: 'team-list' }),
+      task({ id: 'B', subject: 'Review shared surface', taskListId: 'team-list', status: 'completed' }),
+    ]
+    const runTasks = [
+      task({ id: 'A', subject: 'Review shared surface', taskListId: 'session-list', status: 'in_progress' }),
+    ]
+
+    const failedState = buildSessionActivityModel({
+      sessionId: 'session-1',
+      messages,
+      tasks: runTasks,
+      teamTasks,
+      taskScope: 'team-session',
+      teamTaskWindows: [{ startedAt: 1000 }],
+      isForegroundTurnActive: false,
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(failedState.sections.tasks.rows).toEqual([
+      expect.objectContaining({ id: 'A', taskId: 'A', status: 'stopped' }),
+      expect.objectContaining({ id: 'team-task:team-list:A', taskId: 'A', status: 'pending' }),
+      expect.objectContaining({ id: 'team-task:team-list:B', taskId: 'B', status: 'completed' }),
+    ])
+
+    const completedState = buildSessionActivityModel({
+      sessionId: 'session-1',
+      messages,
+      tasks: runTasks,
+      teamTasks: teamTasks.map(current => ({ ...current, status: 'completed' })),
+      taskScope: 'team-session',
+      teamTaskWindows: [{ startedAt: 1000 }],
+      isForegroundTurnActive: false,
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(completedState.sections.tasks.rows).toEqual([
+      expect.objectContaining({ id: 'A', taskId: 'A', status: 'stopped' }),
+      expect.objectContaining({ id: 'team-task:team-list:A', taskId: 'A', status: 'completed' }),
+      expect.objectContaining({ id: 'team-task:team-list:B', taskId: 'B', status: 'completed' }),
+    ])
+  })
+
   it('filters shared tasks only inside a successful TeamCreate to TeamDelete lifecycle', () => {
     const taskCall = (id: string, subject: string, timestamp: number): UIMessage[] => [{
       id: `${id}-use`,

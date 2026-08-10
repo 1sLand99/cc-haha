@@ -522,16 +522,22 @@ export function ActiveSession() {
     if (!activeTabId) return null
     const includeCliTasks = trackedTaskSessionId === activeTabId
     const teamTaskWindows = teamTaskWindowsForSnapshot(agentTeamsSnapshot, activeTeamStartedAt)
+    const teamTasks = agentTeamsSnapshot && (
+      !agentTeamsSnapshot.team.leadSessionId ||
+      agentTeamsSnapshot.team.leadSessionId === activeTabId
+    )
+      ? agentTeamsSnapshot.tasks
+      : undefined
 
     return buildSessionActivityModel({
       sessionId: activeTabId,
       messages,
       // cliTaskStore is explicitly loaded from the session-id list, so these
-      // are the lead's own tasks even if this session later creates a team.
-      // The shared team DAG is reconstructed from neither this list nor the
-      // transcript; it stays in the workbench and is projected by owner on a
-      // member run. TodoWrite also remains run-local.
+      // remain the lead's own tasks. An owned workbench adds its canonical
+      // shared DAG beside them; member-internal activity remains isolated by
+      // run ownership.
       tasks: includeCliTasks ? cliTasks : [],
+      teamTasks,
       taskScope: 'team-session',
       teamTaskWindows,
       completedAndDismissed: includeCliTasks ? cliTasksCompletedAndDismissed : false,

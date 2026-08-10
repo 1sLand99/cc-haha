@@ -253,6 +253,49 @@ describe('SessionActivityPanel', () => {
     expect(screen.getByText('2/4')).toBeInTheDocument()
   })
 
+  it('keeps run-local rows visible without adding them to canonical team progress', () => {
+    render(
+      <SessionActivityPanel
+        model={model({
+          sections: {
+            ...model().sections,
+            tasks: {
+              id: 'tasks',
+              title: 'Tasks',
+              emptyLabel: 'No tasks',
+              rows: [
+                { id: 'local-a', section: 'tasks', label: 'Lead follow-up', status: 'stopped', openable: false },
+                {
+                  id: 'team:one',
+                  section: 'tasks',
+                  label: 'Team task one',
+                  status: 'completed',
+                  teamTaskListId: 'team-list',
+                  openable: false,
+                },
+                {
+                  id: 'team:two',
+                  section: 'tasks',
+                  label: 'Team task two',
+                  status: 'completed',
+                  teamTaskListId: 'team-list',
+                  openable: false,
+                },
+              ],
+            },
+          },
+        })}
+        open
+        onClose={vi.fn()}
+        onOpenSubagent={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Lead follow-up')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: 'Task progress 2/2' })).toHaveAttribute('aria-valuenow', '100')
+    expect(screen.queryByText('2/3')).not.toBeInTheDocument()
+  })
+
   it('leaves sections other than tasks without a progress rail', () => {
     render(
       <SessionActivityPanel
