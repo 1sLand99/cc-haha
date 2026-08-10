@@ -103,6 +103,17 @@ This project is maintained in the author's spare time. Corporate or individual s
         Thanks to <a href="https://s.qiniu.com/IZbyya">Qiniu Cloud AI</a> for sponsoring this project. Qiniu Cloud AI is the enterprise-grade LLM MaaS platform from Qiniu Cloud (02567.HK): one entry point to 150+ leading models worldwide, compatible with the major vendors' protocols, covering text, image, audio, video, and file processing across every modality, and serving more than 1.69 million enterprises and developers. As a cc-haha user perk, registering through <a href="https://s.qiniu.com/IZbyya">this link</a> gets enterprise users 12M free tokens and developers 3M free tokens.
       </td>
     </tr>
+    <tr>
+      <td align="center" valign="middle">
+        <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=cc-haha">
+          <img src="docs/images/sponsors/atlascloud-logo-black.png#gh-light-mode-only" width="180" alt="Atlas Cloud">
+          <img src="docs/images/sponsors/atlascloud-logo-white.png#gh-dark-mode-only" width="180" alt="Atlas Cloud">
+        </a>
+      </td>
+      <td valign="middle">
+        Thanks to <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=cc-haha">Atlas Cloud</a> for sponsoring this project. Atlas Cloud is a full-modal AI inference platform that gives developers a single AI API to access video generation, image generation, and LLM APIs. Instead of managing multiple vendor integrations, you connect once and get unified access to 300+ curated models across all modalities. Atlas Cloud is already built into the cc-haha provider list, so you can pick it in settings and start using it with just an API key. Check out Atlas Cloud's new <a href="https://www.atlascloud.ai/console/coding-plan">coding plan promotion</a> for more budget-friendly API access.
+      </td>
+    </tr>
   </tbody>
 </table>
 

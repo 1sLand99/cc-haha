@@ -103,6 +103,17 @@ Claude Code Haha 是一个**桌面端 Claude Code 工作台**：多会话与全�
         感谢 <a href="https://s.qiniu.com/IZbyya">七牛云 AI</a> 赞助本项目！七牛云 AI 是七牛云（02567.HK）旗下企业级大模型 MaaS 平台，一站式调用全球 150+ 主流模型，兼容全球主流模型厂商协议，覆盖文本、图像、音频、视频、文件处理等全模态处理能力，服务超过 169 万企业及开发者用户。作为 cc-haha 用户专属福利，通过 <a href="https://s.qiniu.com/IZbyya">专属链接</a> 注册，企业用户免费领 1200 万 Token，开发者免费领 300 万 Token。
       </td>
     </tr>
+    <tr>
+      <td align="center" valign="middle">
+        <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=cc-haha">
+          <img src="docs/images/sponsors/atlascloud-logo-black.png#gh-light-mode-only" width="180" alt="Atlas Cloud">
+          <img src="docs/images/sponsors/atlascloud-logo-white.png#gh-dark-mode-only" width="180" alt="Atlas Cloud">
+        </a>
+      </td>
+      <td valign="middle">
+        感谢 <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=cc-haha">Atlas Cloud</a> 赞助本项目！Atlas Cloud 是一个全模态 AI 推理平台，让开发者通过统一的 AI API 访问视频生成、图像生成和 LLM API，无需分别维护多个厂商集成，即可调用 300+ 精选模型。cc-haha 已内置 Atlas Cloud 供应商预设，在设置里选择后填入 API Key 即可直接使用。Atlas Cloud 最新推出 <a href="https://www.atlascloud.ai/console/coding-plan">coding plan 优惠</a>，为开发者提供更具性价比的 API 访问预算。
+      </td>
+    </tr>
   </tbody>
 </table>
 
