@@ -164,11 +164,17 @@ function transcriptToolResult(
   id: string,
   toolUseResult: Record<string, unknown>,
   timestamp: string,
+  isError = false,
 ): MessageEntry {
   return {
     id: `result-${id}`,
     type: 'tool_result',
-    content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }],
+    content: [{
+      type: 'tool_result',
+      tool_use_id: id,
+      content: 'ok',
+      ...(isError ? { is_error: true } : {}),
+    }],
     toolUseResult,
     timestamp,
   }
@@ -1181,6 +1187,71 @@ describe('TeamService', () => {
       ],
       messages: [{ id: 'broadcast', kind: 'broadcast', text: 'Ship the archive' }],
     })
+  })
+
+  it('projects successful and failed task updates by tool-use identity instead of result text', () => {
+    const messages: MessageEntry[] = [
+      transcriptToolUse('team-create', 'TeamCreate', {
+        team_name: 'result-identity-team',
+      }, '2026-08-08T00:00:00.000Z'),
+      transcriptToolResult('team-create', {
+        team_name: 'result-identity-team',
+        lead_agent_id: 'team-lead@result-identity-team',
+      }, '2026-08-08T00:00:00.100Z'),
+      transcriptToolUse('task-a', 'TaskCreate', {
+        subject: 'Review shared surface',
+      }, '2026-08-08T00:00:01.000Z'),
+      transcriptToolResult('task-a', {
+        task: { id: 'A', subject: 'Review shared surface' },
+      }, '2026-08-08T00:00:01.100Z'),
+      transcriptToolUse('task-b', 'TaskCreate', {
+        subject: 'Review shared surface',
+      }, '2026-08-08T00:00:02.000Z'),
+      transcriptToolResult('task-b', {
+        task: { id: 'B', subject: 'Review shared surface' },
+      }, '2026-08-08T00:00:02.100Z'),
+      transcriptToolUse('failed-update-a', 'TaskUpdate', {
+        taskId: 'A',
+        status: 'completed',
+      }, '2026-08-08T00:00:03.000Z'),
+      transcriptToolResult(
+        'failed-update-a',
+        {},
+        '2026-08-08T00:00:03.100Z',
+        true,
+      ),
+      transcriptToolResult(
+        'failed-update-a',
+        {},
+        '2026-08-08T00:00:03.200Z',
+      ),
+      transcriptToolUse('successful-update-b', 'TaskUpdate', {
+        taskId: 'B',
+        status: 'completed',
+      }, '2026-08-08T00:00:04.000Z'),
+      transcriptToolResult(
+        'successful-update-b',
+        {},
+        '2026-08-08T00:00:04.100Z',
+      ),
+      transcriptToolUse('failed-bash', 'Bash', {
+        command: 'false',
+      }, '2026-08-08T00:00:05.000Z'),
+      transcriptToolResult(
+        'failed-bash',
+        {},
+        '2026-08-08T00:00:05.100Z',
+        true,
+      ),
+    ]
+
+    const [snapshot] = projectTeamWorkbenchesFromTranscript('legacy-session', messages)
+
+    expect(snapshot?.tasks).toEqual([
+      expect.objectContaining({ id: 'A', subject: 'Review shared surface', status: 'pending' }),
+      expect.objectContaining({ id: 'B', subject: 'Review shared surface', status: 'completed' }),
+    ])
+    expect(snapshot?.generatedAt).toBe('2026-08-08T00:00:05.000Z')
   })
 
   it('should derive running status when isActive is undefined', async () => {

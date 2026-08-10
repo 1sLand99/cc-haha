@@ -2,12 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { act } from 'react'
+import type { TeamWorkbenchSessionTimeline, TeamWorkbenchSnapshot } from '../types/team'
 
 const viewportMocks = vi.hoisted(() => ({
   isMobile: false,
 }))
 const sessionApiMocks = vi.hoisted(() => ({
   getGitInfo: vi.fn(),
+}))
+const teamApiMocks = vi.hoisted(() => ({
+  getMemberTranscript: vi.fn(() => Promise.resolve({ messages: [] })),
+  getTeam: vi.fn(),
+  listTeams: vi.fn(),
+  getWorkbenchForSession: vi.fn(
+    (): Promise<TeamWorkbenchSessionTimeline> => Promise.reject(new Error('not a team session')),
+  ),
+  getWorkbench: vi.fn(),
+  sendMemberMessage: vi.fn(),
 }))
 
 vi.mock('../api/sessions', async (importOriginal) => {
@@ -45,12 +56,12 @@ vi.mock('../components/workbench/WorkbenchPanel', () => ({
 
 vi.mock('../api/teams', () => ({
   teamsApi: {
-    getMemberTranscript: vi.fn(() => Promise.resolve({ messages: [] })),
-    get: vi.fn(),
-    list: vi.fn(),
-    getWorkbenchForSession: vi.fn(() => Promise.reject(new Error('not a team session'))),
-    getWorkbench: vi.fn(),
-    sendMemberMessage: vi.fn(),
+    getMemberTranscript: teamApiMocks.getMemberTranscript,
+    get: teamApiMocks.getTeam,
+    list: teamApiMocks.listTeams,
+    getWorkbenchForSession: teamApiMocks.getWorkbenchForSession,
+    getWorkbench: teamApiMocks.getWorkbench,
+    sendMemberMessage: teamApiMocks.sendMemberMessage,
   },
 }))
 
@@ -112,6 +123,14 @@ beforeEach(() => {
     changedFiles: 0,
     worktree: null,
   })
+  teamApiMocks.getMemberTranscript.mockReset()
+  teamApiMocks.getMemberTranscript.mockResolvedValue({ messages: [] })
+  teamApiMocks.getTeam.mockReset()
+  teamApiMocks.listTeams.mockReset()
+  teamApiMocks.getWorkbenchForSession.mockReset()
+  teamApiMocks.getWorkbenchForSession.mockRejectedValue(new Error('not a team session'))
+  teamApiMocks.getWorkbench.mockReset()
+  teamApiMocks.sendMemberMessage.mockReset()
 })
 
 afterEach(() => {
@@ -1619,6 +1638,210 @@ describe('ActiveSession task polling', () => {
     })
     expect(screen.queryByTestId('agent-teams-workbench-panel')).not.toBeInTheDocument()
     expect(useTeamStore.getState().workbenchesBySession[sessionId]?.snapshots).toHaveLength(1)
+  })
+
+  it('updates the team strip without leaking the shared DAG into lead Activity', async () => {
+    const sessionId = 'team-activity-runtime-state-session'
+    const teamName = 'runtime-state-team'
+    const taskDefinitions = [
+      { id: 'A', subject: 'Map routes' },
+      { id: 'B', subject: 'Review security' },
+      { id: 'C', subject: 'Verify integration' },
+      { id: 'D', subject: 'Write report' },
+    ]
+    const snapshot = (
+      version: string,
+      statuses: Record<string, 'pending' | 'in_progress' | 'completed'>,
+    ): TeamWorkbenchSnapshot => ({
+      version,
+      generatedAt: `2026-08-10T00:00:0${version === 'v1' ? '1' : '2'}.000Z`,
+      team: {
+        name: teamName,
+        leadAgentId: `team-lead@${teamName}`,
+        leadSessionId: sessionId,
+        createdAt: '2026-08-10T00:00:00.000Z',
+        members: [
+          { agentId: `team-lead@${teamName}`, role: 'team-lead', status: 'running' },
+          { agentId: `route-mapper@${teamName}`, role: 'route-mapper', status: 'running' },
+          { agentId: `security-reviewer@${teamName}`, role: 'security-reviewer', status: 'running' },
+          { agentId: `integration-tester@${teamName}`, role: 'integration-tester', status: 'running' },
+        ],
+      },
+      tasks: taskDefinitions.map(({ id, subject }) => ({
+        id,
+        subject,
+        description: subject,
+        status: statuses[id] ?? 'pending',
+        blocks: [],
+        blockedBy: [],
+        taskListId: teamName,
+      })),
+      messages: version === 'v2'
+        ? [{
+            id: 'route-mapper-to-security-reviewer',
+            from: 'route-mapper',
+            to: 'security-reviewer',
+            recipients: ['security-reviewer'],
+            kind: 'direct',
+            text: '**Routes mapped.** Review the auth boundary.',
+            timestamp: '2026-08-10T00:00:02.000Z',
+          }]
+        : [],
+    })
+    const initialSnapshot = snapshot('v1', {
+      A: 'pending',
+      B: 'pending',
+      C: 'pending',
+      D: 'completed',
+    })
+    const completedSnapshot = snapshot('v2', {
+      A: 'completed',
+      B: 'completed',
+      C: 'completed',
+      D: 'completed',
+    })
+
+    teamApiMocks.getWorkbenchForSession.mockResolvedValue({
+      sessionId,
+      teamName,
+      source: 'live',
+      snapshots: [initialSnapshot],
+    })
+    teamApiMocks.getTeam.mockResolvedValue(completedSnapshot.team)
+    teamApiMocks.getWorkbench.mockResolvedValue(completedSnapshot)
+    useActivityPanelStore.getState().open(sessionId)
+    useSessionStore.setState({
+      sessions: [{
+        id: sessionId,
+        title: 'Runtime State Team',
+        createdAt: '2026-08-10T00:00:00.000Z',
+        modifiedAt: '2026-08-10T00:00:00.000Z',
+        messageCount: 1,
+        projectPath: '/workspace/project',
+        workDir: '/workspace/project',
+        workDirExists: true,
+      }],
+      activeSessionId: sessionId,
+      isLoading: false,
+      error: null,
+    })
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'Runtime State Team', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    useChatStore.setState({
+      sessions: {
+        [sessionId]: {
+          messages: [],
+          chatState: 'idle',
+          connectionState: 'connected',
+          streamingText: '',
+          streamingToolInput: '',
+          activeToolUseId: null,
+          activeToolName: null,
+          activeThinkingId: null,
+          pendingPermission: null,
+          pendingComputerUsePermission: null,
+          tokenUsage: { input_tokens: 0, output_tokens: 0 },
+          streamingResponseChars: 0,
+          elapsedSeconds: 0,
+          statusVerb: '',
+          slashCommands: [],
+          backgroundAgentTasks: {},
+          agentTaskNotifications: {},
+          elapsedTimer: null,
+        },
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(sessionId, {
+      type: 'team_created',
+      teamName,
+    })
+    useChatStore.getState().sendMessage(sessionId, 'Coordinate the four-task team')
+    useChatStore.getState().handleServerMessage(sessionId, {
+      type: 'tool_use_complete',
+      toolName: 'TodoWrite',
+      toolUseId: 'lead-personal-todo',
+      input: {
+        todos: [{ content: 'Summarize team delivery', status: 'in_progress' }],
+      },
+    })
+    for (const { id, subject } of taskDefinitions) {
+      useChatStore.getState().handleServerMessage(sessionId, {
+        type: 'tool_use_complete',
+        toolName: 'TaskCreate',
+        toolUseId: `create-${id}`,
+        input: { subject },
+      })
+      useChatStore.getState().handleServerMessage(sessionId, {
+        type: 'tool_result',
+        toolUseId: `create-${id}`,
+        content: `Task #${id} created successfully: ${subject}`,
+        isError: false,
+      })
+    }
+    for (const id of ['A', 'B', 'C']) {
+      useChatStore.getState().handleServerMessage(sessionId, {
+        type: 'tool_use_complete',
+        toolName: 'TaskUpdate',
+        toolUseId: `failed-update-${id}`,
+        input: { taskId: id, status: 'completed' },
+      })
+      useChatStore.getState().handleServerMessage(sessionId, {
+        type: 'tool_result',
+        toolUseId: `failed-update-${id}`,
+        content: 'Task not found',
+        isError: false,
+      })
+    }
+    useChatStore.getState().handleServerMessage(sessionId, {
+      type: 'tool_use_complete',
+      toolName: 'TaskUpdate',
+      toolUseId: 'completed-update-D',
+      input: { taskId: 'D', status: 'completed' },
+    })
+    useChatStore.getState().handleServerMessage(sessionId, {
+      type: 'tool_result',
+      toolUseId: 'completed-update-D',
+      content: 'Updated task #D status',
+      isError: false,
+    })
+    useChatStore.getState().handleServerMessage(sessionId, {
+      type: 'message_complete',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    })
+
+    render(<ActiveSession />)
+
+    const panel = await screen.findByTestId('session-activity-panel')
+    await waitFor(() => {
+      expect(within(screen.getByTestId('agent-teams-strip')).getByText(/1\/4/)).toBeInTheDocument()
+      expect(within(panel).getByText('Summarize team delivery')).toBeInTheDocument()
+    })
+    for (const { subject } of taskDefinitions) {
+      expect(within(panel).queryByText(subject)).not.toBeInTheDocument()
+    }
+
+    act(() => {
+      useChatStore.getState().handleServerMessage(sessionId, {
+        type: 'team_workbench_updated',
+        teamName,
+      })
+    })
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId('agent-teams-strip')).getByText(/4\/4/)).toBeInTheDocument()
+      expect(within(panel).getByText('Summarize team delivery')).toBeInTheDocument()
+    })
+    for (const { subject } of taskDefinitions) {
+      expect(within(panel).queryByText(subject)).not.toBeInTheDocument()
+    }
+    const timeline = useTeamStore.getState().workbenchesBySession[sessionId]
+    expect(timeline?.snapshots.map(current => current.version)).toEqual(['v1', 'v2'])
+    expect(timeline?.snapshots.at(-1)?.messages).toEqual([
+      expect.objectContaining({ id: 'route-mapper-to-security-reviewer' }),
+    ])
   })
 
   it('clears the last visible background task by closing Activity while preserving later runs', async () => {

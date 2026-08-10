@@ -407,8 +407,8 @@ function taskStatus(value: unknown): TaskInfo['status'] | undefined {
 
 function resultRecordsByToolUseId(
   messages: SessionMessageEntry[],
-): Map<string, Record<string, unknown>> {
-  const results = new Map<string, Record<string, unknown>>()
+): Map<string, { value: Record<string, unknown>; isError: boolean }> {
+  const results = new Map<string, { value: Record<string, unknown>; isError: boolean }>()
   for (const message of messages) {
     if (message.type !== 'tool_result') continue
     const blocks = Array.isArray(message.content) ? message.content : []
@@ -417,7 +417,11 @@ function resultRecordsByToolUseId(
       const toolUseId = stringValue(record?.tool_use_id)
       if (!toolUseId) continue
       const structured = objectValue(message.toolUseResult)
-      results.set(toolUseId, structured ?? record!)
+      const previous = results.get(toolUseId)
+      results.set(toolUseId, {
+        value: structured ?? record!,
+        isError: previous?.isError === true || record?.is_error === true,
+      })
     }
   }
   return results
@@ -524,9 +528,11 @@ export function projectTeamWorkbenchesFromTranscript(
       const name = stringValue(tool.name)
       const input = objectValue(tool.input) ?? {}
       if (!toolUseId || !name) continue
-      const result = results.get(toolUseId) ?? {}
+      const toolResult = results.get(toolUseId)
+      const result = toolResult?.value ?? {}
 
       if (name === 'TeamCreate') {
+        if (toolResult?.isError) continue
         const teamName = stringValue(input.team_name) ?? stringValue(result.team_name)
         if (!teamName) continue
         currentTeamName = teamName
@@ -561,6 +567,7 @@ export function projectTeamWorkbenchesFromTranscript(
       const team = teams.get(teamName)
       if (!team) continue
       team.updatedAt = timestamp
+      if (toolResult?.isError) continue
 
       if (name === 'TeamDelete') {
         team.deletedAt = timestamp
