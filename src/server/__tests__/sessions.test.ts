@@ -4000,6 +4000,34 @@ describe('Sessions API', () => {
     }
   })
 
+  it('GET /api/sessions/:id/git-info should not report the source checkout as a planned worktree', async () => {
+    const workDir = await createCleanGitRepo(tmpDir)
+    const { sessionId } = await sessionService.createSession(
+      workDir,
+      { branch: 'feature/rail', worktree: true },
+    )
+    const launchInfo = await sessionService.getSessionLaunchInfo(sessionId)
+    const plannedPath = launchInfo?.repository?.worktreePath
+    expect(plannedPath).toBeTruthy()
+
+    const res = await fetch(`${baseUrl}/api/sessions/${sessionId}/git-info`)
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as {
+      workDir: string
+      worktree: {
+        path: string | null
+        plannedPath: string | null
+      } | null
+    }
+    expect(body.workDir).toBe(launchInfo?.workDir)
+    expect(body.worktree).toMatchObject({
+      path: null,
+      plannedPath,
+    })
+    expect(body.worktree?.plannedPath).not.toBe(body.workDir)
+  })
+
   it('GET /api/sessions/:id/git-info should keep the visible launch branch while including isolated worktree identity', async () => {
     const workDir = await createCleanGitRepo(tmpDir)
     const { sessionId } = await sessionService.createSession(

@@ -991,11 +991,15 @@ async function getGitInfo(sessionId: string): Promise<Response> {
   // CLI originalBranch is the source checkout before creating the worktree, which
   // can differ from the selected base ref.
   const sessionBranch = repository?.branch || worktreeSession?.originalBranch || null
+  const plannedWorktreePath = worktreeSession?.worktreePath || repository?.worktreePath || null
+  const activeWorktreePath = worktreeSession?.worktreePath || (
+    sameResolvedPath(workDir, plannedWorktreePath) ? workDir : null
+  )
   const worktree = repository?.worktree || worktreeSession
     ? {
         enabled: true,
-        path: worktreeSession?.worktreePath || workDir,
-        plannedPath: worktreeSession?.worktreePath || repository?.worktreePath || null,
+        path: activeWorktreePath,
+        plannedPath: plannedWorktreePath,
         sourceWorkDir: worktreeSession?.originalCwd || repository?.requestedWorkDir || repository?.repoRoot || null,
         slug: worktreeSession?.worktreeName || repository?.worktreeSlug || null,
         branch: worktreeSession?.worktreeBranch || repository?.worktreeBranch || null,

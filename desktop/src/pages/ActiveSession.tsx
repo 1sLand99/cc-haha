@@ -336,6 +336,11 @@ export function ActiveSession() {
   const stoppingBackgroundTaskIds = sessionState?.stoppingBackgroundTaskIds
 
   const session = sessions.find((s) => s.id === activeTabId)
+  const sessionMessageCount = Math.max(
+    sessionState?.messages.length ?? 0,
+    session?.messageCount ?? 0,
+  )
+  const sessionSlashCommandCount = sessionState?.slashCommands.length ?? 0
   const agentTeamsSnapshot = useTeamStore((s) => activeTabId
     ? s.workbenchesBySession[activeTabId]?.snapshots.at(-1)
     : undefined)
@@ -392,6 +397,39 @@ export function ActiveSession() {
       cancelled = true
     }
   }, [activeTabId, activeTabType])
+
+  useEffect(() => {
+    if (
+      !activeTabId ||
+      !isSessionTabState(activeTabId, activeTabType) ||
+      sessionMessageCount === 0
+    ) return
+
+    let cancelled = false
+    const timeout = setTimeout(() => {
+      void sessionsApi.getGitInfo(activeTabId)
+        .then((info) => {
+          if (cancelled) return
+          setSessionGitInfo(info.worktree?.enabled
+            ? { sessionId: activeTabId, info }
+            : null)
+        })
+        .catch(() => {
+          // Keep the last useful snapshot when supplementary Git metadata cannot refresh.
+        })
+    }, chatState === 'idle' ? 0 : 500)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timeout)
+    }
+  }, [
+    activeTabId,
+    activeTabType,
+    chatState,
+    sessionMessageCount,
+    sessionSlashCommandCount,
+  ])
 
   useEffect(() => {
     if (!activeTabId) return
