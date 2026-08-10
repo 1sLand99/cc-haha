@@ -56,6 +56,8 @@ export type TeamWorkbenchMessage = {
 export type TeamWorkbenchSnapshot = {
   version: string
   generatedAt: string
+  taskListRevision?: number
+  terminalTaskFrameId?: string
   team: TeamDetail
   tasks: TeamWorkbenchTask[]
   messages: TeamWorkbenchMessage[]

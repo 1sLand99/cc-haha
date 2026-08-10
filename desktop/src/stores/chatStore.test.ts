@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MessageEntry } from '../types/session'
-import { buildSessionActivityModel } from '../components/activity/sessionActivityModel'
+import {
+  buildMainSessionActivityModel,
+  buildSessionActivityModel,
+  hasVisibleSessionActivity,
+} from '../components/activity/sessionActivityModel'
 import { useSessionRuntimeStore } from './sessionRuntimeStore'
 
 const {
@@ -3204,6 +3208,97 @@ describe('chatStore history mapping', () => {
       isPending: false,
     })
     expect(toolMessages[0]).not.toHaveProperty('partialInput')
+
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+  })
+
+  it('never projects sequential streaming teammates into main Activity', () => {
+    vi.useFakeTimers()
+
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession(),
+      },
+    })
+
+    const buildMainActivity = () => buildMainSessionActivityModel({
+      sessionId: TEST_SESSION_ID,
+      messages: useChatStore.getState().sessions[TEST_SESSION_ID]?.messages ?? [],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    for (const [index, member] of ['feature-analyst', 'bug-analyst', 'quality-analyst'].entries()) {
+      const toolUseId = `team-agent-${index + 1}`
+      const description = `分析第 ${index + 1} 组 commit`
+
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'content_start',
+        blockType: 'tool_use',
+        toolName: 'Agent',
+        toolUseId,
+      })
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'content_delta',
+        toolInput: `{"description":"${description}","name":`,
+      })
+      vi.advanceTimersByTime(60)
+
+      expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toContainEqual(
+        expect.objectContaining({
+          type: 'tool_use',
+          toolUseId,
+          input: { description },
+          isPending: true,
+        }),
+      )
+      expect(hasVisibleSessionActivity(buildMainActivity())).toBe(false)
+
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'tool_use_complete',
+        toolName: 'Agent',
+        toolUseId,
+        input: {
+          description,
+          name: member,
+          team_name: 'commit-analysis',
+        },
+      })
+
+      expect(hasVisibleSessionActivity(buildMainActivity())).toBe(false)
+    }
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_start',
+      blockType: 'tool_use',
+      toolName: 'Agent',
+      toolUseId: 'direct-agent',
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'content_delta',
+      toolInput: '{"description":"审查普通 SubAgent 路径"',
+    })
+    vi.advanceTimersByTime(60)
+
+    expect(hasVisibleSessionActivity(buildMainActivity())).toBe(false)
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_use_complete',
+      toolName: 'Agent',
+      toolUseId: 'direct-agent',
+      input: { description: '审查普通 SubAgent 路径' },
+    })
+
+    expect(buildMainActivity().sections.subagents.rows).toEqual([
+      expect.objectContaining({
+        id: 'direct-agent',
+        label: '审查普通 SubAgent 路径',
+        status: 'running',
+      }),
+    ])
 
     vi.runOnlyPendingTimers()
     vi.useRealTimers()

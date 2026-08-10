@@ -10,6 +10,7 @@ import {
   parseWorkbenchMessageBody,
   resolveTeamMemberIdentity,
   runningTaskForMember,
+  snapshotWithHistoricalMembers,
   taskOwnedByMember,
   WORKBENCH_TASK_WIDTH,
 } from './agentTeamsModel'
@@ -163,6 +164,57 @@ describe('Agent Teams workbench model', () => {
     expect(getMemberAvatarKey(lead.member, lead.isLead)).toBe('team-lead')
     expect(reviewer.member.agentId).toBe('server-reviewer@team-a')
     expect(getMemberAvatarKey(reviewer.member, reviewer.isLead)).toBe('security-reviewer')
+  })
+
+  it('replays roster transitions so shutdown cannot orphan a completed task owner', () => {
+    const lead: TeamMember = {
+      agentId: 'team-lead@team-a',
+      name: 'team-lead',
+      role: 'orchestrator',
+      status: 'running',
+    }
+    const owner: TeamMember = {
+      agentId: 'builder@team-a',
+      name: 'builder',
+      role: 'frontend',
+      status: 'running',
+    }
+    const observer: TeamMember = {
+      agentId: 'observer@team-a',
+      name: 'observer',
+      role: 'reviewer',
+      status: 'idle',
+    }
+    const beforeRemoval = {
+      ...snapshot([task('1', 'in_progress', [], 'builder')]),
+      version: 'roster-1',
+      team: { ...snapshot([]).team, members: [lead, owner, observer] },
+    }
+    const afterRemoval = {
+      ...snapshot([task('1', 'completed', [], 'builder')]),
+      version: 'roster-2',
+      deletedAt: '2026-08-08T00:01:00.000Z',
+      team: {
+        ...snapshot([]).team,
+        members: [
+          { ...lead, status: 'completed' as const },
+          { ...observer, status: 'completed' as const },
+        ],
+      },
+    }
+
+    const repaired = snapshotWithHistoricalMembers([beforeRemoval, afterRemoval], 1)!
+    const repairedOwner = repaired.team.members.find(member => taskOwnedByMember(repaired.tasks[0]!, member))
+
+    expect(repaired.team.members.map(member => ({
+      name: member.name,
+      status: member.status,
+    }))).toEqual([
+      { name: 'team-lead', status: 'completed' },
+      { name: 'builder', status: 'completed' },
+      { name: 'observer', status: 'completed' },
+    ])
+    expect(repairedOwner?.agentId).toBe('builder@team-a')
   })
 
   it('derives forming, running, finishing, and completed phases from real transitions', () => {

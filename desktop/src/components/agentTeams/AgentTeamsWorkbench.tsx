@@ -27,6 +27,7 @@ import {
   getMemberAvatarKey,
   layoutWorkbenchTasks,
   runningTaskForMember,
+  snapshotWithHistoricalMembers,
   taskOwnedByMember,
   WORKBENCH_TASK_HEIGHT,
   WORKBENCH_TASK_WIDTH,
@@ -153,8 +154,14 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
   const snapshots = timeline?.snapshots ?? []
   const latestIndex = snapshots.length - 1
   const selectedIndex = historyIndex === null ? latestIndex : Math.min(historyIndex, latestIndex)
-  const snapshot = selectedIndex >= 0 ? snapshots[selectedIndex] : undefined
-  const previousSnapshot = selectedIndex > 0 ? snapshots[selectedIndex - 1] : undefined
+  const snapshot = useMemo(
+    () => snapshotWithHistoricalMembers(snapshots, selectedIndex),
+    [selectedIndex, snapshots],
+  )
+  const previousSnapshot = useMemo(
+    () => snapshotWithHistoricalMembers(snapshots, selectedIndex - 1),
+    [selectedIndex, snapshots],
+  )
 
   useEffect(() => {
     const element = officeViewportRef.current
@@ -263,6 +270,12 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
     if (firstOwnedTask) primaryTaskByMemberId.set(member.agentId, firstOwnedTask.id)
   }
   const unassignedMembers = workerMembers.filter((member) => !primaryTaskByMemberId.has(member.agentId))
+  const archivedUnassignedMembers = unassignedMembers.filter((member) => (
+    memberState(member, snapshot, false) === 'exited'
+  ))
+  const activeUnassignedMembers = unassignedMembers.filter((member) => (
+    memberState(member, snapshot, false) !== 'exited'
+  ))
   const rootTasks = layout.tasks.filter(({ task }) =>
     task.blockedBy.every((dependencyId) => !layout.byId.has(dependencyId)),
   )
@@ -284,9 +297,10 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
         state,
       })
     } else {
-      const unassignedIndex = unassignedMembers.findIndex((worker) => worker.agentId === member.agentId)
-      const pitch = Math.min(62, (layout.width - 48) / Math.max(unassignedMembers.length, 1))
-      const rowWidth = Math.max(0, (unassignedMembers.length - 1) * pitch)
+      const unassignedIndex = activeUnassignedMembers.findIndex((worker) => worker.agentId === member.agentId)
+      if (unassignedIndex < 0) return
+      const pitch = Math.min(62, (layout.width - 48) / Math.max(activeUnassignedMembers.length, 1))
+      const rowWidth = Math.max(0, (activeUnassignedMembers.length - 1) * pitch)
       memberPositions.set(member.agentId, {
         x: layout.width / 2 - rowWidth / 2 + Math.max(0, unassignedIndex) * pitch,
         y: 147,
@@ -447,7 +461,7 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
             />
           ) : null}
 
-          {unassignedMembers.map((member) => {
+          {activeUnassignedMembers.map((member) => {
             const position = memberPositions.get(member.agentId)
             if (!position) return null
             return (
@@ -463,6 +477,32 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
               />
             )
           })}
+
+          {archivedUnassignedMembers.length > 0 ? (
+            <div
+              data-testid="agent-teams-archived-members"
+              data-layout-role="archived-participants"
+              aria-label={t('agentTeams.member.exited')}
+              className="absolute bottom-1 left-3 right-3 flex h-16 min-w-0 items-center gap-1.5 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] px-2 shadow-[var(--shadow-card)] [scrollbar-width:thin]"
+            >
+              <span className="mr-0.5 shrink-0 text-[9px] font-semibold text-[var(--color-text-tertiary)]">
+                {t('agentTeams.member.exited')}
+              </span>
+              {archivedUnassignedMembers.map((member) => (
+                <MemberFigure
+                  key={member.agentId}
+                  member={member}
+                  state="exited"
+                  accent={memberAccent(member, members.indexOf(member))}
+                  isMessageSender={Boolean(hasNewMessage && latestMessage && memberMatchesIdentity(member, latestMessage.from))}
+                  testId={`agent-teams-member-${member.agentId}`}
+                  className="h-11 w-11 shrink-0"
+                  onSelect={() => selectMember(member)}
+                  t={t}
+                />
+              ))}
+            </div>
+          ) : null}
 
           {layout.tasks.length === 0 ? (
             <div className="absolute inset-x-4 top-[196px] text-center text-[12px] leading-7 text-[var(--color-text-tertiary)]">
@@ -825,6 +865,7 @@ function TaskCard({
   const owner = task.owner
     ? members.find((member) => taskOwnedByMember(task, member))
     : undefined
+  const ownerLabel = owner ? memberName(owner) : task.owner?.trim()
   const dependencyLabel = task.blockedBy.map((dependency) => `#${dependency}`).join(' ')
   const ownerState = owner
     ? memberState(owner, snapshot, owner.agentId === snapshot.team.leadAgentId)
@@ -842,6 +883,7 @@ function TaskCard({
       data-testid={`agent-teams-task-${task.id}`}
       data-state={state}
       data-owner-agent-id={owner?.agentId}
+      data-owner-identity={task.owner}
       tabIndex={0}
       role={owner ? 'button' : undefined}
       aria-label={owner ? t('agentTeams.openMember', { name: memberName(owner) }) : undefined}
@@ -896,9 +938,13 @@ function TaskCard({
         {task.subject}
       </div>
       <div className="mt-1 flex min-h-4 items-center gap-1.5">
-        {owner ? (
+        {ownerLabel ? (
           <span className="truncate font-mono text-[10px] font-semibold text-[var(--color-text-secondary)]">
-            {memberName(owner)}
+            {ownerLabel}
+          </span>
+        ) : state === 'completed' ? (
+          <span className="truncate text-[9.5px] text-[var(--color-text-tertiary)]">
+            {t('agentTeams.task.completedNoOwner')}
           </span>
         ) : (
           <span className="truncate text-[9.5px] text-[var(--color-text-tertiary)]">

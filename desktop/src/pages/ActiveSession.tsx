@@ -37,6 +37,7 @@ import { getWorktreeDisplayName, WorktreeDetails } from '../components/chat/Work
 import { ComputerUsePermissionModal } from '../components/chat/ComputerUsePermissionModal'
 import { WorkbenchPanel } from '../components/workbench/WorkbenchPanel'
 import { AgentTeamsStrip } from '../components/agentTeams/AgentTeamsSummary'
+import { snapshotWithHistoricalMembers } from '../components/agentTeams/agentTeamsModel'
 import {
   SessionActivityPanel,
   type OpenSubagentPayload,
@@ -347,9 +348,14 @@ export function ActiveSession() {
     session?.messageCount ?? 0,
   )
   const sessionSlashCommandCount = sessionState?.slashCommands.length ?? 0
-  const agentTeamsSnapshot = useTeamStore((s) => activeTabId
-    ? s.workbenchesBySession[activeTabId]?.snapshots.at(-1)
+  const agentTeamsSnapshots = useTeamStore((s) => activeTabId
+    ? s.workbenchesBySession[activeTabId]?.snapshots
     : undefined)
+  const agentTeamsSnapshot = useMemo(() => (
+    agentTeamsSnapshots?.length
+      ? snapshotWithHistoricalMembers(agentTeamsSnapshots, agentTeamsSnapshots.length - 1)
+      : undefined
+  ), [agentTeamsSnapshots])
   const activeTeamStartedAt = useTeamStore((s) => activeTabId
     ? s.activeTeamStartedAtBySession[activeTabId]
     : undefined)

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -246,6 +246,57 @@ describe('AgentTeamsWorkbench', () => {
     expect(useTabStore.getState().activeTabId).toBe('team-member:reviewer@visual-team')
   })
 
+  it('replays a shrinking archived roster without orphaning owners or hanging exited observers under the lead', async () => {
+    const beforeRemoval = workbench('roster-1', ['in_progress', 'in_progress', 'pending'])
+    beforeRemoval.team.members.push({
+      agentId: 'observer@visual-team',
+      name: 'observer',
+      role: 'researcher',
+      status: 'idle',
+    })
+    const afterRemoval: TeamWorkbenchSnapshot = {
+      ...workbench('roster-2', ['completed', 'completed', 'completed']),
+      deletedAt: '2026-08-08T00:10:00.000Z',
+      team: {
+        ...beforeRemoval.team,
+        members: beforeRemoval.team.members
+          .filter((member) => member.name !== 'builder')
+          .map((member) => ({ ...member, status: 'completed' as const })),
+      },
+      tasks: workbench('roster-2', ['completed', 'completed', 'completed']).tasks.map((entry) => (
+        entry.id === '3' ? { ...entry, owner: 'legacy-owner' } : entry
+      )),
+    }
+    getWorkbenchForSessionMock.mockResolvedValueOnce({
+      sessionId: 'lead-session',
+      teamName: 'visual-team',
+      source: 'archive',
+      snapshots: [beforeRemoval, afterRemoval],
+    })
+
+    await act(async () => {
+      await useTeamStore.getState().fetchTeamForSession('lead-session', { force: true })
+    })
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    const restoredOwnerTask = screen.getByTestId('agent-teams-task-1')
+    expect(restoredOwnerTask.getAttribute('data-owner-agent-id')).toBe('builder@visual-team')
+    expect(within(restoredOwnerTask).getByText('builder')).toBeTruthy()
+    fireEvent.click(restoredOwnerTask)
+    expect(useTabStore.getState().activeTabId).toBe('team-member:builder@visual-team')
+
+    const rawOwnerTask = screen.getByTestId('agent-teams-task-3')
+    expect(within(rawOwnerTask).getByText('legacy-owner')).toBeTruthy()
+    expect(within(rawOwnerTask).queryByText('Waiting for a teammate')).toBeNull()
+
+    const archivedRoster = screen.getByTestId('agent-teams-archived-members')
+    const observer = screen.getByTestId('agent-teams-member-observer@visual-team')
+    expect(archivedRoster.contains(observer)).toBe(true)
+    expect(observer.getAttribute('data-member-state')).toBe('exited')
+    fireEvent.click(observer)
+    expect(useTabStore.getState().activeTabId).toBe('team-member:observer@visual-team')
+  })
+
   it('carries no docked-panel chrome of its own', async () => {
     getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
     await act(async () => {
@@ -259,6 +310,29 @@ describe('AgentTeamsWorkbench', () => {
     const feed = screen.getByTestId('agent-teams-communication')
     expect(feed.className).toContain('h-full')
     expect(feed.className).not.toContain('h-[210px]')
+  })
+
+  it('never describes an ownerless completed task as waiting to be claimed', async () => {
+    const snapshot = workbench('v1', ['completed', 'pending', 'completed'])
+    snapshot.tasks = snapshot.tasks.map((entry) => (
+      entry.id === '1' || entry.id === '2'
+        ? { ...entry, owner: undefined }
+        : entry
+    ))
+    getWorkbenchMock.mockResolvedValueOnce(snapshot)
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    const completed = screen.getByTestId('agent-teams-task-1')
+    expect(within(completed).getByText('Completed · owner not recorded')).toBeTruthy()
+    expect(within(completed).queryByText('Waiting for a teammate')).toBeNull()
+
+    const available = screen.getByTestId('agent-teams-task-2')
+    expect(within(available).getByText('Waiting for a teammate')).toBeTruthy()
+    expect(within(available).queryByText('Completed · owner not recorded')).toBeNull()
   })
 
   it('resizes the communication column by pointer and keyboard without collapsing the DAG', async () => {
@@ -305,5 +379,46 @@ describe('AgentTeamsWorkbench', () => {
 
     fireEvent.click(screen.getByTestId('agent-teams-member-reviewer@visual-team'))
     expect(useTabStore.getState().activeTabId).toBe('team-member:reviewer@visual-team')
+  })
+
+  it('keeps a crowded archived roster in a scrollable narrow lane with touch-sized targets', async () => {
+    const archived = workbench('v1', ['completed', 'completed', 'completed'])
+    archived.deletedAt = '2026-08-08T00:10:00.000Z'
+    archived.team.members = [
+      ...archived.team.members.map((member) => ({
+        ...member,
+        status: 'completed' as const,
+      })),
+      ...Array.from({ length: 12 }, (_, index) => ({
+        agentId: `observer-${index}@visual-team`,
+        name: `observer-${index}`,
+        role: 'observer',
+        status: 'completed' as const,
+      })),
+    ]
+    getWorkbenchMock.mockResolvedValueOnce(archived)
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    const archivedRoster = screen.getByTestId('agent-teams-archived-members')
+    expect(archivedRoster.className).toContain('left-3')
+    expect(archivedRoster.className).toContain('right-3')
+    expect(archivedRoster.className).toContain('h-16')
+    expect(archivedRoster.className).toContain('overflow-x-auto')
+    expect(archivedRoster.className).toContain('overflow-y-hidden')
+
+    const observers = screen.getAllByTestId(/^agent-teams-member-observer-/)
+    expect(observers).toHaveLength(12)
+    for (const observer of observers) {
+      expect(observer.className).toContain('h-11')
+      expect(observer.className).toContain('w-11')
+      expect(observer.className).toContain('shrink-0')
+    }
+
+    fireEvent.click(observers.at(-1)!)
+    expect(useTabStore.getState().activeTabId).toBe('team-member:observer-11@visual-team')
   })
 })

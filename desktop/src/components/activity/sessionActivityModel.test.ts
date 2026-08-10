@@ -521,6 +521,249 @@ describe('buildSessionActivityModel', () => {
     ])
   })
 
+  it('waits for a pending Agent input to finish before projecting an unknown owner', () => {
+    const buildMainModel = (message: UIMessage) => buildMainSessionActivityModel({
+      sessionId: 'session-1',
+      messages: [message],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+    const partialAgent: UIMessage = {
+      id: 'streaming-agent-tool',
+      type: 'tool_use',
+      toolName: 'Agent',
+      toolUseId: 'streaming-agent-tool',
+      input: { description: '正在流式解析任务' },
+      timestamp: 1000,
+      isPending: true,
+      partialInput: '{"description":"正在流式解析任务","name":',
+    }
+
+    expect(hasVisibleSessionActivity(buildMainModel(partialAgent))).toBe(false)
+
+    const completedDirectAgent = buildMainModel({
+      ...partialAgent,
+      input: { description: '正在流式解析任务' },
+      isPending: false,
+      partialInput: undefined,
+    })
+    expect(completedDirectAgent.sections.subagents.rows).toEqual([
+      expect.objectContaining({
+        id: 'streaming-agent-tool',
+        label: '正在流式解析任务',
+        status: 'running',
+      }),
+    ])
+  })
+
+  it('uses the durable Team window to classify name-only Agent launches in both directions', () => {
+    const messages: UIMessage[] = [
+      {
+        id: 'create-tool',
+        type: 'tool_use',
+        toolName: 'TeamCreate',
+        toolUseId: 'create-tool',
+        input: { team_name: 'durable-team' },
+        timestamp: 100,
+      },
+      {
+        id: 'create-result',
+        type: 'tool_result',
+        toolUseId: 'create-tool',
+        content: { success: true, team_name: 'durable-team' },
+        isError: false,
+        timestamp: 101,
+      },
+      {
+        id: 'window-member',
+        type: 'tool_use',
+        toolName: 'Agent',
+        toolUseId: 'window-member',
+        input: { name: 'reviewer', description: 'Team member from durable scope' },
+        timestamp: 150,
+        isPending: false,
+      },
+      {
+        id: 'window-direct',
+        type: 'tool_use',
+        toolName: 'Agent',
+        toolUseId: 'window-direct',
+        input: { description: 'Unnamed direct Agent inside Team scope' },
+        timestamp: 160,
+        isPending: false,
+      },
+      {
+        id: 'post-window-direct',
+        type: 'tool_use',
+        toolName: 'Agent',
+        toolUseId: 'post-window-direct',
+        input: { name: 'standalone-reviewer', description: 'Named direct Agent after Team scope' },
+        timestamp: 250,
+        isPending: false,
+      },
+      {
+        id: 'explicit-team-member',
+        type: 'tool_use',
+        toolName: 'Agent',
+        toolUseId: 'explicit-team-member',
+        input: {
+          name: 'explicit-reviewer',
+          team_name: 'archived-team',
+          description: 'Explicit Team member outside durable scope',
+        },
+        timestamp: 260,
+        isPending: false,
+      },
+    ]
+
+    const model = buildMainSessionActivityModel({
+      sessionId: 'session-1',
+      messages,
+      teamTaskWindows: [{ startedAt: 100, endedAt: 200 }],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.subagents.rows).toEqual([
+      expect.objectContaining({
+        id: 'window-direct',
+        label: 'Unnamed direct Agent inside Team scope',
+      }),
+      expect.objectContaining({
+        id: 'post-window-direct',
+        label: 'Named direct Agent after Team scope',
+      }),
+    ])
+    expect(model.sections.team.rows).toEqual([])
+  })
+
+  it('does not classify a named direct Agent as a teammate after TeamCreate fails', () => {
+    const createTool: UIMessage = {
+      id: 'create-tool',
+      type: 'tool_use',
+      toolName: 'TeamCreate',
+      toolUseId: 'create-tool',
+      input: { team_name: 'review-team' },
+      timestamp: 100,
+    }
+    const namedAgent: UIMessage = {
+      id: 'named-agent-tool',
+      type: 'tool_use',
+      toolName: 'Agent',
+      toolUseId: 'named-agent-tool',
+      input: { name: 'reviewer', description: 'Review independently' },
+      timestamp: 200,
+    }
+    const buildMainModel = (success: boolean, agentResult?: UIMessage) => buildMainSessionActivityModel({
+      sessionId: 'session-1',
+      messages: [
+        createTool,
+        {
+          id: 'create-result',
+          type: 'tool_result',
+          toolUseId: 'create-tool',
+          content: { success, team_name: 'review-team' },
+          isError: false,
+          timestamp: 101,
+        },
+        namedAgent,
+        ...(agentResult ? [agentResult] : []),
+      ],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(buildMainModel(false).sections.subagents.rows).toEqual([
+      expect.objectContaining({
+        id: 'named-agent-tool',
+        label: 'Review independently',
+      }),
+    ])
+    expect(hasVisibleSessionActivity(buildMainModel(true))).toBe(false)
+
+    const completedTeammate = buildMainModel(true, {
+      id: 'named-agent-result',
+      type: 'tool_result',
+      toolUseId: 'named-agent-tool',
+      content: { status: 'teammate_spawned', name: 'reviewer', team_name: 'review-team' },
+      isError: false,
+      timestamp: 201,
+    })
+    expect(hasVisibleSessionActivity(completedTeammate)).toBe(false)
+  })
+
+  it('lets a durable Team end close task scope when TeamDelete is absent from history', () => {
+    const messages: UIMessage[] = [
+      {
+        id: 'create-tool', type: 'tool_use', toolName: 'TeamCreate', toolUseId: 'create',
+        input: { team_name: 'audit-team' }, timestamp: 100,
+      },
+      {
+        id: 'create-result', type: 'tool_result', toolUseId: 'create',
+        content: { success: true }, isError: false, timestamp: 101,
+      },
+      {
+        id: 'team-task', type: 'tool_use', toolName: 'TaskCreate', toolUseId: 'team-task',
+        input: { subject: 'Shared Team task' }, timestamp: 150,
+      },
+      {
+        id: 'main-task', type: 'tool_use', toolName: 'TaskCreate', toolUseId: 'main-task',
+        input: { subject: 'Lead follow-up task' }, timestamp: 250,
+      },
+    ]
+
+    const model = buildMainSessionActivityModel({
+      sessionId: 'session-1',
+      messages,
+      teamTaskWindows: [{ startedAt: 100, endedAt: 200 }],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.tasks.rows.map(row => row.label)).toEqual(['Lead follow-up task'])
+  })
+
+  it('uses a newer durable Team window after an older explicit TeamDelete', () => {
+    const messages: UIMessage[] = [
+      {
+        id: 'old-delete', type: 'tool_use', toolName: 'TeamDelete', toolUseId: 'old-delete',
+        input: { team_name: 'old-team' }, timestamp: 90,
+      },
+      {
+        id: 'old-delete-result', type: 'tool_result', toolUseId: 'old-delete',
+        content: { success: true }, isError: false, timestamp: 91,
+      },
+      {
+        id: 'team-task', type: 'tool_use', toolName: 'TaskCreate', toolUseId: 'team-task',
+        input: { subject: 'Compacted Team task' }, timestamp: 150,
+      },
+      {
+        id: 'main-task', type: 'tool_use', toolName: 'TaskCreate', toolUseId: 'main-task',
+        input: { subject: 'After compacted Team' }, timestamp: 250,
+      },
+    ]
+
+    const model = buildMainSessionActivityModel({
+      sessionId: 'session-1',
+      messages,
+      teamTaskWindows: [{ startedAt: 100, endedAt: 200 }],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.tasks.rows.map(row => row.label)).toEqual(['After compacted Team'])
+  })
+
   it('uses successful Team lifecycle results to hide implicit member spawns without hiding ordinary Agents', () => {
     const model = buildSessionActivityModel({
       sessionId: 'session-1',

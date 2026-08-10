@@ -367,6 +367,44 @@ describe('TeamWatcher polling', () => {
     }])
   })
 
+  it('uses the canonical config name when a sanitized Team directory is deleted', async () => {
+    const deliveries: Array<{ message: ServerMessage; sessionId?: string }> = []
+    const deleted: Array<[string, string | undefined, string | undefined]> = []
+    const workbenchNames: string[] = []
+    watcher = new TeamWatcher(
+      (message, sessionId) => deliveries.push({ message, sessionId }),
+      {
+        getWorkbench: async (name) => {
+          workbenchNames.push(name)
+          return {} as never
+        },
+        markWorkbenchArchiveDeleted: async (name, sessionId, incarnationId) => {
+          deleted.push([name, sessionId, incarnationId])
+        },
+      },
+    )
+    const config = makeTeamConfig({
+      name: 'My Team',
+      createdAt: 1900000000000,
+      leadSessionId: 'canonical-lead',
+    })
+    await writeTeamConfig('my-team', config)
+    await watcher.checkNow()
+    await fs.rm(path.join(tmpDir, 'teams', 'my-team'), { recursive: true, force: true })
+    await watcher.checkNow()
+
+    expect(workbenchNames).toEqual(['my-team'])
+    expect(deleted).toEqual([[
+      'My Team',
+      'canonical-lead',
+      teamIncarnationId(config),
+    ]])
+    expect(deliveries.map(delivery => delivery.message)).toEqual([
+      expect.objectContaining({ type: 'team_created', teamName: 'My Team' }),
+      expect.objectContaining({ type: 'team_deleted', teamName: 'My Team' }),
+    ])
+  })
+
   it('should detect team deletion', async () => {
     // Create a team
     await writeTeamConfig('doomed-team', makeTeamConfig({ name: 'doomed-team' }))

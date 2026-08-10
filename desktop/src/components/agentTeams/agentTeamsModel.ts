@@ -81,6 +81,56 @@ function identityAliases(value: string): string[] {
   return normalized === short ? [normalized] : [normalized, short]
 }
 
+function sameTeamMember(left: TeamMember, right: TeamMember): boolean {
+  const leftAliases = [
+    ...identityAliases(left.agentId),
+    ...(left.name ? identityAliases(left.name) : []),
+  ]
+  const rightAliases = [
+    ...identityAliases(right.agentId),
+    ...(right.name ? identityAliases(right.name) : []),
+  ]
+  return leftAliases.some(alias => rightAliases.includes(alias))
+}
+
+/**
+ * Team config is a mutable live roster, while the workbench is a run history.
+ * Rebuild the roster by replaying snapshots so a teammate removed during
+ * shutdown still owns its completed task and can reopen its transcript.
+ */
+export function snapshotWithHistoricalMembers(
+  snapshots: TeamWorkbenchSnapshot[],
+  selectedIndex: number,
+): TeamWorkbenchSnapshot | undefined {
+  const selected = snapshots[selectedIndex]
+  if (!selected) return undefined
+
+  let members: TeamMember[] = []
+  for (const snapshot of snapshots.slice(0, selectedIndex + 1)) {
+    const remaining = [...snapshot.team.members]
+    members = members.map((historicalMember) => {
+      const currentIndex = remaining.findIndex(member => sameTeamMember(historicalMember, member))
+      if (currentIndex < 0) {
+        return {
+          ...historicalMember,
+          status: historicalMember.status === 'error' ? 'error' : 'completed',
+        }
+      }
+      const [currentMember] = remaining.splice(currentIndex, 1)
+      return { ...historicalMember, ...currentMember! }
+    })
+    members.push(...remaining)
+  }
+
+  return {
+    ...selected,
+    team: {
+      ...selected.team,
+      members,
+    },
+  }
+}
+
 /**
  * Resolves the same persisted teammate identity for the DAG, communication
  * feed, and member transcript. A sender can be serialized as either its bare
@@ -194,7 +244,10 @@ export function layoutWorkbenchTasks(
     tasks: positioned,
     byId: new Map(positioned.map((task) => [task.task.id, task])),
     width,
-    height: DAG_TOP + Math.max(0, row - 1) * ROW_HEIGHT + TASK_HEIGHT + 54,
+    // Leave enough room for a 44px historical-member target plus a classic
+    // horizontal scrollbar, which consumes layout height on Windows and on
+    // macOS when scrollbars are configured to stay visible.
+    height: DAG_TOP + Math.max(0, row - 1) * ROW_HEIGHT + TASK_HEIGHT + 70,
     columns,
   }
 }

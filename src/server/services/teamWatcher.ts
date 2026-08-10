@@ -30,6 +30,7 @@ function getTeamsDir(): string {
 }
 
 type WatchedTeamIdentity = {
+  teamName: string
   incarnationId: string
   createdAt: number
   leadSessionId?: string
@@ -111,7 +112,7 @@ export class TeamWatcher {
       for (const [name] of this.lastSnapshots) {
         const identity = this.lastTeamIdentities.get(name)
         await this.archive.markWorkbenchArchiveDeleted(
-          name,
+          identity?.teamName ?? name,
           identity?.leadSessionId ?? this.lastLeadSessionIds.get(name),
           identity?.incarnationId,
         ).catch(() => {})
@@ -170,7 +171,7 @@ export class TeamWatcher {
           previousIdentity.incarnationId !== currentIdentity.incarnationId
         ) {
           await this.archive.markWorkbenchArchiveDeleted(
-            teamName,
+            previousIdentity.teamName,
             previousIdentity.leadSessionId,
             previousIdentity.incarnationId,
           ).catch(() => {})
@@ -245,7 +246,7 @@ export class TeamWatcher {
         const identity = this.lastTeamIdentities.get(name)
         const leadSessionId = identity?.leadSessionId ?? this.lastLeadSessionIds.get(name)
         await this.archive.markWorkbenchArchiveDeleted(
-          name,
+          identity?.teamName ?? name,
           leadSessionId,
           identity?.incarnationId,
         ).catch(() => {})
@@ -318,14 +319,18 @@ export class TeamWatcher {
       const leadSessionId = typeof config.leadSessionId === 'string' && config.leadSessionId
         ? config.leadSessionId
         : undefined
+      const canonicalTeamName = typeof config.name === 'string' && config.name
+        ? config.name
+        : teamName
       const identity = {
+        teamName: canonicalTeamName,
         createdAt,
         ...(leadSessionId ? { leadSessionId } : {}),
       }
       return {
         ...identity,
         incarnationId: teamIncarnationId({
-          name: teamName,
+          name: canonicalTeamName,
           createdAt,
           leadSessionId,
         }),

@@ -23,7 +23,15 @@ import { localIndexCoordinator } from './localIndex/coordinator.js'
 import { readSessionEntriesByLocator } from './localIndex/sessionEntries.js'
 import { deserializeSourceFingerprint } from './localIndex/sourceFingerprint.js'
 import type { LocalIndexGateway } from './localIndex/sessionIndex.js'
-import { taskService, type TaskInfo } from './taskService.js'
+import {
+  getCanonicalTeamTaskListId,
+  readTaskListLifecycleState,
+  readTaskListSnapshot,
+  withTaskListLifecycleLock,
+} from '../../utils/tasks.js'
+import type { TaskListLifecycleState } from '../../utils/tasks.js'
+import { cleanupTeamDirectories } from '../../utils/swarm/teamHelpers.js'
+import type { TaskInfo } from './taskService.js'
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -72,6 +80,8 @@ export type TeamWorkbenchMessage = {
 export type TeamWorkbenchSnapshot = {
   version: string
   generatedAt: string
+  taskListRevision?: number
+  terminalTaskFrameId?: string
   team: TeamDetail
   tasks: TaskInfo[]
   messages: TeamWorkbenchMessage[]
@@ -195,6 +205,61 @@ type ProjectedTeamState = {
   messages: TeamWorkbenchMessage[]
   updatedAt: string
   deletedAt?: string
+}
+
+function memberArchiveIdentity(member: TeamMember): string {
+  return member.agentId || member.name
+}
+
+/**
+ * CLI team config is a live roster and removes a teammate as soon as it exits.
+ * A workbench archive is a run history, so dropping that member would also
+ * orphan every durable task owner and make the member transcript unreachable.
+ */
+function carryForwardArchivedMembers(
+  snapshot: TeamWorkbenchSnapshot,
+  previous: TeamWorkbenchSnapshot | undefined,
+): TeamWorkbenchSnapshot {
+  if (!previous) return snapshot
+
+  const currentByIdentity = new Map(
+    snapshot.team.members.map(member => [memberArchiveIdentity(member), member]),
+  )
+  const historicalIdentities = new Set<string>()
+  const members = previous.team.members.map((historicalMember) => {
+    const identity = memberArchiveIdentity(historicalMember)
+    historicalIdentities.add(identity)
+    const currentMember = currentByIdentity.get(identity)
+    if (currentMember) return { ...historicalMember, ...currentMember }
+    return {
+      ...historicalMember,
+      status: historicalMember.status === 'failed'
+        ? 'failed' as const
+        : 'completed' as const,
+    }
+  })
+  for (const member of snapshot.team.members) {
+    if (!historicalIdentities.has(memberArchiveIdentity(member))) members.push(member)
+  }
+
+  const team = {
+    ...snapshot.team,
+    memberCount: members.length,
+    activeMemberCount: members.filter(member => member.status === 'running').length,
+    members,
+  }
+  if (JSON.stringify(team) === JSON.stringify(snapshot.team)) return snapshot
+
+  return {
+    ...snapshot,
+    version: hash(JSON.stringify({
+      team,
+      tasks: snapshot.tasks,
+      messages: snapshot.messages,
+      deletedAt: snapshot.deletedAt,
+    })),
+    team,
+  }
 }
 
 function hash(bytes: Buffer | string): string {
@@ -405,10 +470,16 @@ function taskStatus(value: unknown): TaskInfo['status'] | undefined {
     : undefined
 }
 
+type ProjectedToolResult = {
+  value: Record<string, unknown>
+  isError: boolean
+  timestamp?: string
+}
+
 function resultRecordsByToolUseId(
   messages: SessionMessageEntry[],
-): Map<string, { value: Record<string, unknown>; isError: boolean }> {
-  const results = new Map<string, { value: Record<string, unknown>; isError: boolean }>()
+): Map<string, ProjectedToolResult> {
+  const results = new Map<string, ProjectedToolResult>()
   for (const message of messages) {
     if (message.type !== 'tool_result') continue
     const blocks = Array.isArray(message.content) ? message.content : []
@@ -421,6 +492,7 @@ function resultRecordsByToolUseId(
       results.set(toolUseId, {
         value: structured ?? record!,
         isError: previous?.isError === true || record?.is_error === true,
+        timestamp: message.timestamp || previous?.timestamp,
       })
     }
   }
@@ -463,6 +535,68 @@ function applyProjectedTaskUpdate(task: TaskInfo, input: Record<string, unknown>
   if (metadata) task.metadata = { ...(task.metadata ?? {}), ...metadata }
 }
 
+function replaceProjectedTaskList(
+  tasks: Map<string, TaskInfo>,
+  rawTasks: unknown[],
+  taskListId: string,
+  edgeShape: 'complete' | 'blockedBy-only' = 'complete',
+): void {
+  const listedTaskRecords = rawTasks
+    .map(rawTask => objectValue(rawTask))
+    .filter((record): record is Record<string, unknown> => (
+      record !== null && stringValue(record.id) !== undefined
+    ))
+  // TaskList historically serializes only blockedBy. Treat that shape as a
+  // complete edge projection when every task carries the field: clear the
+  // stale forward edges first, then finalizeProjectedTaskEdges rebuilds them
+  // from the authoritative reverse edges. Older partial results that omitted
+  // blockedBy entirely retain their best-effort compatibility behavior.
+  const rebuildEdgesFromBlockedBy = edgeShape === 'blockedBy-only' &&
+    listedTaskRecords.every(record => Array.isArray(record.blockedBy))
+  const listedIds = new Set<string>()
+  for (const record of listedTaskRecords) {
+    const id = stringValue(record?.id)
+    if (!id) continue
+    listedIds.add(id)
+    const task = tasks.get(id) ?? {
+      id,
+      subject: `Task #${id}`,
+      description: '',
+      status: 'pending' as const,
+      blocks: [],
+      blockedBy: [],
+      taskListId,
+    }
+    const status = taskStatus(record.status)
+    const subject = stringValue(record.subject)
+    const description = typeof record.description === 'string'
+      ? record.description
+      : undefined
+    const activeForm = stringValue(record.activeForm)
+    const owner = stringValue(record.owner)
+    if (status) task.status = status
+    if (subject) task.subject = subject
+    if (description !== undefined) task.description = description
+    if (activeForm !== undefined) task.activeForm = activeForm
+    // TaskList and TeamDelete terminal frames are authoritative full-list
+    // reads. An omitted owner must clear a stale archived assignment.
+    task.owner = owner
+    if (rebuildEdgesFromBlockedBy) {
+      task.blocks = []
+      task.blockedBy = stringArray(record.blockedBy)
+    } else {
+      if (Array.isArray(record.blocks)) task.blocks = stringArray(record.blocks)
+      if (Array.isArray(record.blockedBy)) task.blockedBy = stringArray(record.blockedBy)
+    }
+    const metadata = objectValue(record.metadata)
+    if (metadata) task.metadata = metadata
+    tasks.set(id, task)
+  }
+  for (const id of tasks.keys()) {
+    if (!listedIds.has(id)) tasks.delete(id)
+  }
+}
+
 function finalizeProjectedTaskEdges(tasks: Map<string, TaskInfo>): void {
   for (const task of tasks.values()) {
     for (const blockedId of task.blocks) {
@@ -473,6 +607,377 @@ function finalizeProjectedTaskEdges(tasks: Map<string, TaskInfo>): void {
       const blocker = tasks.get(blockerId)
       if (blocker) blocker.blocks = addUnique(blocker.blocks, [task.id])
     }
+  }
+}
+
+const TEAM_CREATE_TRANSCRIPT_CLOCK_SKEW_MS = 5_000
+
+type OrderedSessionMessage = {
+  message: SessionMessageEntry
+  index: number
+}
+
+type TranscriptTeamCreation = {
+  position: number
+  teamName: string
+  startedAt: number
+  completedAt: number
+}
+
+function orderedSessionMessages(
+  messages: SessionMessageEntry[],
+): OrderedSessionMessage[] {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort((left, right) => (
+      Date.parse(left.message.timestamp) - Date.parse(right.message.timestamp) ||
+      left.index - right.index
+    ))
+}
+
+function successfulToolResult(
+  result: ProjectedToolResult | undefined,
+): boolean {
+  return Boolean(
+    result &&
+    !result.isError &&
+    result.value.success !== false,
+  )
+}
+
+function transcriptTeamCreations(
+  ordered: OrderedSessionMessage[],
+  results: ReturnType<typeof resultRecordsByToolUseId>,
+): TranscriptTeamCreation[] {
+  const creations: TranscriptTeamCreation[] = []
+  for (let position = 0; position < ordered.length; position++) {
+    const message = ordered[position]?.message
+    if (message?.type !== 'tool_use' || !Array.isArray(message.content)) continue
+    for (const block of message.content) {
+      const tool = objectValue(block)
+      if (tool?.type !== 'tool_use' || stringValue(tool.name) !== 'TeamCreate') continue
+      const toolUseId = stringValue(tool.id)
+      if (!toolUseId) continue
+      const result = results.get(toolUseId)
+      if (!result || !successfulToolResult(result)) continue
+      const input = objectValue(tool.input) ?? {}
+      // TeamCreate may uniquify a requested name. The successful result owns
+      // the durable identity used by the config, task list, and archive.
+      const teamName = stringValue(result.value.team_name) ?? stringValue(input.team_name)
+      const startedAt = Date.parse(message.timestamp)
+      const completedAt = result.timestamp ? Date.parse(result.timestamp) : startedAt
+      if (!teamName || !Number.isFinite(startedAt) || !Number.isFinite(completedAt)) continue
+      creations.push({ position, teamName, startedAt, completedAt })
+    }
+  }
+  return creations
+}
+
+function transcriptCreationDistance(
+  creation: TranscriptTeamCreation,
+  createdAt: number,
+): number {
+  const lower = Math.min(creation.startedAt, creation.completedAt)
+  const upper = Math.max(creation.startedAt, creation.completedAt)
+  if (createdAt < lower) return lower - createdAt
+  if (createdAt > upper) return createdAt - upper
+  return 0
+}
+
+function transcriptTeamLifecycleEnd(
+  creation: TranscriptTeamCreation,
+  ordered: OrderedSessionMessage[],
+  results: ReturnType<typeof resultRecordsByToolUseId>,
+  creations: TranscriptTeamCreation[],
+): number {
+  const nextCreationPosition = creations.find(candidate => (
+    candidate.position > creation.position
+  ))?.position ?? ordered.length
+  for (let position = creation.position + 1; position < nextCreationPosition; position++) {
+    const message = ordered[position]?.message
+    if (message?.type !== 'tool_use' || !Array.isArray(message.content)) continue
+    for (const block of message.content) {
+      const tool = objectValue(block)
+      if (tool?.type !== 'tool_use' || stringValue(tool.name) !== 'TeamDelete') continue
+      const toolUseId = stringValue(tool.id)
+      if (!toolUseId) continue
+      const result = results.get(toolUseId)
+      const input = objectValue(tool.input)
+      const deletedTeamName = stringValue(input?.team_name) ?? stringValue(result?.value.team_name)
+      if (
+        successfulToolResult(result) &&
+        (!deletedTeamName || deletedTeamName === creation.teamName)
+      ) return position + 1
+    }
+  }
+  return nextCreationPosition
+}
+
+function cloneTask(task: TaskInfo): TaskInfo {
+  return {
+    ...task,
+    blocks: [...task.blocks],
+    blockedBy: [...task.blockedBy],
+    ...(task.metadata ? { metadata: { ...task.metadata } } : {}),
+  }
+}
+
+/**
+ * Replays only successful task mutations that completed after the last disk
+ * snapshot and before the next Team incarnation. TeamDelete can remove the
+ * task directory before TeamWatcher observes its final contents, while the
+ * lead transcript still has the durable TaskUpdate/TaskList results.
+ */
+type ReconciledArchivedTasks = {
+  tasks: TaskInfo[]
+  taskListRevision?: number
+  terminalTaskFrameId?: string
+}
+
+function terminalLifecycleTasks(
+  snapshot: TeamWorkbenchSnapshot,
+  lifecycle: TaskListLifecycleState | undefined,
+): ReconciledArchivedTasks | null {
+  if (!lifecycle) return null
+  const terminal = [...lifecycle.terminals].reverse().find(receipt => (
+    receipt.identity.teamName === snapshot.team.name &&
+    receipt.identity.createdAt === snapshot.team.createdAt &&
+    receipt.identity.leadSessionId === snapshot.team.leadSessionId
+  ))
+  if (!terminal) return null
+  return {
+    tasks: terminal.tasks
+      .filter(task => !task.metadata?._internal)
+      .map(task => ({
+        ...task,
+        blocks: [...task.blocks],
+        blockedBy: [...task.blockedBy],
+        taskListId: snapshot.team.name,
+        ...(task.metadata ? { metadata: { ...task.metadata } } : {}),
+      }))
+      .sort((left, right) => {
+        const leftNumber = Number.parseInt(left.id, 10)
+        const rightNumber = Number.parseInt(right.id, 10)
+        if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+          return leftNumber - rightNumber
+        }
+        return left.id.localeCompare(right.id)
+      }),
+    taskListRevision: terminal.revision,
+    terminalTaskFrameId: terminal.frameId,
+  }
+}
+
+function preferTerminalTaskFrame(
+  transcript: ReconciledArchivedTasks | null,
+  lifecycle: ReconciledArchivedTasks | null,
+): ReconciledArchivedTasks | null {
+  if (!lifecycle) return transcript
+  if (!transcript) return lifecycle
+  if (
+    transcript.taskListRevision !== undefined &&
+    lifecycle.taskListRevision !== undefined &&
+    transcript.taskListRevision > lifecycle.taskListRevision
+  ) return transcript
+  return {
+    ...lifecycle,
+    terminalTaskFrameId: transcript.terminalTaskFrameId ??
+      lifecycle.terminalTaskFrameId,
+  }
+}
+
+function reconcileArchivedTasksFromTranscript(
+  snapshot: TeamWorkbenchSnapshot,
+  messages: SessionMessageEntry[],
+): ReconciledArchivedTasks | null {
+  const snapshotGeneratedAt = Date.parse(snapshot.generatedAt)
+  const snapshotRevision = Number.isSafeInteger(snapshot.taskListRevision) &&
+    (snapshot.taskListRevision ?? -1) >= 0
+    ? snapshot.taskListRevision
+    : undefined
+  const teamCreatedAt = snapshot.team.createdAt
+  if (!Number.isFinite(snapshotGeneratedAt) || !Number.isFinite(teamCreatedAt)) return null
+
+  const results = resultRecordsByToolUseId(messages)
+  const ordered = orderedSessionMessages(messages)
+  const creations = transcriptTeamCreations(ordered, results)
+  const creation = creations
+    .filter(candidate => candidate.teamName === snapshot.team.name)
+    .map(candidate => ({
+      candidate,
+      distance: transcriptCreationDistance(candidate, teamCreatedAt),
+    }))
+    .filter(candidate => candidate.distance <= TEAM_CREATE_TRANSCRIPT_CLOCK_SKEW_MS)
+    .sort((left, right) => (
+      left.distance - right.distance ||
+      Math.abs(left.candidate.startedAt - teamCreatedAt) -
+        Math.abs(right.candidate.startedAt - teamCreatedAt)
+    ))[0]?.candidate
+  if (!creation) return null
+
+  const endPosition = transcriptTeamLifecycleEnd(creation, ordered, results, creations)
+  const tasks = new Map(snapshot.tasks.map(task => [task.id, cloneTask(task)]))
+  let changed = false
+
+  type ReplayEvent = {
+    name: string
+    toolUseId: string
+    input: Record<string, unknown>
+    result: ProjectedToolResult
+    replayAt: number
+    revision?: number
+    order: number
+  }
+  const replayEvents: ReplayEvent[] = []
+
+  for (let position = creation.position; position < endPosition; position++) {
+    const message = ordered[position]?.message
+    if (message?.type !== 'tool_use' || !Array.isArray(message.content)) continue
+    for (let blockIndex = 0; blockIndex < message.content.length; blockIndex++) {
+      const block = message.content[blockIndex]
+      const tool = objectValue(block)
+      if (tool?.type !== 'tool_use') continue
+      const toolUseId = stringValue(tool.id)
+      const name = stringValue(tool.name)
+      const input = objectValue(tool.input) ?? {}
+      if (!toolUseId || !name) continue
+      const result = results.get(toolUseId)
+      if (!result || !successfulToolResult(result)) continue
+      const startedAt = Date.parse(message.timestamp)
+      const completedAt = result.timestamp ? Date.parse(result.timestamp) : Number.NaN
+      const causalMarker = name === 'TaskList' || name === 'TeamDelete'
+        ? stringValue(result.value.taskListSnapshotAt)
+        : stringValue(result.value.taskListMutationAt)
+      const rawRevision = name === 'TaskList' || name === 'TeamDelete'
+        ? result.value.taskListSnapshotRevision
+        : result.value.taskListMutationRevision
+      const revision = typeof rawRevision === 'number' &&
+        Number.isSafeInteger(rawRevision) && rawRevision >= 0
+        ? rawRevision
+        : undefined
+      const causalAt = causalMarker ? Date.parse(causalMarker) : Number.NaN
+      const hasCausalMarker = Number.isFinite(causalAt)
+      // New tool results carry the task-list lock timestamp. Legacy results
+      // lack it, so only replay operations whose invocation and completion are
+      // both strictly after the locked disk snapshot; a cross-boundary result
+      // is ambiguous and must not overwrite the known snapshot.
+      if (snapshotRevision !== undefined && revision !== undefined) {
+        if (
+          revision < snapshotRevision ||
+          (revision === snapshotRevision && name !== 'TeamDelete')
+        ) continue
+      } else if (hasCausalMarker) {
+        if (causalAt <= snapshotGeneratedAt) continue
+      } else if (
+        !Number.isFinite(startedAt) ||
+        !Number.isFinite(completedAt) ||
+        startedAt <= snapshotGeneratedAt ||
+        completedAt <= snapshotGeneratedAt
+      ) continue
+      replayEvents.push({
+        name,
+        toolUseId,
+        input,
+        result,
+        replayAt: hasCausalMarker ? causalAt : completedAt,
+        revision,
+        order: position * 1_000 + blockIndex,
+      })
+    }
+  }
+
+  const allEventsHaveRevision = replayEvents.every(
+    event => event.revision !== undefined,
+  )
+  replayEvents.sort((left, right) => {
+    if (allEventsHaveRevision) {
+      return left.revision! - right.revision! || left.order - right.order
+    }
+    return left.replayAt - right.replayAt || left.order - right.order
+  })
+
+  let appliedRevision = snapshotRevision
+  let terminalTaskFrameId: string | undefined
+  for (const { name, toolUseId, input, result, revision } of replayEvents) {
+    if (revision !== undefined) {
+      appliedRevision = Math.max(appliedRevision ?? revision, revision)
+    }
+    if (name === 'TaskCreate') {
+      const resultTask = objectValue(result.value.task)
+      const id = stringValue(resultTask?.id)
+      if (!id) continue
+      const task = tasks.get(id) ?? {
+        id,
+        subject: `Task #${id}`,
+        description: '',
+        status: 'pending' as const,
+        blocks: [],
+        blockedBy: [],
+        taskListId: snapshot.team.name,
+      }
+      applyProjectedTaskUpdate(task, input)
+      task.subject = stringValue(resultTask?.subject) ?? task.subject
+      const resultDescription = stringValue(resultTask?.description)
+      if (resultDescription !== undefined) task.description = resultDescription
+      tasks.set(id, task)
+      changed = true
+      continue
+    }
+
+    if (name === 'TaskUpdate') {
+      const id = stringValue(input.taskId)
+      if (!id) continue
+      if (input.status === 'deleted') {
+        changed = tasks.delete(id) || changed
+        continue
+      }
+      const task = tasks.get(id) ?? {
+        id,
+        subject: `Task #${id}`,
+        description: '',
+        status: 'pending' as const,
+        blocks: [],
+        blockedBy: [],
+        taskListId: snapshot.team.name,
+      }
+      applyProjectedTaskUpdate(task, input)
+      tasks.set(id, task)
+      changed = true
+      continue
+    }
+
+    const authoritativeTasks = name === 'TaskList'
+      ? result.value.tasks
+      : name === 'TeamDelete'
+        ? result.value.finalTasks
+        : undefined
+    if (Array.isArray(authoritativeTasks)) {
+      replaceProjectedTaskList(
+        tasks,
+        authoritativeTasks,
+        snapshot.team.name,
+        name === 'TaskList' ? 'blockedBy-only' : 'complete',
+      )
+      if (name === 'TeamDelete') terminalTaskFrameId = toolUseId
+      changed = true
+    }
+  }
+
+  if (!changed) return null
+  finalizeProjectedTaskEdges(tasks)
+  return {
+    tasks: [...tasks.values()].sort((left, right) => {
+      const leftNumber = Number.parseInt(left.id, 10)
+      const rightNumber = Number.parseInt(right.id, 10)
+      if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+        return leftNumber - rightNumber
+      }
+      return left.id.localeCompare(right.id)
+    }),
+    ...(appliedRevision !== undefined
+      ? { taskListRevision: appliedRevision }
+      : {}),
+    ...(terminalTaskFrameId ? { terminalTaskFrameId } : {}),
   }
 }
 
@@ -492,31 +997,32 @@ export function projectTeamWorkbenchesFromTranscript(
       Date.parse(left.message.timestamp) - Date.parse(right.message.timestamp) ||
       left.index - right.index
     ))
-  const teams = new Map<string, ProjectedTeamState>()
-  let currentTeamName: string | null = null
+  // A lead session may delete and recreate the same Team name. Keep each
+  // creation as its own ordered incarnation instead of keying history by the
+  // mutable display name.
+  const teams: ProjectedTeamState[] = []
+  let currentTeam: ProjectedTeamState | null = null
 
   for (const { message } of ordered) {
     const timestamp = timestampOrNow(message.timestamp)
-    if (message.type === 'user' && currentTeamName) {
-      const team = teams.get(currentTeamName)
-      if (team) {
-        const text = transcriptText(message.content)
-        const teammatePattern = /<teammate-message\s+teammate_id="([^"]+)"(?:\s+color="([^"]+)")?[^>]*>([\s\S]*?)<\/teammate-message>/g
-        for (const match of text.matchAll(teammatePattern)) {
-          const body = match[3]?.trim()
-          if (!body) continue
-          team.messages.push({
-            id: `${message.id}:teammate:${team.messages.length}`,
-            from: match[1]!,
-            to: 'team-lead',
-            recipients: ['team-lead'],
-            kind: 'direct',
-            text: body,
-            timestamp,
-            ...(match[2] ? { color: match[2] } : {}),
-          })
-          team.updatedAt = timestamp
-        }
+    if (message.type === 'user' && currentTeam) {
+      const team = currentTeam
+      const text = transcriptText(message.content)
+      const teammatePattern = /<teammate-message\s+teammate_id="([^"]+)"(?:\s+color="([^"]+)")?[^>]*>([\s\S]*?)<\/teammate-message>/g
+      for (const match of text.matchAll(teammatePattern)) {
+        const body = match[3]?.trim()
+        if (!body) continue
+        team.messages.push({
+          id: `${message.id}:teammate:${team.messages.length}`,
+          from: match[1]!,
+          to: 'team-lead',
+          recipients: ['team-lead'],
+          kind: 'direct',
+          text: body,
+          timestamp,
+          ...(match[2] ? { color: match[2] } : {}),
+        })
+        team.updatedAt = timestamp
       }
     }
 
@@ -532,10 +1038,9 @@ export function projectTeamWorkbenchesFromTranscript(
       const result = toolResult?.value ?? {}
 
       if (name === 'TeamCreate') {
-        if (toolResult?.isError) continue
-        const teamName = stringValue(input.team_name) ?? stringValue(result.team_name)
+        if (toolResult && !successfulToolResult(toolResult)) continue
+        const teamName = stringValue(result.team_name) ?? stringValue(input.team_name)
         if (!teamName) continue
-        currentTeamName = teamName
         const leadAgentId = stringValue(result.lead_agent_id) ?? `team-lead@${teamName}`
         const team: ProjectedTeamState = {
           name: teamName,
@@ -557,25 +1062,33 @@ export function projectTeamWorkbenchesFromTranscript(
           cwd: stringValue(message.cwd) ?? '',
           sessionId,
         })
-        teams.set(teamName, team)
+        teams.push(team)
+        currentTeam = team
         continue
       }
 
       const explicitTeamName = stringValue(input.team_name)
-      const teamName = explicitTeamName ?? currentTeamName
-      if (!teamName) continue
-      const team = teams.get(teamName)
+      const team = currentTeam && (!explicitTeamName || currentTeam.name === explicitTeamName)
+        ? currentTeam
+        : [...teams].reverse().find(candidate => candidate.name === explicitTeamName)
       if (!team) continue
+      const teamName = team.name
       team.updatedAt = timestamp
-      if (toolResult?.isError) continue
+      // Old transcripts may omit tool results, so keep best-effort replay for
+      // that shape. An explicit non-error failure (`success: false`) is still
+      // authoritative and must never mutate the reconstructed Team.
+      if (toolResult && !successfulToolResult(toolResult)) continue
 
       if (name === 'TeamDelete') {
+        if (Array.isArray(result.finalTasks)) {
+          replaceProjectedTaskList(team.tasks, result.finalTasks, teamName)
+        }
         team.deletedAt = timestamp
-        if (currentTeamName === teamName) currentTeamName = null
+        if (currentTeam === team) currentTeam = null
         continue
       }
 
-      if (name === 'Agent' && explicitTeamName) {
+      if (name === 'Agent') {
         const memberName = stringValue(input.name)
         if (!memberName) continue
         const agentId = stringValue(result.agent_id) ??
@@ -610,24 +1123,17 @@ export function projectTeamWorkbenchesFromTranscript(
       if (name === 'TaskUpdate') {
         const id = stringValue(input.taskId)
         if (!id) continue
+        if (input.status === 'deleted') {
+          team.tasks.delete(id)
+          continue
+        }
         applyProjectedTaskUpdate(ensureProjectedTask(team, id), input)
         continue
       }
 
       if (name === 'TaskList') {
-        const listed = Array.isArray(result.tasks) ? result.tasks : []
-        for (const rawTask of listed) {
-          const record = objectValue(rawTask)
-          const id = stringValue(record?.id)
-          if (!record || !id) continue
-          const task = ensureProjectedTask(team, id)
-          const status = taskStatus(record.status)
-          const subject = stringValue(record.subject)
-          const owner = stringValue(record.owner)
-          if (status) task.status = status
-          if (subject) task.subject = subject
-          if (owner) task.owner = owner
-        }
+        if (!Array.isArray(result.tasks)) continue
+        replaceProjectedTaskList(team.tasks, result.tasks, teamName, 'blockedBy-only')
         continue
       }
 
@@ -654,7 +1160,7 @@ export function projectTeamWorkbenchesFromTranscript(
     }
   }
 
-  return [...teams.values()].map((team) => {
+  return teams.map((team) => {
     finalizeProjectedTaskEdges(team.tasks)
     const members = [...team.members.values()]
     const tasks = [...team.tasks.values()].sort((left, right) => {
@@ -965,37 +1471,45 @@ export class TeamService {
       transcriptStartedAt = config.createdAt
     } catch (error) {
       configError = error
-      if (leadSessionId) {
-        const archive = await this.readArchiveDocument(leadSessionId)
-        const archivedEntry = this.archiveEntryForTeam(
-          archive,
-          teamName,
-          options.incarnationId,
-        )
-        const archivedSnapshot = archivedEntry?.snapshots.at(-1)
-        const archivedMember = archivedSnapshot?.team.members.find((candidate) => (
+    }
+
+    // A live team config is only the current roster. Members disappear from it
+    // during shutdown before the team directory itself is removed, so a
+    // successful config load can still require the durable archive identity.
+    if (!memberName && leadSessionId) {
+      const archive = await this.readArchiveDocument(leadSessionId)
+      const archivedEntry = this.archiveEntryForTeam(
+        archive,
+        teamName,
+        options.incarnationId,
+      )
+      const archivedSnapshot = archivedEntry?.snapshots.at(-1)
+      const archivedMember = archivedEntry?.snapshots
+        .slice()
+        .reverse()
+        .flatMap(snapshot => snapshot.team.members)
+        .find((candidate) => (
           candidate.agentId === agentId || candidate.name === agentId
         ))
-        memberName = archivedMember?.name ?? null
-        memberSessionId = archivedMember?.sessionId
-        leadSessionId = archivedSnapshot?.team.leadSessionId ?? leadSessionId
-        transcriptStartedAt = archivedSnapshot?.team.createdAt
-        const deletedAt = archivedSnapshot?.deletedAt
-          ? Date.parse(archivedSnapshot.deletedAt)
-          : undefined
-        const nextIncarnationStartedAt = archive?.teams
-          .filter((entry) => entry.teamName === teamName)
-          .map((entry) => entry.snapshots.at(-1)?.team.createdAt)
-          .filter((createdAt): createdAt is number => (
-            Number.isFinite(createdAt) &&
-            Number.isFinite(transcriptStartedAt) &&
-            createdAt! > transcriptStartedAt!
-          ))
-          .sort((left, right) => left - right)[0]
-        transcriptEndedAt = [deletedAt, nextIncarnationStartedAt]
-          .filter((value): value is number => Number.isFinite(value))
-          .sort((left, right) => left - right)[0]
-      }
+      memberName = archivedMember?.name ?? null
+      memberSessionId = archivedMember?.sessionId
+      leadSessionId = archivedSnapshot?.team.leadSessionId ?? leadSessionId
+      transcriptStartedAt = archivedSnapshot?.team.createdAt
+      const deletedAt = archivedSnapshot?.deletedAt
+        ? Date.parse(archivedSnapshot.deletedAt)
+        : undefined
+      const nextIncarnationStartedAt = archive?.teams
+        .filter((entry) => entry.teamName === teamName)
+        .map((entry) => entry.snapshots.at(-1)?.team.createdAt)
+        .filter((createdAt): createdAt is number => (
+          Number.isFinite(createdAt) &&
+          Number.isFinite(transcriptStartedAt) &&
+          createdAt! > transcriptStartedAt!
+        ))
+        .sort((left, right) => left - right)[0]
+      transcriptEndedAt = [deletedAt, nextIncarnationStartedAt]
+        .filter((value): value is number => Number.isFinite(value))
+        .sort((left, right) => left - right)[0]
     }
 
     if (!memberName) {
@@ -1141,29 +1655,47 @@ export class TeamService {
    * inbox entry as read or otherwise mutates CLI state.
    */
   async getWorkbench(name: string): Promise<TeamWorkbenchSnapshot> {
-    const config = await this.loadTeamConfig(name)
-    const discoveredTeam = await this.getTeam(name)
-    const rosterIds = new Set(config.members.map((member) => member.agentId))
-    const members = discoveredTeam.members.filter((member) => rosterIds.has(member.agentId))
-    const team = {
-      ...discoveredTeam,
-      memberCount: members.length,
-      activeMemberCount: members.filter((member) => member.status === 'running').length,
-      members,
-    }
-    const tasks = await taskService.getTasksForList(name)
-    const messages = await this.readWorkbenchMessages(name)
-    const canonical = JSON.stringify({ team, tasks, messages })
+    return withTaskListLifecycleLock(getCanonicalTeamTaskListId(name), async () => {
+      const config = await this.loadTeamConfig(name)
+      const taskListId = getCanonicalTeamTaskListId(config.name)
+      const discoveredTeam = await this.getTeam(name)
+      const rosterIds = new Set(config.members.map((member) => member.agentId))
+      const members = discoveredTeam.members.filter((member) => rosterIds.has(member.agentId))
+      const team = {
+        ...discoveredTeam,
+        memberCount: members.length,
+        activeMemberCount: members.filter((member) => member.status === 'running').length,
+        members,
+      }
+      const taskSnapshot = await readTaskListSnapshot(taskListId)
+      const tasks: TaskInfo[] = taskSnapshot.tasks
+        .filter(task => !task.metadata?._internal)
+        .map(task => ({ ...task, taskListId }))
+        .sort((left, right) => {
+          const leftNumber = Number.parseInt(left.id, 10)
+          const rightNumber = Number.parseInt(right.id, 10)
+          if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+            return leftNumber - rightNumber
+          }
+          return left.id.localeCompare(right.id)
+        })
+      const messages = await this.readWorkbenchMessages(name)
+      const canonical = JSON.stringify({ team, tasks, messages })
 
-    const snapshot: TeamWorkbenchSnapshot = {
-      version: hash(canonical),
-      generatedAt: new Date().toISOString(),
-      team,
-      tasks,
-      messages,
-    }
-    await this.archiveWorkbenchSnapshot(snapshot)
-    return snapshot
+      const snapshot: TeamWorkbenchSnapshot = {
+        version: hash(canonical),
+        // This is the task-list replay boundary, captured after the locked read.
+        // It orders transcript tail repair against the mutable DAG rather than
+        // against unrelated roster or mailbox I/O.
+        generatedAt: taskSnapshot.capturedAt,
+        taskListRevision: taskSnapshot.revision,
+        team,
+        tasks,
+        messages,
+      }
+      await this.archiveWorkbenchSnapshot(snapshot)
+      return snapshot
+    })
   }
 
   /**
@@ -1190,6 +1722,36 @@ export class TeamService {
 
     let archive = await this.readArchiveDocument(sessionId)
     let archived = this.archiveEntryForLookup(archive, lookup)
+    const archivedLatest = archived?.snapshots.at(-1)
+    let shouldRefreshArchive = Boolean(
+      archivedLatest?.deletedAt && !archivedLatest.terminalTaskFrameId,
+    )
+    if (
+      archivedLatest &&
+      !archivedLatest.deletedAt &&
+      !liveIncarnations.has(archivedLatest.team.incarnationId)
+    ) {
+      try {
+        const lifecycle = await readTaskListLifecycleState(
+          getCanonicalTeamTaskListId(archivedLatest.team.name),
+        )
+        shouldRefreshArchive = Boolean(
+          terminalLifecycleTasks(archivedLatest, lifecycle),
+        )
+      } catch {
+        // Malformed lifecycle state is never evidence that a live archive
+        // frame ended; legacy transcript/watcher paths remain available.
+      }
+    }
+    if (archived && shouldRefreshArchive) {
+      await this.markWorkbenchArchiveDeleted(
+        archived.teamName,
+        sessionId,
+        archived.incarnationId,
+      )
+      archive = await this.readArchiveDocument(sessionId)
+      archived = this.archiveEntryForLookup(archive, lookup)
+    }
     if (archived) {
       return {
         sessionId,
@@ -1244,15 +1806,48 @@ export class TeamService {
       const teams = [...current.teams]
       const index = teams.findIndex((entry) => entry.incarnationId === incarnationId)
       const existing = index >= 0 ? teams[index] : undefined
-      const snapshots = existing?.snapshots.at(-1)?.version === normalizedSnapshot.version
-        ? existing.snapshots
-        : [...(existing?.snapshots ?? []), normalizedSnapshot]
+      const snapshotWithRoster = carryForwardArchivedMembers(
+        normalizedSnapshot,
+        existing?.snapshots.at(-1),
+      )
+      const latest = existing?.snapshots.at(-1)
+      const incomingAt = Date.parse(snapshotWithRoster.generatedAt)
+      const latestAt = latest ? Date.parse(latest.generatedAt) : Number.NEGATIVE_INFINITY
+      const incomingRevision = snapshotWithRoster.taskListRevision
+      const latestRevision = latest?.taskListRevision
+      const comparableRevisions = Number.isSafeInteger(incomingRevision) &&
+        Number.isSafeInteger(latestRevision)
+      // Archive entries are a monotonic state machine. A delayed watcher read
+      // must never move the replay boundary backward, and no live snapshot may
+      // resurrect an incarnation after its deletion tombstone was committed.
+      if (
+        (latest?.deletedAt && !snapshotWithRoster.deletedAt) ||
+        (comparableRevisions && incomingRevision! < latestRevision!) ||
+        (
+          (
+            !comparableRevisions ||
+            incomingRevision === latestRevision
+          ) &&
+          Number.isFinite(incomingAt) &&
+          Number.isFinite(latestAt) &&
+          (
+            incomingAt < latestAt ||
+            (
+              incomingAt === latestAt &&
+              latest?.version !== snapshotWithRoster.version
+            )
+          )
+        )
+      ) return
+      const snapshots = latest?.version === snapshotWithRoster.version
+        ? [...existing.snapshots.slice(0, -1), snapshotWithRoster]
+        : [...(existing?.snapshots ?? []), snapshotWithRoster]
             .slice(-TEAM_WORKBENCH_ARCHIVE_HISTORY_LIMIT)
       const nextEntry: TeamWorkbenchArchiveEntry = {
         ...(existing ?? {}),
-        teamName: normalizedSnapshot.team.name,
+        teamName: snapshotWithRoster.team.name,
         incarnationId,
-        updatedAt: normalizedSnapshot.generatedAt,
+        updatedAt: snapshotWithRoster.generatedAt,
         snapshots,
       }
       if (index >= 0) teams[index] = nextEntry
@@ -1273,24 +1868,116 @@ export class TeamService {
     incarnationId?: string,
   ): Promise<void> {
     if (!sessionId) return
-    const document = await this.readArchiveDocument(sessionId)
-    const entry = this.archiveEntryForTeam(document, teamName, incarnationId)
-    const latest = entry?.snapshots.at(-1)
-    if (!latest || latest.deletedAt) return
-    const deletedAt = new Date().toISOString()
-    await this.archiveWorkbenchSnapshot({
-      ...latest,
-      version: `${latest.version}:deleted`,
-      generatedAt: deletedAt,
-      deletedAt,
-      team: {
-        ...latest.team,
-        activeMemberCount: 0,
-        members: latest.team.members.map((member) => ({
-          ...member,
-          status: 'completed' as const,
-        })),
-      },
+    let messages: SessionMessageEntry[] | undefined
+    let lifecycle: TaskListLifecycleState | undefined
+    try {
+      messages = await this.sessionReader.getSessionMessages(sessionId)
+    } catch {
+      // The archive tombstone must still be written when a legacy or partially
+      // persisted lead transcript cannot be read.
+    }
+    try {
+      lifecycle = await readTaskListLifecycleState(
+        getCanonicalTeamTaskListId(teamName),
+      )
+    } catch {
+      // A malformed lifecycle receipt is never trusted. Transcript repair and
+      // the last archived snapshot remain available as legacy fallbacks.
+    }
+    const filePath = this.getWorkbenchArchivePath(sessionId)
+    await this.withArchiveWriteLock(filePath, async () => {
+      const current = await this.readArchiveDocument(sessionId)
+      const entry = this.archiveEntryForTeam(current, teamName, incarnationId)
+      const latest = entry?.snapshots.at(-1)
+      if (!current || !entry || !latest) return
+      const base = latest.deletedAt
+        ? [...entry.snapshots].reverse().find(snapshot => !snapshot.deletedAt)
+        : latest
+      if (!base) return
+      const transcriptReconciled = messages
+        ? reconcileArchivedTasksFromTranscript(base, messages)
+        : null
+      const reconciled = preferTerminalTaskFrame(
+        transcriptReconciled,
+        terminalLifecycleTasks(base, lifecycle),
+      )
+
+      if (latest.deletedAt) {
+        // A watcher can observe directory deletion before the TeamDelete tool
+        // result is durable. The tombstone remains terminal, but a later GET
+        // or mark may enrich its payload from that authoritative final frame.
+        if (!reconciled?.terminalTaskFrameId) return
+        if (
+          latest.terminalTaskFrameId === reconciled.terminalTaskFrameId &&
+          (latest.taskListRevision ?? -1) >=
+            (reconciled.taskListRevision ?? -1)
+        ) return
+        if (
+          latest.taskListRevision !== undefined &&
+          reconciled.taskListRevision !== undefined &&
+          reconciled.taskListRevision < latest.taskListRevision
+        ) return
+        const enriched: TeamWorkbenchSnapshot = {
+          ...latest,
+          version: `${base.version}:tasks:${hash(JSON.stringify(reconciled.tasks))}:deleted`,
+          tasks: reconciled.tasks,
+          ...(reconciled.taskListRevision !== undefined
+            ? { taskListRevision: reconciled.taskListRevision }
+            : {}),
+          terminalTaskFrameId: reconciled.terminalTaskFrameId,
+        }
+        const index = current.teams.indexOf(entry)
+        const teams = [...current.teams]
+        teams[index] = {
+          ...entry,
+          snapshots: [...entry.snapshots.slice(0, -1), enriched],
+        }
+        await this.writeArchiveDocument(filePath, { ...current, teams })
+        return
+      }
+
+      const reconciledLatest = reconciled
+        ? {
+            ...latest,
+            version: `${latest.version}:tasks:${hash(JSON.stringify(reconciled.tasks))}`,
+            tasks: reconciled.tasks,
+            ...(reconciled.taskListRevision !== undefined
+              ? { taskListRevision: reconciled.taskListRevision }
+              : {}),
+            ...(reconciled.terminalTaskFrameId
+              ? { terminalTaskFrameId: reconciled.terminalTaskFrameId }
+              : {}),
+          }
+        : latest
+
+      const deletedAt = new Date().toISOString()
+      const tombstone: TeamWorkbenchSnapshot = {
+        ...reconciledLatest,
+        version: `${reconciledLatest.version}:deleted`,
+        generatedAt: deletedAt,
+        deletedAt,
+        team: {
+          ...reconciledLatest.team,
+          activeMemberCount: 0,
+          members: reconciledLatest.team.members.map((member) => ({
+            ...member,
+            status: 'completed' as const,
+          })),
+        },
+      }
+      const index = current.teams.indexOf(entry)
+      const teams = [...current.teams]
+      teams[index] = {
+        ...entry,
+        updatedAt: deletedAt,
+        snapshots: [...entry.snapshots, tombstone]
+          .slice(-TEAM_WORKBENCH_ARCHIVE_HISTORY_LIMIT),
+      }
+      await this.writeArchiveDocument(filePath, {
+        ...current,
+        updatedAt: deletedAt,
+        teams,
+      })
     })
   }
 
@@ -1413,7 +2100,7 @@ export class TeamService {
             createdAt: Number.isFinite(createdAt) ? createdAt : 0,
             leadSessionId: stringValue(teamRecord.leadSessionId),
           })
-          const snapshot = {
+          const rawSnapshot = {
             ...record,
             team: {
               ...teamRecord,
@@ -1422,6 +2109,10 @@ export class TeamService {
           } as TeamWorkbenchSnapshot
           const key = `${teamName}\u0000${incarnationId}`
           const existing = groupedTeams.get(key)
+          const snapshot = carryForwardArchivedMembers(
+            rawSnapshot,
+            existing?.snapshots.at(-1),
+          )
           const snapshots = existing?.snapshots.at(-1)?.version === snapshot.version
             ? existing.snapshots
             : [...(existing?.snapshots ?? []), snapshot]
@@ -1481,25 +2172,32 @@ export class TeamService {
   // ── Delete team ─────────────────────────────────────────────────────────
 
   async deleteTeam(name: string): Promise<void> {
-    const config = await this.loadTeamConfig(name)
+    return withTaskListLifecycleLock(
+      getCanonicalTeamTaskListId(name),
+      async () => {
+      const config = await this.loadTeamConfig(name)
 
-    const hasActive = config.members.some(
-      (m) => m.isActive === undefined || m.isActive === true,
-    )
-    if (hasActive) {
-      throw ApiError.conflict(
-        `Cannot delete team "${name}": has active members`,
+      const remainingTeammates = config.members.filter(
+        member => member.agentId !== config.leadAgentId,
       )
-    }
+      const lead = config.members.find(
+        member => member.agentId === config.leadAgentId,
+      )
+      if (lead?.isActive !== false || remainingTeammates.length > 0) {
+        throw ApiError.conflict(
+          `Cannot delete team "${name}": lead is active or teammates remain registered`,
+        )
+      }
 
-    await this.getWorkbench(name)
-    await this.markWorkbenchArchiveDeleted(
-      name,
-      config.leadSessionId,
-      teamIncarnationId(config),
+      await this.getWorkbench(name)
+      await cleanupTeamDirectories(config.name)
+      await this.markWorkbenchArchiveDeleted(
+        config.name,
+        config.leadSessionId,
+        teamIncarnationId(config),
+      )
+      },
     )
-    const teamDir = path.join(this.getTeamsDir(), name)
-    await fs.rm(teamDir, { recursive: true, force: true })
   }
 
   // ── Internal helpers ────────────────────────────────────────────────────
