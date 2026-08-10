@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
-import { act } from 'react'
+import { act, StrictMode } from 'react'
 
 const viewportMocks = vi.hoisted(() => ({
   isMobile: false,
@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   getSlashCommands: vi.fn(),
   listAgents: vi.fn(),
   getRepositoryContext: vi.fn(),
+  createRepositoryBranch: vi.fn(),
   getRecentProjects: vi.fn(),
   search: vi.fn(),
   browse: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('../../api/sessions', () => ({
     getGitInfo: mocks.getGitInfo,
     getSlashCommands: mocks.getSlashCommands,
     getRepositoryContext: mocks.getRepositoryContext,
+    createRepositoryBranch: mocks.createRepositoryBranch,
     getRecentProjects: mocks.getRecentProjects,
   },
 }))
@@ -191,6 +193,7 @@ describe('ChatInput file mentions', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.createRepositoryBranch.mockReset()
     mocks.webviewDragHandlers.length = 0
     Reflect.deleteProperty(window, 'desktopHost')
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
@@ -1186,6 +1189,109 @@ describe('ChatInput file mentions', () => {
     })
     expect(useChatStore.getState().sessions['created-direct']?.isPreparingTurn).toBe(false)
     expect(mocks.delete).toHaveBeenCalledWith(sessionId)
+  })
+
+  it('launches on a branch created from the picker instead of falling back to the current branch', async () => {
+    const headCommit = 'a'.repeat(40)
+    const initialContext = {
+      ...okRepositoryContext(),
+      headCommit,
+      dirty: true,
+      branches: okRepositoryContext().branches.map((branch) => ({ ...branch, commit: headCommit })),
+    }
+    const createdContext = {
+      ...initialContext,
+      branches: [
+        ...initialContext.branches,
+        {
+          name: 'qa/launch-picker',
+          current: false,
+          local: true,
+          remote: false,
+          checkedOut: false,
+          commit: headCommit,
+        },
+      ],
+    }
+    mocks.getRepositoryContext.mockResolvedValue(initialContext)
+    mocks.createRepositoryBranch.mockImplementation(() => new Promise((resolve) => {
+      window.setTimeout(() => resolve({
+        branch: 'qa/launch-picker',
+        baseRef: 'main',
+        context: createdContext,
+      }), 0)
+    }))
+    mocks.create.mockResolvedValueOnce({ sessionId: 'created-picker-branch', workDir: '/repo' })
+    useSessionStore.setState({
+      sessions: [{
+        id: sessionId,
+        title: 'Project',
+        createdAt: '2026-05-01T00:00:00.000Z',
+        modifiedAt: '2026-05-01T00:00:00.000Z',
+        messageCount: 0,
+        projectPath: '/repo',
+        workDir: '/repo',
+        workDirExists: true,
+      }],
+      activeSessionId: sessionId,
+    })
+    useChatStore.setState({
+      sessions: {
+        [sessionId]: {
+          messages: [],
+          chatState: 'idle',
+          connectionState: 'connected',
+          streamingText: '',
+          streamingToolInput: '',
+          activeToolUseId: null,
+          activeToolName: null,
+          activeThinkingId: null,
+          pendingPermission: null,
+          pendingComputerUsePermission: null,
+          tokenUsage: { input_tokens: 0, output_tokens: 0 },
+          streamingResponseChars: 0,
+          elapsedSeconds: 0,
+          statusVerb: '',
+          slashCommands: [],
+          agentTaskNotifications: {},
+          elapsedTimer: null,
+        },
+      },
+    })
+
+    render(
+      <StrictMode>
+        <ChatInput variant="hero" />
+      </StrictMode>,
+    )
+
+    await openBranchList()
+    fireEvent.click(screen.getByRole('button', { name: 'Create branch…' }))
+    fireEvent.change(await screen.findByLabelText('Branch name'), {
+      target: { value: 'qa/launch-picker' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    expect(await screen.findByRole('button', { name: 'Location: repo / qa/launch-picker' }))
+      .toBeInTheDocument()
+    expect(useChatStore.getState().sessions[sessionId]?.repositoryLaunchDraft?.branch)
+      .toBe('qa/launch-picker')
+    expect(screen.queryByRole('status', { name: /Uncommitted changes/ })).not.toBeInTheDocument()
+
+    setComposerText('show the current branch', 23)
+    fireEvent.keyDown(getComposerElement(), { key: 'Enter' })
+
+    await waitFor(() => {
+      expect(mocks.create).toHaveBeenCalledWith({
+        workDir: '/repo',
+        repository: { branch: 'qa/launch-picker', worktree: false },
+      })
+    })
+    expect(mocks.wsSend).toHaveBeenCalledWith('created-picker-branch', {
+      type: 'user_message',
+      content: 'show the current branch',
+      attachments: [],
+    })
   })
 
   it('preserves explicit permission mode when replacing an empty session for branch launch', async () => {
