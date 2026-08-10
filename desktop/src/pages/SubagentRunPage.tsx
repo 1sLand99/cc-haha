@@ -10,6 +10,7 @@ import {
 } from '../api/subagents'
 import { MessageList } from '../components/chat/MessageList'
 import { ChatInput } from '../components/chat/ChatInput'
+import { SessionChatHeader, SessionChatSurface } from '@/components/chat/SessionChatSurface'
 import { SessionActivityButton } from '../components/activity/SessionActivityButton'
 import { SessionActivityPanel, type OpenSubagentPayload } from '../components/activity/SessionActivityPanel'
 import {
@@ -250,7 +251,7 @@ export function SubagentRunPage({
   }, [sourceSessionId, tabId, workflowOwnerAliases])
 
   return (
-    <AgentRunDesktop
+    <AgentSessionView
       kind="subagent"
       sessionId={tabId}
       sourceSessionId={sourceSessionId}
@@ -432,7 +433,7 @@ export function TeamMemberRunPage({
   }, [leadSessionId, tabId])
 
   return (
-    <AgentRunDesktop
+    <AgentSessionView
       kind="team-member"
       sessionId={runSessionId}
       sourceSessionId={member?.sessionId ?? leadSessionId}
@@ -469,7 +470,7 @@ export function TeamMemberRunPage({
   )
 }
 
-function AgentRunDesktop({
+function AgentSessionView({
   kind,
   sessionId,
   sourceSessionId,
@@ -633,90 +634,92 @@ function AgentRunDesktop({
   }, [dismissBackgroundTaskKeys, sessionId])
 
   return (
-    <div
-      data-testid="agent-run-desktop"
-      data-agent-run-kind={kind}
-      className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface)] text-[var(--color-text-primary)]"
+    <SessionChatSurface
+      surfaceKind="agent"
+      agentRunKind={kind}
+      isMobileLayout={isMobileLayout}
+      activityRailOpen={isActivityRailOpen}
+      contentRowTestId="agent-run-content-row"
+      chatColumnTestId="agent-run-conversation-column"
+      activityRail={showActivityRail ? (
+        <SessionActivityPanel
+          model={activityModel}
+          open={isActivityPanelOpen}
+          onClose={() => closeActivityPanel(sessionId)}
+          onOpenSubagent={handleOpenSubagent}
+          onClearFinishedBackgroundTasks={handleClearFinishedBackgroundTasks}
+          placement="rail"
+        />
+      ) : null}
+      overlay={hasVisibleActivity && isMobileLayout ? (
+        <SessionActivityPanel
+          model={activityModel}
+          open={isActivityPanelOpen}
+          onClose={() => closeActivityPanel(sessionId)}
+          onOpenSubagent={handleOpenSubagent}
+          onClearFinishedBackgroundTasks={handleClearFinishedBackgroundTasks}
+          placement="overlay"
+        />
+      ) : null}
     >
-      <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--color-border)] px-5 py-3">
-        <div className="flex min-w-0 items-start gap-2">
+      <SessionChatHeader
+        title={title}
+        compact={isMobileLayout}
+        leading={(
           <Button
             variant="ghost"
             size="base"
             onClick={onBack}
             icon={<ArrowLeft size={15} strokeWidth={2} aria-hidden="true" />}
-            className="mt-0.5 shrink-0"
+            className="shrink-0"
           >
             {backLabel}
           </Button>
-          <div className="min-w-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h1
-                className="min-w-0 truncate text-[16.5px] font-semibold leading-tight text-[var(--color-text-primary)]"
-                style={{ fontFamily: 'var(--font-headline)' }}
-              >
-                {title}
-              </h1>
-              {status ? <StatusBadge status={status} t={t} /> : null}
-            </div>
-            <p className="mt-1 truncate font-mono text-[11px] text-[var(--color-text-tertiary)]">
-              {identity}
-            </p>
-            {details ? (
-              <p className="mt-1 flex min-w-0 flex-wrap gap-x-2 text-[11px] text-[var(--color-text-tertiary)]">
-                {details}
-              </p>
-            ) : null}
-          </div>
+        )}
+        titleAddon={status ? <StatusBadge status={status} t={t} /> : null}
+        actions={(
+          <>
+            {hasVisibleActivity ? <SessionActivityButton sessionId={sessionId} /> : null}
+            <IconButton
+              icon={<RefreshCw size={15} strokeWidth={2.2} aria-hidden="true" className={loading ? 'animate-spin' : undefined} />}
+              label={refreshLabel}
+              showTooltip={false}
+              size="md"
+              tone="muted"
+              onClick={onRefresh}
+              disabled={loading}
+            />
+          </>
+        )}
+        metadata={[{
+          key: 'identity',
+          content: <span className="truncate font-mono">{identity}</span>,
+        }]}
+      >
+        {details ? (
+          <p className="mt-1 flex min-w-0 flex-wrap gap-x-2 text-[11px] text-[var(--color-text-tertiary)]">
+            {details}
+          </p>
+        ) : null}
+      </SessionChatHeader>
+
+      {loading && !ready ? (
+        <div role="status" className="flex flex-1 items-center justify-center text-sm text-[var(--color-text-tertiary)]">{loadingLabel}</div>
+      ) : null}
+      {error ? (
+        <div role="alert" className="mx-5 mt-4 rounded-[var(--radius-md)] border border-[var(--color-error)] bg-[var(--color-error-container)] px-3 py-2 text-sm text-[var(--color-on-error-container)]">
+          {error}
         </div>
-        {/* The icon spins in place while loading rather than swapping to the
-            generic spinner, so SubAgents and teammates share identical chrome. */}
-        <div className="flex shrink-0 items-center gap-1">
-          {hasVisibleActivity ? <SessionActivityButton sessionId={sessionId} /> : null}
-          <IconButton
-            icon={<RefreshCw size={15} strokeWidth={2.2} aria-hidden="true" className={loading ? 'animate-spin' : undefined} />}
-            label={refreshLabel}
-            showTooltip={false}
-            size="md"
-            tone="muted"
-            onClick={onRefresh}
-            disabled={loading}
+      ) : null}
+      {ready ? (
+        <div data-testid={conversationTestId} className="flex min-h-0 flex-1 flex-col">
+          <MessageList
+            sessionId={sessionId}
+            mobileLayout={isMobileLayout}
+            onOpenAgentRun={handleOpenSubagent}
           />
         </div>
-      </header>
-
-      <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div
-          data-testid="agent-run-conversation-column"
-          className={[
-            'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
-            'transition-[padding] duration-200 ease-out motion-reduce:transition-none',
-            isActivityRailOpen ? 'pr-[352px]' : '',
-          ].filter(Boolean).join(' ')}
-        >
-          {loading && !ready ? (
-            <div role="status" className="flex flex-1 items-center justify-center text-sm text-[var(--color-text-tertiary)]">{loadingLabel}</div>
-          ) : null}
-          {error ? (
-            <div role="alert" className="mx-5 mt-4 rounded-[var(--radius-md)] border border-[var(--color-error)] bg-[var(--color-error-container)] px-3 py-2 text-sm text-[var(--color-on-error-container)]">
-              {error}
-            </div>
-          ) : null}
-          {ready ? (
-            <div data-testid={conversationTestId} className="flex min-h-0 flex-1 flex-col">
-              <MessageList sessionId={sessionId} onOpenAgentRun={handleOpenSubagent} />
-            </div>
-          ) : null}
-        </div>
-        <SessionActivityPanel
-          model={activityModel}
-          open={hasVisibleActivity && isActivityPanelOpen}
-          onClose={() => closeActivityPanel(sessionId)}
-          onOpenSubagent={handleOpenSubagent}
-          onClearFinishedBackgroundTasks={handleClearFinishedBackgroundTasks}
-          placement={isMobileLayout ? 'overlay' : 'rail'}
-        />
-      </main>
+      ) : null}
       {ready && canSendMessage ? <ChatInput /> : null}
       {ready && !canSendMessage ? (
         <p
@@ -726,7 +729,7 @@ function AgentRunDesktop({
           {readOnlyLabel}
         </p>
       ) : null}
-    </div>
+    </SessionChatSurface>
   )
 }
 

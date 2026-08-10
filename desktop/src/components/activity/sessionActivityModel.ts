@@ -96,9 +96,17 @@ export type BuildSessionActivityModelInput = {
   dismissedBackgroundTaskKeys?: Set<string>
   agentNotifications: AgentTaskNotification[]
   teamMembers?: TeamMember[]
+  /** AgentTeam has its own strip/workbench in a main session. Set false at
+   * that ownership boundary so transcript spawn rows cannot affect Activity. */
+  includeTeamActivity?: boolean
   /** Live workflow runs for this session, newest first. */
   workflowRuns?: WorkflowRun[]
 }
+
+export type BuildMainSessionActivityModelInput = Omit<
+  BuildSessionActivityModelInput,
+  'runScope' | 'taskScope' | 'teamTasks' | 'teamMembers' | 'includeTeamActivity'
+>
 
 /**
  * Ordered by how directly each section answers "what is this turn doing":
@@ -1110,6 +1118,7 @@ function buildOutputRow(key: string, outputFile: string): ActivityRow {
 export function buildSessionActivityModel(input: BuildSessionActivityModelInput): SessionActivityModel {
   const sections = createEmptySections()
   let badgeCount = 0
+  const includeTeamActivity = input.includeTeamActivity !== false
   const runMessages = projectMessagesToRun(input.messages ?? [], input.runScope ?? 'session')
   const runTaskRows = buildTaskRowsFromMessages(
     runMessages,
@@ -1120,7 +1129,9 @@ export function buildSessionActivityModel(input: BuildSessionActivityModelInput)
   const settledRunTaskRows = input.isForegroundTurnActive === false
     ? sealUnfinishedTaskRows(runTaskRows)
     : runTaskRows
-  const teamTaskRows = input.teamTasks?.map(buildTeamTaskRow) ?? []
+  const teamTaskRows = includeTeamActivity
+    ? input.teamTasks?.map(buildTeamTaskRow) ?? []
+    : []
   sections.tasks.rows = [...settledRunTaskRows, ...teamTaskRows]
   for (const row of sections.tasks.rows) {
     if (isBadgeStatus(row.status)) {
@@ -1137,8 +1148,10 @@ export function buildSessionActivityModel(input: BuildSessionActivityModelInput)
     }
   }
 
-  for (const member of input.teamMembers ?? []) {
-    sections.team.rows.push(buildTeamRow(member))
+  if (includeTeamActivity) {
+    for (const member of input.teamMembers ?? []) {
+      sections.team.rows.push(buildTeamRow(member))
+    }
   }
 
   const subagentRowsByKey = new Map<string, ActivityRow>()
@@ -1149,7 +1162,6 @@ export function buildSessionActivityModel(input: BuildSessionActivityModelInput)
   const dismissedNotificationTaskIds = new Set<string>()
   const visibleBackgroundTaskIds = new Set<string>()
   const hiddenChildTaskIds = new Set<string>()
-
   const knownTeamMemberNames = new Set(
     (input.teamMembers ?? []).flatMap((member) => [
       member.name,
@@ -1159,6 +1171,7 @@ export function buildSessionActivityModel(input: BuildSessionActivityModelInput)
   const teamLaunchRowsByMember = new Map<string, ActivityRow>()
   for (const row of buildAgentRowsFromMessages(runMessages)) {
     if (row.section === 'team') {
+      if (!includeTeamActivity) continue
       if (row.teamMemberName && knownTeamMemberNames.has(row.teamMemberName)) continue
       const key = row.teamName && row.teamMemberName
         ? `${row.teamName}:${row.teamMemberName}`
@@ -1264,4 +1277,20 @@ export function buildSessionActivityModel(input: BuildSessionActivityModelInput)
     badgeCount,
     sections,
   }
+}
+
+/**
+ * Main-session Activity is the lead agent's run projection. AgentTeam owns a
+ * separate strip/workbench, so its shared DAG, roster and launch rows cannot
+ * enter this model or affect the toolbar badge/auto-open state.
+ */
+export function buildMainSessionActivityModel(
+  input: BuildMainSessionActivityModelInput,
+): SessionActivityModel {
+  return buildSessionActivityModel({
+    ...input,
+    runScope: 'session',
+    taskScope: 'team-session',
+    includeTeamActivity: false,
+  })
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildMainSessionActivityModel,
   buildSessionActivityModel,
   getVisibleActivitySections,
   hasVisibleSessionActivity,
@@ -462,6 +463,62 @@ describe('buildSessionActivityModel', () => {
       }),
     ])
     expect(model.badgeCount).toBe(4)
+  })
+
+  it('keeps Team launch rows out of main Activity without hiding direct SubAgents', () => {
+    const teamLaunch: UIMessage = {
+      id: 'team-agent-tool',
+      type: 'tool_use',
+      toolName: 'Agent',
+      toolUseId: 'team-agent-tool',
+      input: {
+        description: '分析桌面端 UI 变更',
+        name: 'desktop-analyzer',
+        team_name: 'v053-release-audit',
+      },
+      timestamp: 1000,
+    }
+    const directLaunch: UIMessage = {
+      id: 'direct-agent-tool',
+      type: 'tool_use',
+      toolName: 'Agent',
+      toolUseId: 'direct-agent-tool',
+      input: { description: '检查普通 SubAgent 路径' },
+      timestamp: 1001,
+    }
+    const buildMainModel = (messages: UIMessage[]) => buildMainSessionActivityModel({
+      sessionId: 'session-1',
+      messages,
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    const teamOnly = buildMainModel([teamLaunch])
+    expect(hasVisibleSessionActivity(teamOnly)).toBe(false)
+    expect(teamOnly.sections.team.rows).toEqual([])
+
+    const guardedTeamInputs = buildSessionActivityModel({
+      sessionId: 'session-1',
+      messages: [teamLaunch],
+      tasks: [],
+      teamTasks: [task({ id: 'team-task', subject: 'Shared Team DAG' })],
+      teamMembers: [{ agentId: 'desktop-analyzer@v053-release-audit', role: 'reviewer', status: 'running' }],
+      includeTeamActivity: false,
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+    expect(hasVisibleSessionActivity(guardedTeamInputs)).toBe(false)
+    expect(guardedTeamInputs.sections.tasks.rows).toEqual([])
+    expect(guardedTeamInputs.sections.team.rows).toEqual([])
+
+    const withDirectSubagent = buildMainModel([teamLaunch, directLaunch])
+    expect(getVisibleActivitySections(withDirectSubagent).map(section => section.id)).toEqual(['subagents'])
+    expect(withDirectSubagent.sections.subagents.rows).toEqual([
+      expect.objectContaining({ id: 'direct-agent-tool', label: '检查普通 SubAgent 路径' }),
+    ])
   })
 
   it('uses successful Team lifecycle results to hide implicit member spawns without hiding ordinary Agents', () => {

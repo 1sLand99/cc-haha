@@ -17,6 +17,11 @@ const {
   sendMemberMessageMock: vi.fn(),
   workflowSessionRunsMock: vi.fn(),
 }))
+const viewportMocks = vi.hoisted(() => ({ isMobile: false }))
+
+vi.mock('../hooks/useMobileViewport', () => ({
+  useMobileViewport: () => viewportMocks.isMobile,
+}))
 
 vi.mock('../api/subagents', async (importOriginal) => ({
   // Keep the real ref helpers: they decide whether the page fetches by tool
@@ -121,8 +126,20 @@ function deferred<T>() {
   return { promise, reject, resolve }
 }
 
+function expectSharedSessionSurface(agentRunKind: 'subagent' | 'team-member') {
+  const surface = screen.getByTestId('session-chat-surface')
+  expect(surface).toHaveAttribute('data-session-chat-kind', 'agent')
+  expect(surface).toHaveAttribute(
+    'data-agent-run-kind',
+    agentRunKind,
+  )
+  expect(screen.getByTestId('agent-run-conversation-column')).toHaveClass('min-w-[360px]')
+  expect(screen.getByTestId('session-header').firstElementChild).toHaveClass('max-w-[900px]')
+}
+
 describe('SubagentRunPage', () => {
   beforeEach(() => {
+    viewportMocks.isMobile = false
     useSettingsStore.setState({ locale: 'en' })
     useChatStore.setState({ sessions: {} })
     useTabStore.setState({ tabs: [], activeTabId: null })
@@ -183,6 +200,7 @@ describe('SubagentRunPage', () => {
     expect(await screen.findByText('survey response.js')).toBeInTheDocument()
     expect(subagentsApi.getRunByAgent).toHaveBeenCalledWith('session-1', 'wfagent1')
     expect(subagentsApi.getRunByTool).not.toHaveBeenCalled()
+    expectSharedSessionSurface('subagent')
   })
 
   it('uses live workflow progress instead of sealing a running agent as completed', async () => {
@@ -268,7 +286,26 @@ describe('SubagentRunPage', () => {
     expect(transcript).toHaveTextContent('Read files')
     expect(transcript).toHaveTextContent('Finding')
     expect(transcript).not.toHaveTextContent('assistant_text')
-    expect(screen.getByTestId('agent-run-desktop')).toHaveAttribute('data-agent-run-kind', 'subagent')
+    expectSharedSessionSurface('subagent')
+  })
+
+  it('uses compact main-session chrome and mobile transcript behavior on narrow screens', async () => {
+    viewportMocks.isMobile = true
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun({
+      messages: Array.from({ length: 4 }, (_, index) => ({
+        id: `mobile-turn-${index}`,
+        type: 'user' as const,
+        content: `Mobile turn ${index + 1}`,
+        timestamp: TRANSCRIPT_TIMESTAMP,
+      })),
+    }))
+
+    render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="Mobile child" />)
+
+    await screen.findByTestId('subagent-conversation')
+    expect(screen.getByTestId('session-header')).toHaveClass('px-4', 'py-2.5')
+    expect(screen.getByTestId('agent-run-conversation-column')).toHaveClass('flex-1')
+    expect(screen.queryByTestId('conversation-navigator')).not.toBeInTheDocument()
   })
 
   it('auto-opens the owning SubAgent Task and Bash activity without another click', async () => {
@@ -689,7 +726,7 @@ describe('SubagentRunPage', () => {
       }],
     }))
 
-    render(
+    const parent = render(
       <SubagentRunPage
         sourceSessionId="session-1"
         toolUseId={currentRef}
@@ -708,6 +745,22 @@ describe('SubagentRunPage', () => {
       subagentToolUseId: expectedRef,
       returnTabId: `__subagent__session-1__${currentRef}`,
     })
+
+    parent.unmount()
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun({
+      toolUseId: expectedRef,
+      agentId: 'nested-target',
+    }))
+    render(
+      <SubagentRunPage
+        sourceSessionId="session-1"
+        toolUseId={expectedRef}
+        title="Nested review"
+      />,
+    )
+
+    await screen.findByTestId('subagent-conversation')
+    expectSharedSessionSurface('subagent')
   })
 
   it('fetches a nested workflow Agent by canonical tool path, not by agent id', async () => {
@@ -757,6 +810,7 @@ describe('SubagentRunPage', () => {
       )
     })
     expect(subagentsApi.getRunByAgent).toHaveBeenCalledTimes(1)
+    expectSharedSessionSurface('subagent')
   })
 
   it('projects a parent-linked TodoWrite into its owning SubAgent panel', async () => {
@@ -1030,7 +1084,7 @@ describe('SubagentRunPage', () => {
     expect(peerShell).toBeTruthy()
     expect(leadShell?.querySelector('[data-testid="teammate-message-avatar"]'))
       .toHaveAttribute('data-avatar-key', 'team-lead')
-    expect(screen.getByTestId('agent-run-desktop')).toHaveAttribute('data-agent-run-kind', 'team-member')
+    expectSharedSessionSurface('team-member')
     expect(screen.getByText('Review auth changes')).toBeInTheDocument()
     expect(screen.queryByTestId('team-member-readonly-note')).not.toBeInTheDocument()
     const activityPanel = await screen.findByRole('dialog', { name: 'Activity' })
@@ -1802,6 +1856,7 @@ describe('SubagentRunPage', () => {
     render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="SubAgent" />)
 
     expect(await screen.findByText('Running')).toBeInTheDocument()
+    expectSharedSessionSurface('subagent')
     expect(subagentsApi.getRunByTool).toHaveBeenCalledWith('session-1', 'tool-1', undefined)
 
     act(() => {
@@ -1825,6 +1880,7 @@ describe('SubagentRunPage', () => {
     await waitFor(() => {
       expect(subagentsApi.getRunByTool).toHaveBeenCalledWith('session-1', 'tool-1', 'agent-1')
     })
+    expectSharedSessionSurface('subagent')
   })
 
   it('keeps the tab open on API errors', async () => {

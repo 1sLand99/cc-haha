@@ -32,10 +32,11 @@ import { WindowControls, showWindowControls } from './WindowControls'
 import { OpenProjectMenu } from './OpenProjectMenu'
 import { Folder, FolderOpen, SquareTerminal } from 'lucide-react'
 import { ActionDialog } from '@/components/ui/ActionDialog'
-import { buildSessionActivityModel, hasVisibleSessionActivity } from '../activity/sessionActivityModel'
+import { buildMainSessionActivityModel, hasVisibleSessionActivity } from '../activity/sessionActivityModel'
 import { SessionActivityButton } from '../activity/SessionActivityButton'
 import { useActivityPanelStore } from '../../stores/activityPanelStore'
 import { getSessionBrowsablePath } from '../../lib/sessionWorkspace'
+import { runsForSession, useWorkflowStore } from '../../stores/workflowStore'
 
 const DRAG_START_THRESHOLD = 4
 // Fraction of the visible strip a chevron press travels. Tabs size to their
@@ -150,6 +151,13 @@ export function TabBar() {
   const activeTeamStartedAt = useTeamStore((state) => activeTabId
     ? state.activeTeamStartedAtBySession[activeTabId]
     : undefined)
+  const allWorkflowRuns = useWorkflowStore((state) => state.runs)
+  const workflowRuns = useMemo(
+    () => activeTabId && isActiveSessionTab
+      ? runsForSession({ runs: allWorkflowRuns }, activeTabId)
+      : [],
+    [activeTabId, allWorkflowRuns, isActiveSessionTab],
+  )
   const dismissedBackgroundTaskKeyList = useActivityPanelStore((state) =>
     activeTabId
       ? state.dismissedBackgroundTaskKeysBySession[activeTabId] ?? EMPTY_DISMISSED_BACKGROUND_TASK_KEYS
@@ -166,25 +174,18 @@ export function TabBar() {
     const sessionState = state.sessions[activeTabId]
     const includeCliTasks = cliTasksSessionId === activeTabId
     const teamTaskWindows = teamTaskWindowsForSnapshot(agentTeamsSnapshot, activeTeamStartedAt)
-    const teamTasks = agentTeamsSnapshot && (
-      !agentTeamsSnapshot.team.leadSessionId ||
-      agentTeamsSnapshot.team.leadSessionId === activeTabId
-    )
-      ? agentTeamsSnapshot.tasks
-      : undefined
 
-    const model = buildSessionActivityModel({
+    const model = buildMainSessionActivityModel({
       sessionId: activeTabId,
       messages: sessionState?.messages ?? [],
       tasks: includeCliTasks ? cliTasks : [],
-      teamTasks,
-      taskScope: 'team-session',
       teamTaskWindows,
       completedAndDismissed: includeCliTasks ? cliTasksCompletedAndDismissed : false,
       isForegroundTurnActive: Boolean(sessionState && sessionState.chatState !== 'idle'),
       backgroundTasks: Object.values(sessionState?.backgroundAgentTasks ?? {}),
       dismissedBackgroundTaskKeys,
       agentNotifications: Object.values(sessionState?.agentTaskNotifications ?? {}),
+      workflowRuns,
     })
     return {
       hasVisibleActivity: hasVisibleSessionActivity(model),

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { SessionChatHeader, SessionChatSurface } from '@/components/chat/SessionChatSurface'
 import { Badge, StatusDot, type Tone } from '@/components/ui/Badge'
 import { Button, type ButtonSize, type ButtonVariant } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -56,6 +57,62 @@ function Section({ title, note, children }: { title: string; note?: string; chil
   )
 }
 
+function SessionSurfacePreview({ kind }: { kind: 'main' | 'agent' }) {
+  const isAgent = kind === 'agent'
+
+  return (
+    <div
+      data-testid={`gallery-${kind}-session`}
+      className="flex h-[390px] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)]"
+    >
+      <SessionChatSurface
+        surfaceKind={kind}
+        agentRunKind={isAgent ? 'subagent' : undefined}
+        isMobileLayout={false}
+        activityRailOpen
+        activityRail={(
+          <aside className="absolute inset-y-0 right-0 z-10 w-[352px] border-l border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold">Activity</span>
+              <Badge tone="success">2 / 2</Badge>
+            </div>
+            <div className="mt-4 space-y-3 text-xs text-[var(--color-text-secondary)]">
+              <div className="rounded-[var(--radius-md)] bg-[var(--color-surface)] p-3">Inspect session UI</div>
+              <div className="rounded-[var(--radius-md)] bg-[var(--color-surface)] p-3">Verify shared layout</div>
+            </div>
+          </aside>
+        )}
+      >
+        <SessionChatHeader
+          title={isAgent ? 'teams-analyst' : 'Main session'}
+          leading={isAgent ? <Button variant="ghost" size="xs">← Back</Button> : undefined}
+          titleAddon={<Badge tone={isAgent ? 'warning' : 'success'}>{isAgent ? 'running' : 'ready'}</Badge>}
+          metadata={[
+            { key: 'project', content: <span>claude-code-haha</span> },
+            { key: 'scope', content: <span>{isAgent ? 'commit-analysis / teams-analyst' : 'main'}</span> },
+          ]}
+          actions={<IconButton icon="refresh" label={`Refresh ${kind} session`} size="sm" />}
+        />
+        <div className="min-h-0 flex-1 overflow-hidden px-8 py-6">
+          <div className="mx-auto max-w-[900px] space-y-4">
+            <div className="max-w-[72%] rounded-[var(--radius-lg)] bg-[var(--color-surface-container)] p-4 text-sm">
+              {isAgent ? 'Review the assigned module and report findings.' : 'Coordinate the task and keep Agent Teams in its workbench.'}
+            </div>
+            <div className="ml-auto max-w-[72%] rounded-[var(--radius-lg)] bg-[var(--color-primary-container)] p-4 text-sm text-[var(--color-on-primary-container)]">
+              {isAgent ? 'I am using the same session surface as the main chat.' : 'The main session keeps only its own activity.'}
+            </div>
+          </div>
+        </div>
+        <div className="px-8 pb-5">
+          <div className="mx-auto max-w-[900px] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-text-tertiary)] shadow-[var(--shadow-composer)]">
+            Message this {isAgent ? 'Agent' : 'session'}…
+          </div>
+        </div>
+      </SessionChatSurface>
+    </div>
+  )
+}
+
 export function ComponentGallery() {
   const [theme, setTheme] = useState<(typeof THEMES)[number]>('white')
   const [modalOpen, setModalOpen] = useState(false)
@@ -86,6 +143,16 @@ export function ComponentGallery() {
           />
         </div>
       </header>
+
+      <Section
+        title="SessionChatSurface"
+        note="Main and child Agents share this exact header, centered transcript measure, Activity rail spacing, and composer frame."
+      >
+        <div className="grid gap-4">
+          <SessionSurfacePreview kind="main" />
+          <SessionSurfacePreview kind="agent" />
+        </div>
+      </Section>
 
       <Section title="Button" note="Every variant x size. Tab through to check the focus ring.">
         <div className="flex flex-col gap-2">
