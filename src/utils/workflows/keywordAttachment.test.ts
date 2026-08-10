@@ -78,12 +78,38 @@ describe('workflow keyword attachment', () => {
     ).toEqual([])
   })
 
+  test('restoring the setting lets a complex typed prompt opt in again', async () => {
+    const prompt =
+      'ultracode：audit route registration, error propagation, and missing tests with several agents'
+
+    await writeSettings({ workflowKeywordTriggerEnabled: false })
+    expect(
+      getAttachmentsForTesting.workflowKeyword(prompt, { suppressed: false }),
+    ).toEqual([])
+
+    await writeSettings({ workflowKeywordTriggerEnabled: true })
+    expect(
+      getAttachmentsForTesting.workflowKeyword(prompt, { suppressed: false }),
+    ).toEqual([{ type: 'workflow_keyword_request' }])
+  })
+
   test('a quoted mention of the word is not an opt-in', () => {
     expect(
       getAttachmentsForTesting.workflowKeyword(
         'what does the "ultracode" keyword do?',
         { suppressed: false },
       ),
+    ).toEqual([])
+  })
+
+  test.each([
+    ['a fenced code block', '```text\nultracode\n```'],
+    ['a path', 'open docs/ultracode/readme.md'],
+    ['a flag', 'pass --ultracode to the CLI'],
+    ['a hyphenated literal', 'inspect the ultracode-runner package'],
+  ])('does not opt in for %s', (_label, prompt) => {
+    expect(
+      getAttachmentsForTesting.workflowKeyword(prompt, { suppressed: false }),
     ).toEqual([])
   })
 })

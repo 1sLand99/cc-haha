@@ -1629,6 +1629,18 @@ button, input, textarea, select, a, [role="button"] {
   overflow-wrap: break-word;
 }
 
+/* The same conservative matcher that injects the runtime Workflow reminder
+   marks actionable Ultracode tokens before submit. */
+.composer-workflow-keyword {
+  color: var(--color-on-brand-soft);
+  background: var(--color-brand-soft);
+  border-radius: var(--radius-sm);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding: 0 2px;
+  font-weight: 600;
+}
+
 /* Floated zero-height placeholder: the empty paragraph keeps its own caret,
    the hint text just borrows its line. */
 .composer-pm[data-empty="true"]::before {

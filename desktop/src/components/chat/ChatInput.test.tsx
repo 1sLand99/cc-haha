@@ -110,6 +110,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useTabStore } from '../../stores/tabStore'
 import { useWorkspaceChatContextStore } from '../../stores/workspaceChatContextStore'
 import { browserHost } from '../../lib/desktopHost/browserHost'
+import { settingsApi } from '../../api/settings'
 
 /**
  * Opens the run-location pill's menu. Directory, branch and worktree all live
@@ -2346,5 +2347,66 @@ describe('ChatInput file mentions', () => {
       content: prompt,
       attachments: [],
     })
+  })
+
+  it('highlights only actionable ultracode tokens and follows the persisted setting in both directions', async () => {
+    const updateUser = vi.spyOn(settingsApi, 'updateUser').mockResolvedValue({ ok: true })
+
+    try {
+      render(<ChatInput />)
+
+      const highlightedKeywords = () =>
+        Array.from(document.querySelectorAll('[data-workflow-keyword="true"]'))
+          .map((element) => element.textContent)
+
+      const complexPrompt = 'ultracode：audit routes, error propagation, and missing tests with several agents'
+      setComposerText(complexPrompt, complexPrompt.length)
+      await waitFor(() => {
+        expect(highlightedKeywords()).toEqual(['ultracode'])
+      })
+
+      for (const literalPrompt of [
+        '```text\nultracode\n```',
+        'explain "ultracode" without running it',
+        'open docs/ultracode/readme.md',
+        'pass --ultracode to the CLI',
+        'inspect the ultracode-runner package',
+      ]) {
+        setComposerText(literalPrompt, literalPrompt.length)
+        await waitFor(() => {
+          expect(highlightedKeywords()).toEqual([])
+        })
+      }
+
+      setComposerText(complexPrompt, complexPrompt.length)
+      await waitFor(() => {
+        expect(highlightedKeywords()).toEqual(['ultracode'])
+      })
+
+      await act(async () => {
+        await useSettingsStore.getState().setWorkflowKeywordTriggerEnabled(false)
+      })
+      await waitFor(() => {
+        expect(highlightedKeywords()).toEqual([])
+      })
+
+      await act(async () => {
+        await useSettingsStore.getState().setWorkflowKeywordTriggerEnabled(true)
+      })
+      await waitFor(() => {
+        expect(highlightedKeywords()).toEqual(['ultracode'])
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+      expect(mocks.wsSend).toHaveBeenCalledWith(sessionId, {
+        type: 'user_message',
+        content: complexPrompt,
+        attachments: [],
+      })
+      expect(updateUser).toHaveBeenNthCalledWith(1, { workflowKeywordTriggerEnabled: false })
+      expect(updateUser).toHaveBeenNthCalledWith(2, { workflowKeywordTriggerEnabled: true })
+    } finally {
+      updateUser.mockRestore()
+    }
   })
 })
