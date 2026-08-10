@@ -9,6 +9,7 @@ import {
 } from '../../bootstrap/state.js'
 import type { AppState } from '../../state/AppState.js'
 import { IDLE_SPECULATION_STATE } from '../../state/AppStateStore.js'
+import { isTerminalTaskStatus } from '../../Task.js'
 import type { ToolUseContext } from '../../Tool.js'
 import { getEmptyToolPermissionContext } from '../../Tool.js'
 import type { SessionId } from '../../types/ids.js'
@@ -18,6 +19,11 @@ import {
 } from '../../utils/messageQueueManager.js'
 import { drainSdkEvents } from '../../utils/sdkEventQueue.js'
 import { resetProjectForTesting } from '../../utils/sessionStorage.js'
+import {
+  _clearOutputsForTest,
+  _resetTaskOutputDirForTest,
+  cleanupTaskOutput,
+} from '../../utils/task/diskOutput.js'
 import { prepareWorkflowScript } from '../../utils/workflows/runtime.js'
 import {
   killWorkflowTask,
@@ -29,10 +35,13 @@ const originalConfigDir = process.env.CLAUDE_CONFIG_DIR
 
 describe('launchWorkflow lifecycle ownership', () => {
   let configDir = ''
+  let launchedTaskIds = new Set<string>()
 
   beforeEach(async () => {
     configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workflow-owner-'))
+    launchedTaskIds = new Set()
     process.env.CLAUDE_CONFIG_DIR = configDir
+    _resetTaskOutputDirForTest()
     resetProjectForTesting()
     resetStateForTests()
     resetCommandQueue()
@@ -42,6 +51,9 @@ describe('launchWorkflow lifecycle ownership', () => {
   })
 
   afterEach(async () => {
+    await _clearOutputsForTest()
+    await Promise.all([...launchedTaskIds].map(cleanupTaskOutput))
+    _resetTaskOutputDirForTest()
     drainSdkEvents()
     resetCommandQueue()
     resetStateForTests()
@@ -56,9 +68,10 @@ describe('launchWorkflow lifecycle ownership', () => {
     scriptBody: string
     ownerAgentId?: string
   }): {
-    getTask: () => LocalWorkflowTaskState | undefined
+    published: Promise<LocalWorkflowTaskState>
     setAppState: (updater: (state: AppState) => AppState) => void
   } {
+    launchedTaskIds.add(options.taskId)
     const script = [
       "export const meta = { name: 'owner-test', description: 'Owner test' }",
       options.scriptBody,
@@ -70,8 +83,25 @@ describe('launchWorkflow lifecycle ownership', () => {
       toolPermissionContext: getEmptyToolPermissionContext(),
       speculation: IDLE_SPECULATION_STATE,
     } as unknown as AppState
+    let resolvePublished: (task: LocalWorkflowTaskState) => void = () => {}
+    let didPublish = false
+    const published = new Promise<LocalWorkflowTaskState>(resolve => {
+      resolvePublished = resolve
+    })
     const setAppState = (updater: (current: AppState) => AppState): void => {
       state = updater(state)
+      const task = state.tasks[options.taskId] as
+        | LocalWorkflowTaskState
+        | undefined
+      if (
+        !didPublish &&
+        task &&
+        isTerminalTaskStatus(task.status) &&
+        task.notified
+      ) {
+        didPublish = true
+        resolvePublished(task)
+      }
     }
     const context = {
       agentId: options.ownerAgentId,
@@ -95,20 +125,9 @@ describe('launchWorkflow lifecycle ownership', () => {
       isResume: false,
     })
     return {
-      getTask: () => state.tasks[options.taskId] as LocalWorkflowTaskState | undefined,
+      published,
       setAppState,
     }
-  }
-
-  async function waitForTerminal(
-    getTask: () => LocalWorkflowTaskState | undefined,
-  ): Promise<LocalWorkflowTaskState> {
-    for (let attempt = 0; attempt < 100; attempt++) {
-      const task = getTask()
-      if (task && task.status !== 'running') return task
-      await Bun.sleep(2)
-    }
-    throw new Error('workflow did not settle')
   }
 
   test('keeps a nested workflow owned from start through progress and completion', async () => {
@@ -117,7 +136,7 @@ describe('launchWorkflow lifecycle ownership', () => {
       ownerAgentId: 'parent-agent',
       scriptBody: "phase('Scan')\nreturn 'done'",
     })
-    expect((await waitForTerminal(run.getTask)).status).toBe('completed')
+    expect((await run.published).status).toBe('completed')
 
     const lifecycle = drainSdkEvents().filter(event => (
       'task_id' in event && event.task_id === 'w-owned-complete'
@@ -139,7 +158,7 @@ describe('launchWorkflow lifecycle ownership', () => {
       ownerAgentId: 'parent-agent',
       scriptBody: "throw new Error('workflow exploded')",
     })
-    expect((await waitForTerminal(failed.getTask)).status).toBe('failed')
+    expect((await failed.published).status).toBe('failed')
 
     const killed = launch({
       taskId: 'w-owned-killed',
@@ -147,6 +166,7 @@ describe('launchWorkflow lifecycle ownership', () => {
       scriptBody: "return 'too late'",
     })
     expect(killWorkflowTask('w-owned-killed', killed.setAppState)).toBe(true)
+    expect((await killed.published).status).toBe('killed')
 
     const terminals = drainSdkEvents().filter(event => (
       event.subtype === 'task_notification' &&
@@ -176,7 +196,7 @@ describe('launchWorkflow lifecycle ownership', () => {
       taskId: 'w-root-complete',
       scriptBody: "phase('Root')\nreturn 'done'",
     })
-    expect((await waitForTerminal(run.getTask)).status).toBe('completed')
+    expect((await run.published).status).toBe('completed')
 
     const lifecycle = drainSdkEvents().filter(event => (
       'task_id' in event && event.task_id === 'w-root-complete'
