@@ -287,6 +287,37 @@ describe('background task notification persistence', () => {
     ])
   })
 
+  it('restores an owned synthetic stop without degrading it to root scope', async () => {
+    const sessionId = crypto.randomUUID()
+    const projectDir = path.join(configDir, 'projects', '-tmp-owned-synthetic-stop')
+    const transcriptPath = path.join(projectDir, `${sessionId}.jsonl`)
+    await fs.mkdir(projectDir, { recursive: true })
+    await fs.writeFile(transcriptPath, `${JSON.stringify({
+      type: 'session-meta',
+      isMeta: true,
+      workDir: '/tmp/owned-synthetic-stop',
+      timestamp: '2026-07-18T00:00:00.000Z',
+    })}\n`, 'utf8')
+
+    const service = new SessionService()
+    await service.appendSessionTaskNotification(sessionId, {
+      taskId: 'provider-analyzer-teammate',
+      toolUseId: 'provider-analyzer-teammate-tool',
+      ownerAgentId: 'provider-analyzer',
+      status: 'stopped',
+      summary: 'Provider analyzer teammate stopped because the runtime exited',
+    })
+
+    expect(await service.getSessionTaskNotifications(sessionId)).toEqual([
+      expect.objectContaining({
+        taskId: 'provider-analyzer-teammate',
+        toolUseId: 'provider-analyzer-teammate-tool',
+        ownerAgentId: 'provider-analyzer',
+        status: 'stopped',
+      }),
+    ])
+  })
+
   it('normalizes and persists one terminal SDK event for multiple observers', async () => {
     const append = spyOn(sessionService, 'appendSessionTaskNotification').mockResolvedValue()
     const sdkEvent = {

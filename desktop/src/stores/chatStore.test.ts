@@ -5212,6 +5212,67 @@ describe('chatStore history mapping', () => {
     vi.useRealTimers()
   })
 
+  it('drops teammate-owned lifecycle from root state while preserving root SubAgents', () => {
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'idle' }),
+      },
+    })
+
+    const sendTaskEvent = (
+      subtype: 'task_started' | 'task_notification',
+      taskId: string,
+      ownerAgentId?: string,
+      taskType = 'local_agent',
+    ) => {
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'system_notification',
+        subtype,
+        data: {
+          task_id: taskId,
+          tool_use_id: 'shared-leaf-tool',
+          task_type: taskType,
+          description: taskId === 'root-agent-task' ? 'Root SubAgent' : 'Member SubAgent',
+          ...(ownerAgentId ? { owner_agent_id: ownerAgentId } : {}),
+          ...(subtype === 'task_notification' ? { status: 'completed' } : {}),
+        },
+      })
+    }
+
+    sendTaskEvent('task_started', 'root-agent-task')
+    sendTaskEvent('task_notification', 'root-agent-task')
+    const rootTabUpdateCount = updateTabStatusMock.mock.calls.length
+    sendTaskEvent('task_started', 'member-agent-task', 'provider-turn-id')
+    sendTaskEvent('task_notification', 'member-agent-task', 'provider-turn-id')
+    sendTaskEvent(
+      'task_started',
+      'in-process-teammate-task',
+      'provider-analyzer@release-audit',
+      'in_process_teammate',
+    )
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]!
+    expect(Object.keys(session.backgroundAgentTasks ?? {})).toEqual(['root-agent-task'])
+    const rootNotifications = Object.values(session.agentTaskNotifications)
+    expect(rootNotifications).toHaveLength(1)
+    expect(rootNotifications[0]).toMatchObject({ taskId: 'root-agent-task' })
+    expect(rootNotifications[0]?.ownerAgentId).toBeUndefined()
+    expect(session.messages.filter((message) => message.type === 'background_task')).toEqual([])
+    expect(updateTabStatusMock).toHaveBeenCalledTimes(rootTabUpdateCount)
+
+    const model = buildSessionActivityModel({
+      sessionId: TEST_SESSION_ID,
+      messages: [],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: Object.values(session.backgroundAgentTasks ?? {}),
+      agentNotifications: Object.values(session.agentTaskNotifications),
+    })
+    expect(model.sections.subagents.rows).toEqual([
+      expect.objectContaining({ taskId: 'root-agent-task', label: 'Root SubAgent' }),
+    ])
+  })
+
   it('keeps idle chat state while marking the tab running for background task start and progress', () => {
     useChatStore.setState({
       sessions: {

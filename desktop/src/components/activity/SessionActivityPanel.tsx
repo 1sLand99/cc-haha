@@ -501,7 +501,7 @@ function ActivityRowView({
   // A workflow agent is an ordinary subagent, so it opens the same page by the
   // same handler — there is nothing workflow-specific to render for one.
   if (
-    (row.section === 'subagents' || row.section === 'workflow') &&
+    (row.section === 'subagents' || row.section === 'workflow' || row.section === 'team') &&
     row.openable &&
     row.toolUseId
   ) {

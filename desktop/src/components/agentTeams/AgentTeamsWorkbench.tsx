@@ -95,7 +95,11 @@ function memberState(
 ): MemberWorkState {
   if (snapshot.deletedAt || member.status === 'completed') return 'exited'
   if (member.status === 'error') return 'error'
-  if (runningTaskForMember(snapshot.tasks, member) || isLead) return 'working'
+  if (
+    member.status === 'running' ||
+    runningTaskForMember(snapshot.tasks, member) ||
+    isLead
+  ) return 'working'
   if (member.status === 'idle') return 'idle'
   return 'idle'
 }

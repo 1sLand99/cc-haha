@@ -545,6 +545,7 @@ export function ActiveSession() {
       backgroundTasks,
       dismissedBackgroundTaskKeys,
       agentNotifications: Object.values(agentTaskNotifications),
+      teamMembers: agentTeamsSnapshot?.team.members,
       workflowRuns,
     })
   }, [

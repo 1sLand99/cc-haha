@@ -1393,7 +1393,7 @@ describe('ActiveSession task polling', () => {
     })
 
     render(<ActiveSession />)
-    fireEvent.click(screen.getByRole('button', { name: /Open run Review ownership UI.*Completed/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Open team member reviewer/ }))
 
     const memberTab = useTabStore.getState().tabs.find((tab) => tab.type === 'team-member')
     expect(memberTab).toMatchObject({
@@ -1497,7 +1497,7 @@ describe('ActiveSession task polling', () => {
     await waitFor(() => {
       expect(teamsApi.getWorkbenchForSession).toHaveBeenCalledWith(sessionId)
     })
-    fireEvent.click(screen.getByRole('button', { name: /Open run Review deferred ownership/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Open run reviewer/ }))
 
     expect(useTabStore.getState().tabs.some((tab) => tab.type === 'subagent')).toBe(false)
     await waitFor(() => {
@@ -1759,14 +1759,6 @@ describe('ActiveSession task polling', () => {
       teamName,
     })
     useChatStore.getState().sendMessage(sessionId, 'Coordinate the four-task team')
-    useChatStore.getState().handleServerMessage(sessionId, {
-      type: 'tool_use_complete',
-      toolName: 'TodoWrite',
-      toolUseId: 'lead-personal-todo',
-      input: {
-        todos: [{ content: 'Summarize team delivery', status: 'in_progress' }],
-      },
-    })
     for (const { id, subject } of taskDefinitions) {
       useChatStore.getState().handleServerMessage(sessionId, {
         type: 'tool_use_complete',
@@ -1818,7 +1810,6 @@ describe('ActiveSession task polling', () => {
     await waitFor(() => {
       expect(within(panel).getByRole('progressbar', { name: 'Task progress 1/4' })).toBeInTheDocument()
       expect(within(screen.getByTestId('agent-teams-strip')).getByText(/1\/4/)).toBeInTheDocument()
-      expect(within(panel).getByText('Summarize team delivery')).toBeInTheDocument()
     })
 
     act(() => {
@@ -1832,7 +1823,6 @@ describe('ActiveSession task polling', () => {
       expect(within(panel).getByRole('progressbar', { name: 'Task progress 4/4' })).toBeInTheDocument()
       expect(within(screen.getByTestId('agent-teams-strip')).getByText(/4\/4/)).toBeInTheDocument()
       expect(within(panel).getAllByLabelText('Task completed')).toHaveLength(4)
-      expect(within(panel).getByText('Summarize team delivery')).toBeInTheDocument()
     })
     const timeline = useTeamStore.getState().workbenchesBySession[sessionId]
     expect(timeline?.snapshots.map(current => current.version)).toEqual(['v1', 'v2'])

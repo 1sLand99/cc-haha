@@ -213,9 +213,15 @@ export function getTaskListId(agentId?: string): string {
   // task list that tmux/iTerm2 teammates also resolve to.
   const teammateCtx = getTeammateContext()
   if (teammateCtx) {
-    return teammateCtx.teamName
+    return getTeamTaskListId(teammateCtx.teamName)
   }
-  return getTeamName() || leaderTeamName || agentId || getSessionId()
+  const teamName = getTeamName() || leaderTeamName
+  return teamName ? getTeamTaskListId(teamName) : agentId || getSessionId()
+}
+
+/** Canonical task-list identity shared by the leader and every teammate backend. */
+export function getTeamTaskListId(teamName: string): string {
+  return process.env.CLAUDE_CODE_TASK_LIST_ID || sanitizeName(teamName)
 }
 
 /**

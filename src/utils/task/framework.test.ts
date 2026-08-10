@@ -8,7 +8,7 @@ import type { AppState } from '../../state/AppState.js'
 import type { RemoteAgentTaskState } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js'
 import type { TaskState } from '../../tasks/types.js'
 import type { SessionId } from '../../types/ids.js'
-import { drainSdkEvents } from '../sdkEventQueue.js'
+import { drainSdkEvents, emitTaskTerminatedSdk } from '../sdkEventQueue.js'
 import { registerTask } from './framework.js'
 import { emitTaskProgress } from './sdkProgress.js'
 
@@ -166,6 +166,37 @@ test('tags a nested local agent start and progress with its owning agent', () =>
   ])
 })
 
+test('scopes an in-process teammate container lifecycle to the member run', () => {
+  const harness = makeHarness()
+  const task = makeTask({
+    id: 'team-member-container',
+    type: 'in_process_teammate',
+    toolUseId: 'team-member-tool',
+    identity: { agentId: 'reviewer@audit-team' },
+  } as Partial<TaskState> & Pick<TaskState, 'id' | 'type'>)
+
+  registerTask(task, harness.setAppState)
+  emitTaskTerminatedSdk(task.id, 'completed', {
+    toolUseId: task.toolUseId,
+    ownerAgentId: 'reviewer@audit-team',
+  })
+
+  expect(harness.state.tasks[task.id]).toBe(task)
+  expect(drainSdkEvents()).toEqual([
+    expect.objectContaining({
+      subtype: 'task_started',
+      task_id: task.id,
+      task_type: 'in_process_teammate',
+      owner_agent_id: 'reviewer@audit-team',
+    }),
+    expect.objectContaining({
+      subtype: 'task_notification',
+      task_id: task.id,
+      owner_agent_id: 'reviewer@audit-team',
+    }),
+  ])
+})
+
 test('includes the stable run id in workflow start events', () => {
   const harness = makeHarness()
   const task = makeTask({
@@ -207,7 +238,7 @@ test('includes the stable run id in workflow progress events', () => {
   }))
 })
 
-test('keeps the original Agent tool_use id when a resume re-registers the task', () => {
+test('keeps the original Agent tool_use id but routes a warm resume to its current owner', () => {
   const harness = makeHarness()
   const spawned = makeTask({
     id: 'resumable-agent',
@@ -227,10 +258,36 @@ test('keeps the original Agent tool_use id when a resume re-registers the task',
     toolUseId: 'toolu_sendmessage',
     agentId: 'resumable-agent',
     retain: false,
+    ownerAgentId: 'current-parent-agent',
   })
   registerTask(resumed, harness.setAppState)
 
   expect(harness.state.tasks['resumable-agent']?.toolUseId).toBe('toolu_agent')
+  expect(
+    (harness.state.tasks['resumable-agent'] as { ownerAgentId?: string })
+      .ownerAgentId,
+  ).toBe('current-parent-agent')
+  expect(drainSdkEvents()).toEqual([])
+})
+
+test('keeps the existing owner when a resume has no current owner', () => {
+  const harness = makeHarness()
+  registerTask(makeTask({
+    id: 'resumable-agent',
+    type: 'local_agent',
+    agentId: 'resumable-agent',
+    retain: true,
+    ownerAgentId: 'parent-agent',
+  }), harness.setAppState)
+  drainSdkEvents()
+
+  registerTask(makeTask({
+    id: 'resumable-agent',
+    type: 'local_agent',
+    agentId: 'resumable-agent',
+    retain: false,
+  }), harness.setAppState)
+
   expect(
     (harness.state.tasks['resumable-agent'] as { ownerAgentId?: string })
       .ownerAgentId,

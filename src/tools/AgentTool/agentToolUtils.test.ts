@@ -337,8 +337,8 @@ describe('runAsyncAgentLifecycle', () => {
         },
         description: 'Resume nested work',
         parentToolUseId: 'toolu_agent',
-        // This is deliberately a root SendMessage context. Ownership must
-        // come from the resumed run, not from the current caller.
+        // Deliberately a root continuation. Ownership must come from the
+        // resumed run, not from the current caller.
         toolUseContext: {
           options: { tools: [] },
           toolUseId: 'toolu_sendmessage',
@@ -351,7 +351,8 @@ describe('runAsyncAgentLifecycle', () => {
         ownerAgentId: 'parent-agent',
       })
 
-      const lifecycle = sdkEventQueue.drainSdkEvents().filter(event => (
+      const events = sdkEventQueue.drainSdkEvents()
+      const lifecycle = events.filter(event => (
         'task_id' in event
         && event.task_id === taskId
         && (
@@ -368,6 +369,11 @@ describe('runAsyncAgentLifecycle', () => {
       expect(lifecycle.every(event => (
         'owner_agent_id' in event && event.owner_agent_id === 'parent-agent'
       ))).toBe(true)
+      expect(events).toContainEqual(expect.objectContaining({
+        subtype: 'agent_tool_activity',
+        task_id: taskId,
+        owner_agent_id: 'parent-agent',
+      }))
       expect(getCommandQueue()[0]?.agentId).toBe('parent-agent')
     } finally {
       sdkEventQueue.drainSdkEvents()
@@ -448,13 +454,19 @@ describe('emitAgentToolActivitiesForMessage', () => {
         ],
       }) as Message
 
-      emitAgentToolActivitiesForMessage(message, 'agent-foregrounded', 'toolu_parent')
+      emitAgentToolActivitiesForMessage(
+        message,
+        'agent-foregrounded',
+        'toolu_parent',
+        'parent-agent',
+      )
 
       expect(emitSpy.mock.calls).toEqual([
         [
           'agent-foregrounded',
           'toolu_parent',
           { kind: 'tool_use', tool_name: 'Bash', tool_use_id: 'toolu_child', input: { command: 'pwd' } },
+          'parent-agent',
         ],
       ])
     } finally {

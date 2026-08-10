@@ -22,6 +22,7 @@ export type ActiveNonAgentTaskState = {
   taskType?: string
   toolUseId: string
   description?: string
+  ownerAgentId?: string
 }
 
 export type ActiveAgentTaskState = {

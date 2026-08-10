@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useTeamStore } from '../../stores/teamStore'
 import { useTabStore } from '../../stores/tabStore'
@@ -85,6 +86,20 @@ function workbench(
   }
 }
 
+function unownedWorkbench(
+  version: string,
+  builderStatus: 'running' | 'idle',
+): TeamWorkbenchSnapshot {
+  const snapshot = workbench(version, ['pending', 'pending', 'pending'])
+  snapshot.tasks = snapshot.tasks.map((entry) => ({ ...entry, owner: undefined }))
+  snapshot.team.members = snapshot.team.members.map((member) => (
+    member.name === 'builder'
+      ? { ...member, status: builderStatus }
+      : member
+  ))
+  return snapshot
+}
+
 describe('AgentTeamsWorkbench', () => {
   beforeEach(() => {
     getWorkbenchMock.mockReset()
@@ -139,6 +154,41 @@ describe('AgentTeamsWorkbench', () => {
       expect(screen.getByTestId('agent-teams-task-3').getAttribute('data-state')).toBe('completed')
     })
     expect(screen.getByText('Snapshot v3 ready')).toBeTruthy()
+  })
+
+  it('follows server-driven idle to running to idle member lifecycle without an owned task', async () => {
+    getWorkbenchMock
+      .mockResolvedValueOnce(unownedWorkbench('lifecycle-1', 'idle'))
+      .mockResolvedValueOnce(unownedWorkbench('lifecycle-2', 'running'))
+      .mockResolvedValueOnce(unownedWorkbench('lifecycle-3', 'idle'))
+
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    const builder = () => screen.getByTestId('agent-teams-member-builder@visual-team')
+    expect(builder().getAttribute('data-member-state')).toBe('idle')
+
+    act(() => {
+      useChatStore.getState().handleServerMessage('lead-session', {
+        type: 'team_workbench_updated',
+        teamName: 'visual-team',
+      })
+    })
+    await waitFor(() => {
+      expect(builder().getAttribute('data-member-state')).toBe('working')
+    })
+
+    act(() => {
+      useChatStore.getState().handleServerMessage('lead-session', {
+        type: 'team_workbench_updated',
+        teamName: 'visual-team',
+      })
+    })
+    await waitFor(() => {
+      expect(builder().getAttribute('data-member-state')).toBe('idle')
+    })
   })
 
   it('opens a teammate in the shared agent run desktop instead of replacing the map', async () => {

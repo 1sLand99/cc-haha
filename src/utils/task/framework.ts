@@ -97,8 +97,10 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
             diskLoaded: existing.diskLoaded,
             pendingMessages: existing.pendingMessages,
             ownerAgentId:
-              'ownerAgentId' in existing
-                ? existing.ownerAgentId
+              existing.type === 'local_agent' && task.type === 'local_agent'
+                ? task.ownerAgentId ?? existing.ownerAgentId
+                : 'ownerAgentId' in existing
+                  ? existing.ownerAgentId
                 : 'ownerAgentId' in task
                   ? task.ownerAgentId
                   : undefined,
@@ -132,9 +134,11 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
         ? (task.workflowRunId as string | undefined)
         : undefined,
     prompt: 'prompt' in task ? (task.prompt as string) : undefined,
-    ...('ownerAgentId' in task && task.ownerAgentId
-      ? { owner_agent_id: task.ownerAgentId as string }
-      : {}),
+    ...(task.type === 'in_process_teammate'
+      ? { owner_agent_id: task.identity.agentId }
+      : 'ownerAgentId' in task && task.ownerAgentId
+        ? { owner_agent_id: task.ownerAgentId as string }
+        : {}),
   })
 }
 

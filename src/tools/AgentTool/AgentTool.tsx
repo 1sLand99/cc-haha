@@ -959,7 +959,12 @@ export const AgentTool = buildTool({
                       // Track progress for backgrounded agents
                       updateProgressFromMessage(tracker, msg, resolveActivity2, toolUseContext.options.tools);
                       updateAsyncAgentProgress(backgroundedTaskId, getProgressUpdate(tracker), rootSetAppState);
-                      emitAgentToolActivitiesForMessage(msg, backgroundedTaskId, toolUseContext.toolUseId);
+                      emitAgentToolActivitiesForMessage(
+                        msg,
+                        backgroundedTaskId,
+                        toolUseContext.toolUseId,
+                        toolUseContext.agentId,
+                      );
                       const lastToolName = getLastToolUseName(msg);
                       if (lastToolName) {
                         emitTaskProgress(tracker, backgroundedTaskId, toolUseContext.toolUseId, description, startTime, lastToolName, toolUseContext.agentId);

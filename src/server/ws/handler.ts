@@ -335,12 +335,21 @@ function trackCliBackgroundTaskLifecycle(
         sessionNonAgentTasks = new Map()
         activeNonAgentTasks.set(sessionId, sessionNonAgentTasks)
       }
-      sessionNonAgentTasks.set(lifecycle.taskId, {
-        taskId: lifecycle.taskId,
-        ...(lifecycle.taskType ? { taskType: lifecycle.taskType } : {}),
-        toolUseId: lifecycle.toolUseId ?? lifecycle.taskId,
-        ...(lifecycle.description ? { description: lifecycle.description } : {}),
-      })
+      const existing = sessionNonAgentTasks.get(lifecycle.taskId)
+      if (existing) {
+        existing.toolUseId = lifecycle.toolUseId ?? existing.toolUseId
+        if (lifecycle.taskType) existing.taskType = lifecycle.taskType
+        if (lifecycle.description) existing.description = lifecycle.description
+        if (lifecycle.ownerAgentId) existing.ownerAgentId = lifecycle.ownerAgentId
+      } else {
+        sessionNonAgentTasks.set(lifecycle.taskId, {
+          taskId: lifecycle.taskId,
+          ...(lifecycle.taskType ? { taskType: lifecycle.taskType } : {}),
+          toolUseId: lifecycle.toolUseId ?? lifecycle.taskId,
+          ...(lifecycle.description ? { description: lifecycle.description } : {}),
+          ...(lifecycle.ownerAgentId ? { ownerAgentId: lifecycle.ownerAgentId } : {}),
+        })
+      }
     }
     return lifecycle
   }
@@ -2235,6 +2244,7 @@ function emitStoppedForNonAgentTasksAfterRuntimeExit(sessionId: string): Promise
       tool_use_id: task.toolUseId,
       ...(task.taskType ? { task_type: task.taskType } : {}),
       ...(task.description ? { description: task.description } : {}),
+      ...(task.ownerAgentId ? { owner_agent_id: task.ownerAgentId } : {}),
       status: 'stopped',
       summary: `${task.description ?? task.taskId} stopped because the runtime exited`,
       timestamp: new Date().toISOString(),
@@ -3322,6 +3332,11 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
         ]
       }
       if (subtype === 'agent_tool_activity') {
+        // Nested Agents belong to their immediate owning run. Their tool
+        // cards must not be flattened into the root session transcript.
+        if (typeof cliMsg.owner_agent_id === 'string' && cliMsg.owner_agent_id.trim()) {
+          return []
+        }
         // Tool activity streamed from a background (async) agent. Re-emit as a
         // normal tool_use_complete / tool_result carrying the parent Agent
         // tool_use_id, so the desktop groups it under the agent card exactly

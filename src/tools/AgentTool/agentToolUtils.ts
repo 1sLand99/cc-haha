@@ -414,10 +414,11 @@ export function emitAgentToolActivitiesForMessage(
   message: MessageType,
   taskId: string,
   parentToolUseId: string | undefined,
+  ownerAgentId?: string,
 ): void {
   if (!parentToolUseId) return
   for (const activity of extractAgentToolActivities(message)) {
-    emitAgentToolActivity(taskId, parentToolUseId, activity)
+    emitAgentToolActivity(taskId, parentToolUseId, activity, ownerAgentId)
   }
 }
 
@@ -656,6 +657,7 @@ export async function runAsyncAgentLifecycle({
         message,
         taskId,
         agentToolUseId,
+        ownerAgentId,
       )
       const lastToolName = getLastToolUseName(message)
       if (lastToolName) {

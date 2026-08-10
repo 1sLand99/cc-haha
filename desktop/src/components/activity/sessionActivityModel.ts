@@ -2,7 +2,10 @@ import type { BackgroundAgentTask, AgentTaskNotification, BackgroundAgentTaskUsa
 import type { TaskSummaryItem, UIMessage } from '../../types/chat'
 import type { CLITask, TaskStatus } from '../../types/cliTask'
 import type { TeamMember } from '../../types/team'
-import { createBackgroundTaskDismissKey } from '../../lib/backgroundTasks'
+import {
+  createBackgroundTaskDismissKey,
+  isVisibleSessionBackgroundTask,
+} from '../../lib/backgroundTasks'
 import { toAgentIdRef } from '../../api/subagents'
 import type { WorkflowAgentEvent, WorkflowRun } from '../../types/workflow'
 
@@ -600,23 +603,133 @@ function agentToolLabel(toolCall: Extract<UIMessage, { type: 'tool_use' }>): str
   )
 }
 
+function parseToolResultRecord(
+  result: Extract<UIMessage, { type: 'tool_result' }> | undefined,
+): Record<string, unknown> | null {
+  if (!result || result.isError) return null
+  if (isRecordValue(result.content)) return result.content
+
+  const text = extractTextContent(result.content).trim()
+  if (!text.startsWith('{')) return null
+  try {
+    const parsed = JSON.parse(text) as unknown
+    return isRecordValue(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function updatedActiveTeamName(
+  toolCall: Extract<UIMessage, { type: 'tool_use' }>,
+  result: Extract<UIMessage, { type: 'tool_result' }> | undefined,
+): string | null | undefined {
+  const output = parseToolResultRecord(result)
+  if (!output) return undefined
+
+  if (toolCall.toolName === 'TeamCreate') {
+    return stringField(output, 'team_name') || undefined
+  }
+  if (toolCall.toolName === 'TeamDelete' && output.success === true) {
+    return null
+  }
+  return undefined
+}
+
+type TeamSpawnIdentity = {
+  memberName: string
+  teamName?: string
+}
+
+function teamSpawnIdentity(
+  toolCall: Extract<UIMessage, { type: 'tool_use' }>,
+  result: Extract<UIMessage, { type: 'tool_result' }> | undefined,
+  activeTeamName: string | undefined,
+): TeamSpawnIdentity | null {
+  const input = isRecordValue(toolCall.input) ? toolCall.input : {}
+  const inputMemberName = stringField(input, 'name')
+  if (!inputMemberName) return null
+
+  const inputTeamName = stringField(input, 'team_name')
+  if (inputTeamName || activeTeamName) {
+    return {
+      memberName: inputMemberName,
+      teamName: inputTeamName || activeTeamName,
+    }
+  }
+
+  const output = parseToolResultRecord(result)
+  if (stringField(output ?? {}, 'status') === 'teammate_spawned') {
+    const outputTeamName = stringField(output ?? {}, 'team_name')
+    return {
+      memberName: stringField(output ?? {}, 'name') || inputMemberName,
+      ...(outputTeamName ? { teamName: outputTeamName } : {}),
+    }
+  }
+
+  const fields = new Map<string, string>()
+  for (const line of extractTextContent(result?.content).split(/\r?\n/)) {
+    const match = /^\s*([a-z_]+):\s*(\S.*?)\s*$/.exec(line)
+    const key = match?.[1]
+    const value = match?.[2]
+    if (key && value) fields.set(key, value)
+  }
+  const resultTeamName = fields.get('team_name')
+  if (!fields.get('agent_id') || !fields.get('name') || !resultTeamName) return null
+  return {
+    memberName: fields.get('name')!,
+    teamName: resultTeamName,
+  }
+}
+
 function buildAgentRowsFromMessages(messages: UIMessage[]): ActivityRow[] {
   const resultsByToolUseId = new Map<string, Extract<UIMessage, { type: 'tool_result' }>>()
+  const toolCallsByToolUseId = new Map<string, Extract<UIMessage, { type: 'tool_use' }>>()
   for (const message of messages) {
     if (message.type === 'tool_result') {
       resultsByToolUseId.set(message.toolUseId, message)
+    } else if (message.type === 'tool_use') {
+      toolCallsByToolUseId.set(message.toolUseId, message)
     }
   }
 
   const rows: ActivityRow[] = []
+  let activeTeamName: string | undefined
   for (const message of messages) {
+    if (message.type === 'tool_result') {
+      const toolCall = toolCallsByToolUseId.get(message.toolUseId)
+      if (toolCall) {
+        const updatedTeamName = updatedActiveTeamName(toolCall, message)
+        if (updatedTeamName !== undefined) activeTeamName = updatedTeamName ?? undefined
+      }
+      continue
+    }
     if (message.type !== 'tool_use' || message.toolName !== 'Agent') continue
 
     const result = resultsByToolUseId.get(message.toolUseId)
     const resultText = result ? stripAgentMetadata(extractTextContent(result.content)) : ''
-    const input = isRecordValue(message.input) ? message.input : {}
-    const teamName = stringField(input, 'team_name')
-    const teamMemberName = stringField(input, 'name')
+    const teamIdentity = teamSpawnIdentity(message, result, activeTeamName)
+    if (teamIdentity) {
+      rows.push({
+        id: message.toolUseId,
+        section: 'team',
+        label: teamIdentity.memberName,
+        status: message.status === 'stopped'
+          ? 'stopped'
+          : result?.isError
+            ? 'failed'
+            : 'running',
+        description: agentToolLabel(message),
+        summary: resultText ? compactText(resultText) : undefined,
+        toolUseId: message.toolUseId,
+        taskType: 'in_process_teammate',
+        ...(teamIdentity.teamName ? { teamName: teamIdentity.teamName } : {}),
+        teamMemberName: teamIdentity.memberName,
+        ...(teamIdentity.teamName ? { teamStartedAt: message.timestamp } : {}),
+        updatedAt: result?.timestamp ?? message.timestamp,
+        openable: Boolean(teamIdentity.teamName),
+      })
+      continue
+    }
     rows.push({
       id: message.toolUseId,
       section: 'subagents',
@@ -631,9 +744,6 @@ function buildAgentRowsFromMessages(messages: UIMessage[]): ActivityRow[] {
       summary: resultText ? compactText(resultText) : undefined,
       toolUseId: message.toolUseId,
       taskType: 'local_agent',
-      ...(teamName ? { teamName } : {}),
-      ...(teamMemberName ? { teamMemberName } : {}),
-      ...(teamName && teamMemberName ? { teamStartedAt: message.timestamp } : {}),
       updatedAt: result?.timestamp ?? message.timestamp,
       openable: true,
     })
@@ -1030,11 +1140,6 @@ export function buildSessionActivityModel(input: BuildSessionActivityModelInput)
   for (const member of input.teamMembers ?? []) {
     sections.team.rows.push(buildTeamRow(member))
   }
-  for (const row of sections.team.rows) {
-    if (isBadgeStatus(row.status)) {
-      badgeCount += 1
-    }
-  }
 
   const subagentRowsByKey = new Map<string, ActivityRow>()
   const subagentKeyByTaskId = new Map<string, string>()
@@ -1043,12 +1148,39 @@ export function buildSessionActivityModel(input: BuildSessionActivityModelInput)
   const dismissedNotificationKeys = new Set<string>()
   const dismissedNotificationTaskIds = new Set<string>()
   const visibleBackgroundTaskIds = new Set<string>()
+  const hiddenChildTaskIds = new Set<string>()
 
+  const knownTeamMemberNames = new Set(
+    (input.teamMembers ?? []).flatMap((member) => [
+      member.name,
+      member.agentId.split('@')[0],
+    ]).filter((name): name is string => Boolean(name)),
+  )
+  const teamLaunchRowsByMember = new Map<string, ActivityRow>()
   for (const row of buildAgentRowsFromMessages(runMessages)) {
+    if (row.section === 'team') {
+      if (row.teamMemberName && knownTeamMemberNames.has(row.teamMemberName)) continue
+      const key = row.teamName && row.teamMemberName
+        ? `${row.teamName}:${row.teamMemberName}`
+        : row.id
+      teamLaunchRowsByMember.set(key, row)
+      continue
+    }
     subagentRowsByKey.set(row.id, mergeSubagentRow(subagentRowsByKey.get(row.id), row))
+  }
+  sections.team.rows.push(...teamLaunchRowsByMember.values())
+  for (const row of sections.team.rows) {
+    if (isBadgeStatus(row.status)) {
+      badgeCount += 1
+    }
   }
 
   for (const task of input.backgroundTasks) {
+    if (!isVisibleSessionBackgroundTask(task)) {
+      hiddenChildTaskIds.add(task.taskId)
+      continue
+    }
+
     const dismissKey = createBackgroundTaskDismissKey(task)
     if (task.status !== 'running' && dismissedBackgroundTaskKeys.has(dismissKey)) {
       const key = activityKey(task)
@@ -1077,6 +1209,8 @@ export function buildSessionActivityModel(input: BuildSessionActivityModelInput)
   }
 
   for (const notification of input.agentNotifications) {
+    if (hiddenChildTaskIds.has(notification.taskId)) continue
+
     const key = notificationKey(notification)
     if (
       dismissedNotificationKeys.has(key) ||

@@ -104,6 +104,7 @@ type AgentToolActivityEvent = {
   // Parent Agent tool_use id — the card this activity belongs under.
   tool_use_id: string
   activity: AgentToolActivity
+  owner_agent_id?: string
 }
 
 export type SdkEvent =
@@ -193,6 +194,7 @@ export function emitAgentToolActivity(
   taskId: string,
   parentToolUseId: string,
   activity: AgentToolActivity,
+  ownerAgentId?: string,
 ): void {
   enqueueSdkEvent({
     type: 'system',
@@ -200,5 +202,6 @@ export function emitAgentToolActivity(
     task_id: taskId,
     tool_use_id: parentToolUseId,
     activity,
+    ...(ownerAgentId ? { owner_agent_id: ownerAgentId } : {}),
   })
 }

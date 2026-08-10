@@ -21,7 +21,11 @@ describe('getTaskListId', () => {
   })
 
   afterEach(() => {
-    if (originalTaskList) process.env.CLAUDE_CODE_TASK_LIST_ID = originalTaskList
+    if (originalTaskList === undefined) {
+      delete process.env.CLAUDE_CODE_TASK_LIST_ID
+    } else {
+      process.env.CLAUDE_CODE_TASK_LIST_ID = originalTaskList
+    }
   })
 
   test('a subagent keeps its own list instead of writing the session list', () => {
@@ -51,6 +55,14 @@ describe('getTaskListId', () => {
   test('a teammate keeps sharing the leader list — that is the point of a team', () => {
     runWithTeammateContext(TEAMMATE, () => {
       expect(getTaskListId('teammate-agent')).toBe('review-crew')
+    })
+  })
+
+  test('canonicalizes teammate names and still honors an explicit list', () => {
+    runWithTeammateContext({ ...TEAMMATE, teamName: 'My_Team' }, () => {
+      expect(getTaskListId('teammate-agent')).toBe('my-team')
+      process.env.CLAUDE_CODE_TASK_LIST_ID = 'explicit-team-list'
+      expect(getTaskListId('teammate-agent')).toBe('explicit-team-list')
     })
   })
 })
