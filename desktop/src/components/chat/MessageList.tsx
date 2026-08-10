@@ -961,7 +961,12 @@ function buildTurnCardInsertionMap(
 
   const cardsByRenderIndex = new Map<number, TurnChangeCardModel[]>()
   turnChangeCards.forEach((card) => {
-    if (card.checkpoint.code.filesChanged.length === 0) return
+    // An unverified-only turn has no structured files to list, but still needs
+    // the card for conversation rewind and the warning about changes left on disk.
+    if (
+      card.checkpoint.code.filesChanged.length === 0 &&
+      (card.checkpoint.unverifiedChangeSources?.length ?? 0) === 0
+    ) return
     const renderIndex =
       lastResponseIndexByTurnId.get(card.target.messageId) ??
       userIndexByTurnId.get(card.target.messageId)

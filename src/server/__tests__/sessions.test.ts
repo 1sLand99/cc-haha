@@ -7694,6 +7694,64 @@ describe('Sessions API', () => {
     expect(await fs.readFile(shellFile, 'utf-8')).toBe('written by shell\n')
   })
 
+  it('should keep a Bash-only first turn rewindable without touching the shell-written file', async () => {
+    const sessionId = '99999999-bbbb-cccc-dddd-000000000033'
+    const workDir = path.join(tmpDir, 'bash-only-empty-checkpoint')
+    const shellFile = path.join(workDir, 'shell-only.txt')
+    const userId = crypto.randomUUID()
+    await fs.mkdir(workDir, { recursive: true })
+    await fs.writeFile(shellFile, 'written by shell\n')
+    await writeSessionFile('-tmp-bash-only-empty-checkpoint', sessionId, [
+      makeSessionMetaEntry(workDir),
+      // Real prompt submission records a snapshot even when no structured file
+      // tool has anything to track. That empty checkpoint must still carry the
+      // Bash coverage warning through to the desktop.
+      makeFileHistorySnapshotEntry(userId, {}),
+      { ...makeUserEntry('write only with Bash', userId), cwd: workDir, sessionId },
+      makeAssistantToolUseEntry([{
+        id: 'Bash:write-only-file',
+        name: 'Bash',
+        input: { command: `printf 'written by shell\\n' > ${shellFile}` },
+      }], userId),
+      makeToolResultUserEntry('Bash:write-only-file', '', undefined, undefined, sessionId),
+      makeAssistantEntry('BASH_ONLY_DONE', userId),
+    ])
+
+    const listRes = await fetch(`${baseUrl}/api/sessions/${sessionId}/turn-checkpoints`)
+    expect(listRes.status).toBe(200)
+    const listBody = await listRes.json() as {
+      checkpoints: Array<{
+        target: { targetUserMessageId: string }
+        code: { available: boolean; filesChanged: string[] }
+        restoreAvailable?: boolean
+        unverifiedChangeSources?: string[]
+      }>
+    }
+    expect(listBody.checkpoints).toHaveLength(1)
+    expect(listBody.checkpoints[0]).toMatchObject({
+      target: { targetUserMessageId: userId },
+      code: { available: true, filesChanged: [] },
+      restoreAvailable: true,
+      unverifiedChangeSources: ['Bash'],
+    })
+
+    const rewindRes = await fetch(`${baseUrl}/api/sessions/${sessionId}/rewind`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUserMessageId: userId, mode: 'conversation' }),
+    })
+    expect(rewindRes.status).toBe(200)
+    expect(await rewindRes.json()).toMatchObject({
+      mode: 'conversation',
+      unverifiedChangeSources: ['Bash'],
+    })
+    expect(await fs.readFile(shellFile, 'utf-8')).toBe('written by shell\n')
+
+    const messagesRes = await fetch(`${baseUrl}/api/sessions/${sessionId}/messages`)
+    const messagesBody = await messagesRes.json() as { messages: Array<{ id: string }> }
+    expect(messagesBody.messages.some((message) => message.id === userId)).toBe(false)
+  })
+
   it('should keep restore available and unflagged when the turn only ran a read-only shell command', async () => {
     const sessionId = '99999999-bbbb-cccc-dddd-0000000f0001'
     const workDir = path.join(tmpDir, 'repro-1192-readonly-bash')
