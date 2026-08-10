@@ -17,6 +17,7 @@ import {
   useWorkflowStore,
   workflowRunIdentity,
 } from './workflowStore'
+import type { ReconstructedWorkflowRun } from '../types/workflow'
 
 const SESSION = 'session-1'
 const TASK = 'w1234abcd'
@@ -392,6 +393,246 @@ describe('hydrateSession', () => {
     expect(phases[0]!.agents.every(agent => agent.agentId)).toBe(true)
   })
 
+  it('restores the authoritative latest progress snapshot with cached flags', async () => {
+    sessionRunsMock.mockResolvedValue({
+      runs: [{
+        ...RECONSTRUCTED,
+        progress: [
+          { type: 'workflow_phase', index: 1, title: 'Run' },
+          {
+            type: 'workflow_agent',
+            index: 1,
+            label: 'A',
+            state: 'done',
+            phaseIndex: 1,
+            phaseTitle: 'Run',
+            agentId: 'a1',
+            cached: true,
+          },
+          {
+            type: 'workflow_agent',
+            index: 2,
+            label: 'X',
+            state: 'done',
+            phaseIndex: 1,
+            phaseTitle: 'Run',
+            agentId: 'x1',
+          },
+        ],
+      }],
+    })
+
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+
+    const [run] = runsForSession(useWorkflowStore.getState(), SESSION)
+    expect(runsForSession(useWorkflowStore.getState(), SESSION)).toHaveLength(1)
+    const agents = run!.progress.filter(row => row.type === 'workflow_agent')
+    expect(agents).toHaveLength(2)
+    expect(agents.map(agent => [agent.label, agent.cached === true])).toEqual([
+      ['A', true],
+      ['X', false],
+    ])
+  })
+
+  it('advances reconstructed lifecycle without dropping the cached snapshot', async () => {
+    const durableProgress: ReconstructedWorkflowRun['progress'] = [
+      { type: 'workflow_phase', index: 1, title: 'Run' },
+      {
+        type: 'workflow_agent',
+        index: 1,
+        label: 'A',
+        state: 'done',
+        phaseIndex: 1,
+        agentId: 'a1',
+        cached: true,
+      },
+    ]
+    sessionRunsMock
+      .mockResolvedValueOnce({
+        runs: [{
+          ...RECONSTRUCTED,
+          status: 'running',
+          updatedAt: RECONSTRUCTED.startedAt,
+          endedAt: undefined,
+          progress: durableProgress,
+        }],
+      })
+      .mockResolvedValueOnce({
+        runs: [{
+          ...RECONSTRUCTED,
+          status: 'failed',
+          updatedAt: RECONSTRUCTED.updatedAt + 500,
+          endedAt: RECONSTRUCTED.updatedAt + 500,
+          error: 'verification failed',
+          progress: durableProgress,
+        }],
+      })
+
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+    const before = runsForSession(useWorkflowStore.getState(), SESSION)[0]!
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+    const after = runsForSession(useWorkflowStore.getState(), SESSION)[0]!
+
+    expect(after).not.toBe(before)
+    expect(after).toMatchObject({
+      status: 'failed',
+      error: 'verification failed',
+      endedAt: RECONSTRUCTED.updatedAt + 500,
+    })
+    expect(after.progress).toContainEqual(expect.objectContaining({
+      type: 'workflow_agent',
+      label: 'A',
+      cached: true,
+    }))
+  })
+
+  it('upgrades a sidecar fallback when a later hydrate finds task progress', async () => {
+    const authoritative = {
+      ...RECONSTRUCTED,
+      progress: [
+        { type: 'workflow_phase' as const, index: 1, title: 'Run' },
+        {
+          type: 'workflow_agent' as const,
+          index: 1,
+          label: 'A',
+          state: 'done' as const,
+          phaseIndex: 1,
+          phaseTitle: 'Run',
+          agentId: 'a1',
+          cached: true,
+        },
+        {
+          type: 'workflow_agent' as const,
+          index: 2,
+          label: 'X',
+          state: 'done' as const,
+          phaseIndex: 1,
+          phaseTitle: 'Run',
+          agentId: 'x1',
+        },
+      ],
+    }
+    sessionRunsMock
+      .mockResolvedValue({ runs: [authoritative] })
+      .mockResolvedValueOnce({ runs: [RECONSTRUCTED] })
+
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+    expect(
+      runsForSession(useWorkflowStore.getState(), SESSION)[0]!.progress
+        .filter(row => row.type === 'workflow_agent')
+        .map(row => row.label),
+    ).toEqual(['review:imagegen', 'review:security', 'verify:security'])
+
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+    const upgraded = runsForSession(useWorkflowStore.getState(), SESSION)[0]!
+    expect(runsForSession(useWorkflowStore.getState(), SESSION)).toHaveLength(1)
+    expect(
+      upgraded.progress
+        .filter(row => row.type === 'workflow_agent')
+        .map(row => [row.label, row.cached === true]),
+    ).toEqual([
+      ['A', true],
+      ['X', false],
+    ])
+
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+    expect(runsForSession(useWorkflowStore.getState(), SESSION)[0]).toBe(upgraded)
+  })
+
+  it('replaces the old reconstructed task key when the same run resumes', async () => {
+    const resumedTaskId = 'w-history-resumed'
+    sessionRunsMock
+      .mockResolvedValueOnce({ runs: [RECONSTRUCTED] })
+      .mockResolvedValueOnce({
+        runs: [{
+          ...RECONSTRUCTED,
+          taskId: resumedTaskId,
+          updatedAt: RECONSTRUCTED.updatedAt + 1_000,
+          endedAt: RECONSTRUCTED.updatedAt + 1_000,
+          progress: [{
+            type: 'workflow_agent',
+            index: 1,
+            label: 'resumed probe',
+            state: 'done',
+            agentId: 'resumed-agent',
+          }],
+        }],
+      })
+
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+    useWorkflowStore.getState().openRun(RECONSTRUCTED.taskId)
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+
+    const runs = runsForSession(useWorkflowStore.getState(), SESSION)
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({
+      runId: RECONSTRUCTED.runId,
+      taskId: resumedTaskId,
+    })
+    expect(runs[0]!.progress).toContainEqual(expect.objectContaining({
+      label: 'resumed probe',
+    }))
+    expect(useWorkflowStore.getState().openRunId).toBe(resumedTaskId)
+    expect(Object.keys(useWorkflowStore.getState().runs)).toEqual([
+      workflowRunIdentity(SESSION, undefined, resumedTaskId),
+    ])
+  })
+
+  it('ignores an older hydrate response that arrives after a newer snapshot', async () => {
+    const authoritative: ReconstructedWorkflowRun = {
+      ...RECONSTRUCTED,
+      progress: [
+        { type: 'workflow_phase', index: 1, title: 'Run' },
+        {
+          type: 'workflow_agent',
+          index: 1,
+          label: 'A',
+          state: 'done',
+          phaseIndex: 1,
+          phaseTitle: 'Run',
+          agentId: 'a1',
+          cached: true,
+        },
+        {
+          type: 'workflow_agent',
+          index: 2,
+          label: 'X',
+          state: 'done',
+          phaseIndex: 1,
+          phaseTitle: 'Run',
+          agentId: 'x1',
+        },
+      ],
+    }
+    const resolvers: Array<(
+      value: { runs: ReconstructedWorkflowRun[] },
+    ) => void> = []
+    sessionRunsMock.mockImplementation(
+      () => new Promise<{ runs: ReconstructedWorkflowRun[] }>(resolve => {
+        resolvers.push(resolve)
+      }),
+    )
+
+    const olderHydrate = useWorkflowStore.getState().hydrateSession(SESSION)
+    const newerHydrate = useWorkflowStore.getState().hydrateSession(SESSION)
+    resolvers[1]!({ runs: [authoritative] })
+    await newerHydrate
+    resolvers[0]!({ runs: [RECONSTRUCTED] })
+    await olderHydrate
+
+    const runs = runsForSession(useWorkflowStore.getState(), SESSION)
+    expect(runs).toHaveLength(1)
+    expect(
+      runs[0]!.progress
+        .filter(row => row.type === 'workflow_agent')
+        .map(row => [row.label, row.cached === true]),
+    ).toEqual([
+      ['A', true],
+      ['X', false],
+    ])
+  })
+
   it('leaves an unrecorded phase title empty rather than inventing one', () => {
     // The renderer falls back to the run name; filling in "Phase 0" here made
     // that impossible and showed a meaningless heading.
@@ -487,6 +728,92 @@ describe('hydrateSession', () => {
       agentId: 'owned-worker',
       state: 'error',
     }))
+  })
+
+  it('ignores an older owner hydrate response after a newer cached terminal', async () => {
+    const ownerAgentId = 'owner-fragment-a'
+    const targetSessionId = 'subagent:synthetic'
+    const resolvers: Array<(
+      value: { runs: ReconstructedWorkflowRun[] },
+    ) => void> = []
+    sessionRunsMock.mockImplementation(
+      () => new Promise<{ runs: ReconstructedWorkflowRun[] }>(resolve => {
+        resolvers.push(resolve)
+      }),
+    )
+    const olderHydrate = useWorkflowStore.getState().hydrateOwnerSession(
+      SESSION,
+      [ownerAgentId],
+      targetSessionId,
+    )
+    const newerHydrate = useWorkflowStore.getState().hydrateOwnerSession(
+      SESSION,
+      [ownerAgentId],
+      targetSessionId,
+    )
+    const ownedRun: ReconstructedWorkflowRun = {
+      ...RECONSTRUCTED,
+      ownerAgentId,
+    }
+    resolvers[1]!({
+      runs: [{
+        ...ownedRun,
+        status: 'failed',
+        updatedAt: RECONSTRUCTED.updatedAt + 500,
+        endedAt: RECONSTRUCTED.updatedAt + 500,
+        error: 'newer terminal',
+        progress: [{
+          type: 'workflow_agent',
+          index: 1,
+          label: 'cached owner probe',
+          state: 'done',
+          agentId: 'owned-worker',
+          cached: true,
+        }],
+      }],
+    })
+    await newerHydrate
+    resolvers[0]!({ runs: [ownedRun] })
+    await olderHydrate
+
+    const owned = runsForOwner(
+      useWorkflowStore.getState(),
+      SESSION,
+      [ownerAgentId],
+    )
+    expect(owned).toHaveLength(1)
+    expect(owned[0]).toMatchObject({
+      sessionId: targetSessionId,
+      status: 'failed',
+      error: 'newer terminal',
+    })
+    expect(owned[0]!.progress).toContainEqual(expect.objectContaining({
+      label: 'cached owner probe',
+      cached: true,
+    }))
+  })
+
+  it('invalidates an in-flight owner hydrate when its target session clears', async () => {
+    const targetSessionId = 'subagent:cleared'
+    let resolveHydrate: ((value: { runs: ReconstructedWorkflowRun[] }) => void) | undefined
+    sessionRunsMock.mockImplementation(
+      () => new Promise<{ runs: ReconstructedWorkflowRun[] }>(resolve => {
+        resolveHydrate = resolve
+      }),
+    )
+
+    const pending = useWorkflowStore.getState().hydrateOwnerSession(
+      SESSION,
+      ['owner-fragment-a'],
+      targetSessionId,
+    )
+    useWorkflowStore.getState().clearSession(targetSessionId)
+    resolveHydrate!({
+      runs: [{ ...RECONSTRUCTED, ownerAgentId: 'owner-fragment-a' }],
+    })
+    await pending
+
+    expect(Object.values(useWorkflowStore.getState().runs)).toHaveLength(0)
   })
 
   it('can remap an independent member session root run into its synthetic tab', async () => {

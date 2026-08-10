@@ -54,10 +54,15 @@ export const workflowsApi = {
     return api.post<WorkflowValidateResult>('/api/workflows/validate', { script })
   },
 
-  save(script: string, scope: 'user' | 'project', cwd?: string) {
+  save(
+    script: string,
+    scope: 'user' | 'project',
+    cwd?: string,
+    name?: string,
+  ) {
     return api.post<{ ok: true; name: string; filePath: string }>(
       '/api/workflows/save',
-      { script, scope, cwd },
+      { script, scope, cwd, name },
     )
   },
 

@@ -11,6 +11,10 @@ export type WorkflowParseResult =
   | { meta: WorkflowMeta; scriptBody: string }
   | { error: string }
 
+export type WorkflowRenameResult =
+  | { script: string }
+  | { error: string }
+
 const PLAIN_JS_HINT =
   'Workflow scripts must be plain JavaScript — common causes are TypeScript syntax ' +
   '(type annotations, interfaces, generics) and broken string quoting or escaping.'
@@ -70,6 +74,50 @@ export function parseWorkflowScript(script: string): WorkflowParseResult {
   // numbers in runtime stack traces line up with the body the user wrote.
   const scriptBody = script.slice(first.end).replace(/^[;\s]*\n/, '').trimStart()
   return { meta: validated.meta, scriptBody }
+}
+
+/**
+ * Rename the command exported by a workflow without touching matching text in
+ * its description or executable body.
+ *
+ * Saved workflows are discovered from `meta.name`, not their filename. The
+ * desktop therefore needs to update the parsed metadata whenever a user picks
+ * a different `/name`; a text replacement would also rewrite prompts and
+ * descriptions that happen to mention the old name.
+ */
+export function renameWorkflowScript(
+  script: string,
+  name: string,
+): WorkflowRenameResult {
+  const parsed = parseWorkflowScript(script)
+  if ('error' in parsed) return parsed
+
+  const nameError = validateWorkflowName(name)
+  if (nameError) return { error: nameError }
+
+  let program: AnyNode
+  try {
+    program = parse(script, ACORN_OPTIONS as never)
+  } catch (error) {
+    return { error: formatParseError(error, script) }
+  }
+  const init = program.body[0].declaration.declarations[0].init
+  const nameProperties = init.properties.filter(
+    (property: AnyNode) =>
+      property.type === 'Property' &&
+      !property.computed &&
+      ((property.key.type === 'Identifier' && property.key.name === 'name') ||
+        (property.key.type === 'Literal' && property.key.value === 'name')),
+  )
+  const property = nameProperties.at(-1)
+  if (!property) return { error: 'meta.name must be a non-empty string' }
+
+  const original = script.slice(property.value.start, property.value.end)
+  const quote = original.startsWith("'") ? "'" : '"'
+  const renamed = `${script.slice(0, property.value.start)}${quote}${name}${quote}${script.slice(property.value.end)}`
+  const reparsed = parseWorkflowScript(renamed)
+  if ('error' in reparsed) return reparsed
+  return { script: renamed }
 }
 
 /**
@@ -199,20 +247,14 @@ function validateMeta(
   }
   const raw = value as Record<string, unknown>
   const name = raw.name
-  if (typeof name !== 'string' || name.trim() === '') {
-    return { error: 'meta.name must be a non-empty string' }
-  }
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(name)) {
-    return {
-      error: `meta.name '${name}' must start with a letter or digit and contain only letters, digits, '-' and '_'`,
-    }
-  }
+  const nameError = validateWorkflowName(name)
+  if (nameError) return { error: nameError }
   const description = raw.description
   if (typeof description !== 'string' || description.trim() === '') {
     return { error: 'meta.description must be a non-empty string' }
   }
 
-  const meta: WorkflowMeta = { name, description }
+  const meta: WorkflowMeta = { name: name as string, description }
   if (typeof raw.whenToUse === 'string') meta.whenToUse = raw.whenToUse
   if (typeof raw.title === 'string') meta.title = raw.title
   if (typeof raw.model === 'string') meta.model = raw.model
@@ -239,6 +281,16 @@ function validateMeta(
   }
 
   return { meta }
+}
+
+function validateWorkflowName(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return 'meta.name must be a non-empty string'
+  }
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(value)) {
+    return `meta.name '${value}' must start with a letter or digit and contain only letters, digits, '-' and '_'`
+  }
+  return undefined
 }
 
 function formatParseError(error: unknown, script: string): string {

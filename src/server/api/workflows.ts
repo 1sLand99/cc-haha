@@ -74,16 +74,21 @@ export async function handleWorkflowsApi(
     if (method === 'POST' && first === 'save') {
       const body = await readJson<{
         script?: string
+        name?: unknown
         scope?: string
         cwd?: string
       }>(req)
       if (typeof body.script !== 'string') {
         throw ApiError.badRequest('`script` is required')
       }
+      if (body.name !== undefined && typeof body.name !== 'string') {
+        throw ApiError.badRequest('`name` must be a string')
+      }
       const saved = await workflowService.saveDefinition({
         script: body.script,
         scope: parseScope(body.scope),
         cwd: body.cwd,
+        name: body.name,
       })
       return Response.json({ ok: true, ...saved })
     }

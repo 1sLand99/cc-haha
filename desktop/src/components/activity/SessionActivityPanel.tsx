@@ -412,7 +412,9 @@ function ActivityRowView({
   const displayStatus: ActivityRow['status'] = isStoppingSubagent ? 'pending' : row.status
   const statusLabel = isStoppingSubagent
     ? t('session.activity.status.stopping')
-    : getActivityStatusLabel(row.status, t)
+    : row.cached
+      ? t('workflows.agent.cached')
+      : getActivityStatusLabel(row.status, t)
   const label = row.taskHistory
     ? t('session.activity.tasks.earlier')
     : row.label

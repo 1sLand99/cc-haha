@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test'
+import { readFile } from 'fs/promises'
 import type { AppState } from '../../state/AppState.js'
 import type { SetAppState } from '../../Task.js'
+import { cleanupTaskOutput } from '../../utils/task/diskOutput.js'
 import { WORKFLOW_MAX_PROGRESS_ROWS } from '../../utils/workflows/constants.js'
 import type { WorkflowProgressEvent } from '../../utils/workflows/types.js'
 import {
   buildResumePrompt,
   buildWorkflowNotification,
+  completeWorkflowTask,
   registerWorkflowTask,
   updateWorkflowProgressBatch,
   type LocalWorkflowTaskState,
@@ -25,9 +28,9 @@ function makeStore(task: LocalWorkflowTaskState): {
   }
 }
 
-function makeTask(): LocalWorkflowTaskState {
+function makeTask(taskId = 'w0000001'): LocalWorkflowTaskState {
   return registerWorkflowTask({
-    taskId: 'w0000001',
+    taskId,
     script: "export const meta = { name: 'demo', description: 'Demo' }\n",
     scriptPath: '/tmp/demo.wf_abc12345-def.js',
     summary: 'Demo',
@@ -120,6 +123,35 @@ describe('updateWorkflowProgressBatch', () => {
     const store = makeStore(makeTask())
     updateWorkflowProgressBatch('w0000001', [], store.setAppState)
     expect(store.get().progressVersion).toBe(0)
+  })
+})
+
+describe('completeWorkflowTask', () => {
+  test('resolves only after the durable progress snapshot is readable', async () => {
+    const task = makeTask('wdurable1')
+    try {
+      const store = makeStore(task)
+      updateWorkflowProgressBatch(
+        task.id,
+        [agent(1, 'done', { cached: true, agentId: 'agent-a' })],
+        store.setAppState,
+      )
+
+      await completeWorkflowTask(task.id, 'done', 1, [], store.setAppState)
+
+      const output = JSON.parse(await readFile(task.outputFile, 'utf8')) as {
+        workflowProgress: WorkflowProgressEvent[]
+      }
+      expect(output.workflowProgress).toContainEqual(
+        expect.objectContaining({
+          type: 'workflow_agent',
+          index: 1,
+          cached: true,
+        }),
+      )
+    } finally {
+      await cleanupTaskOutput(task.id)
+    }
   })
 })
 

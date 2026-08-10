@@ -1,4 +1,3 @@
-import { writeFile } from 'fs/promises'
 import {
   OUTPUT_FILE_TAG,
   STATUS_TAG,
@@ -18,6 +17,7 @@ import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js'
 import {
   evictTaskOutput,
   getTaskOutputPath,
+  writeTaskOutput,
 } from '../../utils/task/diskOutput.js'
 import { PANEL_GRACE_MS, updateTaskState } from '../../utils/task/framework.js'
 import { WORKFLOW_MAX_PROGRESS_ROWS } from '../../utils/workflows/constants.js'
@@ -234,14 +234,14 @@ export function completeWorkflowTask(
   agentCount: number,
   logs: string[],
   setAppState: SetAppState,
-): void {
+): Promise<void> {
   const settled = settleWorkflowTask(taskId, setAppState, 'completed', {
     result,
     agentCount,
     logs,
   })
-  if (!settled) return
-  void writeWorkflowOutput(settled, { result, agentCount, logs })
+  if (!settled) return Promise.resolve()
+  return writeWorkflowOutput(settled, { result, agentCount, logs })
 }
 
 export function failWorkflowTask(
@@ -250,15 +250,16 @@ export function failWorkflowTask(
   agentCount: number,
   logs: string[],
   setAppState: SetAppState,
-): void {
+): Promise<void> {
   const settled = settleWorkflowTask(taskId, setAppState, 'failed', {
     error,
     agentCount,
     logs,
   })
-  if (!settled) return
-  void evictTaskOutput(taskId)
-  void writeWorkflowOutput(settled, { error, agentCount, logs })
+  if (!settled) return Promise.resolve()
+  return evictTaskOutput(taskId).then(() =>
+    writeWorkflowOutput(settled, { error, agentCount, logs }),
+  )
 }
 
 /** Stop the run but keep it resumable: the journal on disk is still valid. */
@@ -507,8 +508,8 @@ async function writeWorkflowOutput(
   extra: { result?: unknown; error?: string; agentCount: number; logs: string[] },
 ): Promise<void> {
   try {
-    await writeFile(
-      task.outputFile,
+    await writeTaskOutput(
+      task.id,
       JSON.stringify(
         {
           summary: task.summary,
@@ -525,7 +526,6 @@ async function writeWorkflowOutput(
         null,
         2,
       ),
-      'utf8',
     )
   } catch (error) {
     logForDebugging(

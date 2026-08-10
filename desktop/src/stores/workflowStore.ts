@@ -14,6 +14,18 @@ import type {
 /** Cap kept in sync with the CLI's own progress-row budget. */
 const MAX_PROGRESS_ROWS = 500
 
+/** Latest hydrate request allowed to write each session's reconstructed runs. */
+const hydrateEpochBySession = new Map<string, number>()
+
+/** Latest owner hydrate allowed to write a given source/target tab pair. */
+const ownerHydrateEpochByScope = new Map<string, number>()
+
+/** Object identity distinguishes disk snapshots from live WebSocket runs. */
+const reconstructedRuns = new WeakSet<WorkflowRun>()
+
+/** Exact task-output snapshots must not be downgraded by a transient read miss. */
+const authoritativeProgressRuns = new WeakSet<WorkflowRun>()
+
 type WorkflowStore = {
   /** Runs keyed by source session, transcript owner, and CLI task id. */
   runs: Record<string, WorkflowRun>
@@ -137,25 +149,26 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
    * alone — the live stream is strictly better than the reconstruction.
    */
   async hydrateSession(sessionId) {
+    const requestEpoch = (hydrateEpochBySession.get(sessionId) ?? 0) + 1
+    hydrateEpochBySession.set(sessionId, requestEpoch)
     try {
       const { runs } = await workflowsApi.sessionRuns(sessionId)
+      if (hydrateEpochBySession.get(sessionId) !== requestEpoch) return
       const rootRuns = runs.filter(run => !run.ownerAgentId)
       if (rootRuns.length === 0) return
       set(state => {
         const next = { ...state.runs }
-        let added = false
+        let changed = false
+        let openRunId = state.openRunId
         for (const run of rootRuns) {
-          const hasLiveRun = Object.values(next).some(candidate => (
-            candidate.sourceSessionId === sessionId &&
-            !candidate.ownerAgentId &&
-            candidate.runId === run.runId
-          ))
-          const key = workflowRunIdentity(sessionId, undefined, run.taskId)
-          if (hasLiveRun || next[key]) continue
-          added = true
-          next[key] = reconstructedToRun(sessionId, sessionId, run)
+          const update = upsertReconstructedRun(next, sessionId, sessionId, run)
+          if (!update.changed) continue
+          changed = true
+          if (openRunId && update.replacedTaskIds.includes(openRunId)) {
+            openRunId = run.taskId
+          }
         }
-        return added ? { runs: next } : state
+        return changed ? { runs: next, openRunId } : state
       })
     } catch {
       // History is an enhancement; a session that cannot load it still works.
@@ -164,8 +177,12 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
 
   async hydrateOwnerSession(sourceSessionId, ownerAliases, targetSessionId, options) {
     if (ownerAliases.length === 0 && !options?.includeRoot) return
+    const scopeKey = workflowOwnerHydrateScope(sourceSessionId, targetSessionId)
+    const requestEpoch = (ownerHydrateEpochByScope.get(scopeKey) ?? 0) + 1
+    ownerHydrateEpochByScope.set(scopeKey, requestEpoch)
     try {
       const { runs } = await workflowsApi.sessionRuns(sourceSessionId)
+      if (ownerHydrateEpochByScope.get(scopeKey) !== requestEpoch) return
       const aliases = new Set(ownerAliases)
       const ownerRuns = runs.filter(run => (
         (run.ownerAgentId !== undefined && aliases.has(run.ownerAgentId)) ||
@@ -174,19 +191,22 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
       if (ownerRuns.length === 0) return
       set(state => {
         const next = { ...state.runs }
-        let added = false
+        let changed = false
+        let openRunId = state.openRunId
         for (const run of ownerRuns) {
-          const hasLiveRun = Object.values(next).some(candidate => (
-            candidate.sourceSessionId === sourceSessionId &&
-            candidate.ownerAgentId === run.ownerAgentId &&
-            candidate.runId === run.runId
-          ))
-          const key = workflowRunIdentity(sourceSessionId, run.ownerAgentId, run.taskId)
-          if (hasLiveRun || next[key]) continue
-          added = true
-          next[key] = reconstructedToRun(targetSessionId, sourceSessionId, run)
+          const update = upsertReconstructedRun(
+            next,
+            targetSessionId,
+            sourceSessionId,
+            run,
+          )
+          if (!update.changed) continue
+          changed = true
+          if (openRunId && update.replacedTaskIds.includes(openRunId)) {
+            openRunId = run.taskId
+          }
         }
-        return added ? { runs: next } : state
+        return changed ? { runs: next, openRunId } : state
       })
     } catch {
       // Agent history remains usable when workflow reconstruction is absent.
@@ -194,6 +214,19 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
   },
 
   clearSession(sessionId) {
+    hydrateEpochBySession.set(
+      sessionId,
+      (hydrateEpochBySession.get(sessionId) ?? 0) + 1,
+    )
+    for (const scopeKey of ownerHydrateEpochByScope.keys()) {
+      const [sourceSessionId, targetSessionId] = JSON.parse(scopeKey) as [string, string]
+      if (sourceSessionId === sessionId || targetSessionId === sessionId) {
+        ownerHydrateEpochByScope.set(
+          scopeKey,
+          (ownerHydrateEpochByScope.get(scopeKey) ?? 0) + 1,
+        )
+      }
+    }
     set(state => {
       const kept: Record<string, WorkflowRun> = {}
       let removed = false
@@ -240,6 +273,13 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
   },
 }))
 
+function workflowOwnerHydrateScope(
+  sourceSessionId: string,
+  targetSessionId: string,
+): string {
+  return JSON.stringify([sourceSessionId, targetSessionId])
+}
+
 
 /**
  * Turn a disk-reconstructed run into the shape the panel renders.
@@ -254,38 +294,48 @@ function reconstructedToRun(
   run: ReconstructedWorkflowRun,
 ): WorkflowRun {
   const phases = new Map<number, string | undefined>()
-  const progress: WorkflowProgressEvent[] = []
+  const progress: WorkflowProgressEvent[] = run.progress?.length
+    ? run.progress.slice(-MAX_PROGRESS_ROWS)
+    : []
 
-  for (const agent of run.agents) {
-    if (!phases.has(agent.phaseIndex)) {
-      phases.set(agent.phaseIndex, agent.phaseTitle)
+  if (progress.length === 0) {
+    for (const agent of run.agents) {
+      if (!phases.has(agent.phaseIndex)) {
+        phases.set(agent.phaseIndex, agent.phaseTitle)
+      }
+    }
+    for (const [index, title] of [...phases.entries()].sort(([a], [b]) => a - b)) {
+      progress.push({
+        type: 'workflow_phase',
+        index,
+        // Left empty rather than invented when the run never recorded a phase
+        // title, so the renderer can fall back to something meaningful. Filling
+        // in "Phase 0" here hid that the title was simply unknown.
+        title: title ?? '',
+      })
+    }
+    for (const agent of run.agents) {
+      progress.push({
+        type: 'workflow_agent',
+        index: agent.agentIndex,
+        label: agent.label,
+        state: agent.state,
+        phaseIndex: agent.phaseIndex,
+        ...(agent.phaseTitle ? { phaseTitle: agent.phaseTitle } : {}),
+        agentId: agent.agentId,
+        ...(agent.error ? { error: agent.error } : {}),
+        ...(agent.skipped ? { skipped: true } : {}),
+      })
     }
   }
-  for (const [index, title] of [...phases.entries()].sort(([a], [b]) => a - b)) {
-    progress.push({
-      type: 'workflow_phase',
-      index,
-      // Left empty rather than invented when the run never recorded a phase
-      // title, so the renderer can fall back to something meaningful. Filling
-      // in "Phase 0" here hid that the title was simply unknown.
-      title: title ?? '',
-    })
-  }
-  for (const agent of run.agents) {
-    progress.push({
-      type: 'workflow_agent',
-      index: agent.agentIndex,
-      label: agent.label,
-      state: agent.state,
-      phaseIndex: agent.phaseIndex,
-      ...(agent.phaseTitle ? { phaseTitle: agent.phaseTitle } : {}),
-      agentId: agent.agentId,
-      ...(agent.error ? { error: agent.error } : {}),
-      ...(agent.skipped ? { skipped: true } : {}),
-    })
-  }
 
-  return {
+  const agentCount = new Set(
+    progress
+      .filter((event): event is WorkflowAgentEvent => event.type === 'workflow_agent')
+      .map(event => event.index),
+  ).size
+
+  const reconstructed: WorkflowRun = {
     taskId: run.taskId,
     sourceSessionId,
     ...(run.ownerAgentId ? { ownerAgentId: run.ownerAgentId } : {}),
@@ -296,13 +346,106 @@ function reconstructedToRun(
     startedAt: run.startedAt,
     updatedAt: run.updatedAt,
     ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
-    agentCount: run.agents.length,
+    agentCount: hasAuthoritativeProgress(run) ? agentCount : run.agents.length,
     totalTokens: 0,
     toolCalls: 0,
     progress,
     ...(run.result ? { result: run.result } : {}),
     ...(run.error ? { error: run.error } : {}),
   }
+  reconstructedRuns.add(reconstructed)
+  if (hasAuthoritativeProgress(run)) {
+    authoritativeProgressRuns.add(reconstructed)
+  }
+  return reconstructed
+}
+
+function isReconstructedRun(run: WorkflowRun): boolean {
+  return reconstructedRuns.has(run)
+}
+
+function upsertReconstructedRun(
+  next: Record<string, WorkflowRun>,
+  targetSessionId: string,
+  sourceSessionId: string,
+  run: ReconstructedWorkflowRun,
+): { changed: boolean; replacedTaskIds: string[] } {
+  const sameRunEntries = Object.entries(next).filter(([, candidate]) => (
+    candidate.sourceSessionId === sourceSessionId &&
+    candidate.ownerAgentId === run.ownerAgentId &&
+    candidate.runId === run.runId
+  ))
+  if (sameRunEntries.some(([, candidate]) => !isReconstructedRun(candidate))) {
+    return { changed: false, replacedTaskIds: [] }
+  }
+
+  const key = workflowRunIdentity(sourceSessionId, run.ownerAgentId, run.taskId)
+  const existing = sameRunEntries.find(([candidateKey]) => candidateKey === key)?.[1]
+    ?? sameRunEntries[0]?.[1]
+  const reconstructed = reconstructedToRun(targetSessionId, sourceSessionId, run)
+
+  // Keep an exact task-output snapshot through a transient output-file read
+  // miss. A resumed attempt has a different task id, so its newer sidecar
+  // shape still replaces the previous attempt.
+  if (
+    existing &&
+    existing.taskId === run.taskId &&
+    authoritativeProgressRuns.has(existing) &&
+    !hasAuthoritativeProgress(run)
+  ) {
+    reconstructed.progress = existing.progress
+    reconstructed.agentCount = existing.agentCount
+    authoritativeProgressRuns.add(reconstructed)
+  }
+
+  if (
+    sameRunEntries.length === 1 &&
+    sameRunEntries[0]?.[0] === key &&
+    existing &&
+    sameReconstructedRun(existing, reconstructed)
+  ) {
+    return { changed: false, replacedTaskIds: [] }
+  }
+
+  const replacedTaskIds = sameRunEntries.map(([, candidate]) => candidate.taskId)
+  for (const [candidateKey] of sameRunEntries) delete next[candidateKey]
+  next[key] = reconstructed
+  return { changed: true, replacedTaskIds }
+}
+
+function hasAuthoritativeProgress(run: ReconstructedWorkflowRun): boolean {
+  return Boolean(
+    run.progress?.some(event => event.type === 'workflow_agent'),
+  )
+}
+
+function sameReconstructedRun(before: WorkflowRun, after: WorkflowRun): boolean {
+  return (
+    before.taskId === after.taskId &&
+    before.sourceSessionId === after.sourceSessionId &&
+    before.ownerAgentId === after.ownerAgentId &&
+    before.sessionId === after.sessionId &&
+    before.runId === after.runId &&
+    before.workflowName === after.workflowName &&
+    before.status === after.status &&
+    before.startedAt === after.startedAt &&
+    before.updatedAt === after.updatedAt &&
+    before.endedAt === after.endedAt &&
+    before.agentCount === after.agentCount &&
+    before.result === after.result &&
+    before.error === after.error &&
+    sameProgress(before.progress, after.progress)
+  )
+}
+
+function sameProgress(
+  before: WorkflowProgressEvent[],
+  after: WorkflowProgressEvent[],
+): boolean {
+  if (before.length !== after.length) return false
+  return before.every(
+    (event, index) => JSON.stringify(event) === JSON.stringify(after[index]),
+  )
 }
 
 // ── Selectors ────────────────────────────────────────────────────────────────

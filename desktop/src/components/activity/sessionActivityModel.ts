@@ -15,6 +15,7 @@ export type ActivityRow = {
   section: ActivitySectionId
   label: string
   status: ActivityStatus
+  cached?: boolean
   description?: string
   summary?: string
   toolUseId?: string
@@ -937,6 +938,7 @@ function buildWorkflowRows(run: WorkflowRun): ActivityRow[] {
         section: 'workflow',
         label: agent.label,
         status: workflowAgentStatus(agent),
+        cached: agent.cached,
         group: groupLabel,
         summary: agent.resultPreview,
         toolUseId: agent.agentId ? toAgentIdRef(agent.agentId) : undefined,

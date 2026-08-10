@@ -204,7 +204,7 @@ export function launchWorkflow(params: LaunchWorkflowParams): LaunchedWorkflow {
     const status = outcome.error ? 'failed' : 'completed'
 
     if (outcome.error) {
-      failWorkflowTask(
+      await failWorkflowTask(
         taskId,
         outcome.error,
         outcome.agentCount,
@@ -212,7 +212,7 @@ export function launchWorkflow(params: LaunchWorkflowParams): LaunchedWorkflow {
         setAppState,
       )
     } else {
-      completeWorkflowTask(
+      await completeWorkflowTask(
         taskId,
         outcome.result,
         outcome.agentCount,
@@ -239,11 +239,11 @@ export function launchWorkflow(params: LaunchWorkflowParams): LaunchedWorkflow {
       args,
       setAppState,
     })
-  })().catch(error => {
+  })().catch(async error => {
     batcher.cancel()
     const message = error instanceof Error ? error.message : String(error)
     logForDebugging(`Workflow ${workflowRunId} crashed: ${message}`)
-    failWorkflowTask(taskId, message, 0, [], setAppState)
+    await failWorkflowTask(taskId, message, 0, [], setAppState)
     enqueueWorkflowNotification({
       taskId,
       summary: meta.description,

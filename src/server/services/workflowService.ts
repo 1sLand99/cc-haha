@@ -10,22 +10,35 @@
  */
 
 import { createHash } from 'crypto'
+import { constants as fsConstants } from 'fs'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getClaudeTempDir } from '../../utils/permissions/filesystem.js'
 import { loadWorkflows } from '../../utils/workflows/discovery.js'
 import { areWorkflowsEnabled } from '../../utils/workflows/enabled.js'
+import { WORKFLOW_MAX_PROGRESS_ROWS } from '../../utils/workflows/constants.js'
 import {
   parseWorkflowScript,
+  renameWorkflowScript,
   usesBannedNondeterminism,
 } from '../../utils/workflows/meta.js'
+import {
+  resolveProjectWorkflowsDir,
+  saveWorkflowScript,
+} from '../../utils/workflows/save.js'
 import { compileWorkflowScript } from '../../utils/workflows/compile.js'
 import type {
+  WorkflowAgentEvent,
   WorkflowDefinition,
   WorkflowPhaseMeta,
   WorkflowProgressEvent,
 } from '../../utils/workflows/types.js'
 import { ApiError } from '../middleware/errorHandler.js'
+import {
+  sessionService,
+  type SessionTaskNotification,
+} from './sessionService.js'
 
 export type WorkflowDefinitionSummary = {
   name: string
@@ -86,6 +99,8 @@ export type ReconstructedRun = {
   endedAt?: number
   result?: string
   error?: string
+  /** Latest durable task snapshot; authoritative when present. */
+  progress?: WorkflowProgressEvent[]
   agents: Array<{
     agentId: string
     label: string
@@ -228,6 +243,26 @@ function stringsInValue(value: unknown): string[] {
   return Object.values(value).flatMap(stringsInValue)
 }
 
+// These names are consumed by the desktop before a prompt reaches the CLI.
+// Saving one would succeed on disk but the advertised `/<name>` entry could
+// never invoke the workflow in a new desktop session.
+const DESKTOP_RESERVED_WORKFLOW_NAMES = new Set([
+  'mcp',
+  'skills',
+  'save-workflow',
+  'help',
+  'status',
+  'cost',
+  'context',
+  'config',
+  'plugin',
+  'plugins',
+  'settings',
+  'memory',
+  'doctor',
+  'model',
+])
+
 class WorkflowService {
   private configDir(): string {
     return path.resolve(getClaudeConfigHomeDir())
@@ -305,34 +340,38 @@ class WorkflowService {
     }
   }
 
-  /**
-   * Save a script as a reusable `/name` command.
-   *
-   * Refuses to write through a symlink: the target directory is user-owned
-   * config, and following a link would place the file somewhere the caller
-   * did not choose.
-   */
+  /** Save a script with the same path and symlink rules as CLI `/workflows`. */
   async saveDefinition(params: {
     script: string
     scope: WorkflowSaveScope
     cwd?: string
+    name?: string
   }): Promise<{ name: string; filePath: string }> {
     this.assertEnabled()
-    const parsed = parseWorkflowScript(params.script)
+    let script = params.script
+    if (params.name !== undefined) {
+      if (DESKTOP_RESERVED_WORKFLOW_NAMES.has(params.name.trim().toLowerCase())) {
+        throw ApiError.badRequest(
+          `Workflow name is reserved by the desktop: ${params.name}`,
+        )
+      }
+      const renamed = renameWorkflowScript(script, params.name)
+      if ('error' in renamed) throw ApiError.badRequest(renamed.error)
+      script = renamed.script
+    }
+
+    const parsed = parseWorkflowScript(script)
     if ('error' in parsed) throw ApiError.badRequest(parsed.error)
     const compiled = compileWorkflowScript(parsed.scriptBody)
     if (!compiled.ok) throw ApiError.badRequest(compiled.error)
 
-    const dir =
-      params.scope === 'project'
-        ? path.join(params.cwd ?? process.cwd(), '.claude', 'workflows')
-        : path.join(this.configDir(), 'workflows')
-    const filePath = path.join(dir, `${parsed.meta.name}.js`)
-
-    await this.assertNotSymlink(filePath)
-    await fs.mkdir(dir, { recursive: true })
-    await fs.writeFile(filePath, params.script, 'utf8')
-    return { name: parsed.meta.name, filePath }
+    const saved = await saveWorkflowScript({
+      script,
+      scope: params.scope,
+      cwd: params.cwd,
+    })
+    if ('error' in saved) throw ApiError.badRequest(saved.error)
+    return saved
   }
 
   async deleteDefinition(
@@ -346,7 +385,7 @@ class WorkflowService {
     }
     const dir =
       scope === 'project'
-        ? path.join(cwd ?? process.cwd(), '.claude', 'workflows')
+        ? resolveProjectWorkflowsDir(cwd ?? process.cwd())
         : path.join(this.configDir(), 'workflows')
     const filePath = path.join(dir, `${name}.js`)
     await this.assertNotSymlink(filePath)
@@ -405,9 +444,14 @@ class WorkflowService {
     }
     if (byRunId.size === 0) return []
 
+    const sidecarModifiedAtByAgent = new Map<string, number>()
     for (const { dir } of sessionDirs) {
       const subagentsDir = path.join(dir, 'subagents')
-      await this.collectRunAgents(subagentsDir, byRunId)
+      await this.collectRunAgents(
+        subagentsDir,
+        byRunId,
+        sidecarModifiedAtByAgent,
+      )
 
       // Runs from before agents recorded their phase wrote their sidecars
       // into `subagents/workflows/<runId>/` instead. The directory name is
@@ -425,9 +469,48 @@ class WorkflowService {
         await this.collectRunAgents(
           path.join(legacyRoot, legacyRunId),
           byRunId,
+          sidecarModifiedAtByAgent,
           legacyRunId,
         )
       }
+    }
+
+    // Resume reuses the run id and leaves old sidecars on disk. Once the new
+    // attempt writes its first changed index, everything at or after that
+    // boundary must come from the new attempt; otherwise an agent deleted from
+    // the script survives as a stale tail. Older indices remain the cached
+    // prefix and are intentionally retained.
+    for (const run of byRunId.values()) {
+      const launchedAt = parseTimestamp(
+        lifecycle.launchesByRunId.get(run.runId)?.timestamp,
+      )
+      if (launchedAt === undefined) continue
+      const firstCurrentIndex = run.agents.reduce((first, agent) => {
+        const modifiedAt = sidecarModifiedAtByAgent.get(
+          `${run.runId}:${agent.agentIndex}`,
+        )
+        return modifiedAt !== undefined && modifiedAt >= launchedAt
+          ? Math.min(first, agent.agentIndex)
+          : first
+      }, Number.POSITIVE_INFINITY)
+      if (!Number.isFinite(firstCurrentIndex)) continue
+      run.agents = run.agents.filter(agent => {
+        if (agent.agentIndex < firstCurrentIndex) return true
+        return (
+          sidecarModifiedAtByAgent.get(`${run.runId}:${agent.agentIndex}`) ??
+          Number.NEGATIVE_INFINITY
+        ) >= launchedAt
+      })
+    }
+
+    const persistedProgress = await this.readPersistedProgress(
+      sessionId,
+      new Set(byRunId.keys()),
+      lifecycle.launchesByRunId,
+    )
+    for (const [runId, progress] of persistedProgress) {
+      const run = byRunId.get(runId)
+      if (run) run.progress = progress
     }
 
     for (const run of byRunId.values()) {
@@ -508,6 +591,96 @@ class WorkflowService {
   }
 
   /**
+   * Recover the exact final progress snapshot written by LocalWorkflowTask.
+   *
+   * Sidecars are the compatibility fallback, but cannot say whether an agent
+   * was replayed from the journal. The task notification points at the output
+   * JSON that already contains that fact. Only regular task output files for
+   * this exact session/task are accepted; transcript paths are user-owned.
+   */
+  private async readPersistedProgress(
+    sessionId: string,
+    runIds: Set<string>,
+    launchesByRunId: ReadonlyMap<string, PersistedWorkflowLaunch>,
+  ): Promise<Map<string, WorkflowProgressEvent[]>> {
+    let notifications: SessionTaskNotification[]
+    try {
+      notifications = await sessionService.getSessionTaskNotifications(sessionId)
+    } catch {
+      return new Map()
+    }
+
+    const byRunId = new Map<
+      string,
+      Array<{ notification: SessionTaskNotification; order: number }>
+    >()
+    notifications.forEach((notification, order) => {
+      const runId = notification.workflowRunId
+      if (!runId || !runIds.has(runId)) return
+      const launch = launchesByRunId.get(runId)
+      if (launch && !notificationMatchesWorkflowLaunch(notification, launch)) return
+      const candidates = byRunId.get(runId) ?? []
+      candidates.push({ notification, order })
+      byRunId.set(runId, candidates)
+    })
+
+    const result = new Map<string, WorkflowProgressEvent[]>()
+    for (const [runId, candidates] of byRunId) {
+      candidates.sort((a, b) => {
+        const byTime = notificationTime(b.notification) - notificationTime(a.notification)
+        return byTime || b.order - a.order
+      })
+      const latest = candidates[0]
+      if (latest) {
+        const progress = await this.readTaskOutputProgress(
+          sessionId,
+          runId,
+          latest.notification,
+        )
+        if (!progress.some(event => event.type === 'workflow_agent')) continue
+        result.set(runId, progress)
+      }
+    }
+    return result
+  }
+
+  private async readTaskOutputProgress(
+    sessionId: string,
+    runId: string,
+    notification: SessionTaskNotification,
+  ): Promise<WorkflowProgressEvent[]> {
+    if (!notification.outputFile) return []
+    const root = path.resolve(getClaudeTempDir())
+    const candidate = path.resolve(notification.outputFile)
+    if (!isExpectedTaskOutputPath(candidate, root, sessionId, notification.taskId)) {
+      return []
+    }
+
+    let handle: Awaited<ReturnType<typeof fs.open>> | undefined
+    try {
+      const realPath = await fs.realpath(candidate)
+      if (!isExpectedTaskOutputPath(realPath, root, sessionId, notification.taskId)) {
+        return []
+      }
+      const stats = await fs.lstat(candidate)
+      if (!stats.isFile() || stats.isSymbolicLink()) return []
+      handle = await fs.open(
+        candidate,
+        fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      )
+      const openedStats = await handle.stat()
+      if (!openedStats.isFile() || openedStats.size > 8 * 1024 * 1024) return []
+      const parsed = JSON.parse(await handle.readFile('utf8')) as unknown
+      if (!isRecord(parsed) || parsed.workflowRunId !== runId) return []
+      return sanitizeWorkflowProgress(parsed.workflowProgress)
+    } catch {
+      return []
+    } finally {
+      await handle?.close().catch(() => {})
+    }
+  }
+
+  /**
    * Add every workflow agent sidecar in `dir` to the run it belongs to.
    *
    * `fallbackRunId` covers legacy layouts where provenance came from the
@@ -517,6 +690,7 @@ class WorkflowService {
   private async collectRunAgents(
     dir: string,
     byRunId: Map<string, ReconstructedRun>,
+    sidecarModifiedAtByAgent: Map<string, number>,
     fallbackRunId?: string,
   ): Promise<void> {
     let entries: string[]
@@ -540,8 +714,15 @@ class WorkflowService {
           agentIndex: number
         }
       }
+      let modifiedAt: number
       try {
-        meta = JSON.parse(await fs.readFile(path.join(dir, entry), 'utf8'))
+        const filePath = path.join(dir, entry)
+        const [raw, stats] = await Promise.all([
+          fs.readFile(filePath, 'utf8'),
+          fs.stat(filePath),
+        ])
+        meta = JSON.parse(raw)
+        modifiedAt = stats.mtimeMs
       } catch {
         continue
       }
@@ -555,7 +736,8 @@ class WorkflowService {
       const agentId = entry.replace(/^agent-/, '').replace(/\.meta\.json$/, '')
       if (run.agents.some(agent => agent.agentId === agentId)) continue
       fallbackIndex += 1
-      run.agents.push({
+      const agentIndex = meta.workflow?.agentIndex ?? fallbackIndex
+      const agent: ReconstructedRun['agents'][number] = {
         agentId,
         label:
           meta.description ??
@@ -564,9 +746,25 @@ class WorkflowService {
         ...(meta.workflow?.phaseTitle
           ? { phaseTitle: meta.workflow.phaseTitle }
           : {}),
-        agentIndex: meta.workflow?.agentIndex ?? fallbackIndex,
+        agentIndex,
         state: 'start',
-      })
+      }
+      if (meta.workflow) {
+        const sidecarKey = `${runId}:${agentIndex}`
+        const existingIndex = run.agents.findIndex(
+          existing => existing.agentIndex === agentIndex,
+        )
+        if (existingIndex !== -1) {
+          const previousModifiedAt =
+            sidecarModifiedAtByAgent.get(sidecarKey) ?? Number.NEGATIVE_INFINITY
+          if (modifiedAt <= previousModifiedAt) continue
+          run.agents[existingIndex] = agent
+          sidecarModifiedAtByAgent.set(sidecarKey, modifiedAt)
+          continue
+        }
+        sidecarModifiedAtByAgent.set(sidecarKey, modifiedAt)
+      }
+      run.agents.push(agent)
     }
   }
 
@@ -990,5 +1188,133 @@ class WorkflowService {
     }
   }
 }
+
+function notificationTime(notification: SessionTaskNotification): number {
+  const parsed = Date.parse(notification.timestamp ?? '')
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function notificationMatchesWorkflowLaunch(
+  notification: SessionTaskNotification,
+  launch: PersistedWorkflowLaunch,
+): boolean {
+  if (
+    notification.taskId !== launch.taskId ||
+    notification.ownerAgentId !== launch.ownerAgentId
+  ) {
+    return false
+  }
+  if (launch.toolUseId && notification.toolUseId !== launch.toolUseId) {
+    return false
+  }
+  const launchAt = parseTimestamp(launch.timestamp)
+  const terminalAt = notificationTime(notification)
+  return launchAt === undefined || terminalAt === 0 || terminalAt >= launchAt
+}
+
+function isExpectedTaskOutputPath(
+  candidate: string,
+  root: string,
+  sessionId: string,
+  taskId: string,
+): boolean {
+  const relative = path.relative(root, candidate)
+  if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    return false
+  }
+  if (path.basename(taskId) !== taskId) return false
+  return (
+    path.basename(candidate) === `${taskId}.output` &&
+    path.basename(path.dirname(candidate)) === 'tasks' &&
+    path.basename(path.dirname(path.dirname(candidate))) === sessionId
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function safeInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined
+}
+
+function sanitizeWorkflowProgress(value: unknown): WorkflowProgressEvent[] {
+  if (!Array.isArray(value)) return []
+  const events = new Map<string, WorkflowProgressEvent>()
+
+  for (const raw of value.slice(-WORKFLOW_MAX_PROGRESS_ROWS)) {
+    if (!isRecord(raw)) continue
+    const index = safeInteger(raw.index)
+    if (index === undefined) continue
+
+    if (raw.type === 'workflow_phase' && typeof raw.title === 'string') {
+      events.set(`workflow_phase:${index}`, {
+        type: 'workflow_phase',
+        index,
+        title: raw.title,
+        ...(raw.kind === 'meta' || raw.kind === 'script' ? { kind: raw.kind } : {}),
+      })
+      continue
+    }
+
+    if (
+      raw.type !== 'workflow_agent' ||
+      typeof raw.label !== 'string' ||
+      (raw.state !== 'start' &&
+        raw.state !== 'progress' &&
+        raw.state !== 'done' &&
+        raw.state !== 'error')
+    ) {
+      continue
+    }
+    const event: Record<string, unknown> = {
+      type: 'workflow_agent',
+      index,
+      label: raw.label,
+      state: raw.state,
+    }
+    for (const key of AGENT_STRING_FIELDS) {
+      if (typeof raw[key] === 'string') event[key] = raw[key]
+    }
+    for (const key of AGENT_NUMBER_FIELDS) {
+      const number = safeInteger(raw[key])
+      if (number !== undefined) event[key] = number
+    }
+    for (const key of AGENT_BOOLEAN_FIELDS) {
+      if (typeof raw[key] === 'boolean') event[key] = raw[key]
+    }
+    if (raw.isolation === 'worktree' || raw.isolation === 'remote') {
+      event.isolation = raw.isolation
+    }
+    events.set(`workflow_agent:${index}`, event as WorkflowAgentEvent)
+  }
+
+  return [...events.values()]
+}
+
+const AGENT_STRING_FIELDS = [
+  'phaseTitle',
+  'agentType',
+  'model',
+  'agentId',
+  'error',
+  'promptPreview',
+  'resultPreview',
+  'lastToolName',
+] as const
+
+const AGENT_NUMBER_FIELDS = [
+  'phaseIndex',
+  'queuedAt',
+  'startedAt',
+  'lastProgressAt',
+  'durationMs',
+  'tokens',
+  'toolCalls',
+] as const
+
+const AGENT_BOOLEAN_FIELDS = ['cached', 'skipped', 'blocked'] as const
 
 export const workflowService = new WorkflowService()

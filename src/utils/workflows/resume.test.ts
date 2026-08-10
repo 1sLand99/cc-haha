@@ -4,6 +4,14 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import type { ToolUseContext } from '../../Tool.js'
+import {
+  buildSessionActivityModel,
+} from '../../../desktop/src/components/activity/sessionActivityModel.js'
+import { useChatStore } from '../../../desktop/src/stores/chatStore.js'
+import {
+  runsForSession,
+  useWorkflowStore,
+} from '../../../desktop/src/stores/workflowStore.js'
 import { createWorkflowHarness } from './harness.js'
 import { WorkflowJournal } from './journal.js'
 import type {
@@ -108,6 +116,120 @@ describe('workflow resume', () => {
       expect(liveRuns).toEqual([])
       expect(second.harness.getAgentCount()).toBe(2)
     } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('inserting an agent preserves only the unchanged prefix cache', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'wf-journal-'))
+    try {
+      const journal = new WorkflowJournal(join(dir, 'journal.jsonl'))
+      const first = makeHarness({ journal })
+      await first.harness.agent('A')
+      await first.harness.agent('B')
+      await first.harness.agent('C')
+
+      await journal.flush()
+      const snapshot = await journal.load()
+      const liveRuns: string[] = []
+      const resumed = makeHarness({
+        journal,
+        journalSnapshot: snapshot,
+        onRun: params => liveRuns.push(params.prompt),
+      })
+
+      await resumed.harness.agent('A')
+      await resumed.harness.agent('X')
+      await resumed.harness.agent('B')
+      await resumed.harness.agent('C')
+
+      expect(liveRuns).toEqual(['X', 'B', 'C'])
+      expect(
+        resumed.events
+          .filter(event => event.type === 'workflow_agent' && event.state === 'done')
+          .map(event => [event.label, event.cached === true]),
+      ).toEqual([
+        ['A', true],
+        ['X', false],
+        ['B', false],
+        ['C', false],
+      ])
+
+      // Carry the runtime's real events through the same WebSocket transition
+      // the desktop uses. Replaying the snapshot models reconnect without
+      // constructing the resulting store or Activity rows by hand.
+      const sessionId = 'session-cache-insertion'
+      const workflowRunId = 'wf_cache-insertion'
+      const handleServerMessage = useChatStore.getState().handleServerMessage
+      useWorkflowStore.setState({ runs: {} })
+      handleServerMessage(sessionId, {
+        type: 'system_notification',
+        subtype: 'task_started',
+        data: {
+          task_id: 'workflow-attempt-1',
+          task_type: 'local_workflow',
+          workflow_name: 'cache-insertion',
+          workflow_run_id: workflowRunId,
+        },
+      })
+      handleServerMessage(sessionId, {
+        type: 'system_notification',
+        subtype: 'task_notification',
+        data: {
+          task_id: 'workflow-attempt-1',
+          workflow_run_id: workflowRunId,
+          status: 'stopped',
+        },
+      })
+      handleServerMessage(sessionId, {
+        type: 'system_notification',
+        subtype: 'task_started',
+        data: {
+          task_id: 'workflow-attempt-2',
+          task_type: 'local_workflow',
+          workflow_name: 'cache-insertion',
+          workflow_run_id: workflowRunId,
+        },
+      })
+      for (const event of resumed.events) {
+        const message = {
+          type: 'system_notification' as const,
+          subtype: 'task_progress' as const,
+          data: {
+            task_id: 'workflow-attempt-2',
+            workflow_run_id: workflowRunId,
+            workflow_progress: [event],
+          },
+        }
+        handleServerMessage(sessionId, message)
+        handleServerMessage(sessionId, message)
+      }
+
+      const workflowRuns = runsForSession(
+        useWorkflowStore.getState(),
+        sessionId,
+      )
+      const activity = buildSessionActivityModel({
+        sessionId,
+        tasks: [],
+        completedAndDismissed: false,
+        backgroundTasks: [],
+        agentNotifications: [],
+        workflowRuns,
+      })
+      const agentRows = activity.sections.workflow.rows.filter(
+        row => !row.groupProgress,
+      )
+
+      expect(workflowRuns).toHaveLength(1)
+      expect(agentRows.map(row => [row.label, row.cached === true])).toEqual([
+        ['A', true],
+        ['X', false],
+        ['B', false],
+        ['C', false],
+      ])
+    } finally {
+      useWorkflowStore.setState({ runs: {} })
       await rm(dir, { recursive: true, force: true })
     }
   })

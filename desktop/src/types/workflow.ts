@@ -135,6 +135,8 @@ export type ReconstructedWorkflowRun = {
   endedAt?: number
   result?: string
   error?: string
+  /** Latest durable task snapshot, including resume-cache markers. */
+  progress?: WorkflowProgressEvent[]
   agents: Array<{
     agentId: string
     label: string

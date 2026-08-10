@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { parseWorkflowScript, usesBannedNondeterminism } from './meta.js'
+import {
+  parseWorkflowScript,
+  renameWorkflowScript,
+  usesBannedNondeterminism,
+} from './meta.js'
 
 describe('parseWorkflowScript', () => {
   test('extracts meta and leaves the body executable', () => {
@@ -75,6 +79,37 @@ describe('parseWorkflowScript', () => {
       "export const meta = { name: '../escape', description: 'b' }\n",
     )
     expect('error' in parsed && parsed.error).toContain('meta.name')
+  })
+
+  test('renames only the parsed meta.name while preserving the executable script', () => {
+    const script = [
+      'export const meta = {',
+      "  name: 'generated-audit',",
+      "  description: 'Audit routes named generated-audit',",
+      "  phases: [{ title: 'Scan' }],",
+      '}',
+      "return await agent('keep generated-audit in the prompt')",
+    ].join('\n')
+
+    const renamed = renameWorkflowScript(script, 'release-audit')
+
+    expect(renamed).not.toHaveProperty('error')
+    if ('error' in renamed) throw new Error(renamed.error)
+    expect(renamed.script).toContain("name: 'release-audit'")
+    expect(renamed.script).toContain("description: 'Audit routes named generated-audit'")
+    expect(renamed.script).toContain("agent('keep generated-audit in the prompt')")
+    expect(parseWorkflowScript(renamed.script)).toMatchObject({
+      meta: { name: 'release-audit', description: 'Audit routes named generated-audit' },
+    })
+  })
+
+  test('rejects a requested command name before rewriting the script', () => {
+    const renamed = renameWorkflowScript(
+      "export const meta = { name: 'audit', description: 'Audit routes' }\nreturn []",
+      '../escape',
+    )
+
+    expect('error' in renamed && renamed.error).toContain('meta.name')
   })
 
   test('reports TypeScript syntax with the plain-JavaScript hint', () => {

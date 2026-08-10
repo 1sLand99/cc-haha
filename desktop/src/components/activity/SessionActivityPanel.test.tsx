@@ -58,6 +58,7 @@ vi.mock('../../i18n', () => ({
       'session.activity.status.stopped': 'Stopped',
       'session.activity.status.idle': 'Idle',
       'session.activity.status.error': 'Error',
+      'workflows.agent.cached': 'Cached',
     }
 
     let text = translations[key] ?? key
@@ -911,6 +912,40 @@ describe('SessionActivityPanel', () => {
       screen.queryByRole('button', { name: /open run check response #2/i }),
     ).not.toBeInTheDocument()
     expect(screen.getByText('check response #2')).toBeInTheDocument()
+  })
+
+  it('labels a cached workflow agent explicitly instead of calling it merely completed', () => {
+    render(
+      <SessionActivityPanel
+        model={model({
+          sections: {
+            ...model().sections,
+            tasks: { id: 'tasks', title: 'Tasks', emptyLabel: 'No tasks', rows: [] },
+            workflow: {
+              id: 'workflow',
+              title: 'Workflow',
+              emptyLabel: 'No workflow running',
+              rows: [{
+                id: 'cached-a',
+                section: 'workflow',
+                label: 'A',
+                status: 'completed',
+                group: 'Run',
+                cached: true,
+                toolUseId: 'agent:a1',
+                openable: true,
+              }],
+            },
+          },
+        })}
+        open
+        onClose={vi.fn()}
+        onOpenSubagent={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Cached')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /open run a · cached/i })).toBeInTheDocument()
   })
 
   it('does not render when closed', () => {

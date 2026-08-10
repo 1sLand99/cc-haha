@@ -109,6 +109,8 @@ import { useSessionStore } from '../../stores/sessionStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useTabStore } from '../../stores/tabStore'
 import { useWorkspaceChatContextStore } from '../../stores/workspaceChatContextStore'
+import { useWorkflowStore } from '../../stores/workflowStore'
+import { workflowsApi } from '../../api/workflows'
 import { browserHost } from '../../lib/desktopHost/browserHost'
 import { settingsApi } from '../../api/settings'
 
@@ -204,6 +206,7 @@ describe('ChatInput file mentions', () => {
     useSessionStore.setState(initialSessionState, true)
     useTabStore.setState(initialTabState, true)
     useWorkspaceChatContextStore.setState(initialWorkspaceContextState, true)
+    useWorkflowStore.setState({ runs: {}, openRunId: null })
 
     useTabStore.setState({
       activeTabId: sessionId,
@@ -281,6 +284,7 @@ describe('ChatInput file mentions', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
     if (originalOffsetWidth) {
       Object.defineProperty(HTMLElement.prototype, 'offsetWidth', originalOffsetWidth)
@@ -2169,6 +2173,113 @@ describe('ChatInput file mentions', () => {
     expect(mocks.wsSend).not.toHaveBeenCalled()
     expect(await screen.findByTestId('model-selector-dropdown')).toHaveTextContent('Model selector opened')
     expect(getComposerText()).toBe('')
+  })
+
+  it('opens actionable /save-workflow help locally without creating a silent user turn', async () => {
+    useSettingsStore.setState({ chatSendBehavior: 'enter' })
+    render(<ChatInput />)
+
+    const beforeMessages = useChatStore.getState().sessions[sessionId]!.messages
+    setComposerText('/save-workflow', '/save-workflow'.length)
+    fireEvent.keyDown(getComposerElement(), { key: 'Enter' })
+
+    expect(mocks.wsSend).not.toHaveBeenCalled()
+    expect(await screen.findByText('Save workflow')).toBeInTheDocument()
+    expect(screen.getByText(/Complete a workflow in this session/)).toBeInTheDocument()
+    expect(useChatStore.getState().sessions[sessionId]!.messages).toBe(beforeMessages)
+    expect(getComposerText()).toBe('')
+  })
+
+  it('saves a completed runtime workflow through the composer command', async () => {
+    useSettingsStore.setState({ chatSendBehavior: 'enter' })
+    const runId = 'wf_save-flow-abc'
+    act(() => {
+      const handle = useChatStore.getState().handleServerMessage
+      handle(sessionId, {
+        type: 'system_notification',
+        subtype: 'task_started',
+        data: {
+          task_id: 'workflow-save-flow',
+          task_type: 'local_workflow',
+          workflow_name: 'generated-audit',
+          workflow_run_id: runId,
+        },
+      })
+      handle(sessionId, {
+        type: 'system_notification',
+        subtype: 'task_progress',
+        data: {
+          task_id: 'workflow-save-flow',
+          workflow_run_id: runId,
+          workflow_progress: [
+            { type: 'workflow_phase', index: 1, title: 'Scan' },
+            {
+              type: 'workflow_agent',
+              index: 1,
+              label: 'scan routes',
+              state: 'done',
+              phaseIndex: 1,
+              agentId: 'agent-save-flow',
+            },
+          ],
+        },
+      })
+      handle(sessionId, {
+        type: 'system_notification',
+        subtype: 'task_notification',
+        data: {
+          task_id: 'workflow-save-flow',
+          workflow_run_id: runId,
+          status: 'completed',
+        },
+      })
+    })
+
+    const script = [
+      "export const meta = { name: 'generated-audit', description: 'Audit routes' }",
+      "return await agent('scan routes')",
+    ].join('\n')
+    const getRun = vi.spyOn(workflowsApi, 'getRun').mockResolvedValue({
+      runId,
+      sessionId,
+      workflowName: 'generated-audit',
+      scriptPath: '/tmp/generated-audit.js',
+      startedAt: 1,
+      completedAgents: 1,
+      status: 'completed',
+      script,
+      agents: [],
+    })
+    const save = vi.spyOn(workflowsApi, 'save').mockResolvedValue({
+      ok: true,
+      name: 'release-audit',
+      filePath: '/repo/.claude/workflows/release-audit.js',
+    })
+
+    render(<ChatInput />)
+    setComposerText('/save-workflow', '/save-workflow'.length)
+    fireEvent.keyDown(getComposerElement(), { key: 'Enter' })
+
+    await waitFor(() => expect(getRun).toHaveBeenCalledWith(sessionId, runId))
+    fireEvent.change(
+      await screen.findByRole('textbox', { name: 'Command name' }),
+      { target: { value: 'release-audit' } },
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Save workflow' }))
+
+    await waitFor(() => {
+      expect(save).toHaveBeenCalledWith(
+        script,
+        'project',
+        '/repo',
+        'release-audit',
+      )
+    })
+    expect(await screen.findByText(/Start a new session and run \/release-audit/)).toBeInTheDocument()
+    expect(mocks.wsSend).not.toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({ type: 'user_message' }),
+    )
   })
 
   it('prioritizes active-session slash commands by command name when filtering', async () => {
