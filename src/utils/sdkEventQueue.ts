@@ -14,6 +14,7 @@ type TaskStartedEvent = {
   workflow_name?: string
   workflow_run_id?: string
   prompt?: string
+  owner_agent_id?: string
 }
 
 type TaskProgressEvent = {
@@ -34,6 +35,7 @@ type TaskProgressEvent = {
   // `${type}:${index}` then group by phaseIndex to rebuild the phase tree,
   // same fold as collectFromEvents + groupByPhase in PhaseProgress.tsx.
   workflow_progress?: SdkWorkflowProgress[]
+  owner_agent_id?: string
 }
 
 // Emitted when a foreground agent completes without being backgrounded.
@@ -56,6 +58,7 @@ type TaskNotificationSdkEvent = {
     tool_uses: number
     duration_ms: number
   }
+  owner_agent_id?: string
 }
 
 // Mirrors notifySessionStateChanged. The CCR bridge already receives this
@@ -161,6 +164,7 @@ export function emitTaskTerminatedSdk(
     outputFile?: string
     workflowRunId?: string
     usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
+    ownerAgentId?: string
   },
 ): void {
   enqueueSdkEvent({
@@ -173,6 +177,7 @@ export function emitTaskTerminatedSdk(
     summary: opts?.summary ?? '',
     workflow_run_id: opts?.workflowRunId,
     usage: opts?.usage,
+    ...(opts?.ownerAgentId ? { owner_agent_id: opts.ownerAgentId } : {}),
   })
 }
 

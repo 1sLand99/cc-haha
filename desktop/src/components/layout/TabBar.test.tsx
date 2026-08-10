@@ -106,6 +106,7 @@ function teamWorkbenchTimeline(sessionId: string): TeamWorkbenchTimeline {
         name: 'review-team',
         leadAgentId: 'lead',
         leadSessionId: sessionId,
+        createdAt: '2026-08-08T00:00:00.000Z',
         members: [
           { agentId: 'lead', role: 'Lead', status: 'running' },
           { agentId: 'security', role: 'Security reviewer', status: 'running' },
@@ -316,6 +317,59 @@ describe('TabBar', () => {
     })
 
     expect(screen.queryByRole('button', { name: /activity/i })).not.toBeInTheDocument()
+  })
+
+  it('routes Agent Teams tasks to the workbench while keeping lead TodoWrite activity', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+    const { useSessionStore } = await import('../../stores/sessionStore')
+    const { useTeamStore } = await import('../../stores/teamStore')
+    const sessionId = 'team-task-ownership-session'
+
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'Team lead', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    useSessionStore.setState({
+      sessions: [{ id: sessionId, title: 'Team lead', workDir: '/tmp/project', workDirExists: true }],
+    } as Partial<ReturnType<typeof useSessionStore.getState>>)
+    useChatStore.setState({
+      sessions: { [sessionId]: makeChatSession('idle') },
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+    useTeamStore.setState({
+      workbenchesBySession: {
+        [sessionId]: teamWorkbenchTimeline(sessionId),
+      },
+    } as Partial<ReturnType<typeof useTeamStore.getState>>)
+
+    const handleServerMessage = useChatStore.getState().handleServerMessage
+    handleServerMessage(sessionId, {
+      type: 'tool_use_complete',
+      toolName: 'TaskCreate',
+      toolUseId: 'team-task-create',
+      input: { subject: 'Review shared auth task' },
+    })
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    expect(screen.queryByRole('button', { name: /activity/i })).not.toBeInTheDocument()
+
+    act(() => {
+      handleServerMessage(sessionId, {
+        type: 'tool_use_complete',
+        toolName: 'TodoWrite',
+        toolUseId: 'lead-personal-todo',
+        input: {
+          todos: [{ content: 'Summarize team delivery', status: 'in_progress' }],
+        },
+      })
+    })
+
+    expect(screen.getByRole('button', { name: /activity/i })).toBeInTheDocument()
   })
 
   it('hides the activity button for output-only activity rows', async () => {

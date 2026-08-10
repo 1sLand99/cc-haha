@@ -11,6 +11,7 @@ const {
   handleTeamUpdateMock,
   handleTeamWorkbenchUpdatedMock,
   handleTeamDeletedMock,
+  fetchTeamForSessionMock,
   fetchSessionTasksMock,
   clearTasksMock,
   setTasksFromTodosMock,
@@ -36,6 +37,7 @@ const {
   handleTeamUpdateMock: vi.fn(),
   handleTeamWorkbenchUpdatedMock: vi.fn(),
   handleTeamDeletedMock: vi.fn(),
+  fetchTeamForSessionMock: vi.fn(async () => {}),
   fetchSessionTasksMock: vi.fn(),
   clearTasksMock: vi.fn(),
   setTasksFromTodosMock: vi.fn(),
@@ -110,6 +112,7 @@ vi.mock('./teamStore', () => ({
       handleTeamUpdate: handleTeamUpdateMock,
       handleTeamWorkbenchUpdated: handleTeamWorkbenchUpdatedMock,
       handleTeamDeleted: handleTeamDeletedMock,
+      fetchTeamForSession: fetchTeamForSessionMock,
     }),
   },
 }))
@@ -152,10 +155,12 @@ vi.mock('./cliTaskStore', () => ({
 
 import { sessionsApi } from '../api/sessions'
 import { useSettingsStore } from './settingsStore'
-import { runsForSession, useWorkflowStore } from './workflowStore'
+import { runsForOwner, runsForSession, useWorkflowStore } from './workflowStore'
 import {
   mapHistoryMessagesToUiMessages,
+  registerAgentRunSession,
   reconstructAgentNotifications,
+  reconstructRunActivityFromTranscript,
   stripGeneratedImageMetadataLines,
   type PerSessionState,
   useChatStore,
@@ -214,6 +219,18 @@ describe('stripGeneratedImageMetadataLines', () => {
 })
 
 describe('Agent Teams workbench invalidation', () => {
+  it('binds team creation to the lead session before workbench hydration', () => {
+    handleTeamCreatedMock.mockReset()
+
+    useChatStore.getState().handleServerMessage('lead-session', {
+      type: 'team_created',
+      teamName: 'visual-team',
+    })
+
+    expect(handleTeamCreatedMock).toHaveBeenCalledOnce()
+    expect(handleTeamCreatedMock).toHaveBeenCalledWith('visual-team', 'lead-session', undefined)
+  })
+
   it('routes the server invalidation through the team store', () => {
     handleTeamWorkbenchUpdatedMock.mockReset()
 
@@ -223,7 +240,34 @@ describe('Agent Teams workbench invalidation', () => {
     })
 
     expect(handleTeamWorkbenchUpdatedMock).toHaveBeenCalledOnce()
-    expect(handleTeamWorkbenchUpdatedMock).toHaveBeenCalledWith('visual-team')
+    expect(handleTeamWorkbenchUpdatedMock).toHaveBeenCalledWith('visual-team', undefined)
+  })
+
+  it('forwards Team incarnation identity and force-reconciles on reconnect', () => {
+    handleTeamCreatedMock.mockReset()
+    fetchTeamForSessionMock.mockClear()
+
+    useChatStore.getState().handleServerMessage('socket-session', {
+      type: 'team_created',
+      teamName: 'visual-team',
+      leadSessionId: 'lead-session',
+      incarnationId: 'visual-team:2000:lead-session',
+      createdAt: 2000,
+    })
+    useChatStore.getState().handleServerMessage('lead-session', {
+      type: 'connected',
+      sessionId: 'lead-session',
+    })
+
+    expect(handleTeamCreatedMock).toHaveBeenCalledWith(
+      'visual-team',
+      'lead-session',
+      {
+        incarnationId: 'visual-team:2000:lead-session',
+        createdAt: 2000,
+      },
+    )
+    expect(fetchTeamForSessionMock).toHaveBeenCalledWith('lead-session', { force: true })
   })
 })
 
@@ -1408,6 +1452,190 @@ describe('chatStore history mapping', () => {
     })
   })
 
+  it('restores only root-run background activity from joined session history', async () => {
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [
+        {
+          id: 'root-shell-use',
+          type: 'assistant',
+          timestamp: '2026-04-06T00:00:00.000Z',
+          content: [{
+            type: 'tool_use',
+            id: 'root-shell-tool',
+            name: 'Bash',
+            input: { command: 'bun test', run_in_background: true },
+          }],
+        },
+        {
+          id: 'root-shell-result',
+          type: 'tool_result',
+          timestamp: '2026-04-06T00:00:01.000Z',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'root-shell-tool',
+            content: 'Command running in background with ID: root-shell-task',
+          }],
+        },
+        {
+          id: 'child-shell-use',
+          type: 'assistant',
+          timestamp: '2026-04-06T00:00:02.000Z',
+          parentToolUseId: 'agent-parent',
+          content: [{
+            type: 'tool_use',
+            id: 'agent-parent/agent-child/child-shell-tool',
+            original_tool_use_id: 'child-shell-tool',
+            name: 'Bash',
+            input: { command: 'bun run child-check', run_in_background: true },
+          }],
+        },
+        {
+          id: 'child-shell-result',
+          type: 'tool_result',
+          timestamp: '2026-04-06T00:00:03.000Z',
+          parentToolUseId: 'agent-parent',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'agent-parent/agent-child/child-shell-tool',
+            content: 'Command running in background with ID: child-shell-task',
+          }],
+        },
+        {
+          id: 'child-shell-notification',
+          type: 'user',
+          timestamp: '2026-04-06T00:00:04.000Z',
+          parentToolUseId: 'agent-parent',
+          content: '<task-notification>\n<task-id>child-shell-task</task-id>\n<tool-use-id>agent-parent/agent-child/child-shell-tool</tool-use-id>\n<status>completed</status>\n<summary>Child checks passed</summary>\n</task-notification>',
+        },
+      ],
+      taskNotifications: [
+        {
+          taskId: 'root-shell-task',
+          toolUseId: 'root-shell-tool',
+          status: 'completed',
+          summary: 'Root checks passed',
+        },
+        {
+          taskId: 'child-shell-task',
+          toolUseId: 'child-shell-tool',
+          status: 'completed',
+          summary: 'Persisted child checks passed',
+        },
+      ],
+    })
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ messages: [] }),
+      },
+    })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.backgroundAgentTasks?.['root-shell-task']).toMatchObject({
+      taskId: 'root-shell-task',
+      toolUseId: 'root-shell-tool',
+      status: 'completed',
+    })
+    expect(session?.backgroundAgentTasks?.['child-shell-task']).toBeUndefined()
+    expect(session?.agentTaskNotifications?.['agent-parent/agent-child/child-shell-tool'])
+      .toBeUndefined()
+  })
+
+  it('does not assign an unjoined child notification to the root run', async () => {
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [{
+        id: 'root-agent-use',
+        type: 'assistant',
+        timestamp: '2026-04-06T00:00:00.000Z',
+        content: [{
+          type: 'tool_use',
+          id: 'root-agent-tool',
+          name: 'Agent',
+          input: { description: 'Run child checks' },
+        }],
+      }],
+      taskNotifications: [{
+        taskId: 'child-shell-task',
+        toolUseId: 'child-shell-tool',
+        status: 'completed',
+        summary: 'Child shell completed before its parent returned',
+      }],
+    })
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ messages: [] }),
+      },
+    })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.agentTaskNotifications).toEqual({})
+    expect(session?.backgroundAgentTasks).toEqual({})
+  })
+
+  it('uses persisted owner identity when root and child reuse the same tool id', async () => {
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [
+        {
+          id: 'root-shell-use',
+          type: 'assistant',
+          timestamp: '2026-04-06T00:00:00.000Z',
+          content: [{
+            type: 'tool_use',
+            id: 'Bash:0',
+            name: 'Bash',
+            input: { command: 'bun test', run_in_background: true },
+          }],
+        },
+        {
+          id: 'root-shell-result',
+          type: 'tool_result',
+          timestamp: '2026-04-06T00:00:01.000Z',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'Bash:0',
+            content: 'Command running in background with ID: root-shell-task',
+          }],
+        },
+      ],
+      taskNotifications: [
+        {
+          taskId: 'root-shell-task',
+          toolUseId: 'Bash:0',
+          status: 'completed',
+          summary: 'Root checks passed',
+        },
+        {
+          taskId: 'child-shell-task',
+          toolUseId: 'Bash:0',
+          ownerAgentId: 'child-agent',
+          status: 'failed',
+          summary: 'Child checks failed',
+        },
+      ],
+    })
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({ messages: [] }),
+      },
+    })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.backgroundAgentTasks?.['root-shell-task']).toMatchObject({
+      status: 'completed',
+      summary: 'Root checks passed',
+    })
+    expect(session?.backgroundAgentTasks?.['child-shell-task']).toBeUndefined()
+    expect(session?.agentTaskNotifications?.['Bash:0']).toMatchObject({
+      taskId: 'root-shell-task',
+      status: 'completed',
+    })
+  })
+
   function mockRestoredSubagentActivity() {
     vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
       messages: [
@@ -2092,6 +2320,150 @@ describe('chatStore history mapping', () => {
         result: 'Detailed result & next step',
         outputFile: 'C:\\Temp\\bg.output',
       },
+    })
+  })
+
+  it('reconstructs a background shell lifecycle from its own raw transcript', () => {
+    const restored = reconstructRunActivityFromTranscript([
+      {
+        id: 'shell-use-message',
+        type: 'assistant',
+        timestamp: '2026-04-06T00:00:00.000Z',
+        content: [{
+          type: 'tool_use',
+          id: 'shell-tool-1',
+          name: 'Bash',
+          input: {
+            command: 'bun run check:desktop',
+            description: 'Run desktop checks',
+            run_in_background: true,
+          },
+        }],
+      },
+      {
+        id: 'shell-result-message',
+        type: 'tool_result',
+        timestamp: '2026-04-06T00:00:01.000Z',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'shell-tool-1',
+          content: 'Command running in background with ID: shell-task-1. Output is being written to: /tmp/shell-task-1.output',
+        }],
+      },
+      {
+        id: 'shell-notification-message',
+        type: 'user',
+        timestamp: '2026-04-06T00:00:02.000Z',
+        content: '<task-notification>\n<task-id>shell-task-1</task-id>\n<tool-use-id>shell-tool-1</tool-use-id>\n<status>completed</status>\n<summary>Desktop checks passed</summary>\n<result>All suites passed</result>\n</task-notification>',
+      },
+    ])
+
+    expect(restored.agentTaskNotifications['shell-tool-1']).toMatchObject({
+      taskId: 'shell-task-1',
+      toolUseId: 'shell-tool-1',
+      status: 'completed',
+      timestamp: '2026-04-06T00:00:02.000Z',
+    })
+    expect(restored.backgroundAgentTasks['shell-task-1']).toEqual({
+      taskId: 'shell-task-1',
+      toolUseId: 'shell-tool-1',
+      status: 'completed',
+      description: 'Run desktop checks',
+      taskType: 'local_bash',
+      result: 'All suites passed',
+      summary: 'Desktop checks passed',
+      startedAt: Date.parse('2026-04-06T00:00:00.000Z'),
+      updatedAt: Date.parse('2026-04-06T00:00:02.000Z'),
+      outputFile: undefined,
+      workflowName: undefined,
+      prompt: undefined,
+      lastToolName: undefined,
+      usage: undefined,
+    })
+  })
+
+  it('recognizes manually backgrounded PowerShell from structured tool output', () => {
+    const restored = reconstructRunActivityFromTranscript([
+      {
+        id: 'powershell-use-message',
+        type: 'tool_use',
+        timestamp: '2026-04-06T00:00:00.000Z',
+        content: [{
+          type: 'tool_use',
+          id: 'powershell-tool-1',
+          name: 'PowerShell',
+          input: { command: 'npm test' },
+        }],
+      },
+      {
+        id: 'powershell-result-message',
+        type: 'tool_result',
+        timestamp: '2026-04-06T00:00:01.000Z',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'powershell-tool-1',
+          content: 'Command was manually backgrounded by user with ID: ignored-text-id. Output is being written to: C:\\Temp\\task.output',
+        }],
+        toolUseResult: { backgroundTaskId: 'powershell-task-1' },
+      },
+    ])
+
+    expect(restored.backgroundAgentTasks['powershell-task-1']).toMatchObject({
+      taskId: 'powershell-task-1',
+      toolUseId: 'powershell-tool-1',
+      status: 'running',
+      description: 'npm test',
+      taskType: 'local_bash',
+      startedAt: Date.parse('2026-04-06T00:00:00.000Z'),
+      updatedAt: Date.parse('2026-04-06T00:00:01.000Z'),
+    })
+  })
+
+  it('does not invent a background task from foreground shell output text', () => {
+    const restored = reconstructRunActivityFromTranscript([
+      {
+        id: 'foreground-shell-use',
+        type: 'assistant',
+        timestamp: '2026-04-06T00:00:00.000Z',
+        content: [{
+          type: 'tool_use',
+          id: 'foreground-shell-tool',
+          name: 'Bash',
+          input: { command: "printf 'Command running in background with ID: fake-task'" },
+        }],
+      },
+      {
+        id: 'foreground-shell-result',
+        type: 'tool_result',
+        timestamp: '2026-04-06T00:00:01.000Z',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'foreground-shell-tool',
+          content: 'Command running in background with ID: fake-task',
+        }],
+        toolUseResult: { stdout: 'Command running in background with ID: fake-task' },
+      },
+    ])
+
+    expect(restored.backgroundAgentTasks).toEqual({})
+  })
+
+  it('restores a killed shell notification as a stopped background task', () => {
+    const restored = reconstructRunActivityFromTranscript([{
+      id: 'shell-killed-notification',
+      type: 'user',
+      timestamp: '2026-04-06T00:00:02.000Z',
+      content: '<task-notification>\n<task-id>shell-task-1</task-id>\n<tool-use-id>shell-tool-1</tool-use-id>\n<status>killed</status>\n<summary>Shell task was stopped</summary>\n</task-notification>',
+    }])
+
+    expect(restored.agentTaskNotifications['shell-tool-1']).toMatchObject({
+      taskId: 'shell-task-1',
+      status: 'stopped',
+    })
+    expect(restored.backgroundAgentTasks['shell-task-1']).toMatchObject({
+      taskId: 'shell-task-1',
+      status: 'stopped',
+      summary: 'Shell task was stopped',
     })
   })
 
@@ -4483,6 +4855,195 @@ describe('chatStore history mapping', () => {
       result: '修复了异常处理并补充了回归覆盖。',
       outputFile: '/tmp/agent-output.txt',
     })
+  })
+
+  it('routes agent-owned task lifecycle events to the owning run instead of root', () => {
+    const runSessionId = '__subagent__test-session-1__root-agent'
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          messages: [{
+            id: 'nested-agent-use',
+            type: 'tool_use',
+            toolName: 'Agent',
+            toolUseId: 'root-agent/agent-a/nested-agent',
+            originalToolUseId: 'nested-agent',
+            input: { description: 'Nested review' },
+            parentToolUseId: 'root-agent',
+            timestamp: 1,
+          }],
+        }),
+        [runSessionId]: makeSession(),
+      },
+    })
+    const unregister = registerAgentRunSession(
+      TEST_SESSION_ID,
+      runSessionId,
+      ['agent-a'],
+    )
+
+    try {
+      for (const [subtype, status] of [
+        ['task_started', undefined],
+        ['task_progress', undefined],
+        ['task_notification', 'completed'],
+      ] as const) {
+        useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+          type: 'system_notification',
+          subtype,
+          data: {
+            task_id: 'nested-agent-task',
+            tool_use_id: 'nested-agent',
+            owner_agent_id: 'agent-a',
+            task_type: 'local_agent',
+            description: 'Nested review',
+            ...(status ? { status } : {}),
+          },
+        })
+      }
+    } finally {
+      unregister()
+    }
+
+    const rootSession = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(rootSession?.backgroundAgentTasks?.['nested-agent-task']).toBeUndefined()
+    expect(rootSession?.agentTaskNotifications?.['nested-agent']).toBeUndefined()
+    const runSession = useChatStore.getState().sessions[runSessionId]
+    expect(runSession?.backgroundAgentTasks?.['nested-agent-task']).toMatchObject({
+      status: 'completed',
+      toolUseId: 'nested-agent',
+    })
+    expect(runSession?.agentTaskNotifications?.['nested-agent']).toMatchObject({
+      status: 'completed',
+      toolUseId: 'nested-agent',
+    })
+  })
+
+  it('replays owner task events that arrive before the run identity is registered', () => {
+    const runSessionId = '__subagent__test-session-1__slow-agent'
+    useWorkflowStore.setState({ runs: {} })
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession(),
+        [runSessionId]: makeSession(),
+      },
+    })
+
+    for (const [subtype, status] of [
+      ['task_started', undefined],
+      ['task_progress', undefined],
+      ['task_notification', 'failed'],
+    ] as const) {
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'system_notification',
+        subtype,
+        data: {
+          task_id: 'fast-workflow-task',
+          tool_use_id: 'fast-workflow-tool',
+          owner_agent_id: 'slow-owner',
+          task_type: 'local_workflow',
+          workflow_name: 'fast-review',
+          description: 'Fast nested workflow',
+          workflow_progress: [{
+            type: 'workflow_agent',
+            index: 0,
+            label: 'Review fast path',
+            state: status ? 'error' : 'progress',
+            agentId: 'workflow-agent',
+          }],
+          ...(status ? { status } : {}),
+        },
+      })
+    }
+
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]
+        ?.backgroundAgentTasks?.['fast-workflow-task'],
+    ).toBeUndefined()
+    expect(
+      useChatStore.getState().sessions[runSessionId]
+        ?.backgroundAgentTasks?.['fast-workflow-task'],
+    ).toBeUndefined()
+    expect(runsForSession(useWorkflowStore.getState(), TEST_SESSION_ID)).toEqual([])
+    expect(
+      runsForOwner(useWorkflowStore.getState(), TEST_SESSION_ID, ['slow-owner']),
+    ).toMatchObject([{
+      taskId: 'fast-workflow-task',
+      workflowName: 'fast-review',
+      status: 'failed',
+    }])
+
+    const unregister = registerAgentRunSession(
+      TEST_SESSION_ID,
+      runSessionId,
+      ['slow-owner'],
+    )
+    try {
+      expect(
+        useChatStore.getState().sessions[runSessionId]
+          ?.backgroundAgentTasks?.['fast-workflow-task'],
+      ).toMatchObject({
+        status: 'failed',
+        workflowName: 'fast-review',
+      })
+    } finally {
+      unregister()
+      useWorkflowStore.setState({ runs: {} })
+    }
+  })
+
+  it('does not replay a reused logical Team owner across incarnations', () => {
+    const runSessionId = 'team-member:new-incarnation:worker'
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession(),
+        [runSessionId]: makeSession(),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'system_notification',
+      subtype: 'task_started',
+      data: {
+        task_id: 'old-team-task',
+        tool_use_id: 'old-team-tool',
+        owner_agent_id: 'worker@reused-team',
+        task_type: 'local_agent',
+        description: 'Old incarnation activity',
+      },
+    })
+
+    const unregister = registerAgentRunSession(
+      TEST_SESSION_ID,
+      runSessionId,
+      ['worker@reused-team'],
+      { ownerScopeId: 'new-incarnation' },
+    )
+    try {
+      expect(
+        useChatStore.getState().sessions[runSessionId]
+          ?.backgroundAgentTasks?.['old-team-task'],
+      ).toBeUndefined()
+
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'system_notification',
+        subtype: 'task_started',
+        data: {
+          task_id: 'new-team-task',
+          tool_use_id: 'new-team-tool',
+          owner_agent_id: 'worker@reused-team',
+          owner_scope_id: 'new-incarnation',
+          task_type: 'local_agent',
+          description: 'New incarnation activity',
+        },
+      })
+      expect(
+        useChatStore.getState().sessions[runSessionId]
+          ?.backgroundAgentTasks?.['new-team-task'],
+      ).toMatchObject({ description: 'New incarnation activity' })
+    } finally {
+      unregister()
+    }
   })
 
   it('tracks background agent task lifecycle without duplicating transcript cards', () => {

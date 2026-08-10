@@ -108,6 +108,25 @@ describe('Agent Teams workbench model', () => {
     expect(runningTaskForMember([fullOwner, bareOwner], member)?.id).toBe('1')
   })
 
+  it('does not treat a shared role label as a member ownership identity', () => {
+    const first: TeamMember = {
+      agentId: 'reviewer-a@team-a',
+      name: 'reviewer-a',
+      role: 'security-reviewer',
+      status: 'running',
+    }
+    const second: TeamMember = {
+      agentId: 'reviewer-b@team-a',
+      name: 'reviewer-b',
+      role: 'security-reviewer',
+      status: 'running',
+    }
+    const ambiguous = task('role-owned', 'in_progress', [], 'security-reviewer')
+
+    expect(taskOwnedByMember(ambiguous, first)).toBe(false)
+    expect(taskOwnedByMember(ambiguous, second)).toBe(false)
+  })
+
   it('assigns generated occupational characters and preserves unknown-member identity', () => {
     const member = (agentId: string, role: string): TeamMember => ({
       agentId,

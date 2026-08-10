@@ -3,6 +3,7 @@ import { sessionsApi } from '../api/sessions'
 import { dropSession as dropVirtualHeightSession } from '../components/chat/virtualHeightCache'
 import { destroyTerminalRuntime } from '../lib/terminalRuntime'
 import { useSessionRuntimeStore } from './sessionRuntimeStore'
+import { teamMemberSessionId } from '../types/team'
 
 const TAB_STORAGE_KEY = 'cc-haha-open-tabs'
 
@@ -36,6 +37,7 @@ export type Tab = {
   subagentTaskId?: string
   teamLeadSessionId?: string
   teamMemberAgentId?: string
+  teamIncarnationId?: string
   returnTabId?: string
 }
 
@@ -60,11 +62,23 @@ type TabStore = {
   openTerminalTab: (cwd?: string, terminalRuntimeId?: string) => string
   openWorkbenchTab: (sessionId: string, title?: string, origin?: WorkbenchTabOrigin) => string
   returnFromWorkbench: (tabId: string) => void
-  openSubagentTab: (sourceSessionId: string, toolUseId: string, title?: string, taskId?: string) => string
+  openSubagentTab: (
+    sourceSessionId: string,
+    toolUseId: string,
+    title?: string,
+    taskId?: string,
+    returnTabId?: string,
+  ) => string
   returnFromSubagent: (tabId: string) => void
   openTeamWorkbenchTab: (leadSessionId: string, title?: string) => string
   returnFromTeamWorkbench: (tabId: string) => void
-  openTeamMemberTab: (leadSessionId: string, agentId: string, title?: string, returnTabId?: string) => string
+  openTeamMemberTab: (
+    leadSessionId: string,
+    agentId: string,
+    title?: string,
+    returnTabId?: string,
+    incarnationId?: string,
+  ) => string
   returnFromTeamMember: (tabId: string) => void
   closeTab: (sessionId: string) => void
   setActiveTab: (sessionId: string) => void
@@ -229,7 +243,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
     get().closeTab(tabId)
   },
 
-  openSubagentTab: (sourceSessionId, toolUseId, title = 'SubAgent', taskId) => {
+  openSubagentTab: (sourceSessionId, toolUseId, title = 'SubAgent', taskId, returnTabId) => {
     const tabId = `${SUBAGENT_TAB_PREFIX}${sourceSessionId}__${toolUseId}`
     const { tabs } = get()
     const existing = tabs.find((tab) => tab.sessionId === tabId)
@@ -241,6 +255,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
       sourceSessionId,
       subagentToolUseId: toolUseId,
       ...(taskId ? { subagentTaskId: taskId } : {}),
+      ...(returnTabId ? { returnTabId } : {}),
     }
 
     set({
@@ -257,8 +272,9 @@ export const useTabStore = create<TabStore>((set, get) => ({
     const tab = get().tabs.find((current) => current.sessionId === tabId)
     if (tab?.type !== 'subagent') return
 
-    if (tab.sourceSessionId && get().tabs.some((current) => current.sessionId === tab.sourceSessionId)) {
-      get().setActiveTab(tab.sourceSessionId)
+    const returnTabId = tab.returnTabId ?? tab.sourceSessionId
+    if (returnTabId && get().tabs.some((current) => current.sessionId === returnTabId)) {
+      get().setActiveTab(returnTabId)
     }
     get().closeTab(tabId)
   },
@@ -295,8 +311,8 @@ export const useTabStore = create<TabStore>((set, get) => ({
     get().closeTab(tabId)
   },
 
-  openTeamMemberTab: (leadSessionId, agentId, title = 'Agent', returnTabId) => {
-    const tabId = `${TEAM_MEMBER_TAB_PREFIX}${agentId}`
+  openTeamMemberTab: (leadSessionId, agentId, title = 'Agent', returnTabId, incarnationId) => {
+    const tabId = teamMemberSessionId(agentId, incarnationId)
     const { tabs, activeTabId } = get()
     const resolvedReturnTabId = returnTabId ?? (
       activeTabId && tabs.some((tab) => tab.sessionId === activeTabId && tab.type === 'team')
@@ -311,6 +327,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
       sourceSessionId: leadSessionId,
       teamLeadSessionId: leadSessionId,
       teamMemberAgentId: agentId,
+      teamIncarnationId: incarnationId,
       returnTabId: resolvedReturnTabId,
     }
 

@@ -14,12 +14,15 @@ import { createTaskStateBase } from '../../Task.js'
 import { createAbortController } from '../../utils/abortController.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js'
+import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js'
 import {
   evictTaskOutput,
   getTaskOutputPath,
 } from '../../utils/task/diskOutput.js'
 import { PANEL_GRACE_MS, updateTaskState } from '../../utils/task/framework.js'
 import { WORKFLOW_MAX_PROGRESS_ROWS } from '../../utils/workflows/constants.js'
+import { getWorkflowTranscriptDir } from '../../utils/workflows/paths.js'
+import { asAgentId } from '../../types/ids.js'
 import {
   isDurableWorkflowEvent,
   type WorkflowPhaseMeta,
@@ -273,11 +276,25 @@ export function killWorkflowTask(
   taskId: string,
   setAppState: SetAppState,
 ): boolean {
-  const settled = settleWorkflowTask(taskId, setAppState, 'killed', {
-    notified: true,
+  const settled = settleWorkflowTask(taskId, setAppState, 'killed', {})
+  if (!settled) return false
+  void evictTaskOutput(taskId)
+  enqueueWorkflowNotification({
+    taskId,
+    summary: settled.summary ?? settled.description,
+    status: 'killed',
+    agentCount: settled.agentCount,
+    totalTokens: settled.totalTokens,
+    totalToolCalls: settled.totalToolCalls,
+    durationMs: Date.now() - settled.startTime,
+    toolUseId: settled.toolUseId,
+    transcriptDir: getWorkflowTranscriptDir(settled.workflowRunId),
+    scriptPath: settled.scriptPath,
+    workflowRunId: settled.workflowRunId,
+    args: settled.args,
+    setAppState,
   })
-  if (settled) void evictTaskOutput(taskId)
-  return settled !== null
+  return true
 }
 
 function abortWorkflowAgent(
@@ -344,19 +361,45 @@ export function enqueueWorkflowNotification(params: {
   setAppState: SetAppState
 }): void {
   let shouldEnqueue = false
+  let ownerAgentId: string | undefined
   updateTaskState<LocalWorkflowTaskState>(
     params.taskId,
     params.setAppState,
     task => {
       if (task.notified) return task
       shouldEnqueue = true
+      ownerAgentId = task.ownerAgentId
       return { ...task, notified: true }
     },
   )
   if (!shouldEnqueue) return
 
   const message = buildWorkflowNotification(params)
-  enqueuePendingNotification({ value: message, mode: 'task-notification' })
+  enqueuePendingNotification({
+    value: message,
+    mode: 'task-notification',
+    agentId: ownerAgentId ? asAgentId(ownerAgentId) : undefined,
+  })
+  // Root notifications are converted into SDK terminal events when print.ts
+  // drains the command. An agent-owned workflow notification is consumed by
+  // its parent loop, so it needs an explicitly owned SDK bookend here.
+  if (ownerAgentId) {
+    emitTaskTerminatedSdk(
+      params.taskId,
+      params.status === 'killed' ? 'stopped' : params.status,
+      {
+        toolUseId: params.toolUseId,
+        summary: params.summary,
+        outputFile: getTaskOutputPath(params.taskId),
+        usage: {
+          total_tokens: params.totalTokens,
+          tool_uses: params.totalToolCalls,
+          duration_ms: params.durationMs,
+        },
+        ownerAgentId,
+      },
+    )
+  }
 }
 
 /**

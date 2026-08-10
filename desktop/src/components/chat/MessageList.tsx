@@ -16,7 +16,7 @@ import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBlock } from './ToolCallBlock'
-import { ToolCallGroup } from './ToolCallGroup'
+import { ToolCallGroup, type OpenAgentRunPayload } from './ToolCallGroup'
 import type { ActivityStep } from './activityGroupModel'
 import { ToolResultBlock } from './ToolResultBlock'
 import { PermissionDialog } from './PermissionDialog'
@@ -1178,6 +1178,7 @@ type MessageListProps = {
   sessionId?: string | null
   compact?: boolean
   mobileLayout?: boolean
+  onOpenAgentRun?: (payload: OpenAgentRunPayload) => void
 }
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 48
@@ -1861,7 +1862,12 @@ const MeasuredRenderItem = memo(function MeasuredRenderItem({
   )
 })
 
-export function MessageList({ sessionId, compact = false, mobileLayout = false }: MessageListProps = {}) {
+export function MessageList({
+  sessionId,
+  compact = false,
+  mobileLayout = false,
+  onOpenAgentRun,
+}: MessageListProps = {}) {
   const activeTabId = useTabStore((s) => s.activeTabId)
   const resolvedSessionId = sessionId ?? activeTabId
   const isWorkspacePanelOpen = useWorkspacePanelStore((state) =>
@@ -1878,7 +1884,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
   const reloadHistory = useChatStore((s) => s.reloadHistory)
   const queueComposerPrefill = useChatStore((s) => s.queueComposerPrefill)
   const memberSessionTeam = useTeamStore((s) => (
-    resolvedSessionId && s.getMemberBySessionId(resolvedSessionId) ? s.activeTeam : null
+    resolvedSessionId ? s.getTeamByMemberSessionId(resolvedSessionId) : null
   ))
   const isMemberSession = Boolean(memberSessionTeam)
   const isSubagentSession = useTabStore((s) => s.tabs.some((tab) => (
@@ -3057,6 +3063,7 @@ export function MessageList({ sessionId, compact = false, mobileLayout = false }
         {item.kind === 'tool_group' ? (
           <ToolCallGroup
             sessionId={resolvedSessionId}
+            onOpenAgentRun={onOpenAgentRun}
             toolCalls={item.toolCalls}
             steps={item.steps}
             resultMap={toolResultMap}

@@ -12,8 +12,10 @@ import {
   activeRunForSession,
   groupRunPhases,
   runCompletion,
+  runsForOwner,
   runsForSession,
   useWorkflowStore,
+  workflowRunIdentity,
 } from './workflowStore'
 
 const SESSION = 'session-1'
@@ -68,6 +70,9 @@ describe('workflowStore', () => {
   })
 
   const store = () => useWorkflowStore.getState()
+  const rootRun = () => useWorkflowStore.getState().runs[
+    workflowRunIdentity(SESSION, undefined, TASK)
+  ]
 
   it('creates a run from task_started and tracks it for the session', () => {
     store().handleTaskEvent(SESSION, 'task_started', taskStarted())
@@ -177,7 +182,7 @@ describe('workflowStore', () => {
       progress([agentRow(1, 'done', { tokens: 400 })]),
     )
 
-    const run = useWorkflowStore.getState().runs[TASK]!
+    const run = rootRun()!
     const agents = run.progress.filter(row => row.type === 'workflow_agent')
     expect(agents).toHaveLength(1)
     expect(agents[0]).toMatchObject({ index: 1, state: 'done', tokens: 400 })
@@ -186,9 +191,9 @@ describe('workflowStore', () => {
 
   it('keeps the object identity stable when an event changes nothing', () => {
     store().handleTaskEvent(SESSION, 'task_started', taskStarted())
-    const before = useWorkflowStore.getState().runs[TASK]
+    const before = rootRun()
     store().handleTaskEvent(SESSION, 'task_progress', progress([]))
-    expect(useWorkflowStore.getState().runs[TASK]).toBe(before)
+    expect(rootRun()).toBe(before)
   })
 
   it('carries usage totals from the event', () => {
@@ -198,7 +203,7 @@ describe('workflowStore', () => {
       'task_progress',
       progress([agentRow(1, 'done')], { total_tokens: 1234, tool_uses: 7 }),
     )
-    expect(useWorkflowStore.getState().runs[TASK]).toMatchObject({
+    expect(rootRun()).toMatchObject({
       totalTokens: 1234,
       toolCalls: 7,
     })
@@ -215,7 +220,7 @@ describe('workflowStore', () => {
       result: '["ALPHA","BETA"]',
       summary: 'Dynamic workflow "route-survey" completed',
     })
-    const run = useWorkflowStore.getState().runs[TASK]!
+    const run = rootRun()!
     expect(run.status).toBe('completed')
     expect(run.result).toBe('["ALPHA","BETA"]')
     expect(run.endedAt).toBeGreaterThan(0)
@@ -234,7 +239,7 @@ describe('workflowStore', () => {
       'task_progress',
       progress([agentRow(2, 'progress')]),
     )
-    const run = useWorkflowStore.getState().runs[TASK]!
+    const run = rootRun()!
     expect(run.status).toBe('failed')
     expect(run.error).toBe('boom')
   })
@@ -251,7 +256,7 @@ describe('workflowStore', () => {
       summary:
         'Dynamic workflow "audit-routes" failed: deliberate failure after the probe settled',
     })
-    const run = useWorkflowStore.getState().runs[TASK]!
+    const run = rootRun()!
     expect(run.error).toContain('deliberate failure after the probe settled')
     // The run's own description must survive the notification.
     expect(run.description).toBe('Audit every route handler')
@@ -265,7 +270,7 @@ describe('workflowStore', () => {
       summary: 'Dynamic workflow "audit-routes" completed',
       result: '{}',
     })
-    const run = useWorkflowStore.getState().runs[TASK]!
+    const run = rootRun()!
     expect(run.description).toBe('Audit every route handler')
     // Boilerplate completion text is not an error.
     expect(run.error).toBeUndefined()
@@ -277,7 +282,7 @@ describe('workflowStore', () => {
       task_id: TASK,
       status: 'killed',
     })
-    expect(useWorkflowStore.getState().runs[TASK]?.status).toBe('stopped')
+    expect(rootRun()?.status).toBe('stopped')
   })
 
   it('clearSession drops only that session and closes an open run', () => {
@@ -304,7 +309,7 @@ describe('workflowStore', () => {
         agentRow(3, 'done'),
       ]),
     )
-    const run = useWorkflowStore.getState().runs[TASK]!
+    const run = rootRun()!
     const { phases, ungrouped } = groupRunPhases(run)
     expect(phases.map(phase => phase.title)).toEqual(['Review', 'Verify'])
     expect(phases[0]?.agents.map(agent => agent.index)).toEqual([1])
@@ -324,7 +329,7 @@ describe('workflowStore', () => {
         agentRow(4, 'start'),
       ]),
     )
-    expect(runCompletion(useWorkflowStore.getState().runs[TASK]!)).toBe(0.5)
+    expect(runCompletion(rootRun()!)).toBe(0.5)
   })
 
   it('recognises a workflow from workflow_progress even without task_type', () => {
@@ -335,17 +340,33 @@ describe('workflowStore', () => {
     )
     expect(runsForSession(useWorkflowStore.getState(), SESSION)).toHaveLength(1)
   })
+
+  it('does not collide identical task ids across sessions and transcript owners', () => {
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted())
+    store().handleTaskEvent(SESSION, 'task_started', taskStarted({
+      owner_agent_id: 'owner-a',
+    }))
+    store().handleTaskEvent('session-2', 'task_started', taskStarted())
+
+    expect(Object.keys(useWorkflowStore.getState().runs)).toHaveLength(3)
+    expect(runsForSession(useWorkflowStore.getState(), SESSION)).toHaveLength(1)
+    expect(runsForOwner(useWorkflowStore.getState(), SESSION, ['owner-a'])).toHaveLength(1)
+  })
 })
 
 describe('hydrateSession', () => {
   const RECONSTRUCTED = {
     runId: 'wf_06ee51bf-6b1',
+    taskId: 'w-history-1',
     workflowName: 'review-last-month',
+    status: 'completed' as const,
     startedAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_500,
+    endedAt: 1_700_000_000_500,
     agents: [
-      { agentId: 'a1', label: 'review:imagegen', phaseIndex: 1, phaseTitle: '维度审查', agentIndex: 1 },
-      { agentId: 'a2', label: 'review:security', phaseIndex: 1, phaseTitle: '维度审查', agentIndex: 2 },
-      { agentId: 'a3', label: 'verify:security', phaseIndex: 2, phaseTitle: '对抗验证', agentIndex: 3 },
+      { agentId: 'a1', label: 'review:imagegen', phaseIndex: 1, phaseTitle: '维度审查', agentIndex: 1, state: 'done' as const },
+      { agentId: 'a2', label: 'review:security', phaseIndex: 1, phaseTitle: '维度审查', agentIndex: 2, state: 'done' as const },
+      { agentId: 'a3', label: 'verify:security', phaseIndex: 2, phaseTitle: '对抗验证', agentIndex: 3, state: 'done' as const },
     ],
   }
 
@@ -377,7 +398,7 @@ describe('hydrateSession', () => {
     sessionRunsMock.mockResolvedValue({
       runs: [{
         ...RECONSTRUCTED,
-        agents: [{ agentId: 'a1', label: 'review:security', phaseIndex: 0, agentIndex: 1 }],
+        agents: [{ agentId: 'a1', label: 'review:security', phaseIndex: 0, agentIndex: 1, state: 'done' }],
       }],
     })
     return useWorkflowStore.getState().hydrateSession(SESSION).then(() => {
@@ -415,5 +436,75 @@ describe('hydrateSession', () => {
     sessionRunsMock.mockRejectedValue(new Error('offline'))
     await useWorkflowStore.getState().hydrateSession(SESSION)
     expect(runsForSession(useWorkflowStore.getState(), SESSION)).toHaveLength(0)
+  })
+
+  it('hydrates owned failures only into the matching synthetic agent session', async () => {
+    sessionRunsMock.mockResolvedValue({
+      runs: [
+        RECONSTRUCTED,
+        {
+          ...RECONSTRUCTED,
+          runId: 'wf_owned-failed',
+          taskId: 'w-owned-failed',
+          ownerAgentId: 'owner-fragment-a',
+          status: 'failed',
+          error: 'probe failed',
+          agents: [{
+            agentId: 'owned-worker',
+            label: 'owned worker',
+            phaseIndex: 1,
+            agentIndex: 1,
+            state: 'error',
+            error: 'probe failed',
+          }],
+        },
+      ],
+    })
+
+    await useWorkflowStore.getState().hydrateSession(SESSION)
+    expect(runsForSession(useWorkflowStore.getState(), SESSION)).toHaveLength(1)
+    expect(runsForOwner(useWorkflowStore.getState(), SESSION, ['owner-fragment-a'])).toHaveLength(0)
+
+    await useWorkflowStore.getState().hydrateOwnerSession(
+      SESSION,
+      ['owner-fragment-a'],
+      'subagent:synthetic',
+    )
+    const owned = runsForOwner(
+      useWorkflowStore.getState(),
+      SESSION,
+      ['owner-fragment-a'],
+    )
+    expect(owned).toHaveLength(1)
+    expect(owned[0]).toMatchObject({
+      sessionId: 'subagent:synthetic',
+      sourceSessionId: SESSION,
+      ownerAgentId: 'owner-fragment-a',
+      status: 'failed',
+      error: 'probe failed',
+    })
+    expect(owned[0]?.progress).toContainEqual(expect.objectContaining({
+      agentId: 'owned-worker',
+      state: 'error',
+    }))
+  })
+
+  it('can remap an independent member session root run into its synthetic tab', async () => {
+    sessionRunsMock.mockResolvedValue({ runs: [RECONSTRUCTED] })
+
+    await useWorkflowStore.getState().hydrateOwnerSession(
+      'independent-member-session',
+      ['member-agent'],
+      'team-member:synthetic',
+      { includeRoot: true },
+    )
+
+    const run = Object.values(useWorkflowStore.getState().runs)[0]
+    expect(run).toMatchObject({
+      sourceSessionId: 'independent-member-session',
+      sessionId: 'team-member:synthetic',
+      status: 'completed',
+    })
+    expect(run?.ownerAgentId).toBeUndefined()
   })
 })

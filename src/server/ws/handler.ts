@@ -311,6 +311,7 @@ function trackCliBackgroundTaskLifecycle(
         existing.toolUseId = lifecycle.toolUseId ?? existing.toolUseId
         if (lifecycle.remoteSessionId) existing.remoteSessionId = lifecycle.remoteSessionId
         if (lifecycle.description) existing.description = lifecycle.description
+        if (lifecycle.ownerAgentId) existing.ownerAgentId = lifecycle.ownerAgentId
       } else {
         sessionAgentTasks.set(lifecycle.taskId, {
           taskId: lifecycle.taskId,
@@ -320,6 +321,7 @@ function trackCliBackgroundTaskLifecycle(
             ? { remoteSessionId: lifecycle.remoteSessionId }
             : {}),
           ...(lifecycle.description ? { description: lifecycle.description } : {}),
+          ...(lifecycle.ownerAgentId ? { ownerAgentId: lifecycle.ownerAgentId } : {}),
           stopIntent: false,
           stopRequested: false,
           localStopConfirmed: false,
@@ -2115,6 +2117,7 @@ function emitAuthoritativeAgentStopped(
       tool_use_id: current.toolUseId,
       task_type: current.taskType,
       ...(current.description ? { description: current.description } : {}),
+      ...(current.ownerAgentId ? { owner_agent_id: current.ownerAgentId } : {}),
       status: 'stopped',
       summary: current.description
         ? `${current.description} stopped`
@@ -3284,6 +3287,7 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
         // The same applies to independent non-Agent task lifecycle after Stop:
         // Activity still needs the event, but chat must remain idle.
         if (
+          cliMsg.owner_agent_id ||
           cliMsg.task_type === 'dream' ||
           sessionStopRequested.has(sessionId) ||
           agentStopRequestedSessions.has(sessionId) ||
@@ -3307,7 +3311,7 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
           message: cliMsg.message || cliMsg.summary || cliMsg.description || 'Task in progress',
           data: cliMsg,
         }
-        if (!hasLiveUserTurnForClient(sessionId)) return [notification]
+        if (cliMsg.owner_agent_id || !hasLiveUserTurnForClient(sessionId)) return [notification]
         return [
           notification,
           {

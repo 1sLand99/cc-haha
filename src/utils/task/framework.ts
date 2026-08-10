@@ -96,6 +96,12 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
             messages: existing.messages,
             diskLoaded: existing.diskLoaded,
             pendingMessages: existing.pendingMessages,
+            ownerAgentId:
+              'ownerAgentId' in existing
+                ? existing.ownerAgentId
+                : 'ownerAgentId' in task
+                  ? task.ownerAgentId
+                  : undefined,
           }
         : task
     return { ...prev, tasks: { ...prev.tasks, [task.id]: merged } }
@@ -126,6 +132,9 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
         ? (task.workflowRunId as string | undefined)
         : undefined,
     prompt: 'prompt' in task ? (task.prompt as string) : undefined,
+    ...('ownerAgentId' in task && task.ownerAgentId
+      ? { owner_agent_id: task.ownerAgentId as string }
+      : {}),
   })
 }
 

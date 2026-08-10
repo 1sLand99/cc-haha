@@ -229,6 +229,64 @@ describe('background task notification persistence', () => {
     }])
   })
 
+  it('keeps root and multiple child terminals with the same leaf tool id distinct', async () => {
+    const sessionId = crypto.randomUUID()
+    const projectDir = path.join(configDir, 'projects', '-tmp-owned-terminals')
+    await fs.mkdir(projectDir, { recursive: true })
+    await fs.writeFile(
+      path.join(projectDir, `${sessionId}.jsonl`),
+      `${JSON.stringify({
+        type: 'session-meta',
+        isMeta: true,
+        workDir: '/tmp/owned-terminals',
+        timestamp: '2026-08-10T00:00:00.000Z',
+      })}\n`,
+      'utf8',
+    )
+    const service = new SessionService()
+
+    await service.appendSessionTaskNotification(sessionId, {
+      taskId: 'root-task',
+      toolUseId: 'Agent:0',
+      status: 'completed',
+      timestamp: '2026-08-10T00:00:01.000Z',
+    })
+    await service.appendSessionTaskNotification(sessionId, {
+      taskId: 'child-a-task',
+      toolUseId: 'Agent:0',
+      ownerAgentId: 'child-a',
+      status: 'failed',
+      timestamp: '2026-08-10T00:00:02.000Z',
+    })
+    await service.appendSessionTaskNotification(sessionId, {
+      taskId: 'child-b-task',
+      toolUseId: 'Agent:0',
+      ownerAgentId: 'child-b',
+      status: 'stopped',
+      timestamp: '2026-08-10T00:00:03.000Z',
+    })
+
+    expect(await service.getSessionTaskNotifications(sessionId)).toEqual([
+      expect.objectContaining({
+        taskId: 'root-task',
+        toolUseId: 'Agent:0',
+        status: 'completed',
+      }),
+      expect.objectContaining({
+        taskId: 'child-a-task',
+        toolUseId: 'Agent:0',
+        ownerAgentId: 'child-a',
+        status: 'failed',
+      }),
+      expect.objectContaining({
+        taskId: 'child-b-task',
+        toolUseId: 'Agent:0',
+        ownerAgentId: 'child-b',
+        status: 'stopped',
+      }),
+    ])
+  })
+
   it('normalizes and persists one terminal SDK event for multiple observers', async () => {
     const append = spyOn(sessionService, 'appendSessionTaskNotification').mockResolvedValue()
     const sdkEvent = {
@@ -242,6 +300,7 @@ describe('background task notification persistence', () => {
       summary: 'Agent completed',
       result: 'All checks passed',
       output_file: '/tmp/agent-task-1.output',
+      owner_agent_id: 'parent-agent',
       timestamp: '2026-07-18T00:01:00.000Z',
     }
 
@@ -260,6 +319,7 @@ describe('background task notification persistence', () => {
       summary: 'Agent completed',
       result: 'All checks passed',
       outputFile: '/tmp/agent-task-1.output',
+      ownerAgentId: 'parent-agent',
       timestamp: '2026-07-18T00:01:00.000Z',
     })
   })

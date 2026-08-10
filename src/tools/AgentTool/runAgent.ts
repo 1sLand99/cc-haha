@@ -308,6 +308,7 @@ export async function* runAgent({
   worktreePath,
   description,
   spawningToolUseId,
+  ownerAgentId,
   persistedAgentType,
   alreadyPersistedMessageCount,
   workflow,
@@ -367,6 +368,8 @@ export async function* runAgent({
    * metadata so resume can re-attach to the original Agent card instead of
    * the resuming tool's own call. */
   spawningToolUseId?: string
+  /** Parent agent that owns this run's task lifecycle. Undefined means root. */
+  ownerAgentId?: string
   /** Stable upstream identity for a resumed agent. A named teammate may use
    * the general-purpose runtime definition after its original definition is
    * no longer active, but its transcript metadata must keep the teammate name
@@ -820,6 +823,7 @@ export async function* runAgent({
     ...(worktreePath && { worktreePath }),
     ...(description && { description }),
     ...(spawningToolUseId && { toolUseId: spawningToolUseId }),
+    ...(ownerAgentId && { ownerAgentId }),
     ...(workflow && { workflow }),
   }).catch(_err => logForDebugging(`Failed to write agent metadata: ${_err}`))
 

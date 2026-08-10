@@ -19,6 +19,7 @@ async function run(
     agent?: (params: WorkflowAgentRunParams) => Promise<unknown>
     args?: unknown
     abortController?: AbortController
+    ownerAgentId?: ToolUseContext['agentId']
   } = {},
 ) {
   const prepared = prepareWorkflowScript(script)
@@ -31,6 +32,7 @@ async function run(
   const outcome = await executeWorkflowScript({
     vmScript: prepared.vmScript,
     toolUseContext: {
+      agentId: options.ownerAgentId,
       abortController,
       options: { mainLoopModel: 'test-model' },
     } as unknown as ToolUseContext,
@@ -250,6 +252,22 @@ describe('executeWorkflowScript', () => {
 })
 
 describe('workflow agent provenance', () => {
+  test('forwards a nested workflow owner to every worker run', async () => {
+    const owners: Array<string | undefined> = []
+    await run(
+      `${META}await agent('owned worker')`,
+      {
+        ownerAgentId: 'parent-agent' as ToolUseContext['agentId'],
+        agent: async (params) => {
+          owners.push(params.ownerAgentId)
+          return 'ok'
+        },
+      },
+    )
+
+    expect(owners).toEqual(['parent-agent'])
+  })
+
   test('stamps every agent with the run, name and phase it belongs to', async () => {
     // This is the only record of a run's shape once the process exits — the
     // desktop rebuilds a finished run's phases from it. It shipped with

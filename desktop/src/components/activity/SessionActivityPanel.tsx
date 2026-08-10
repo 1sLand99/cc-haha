@@ -17,6 +17,9 @@ export type OpenSubagentPayload = {
   taskId?: string
   toolUseId: string
   title: string
+  teamName?: string
+  teamMemberName?: string
+  teamStartedAt?: number
 }
 
 type SessionActivityPanelPlacement = 'overlay' | 'rail'
@@ -502,6 +505,9 @@ function ActivityRowView({
           ...(row.taskId ? { taskId: row.taskId } : {}),
           toolUseId: row.toolUseId!,
           title: row.label,
+          ...(row.teamName ? { teamName: row.teamName } : {}),
+          ...(row.teamMemberName ? { teamMemberName: row.teamMemberName } : {}),
+          ...(row.teamStartedAt !== undefined ? { teamStartedAt: row.teamStartedAt } : {}),
         })}
         className={`${interactiveRowClassName} ${stopButton ? 'flex-1' : 'w-full'} ${row.group ? 'pl-3' : ''}`}
       >

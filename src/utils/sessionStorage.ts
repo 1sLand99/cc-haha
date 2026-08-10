@@ -264,6 +264,9 @@ function getAgentMetadataPath(agentId: AgentId): string {
 
 export type AgentMetadata = {
   agentType: string
+  /** Agent whose transcript owns this run's lifecycle. Absent for root runs
+   * and for metadata written before lifecycle ownership was persisted. */
+  ownerAgentId?: string
   /** Per-invocation Agent tool model override. Retained across follow-ups. */
   model?: ModelAlias
   /** Worktree path if the agent was spawned with isolation: "worktree" */

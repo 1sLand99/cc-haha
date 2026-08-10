@@ -296,7 +296,7 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
   const hasNewMessage = Boolean(
     previousSnapshot && latestMessage && previousSnapshot.messages.at(-1)?.id !== latestMessage.id,
   )
-  const selectMember = (member: TeamMember) => openMemberSession(member, snapshot.team)
+  const selectMember = (member: TeamMember) => openMemberSession(member, snapshot.team, snapshot)
 
   return (
     <section

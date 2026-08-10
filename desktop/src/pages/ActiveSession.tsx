@@ -14,7 +14,7 @@ import {
 import { useSessionStore } from '../stores/sessionStore'
 import { useChatStore } from '../stores/chatStore'
 import { useCLITaskStore } from '../stores/cliTaskStore'
-import { useTeamStore } from '../stores/teamStore'
+import { teamTaskWindowsForSnapshot, useTeamStore } from '../stores/teamStore'
 import { useWorkspacePanelStore } from '../stores/workspacePanelStore'
 import {
   TERMINAL_PANEL_DEFAULT_HEIGHT,
@@ -32,7 +32,10 @@ import { getWorktreeDisplayName, WorktreeDetails } from '../components/chat/Work
 import { ComputerUsePermissionModal } from '../components/chat/ComputerUsePermissionModal'
 import { WorkbenchPanel } from '../components/workbench/WorkbenchPanel'
 import { AgentTeamsStrip } from '../components/agentTeams/AgentTeamsSummary'
-import { SessionActivityPanel } from '../components/activity/SessionActivityPanel'
+import {
+  SessionActivityPanel,
+  type OpenSubagentPayload,
+} from '../components/activity/SessionActivityPanel'
 import { buildSessionActivityModel, hasVisibleSessionActivity } from '../components/activity/sessionActivityModel'
 import { runsForSession, useWorkflowStore } from '../stores/workflowStore'
 import { TerminalSettings } from './TerminalSettings'
@@ -344,6 +347,9 @@ export function ActiveSession() {
   const agentTeamsSnapshot = useTeamStore((s) => activeTabId
     ? s.workbenchesBySession[activeTabId]?.snapshots.at(-1)
     : undefined)
+  const activeTeamStartedAt = useTeamStore((s) => activeTabId
+    ? s.activeTeamStartedAtBySession[activeTabId]
+    : undefined)
   const fetchTeamForSession = useTeamStore((s) => s.fetchTeamForSession)
   const [sessionGitInfo, setSessionGitInfo] = useState<{
     sessionId: string
@@ -515,11 +521,19 @@ export function ActiveSession() {
   const activityModel = useMemo(() => {
     if (!activeTabId) return null
     const includeCliTasks = trackedTaskSessionId === activeTabId
+    const teamTaskWindows = teamTaskWindowsForSnapshot(agentTeamsSnapshot, activeTeamStartedAt)
 
     return buildSessionActivityModel({
       sessionId: activeTabId,
       messages,
+      // cliTaskStore is explicitly loaded from the session-id list, so these
+      // are the lead's own tasks even if this session later creates a team.
+      // The shared team DAG is reconstructed from neither this list nor the
+      // transcript; it stays in the workbench and is projected by owner on a
+      // member run. TodoWrite also remains run-local.
       tasks: includeCliTasks ? cliTasks : [],
+      taskScope: 'team-session',
+      teamTaskWindows,
       completedAndDismissed: includeCliTasks ? cliTasksCompletedAndDismissed : false,
       isForegroundTurnActive: chatState !== 'idle',
       backgroundTasks,
@@ -529,6 +543,8 @@ export function ActiveSession() {
     })
   }, [
     activeTabId,
+    activeTeamStartedAt,
+    agentTeamsSnapshot,
     agentTaskNotifications,
     backgroundTasks,
     cliTasks,
@@ -586,8 +602,28 @@ export function ActiveSession() {
     closeActivityPanel(activeTabId)
   }, [activeTabId, closeActivityPanel, isActivityPanelOpen, showRightPanel])
 
-  const handleOpenSubagentRun = useCallback((payload: { sessionId: string; taskId?: string; toolUseId: string; title: string }) => {
-    useTabStore.getState().openSubagentTab(payload.sessionId, payload.toolUseId, payload.title, payload.taskId)
+  const handleOpenSubagentRun = useCallback((payload: OpenSubagentPayload) => {
+    if (
+      payload.teamName &&
+      payload.teamMemberName &&
+      payload.teamStartedAt !== undefined
+    ) {
+      void useTeamStore.getState().openMemberFromActivity(
+        payload.sessionId,
+        payload.teamName,
+        payload.teamMemberName,
+        payload.teamStartedAt,
+      )
+      return
+    }
+
+    const targetSessionId = useTabStore.getState().openSubagentTab(
+      payload.sessionId,
+      payload.toolUseId,
+      payload.title,
+      payload.taskId,
+    )
+    useActivityPanelStore.getState().open(targetSessionId)
   }, [])
   const handleOpenTeamMember = useCallback((member: TeamMember) => {
     useTeamStore.getState().openMemberSession(member)

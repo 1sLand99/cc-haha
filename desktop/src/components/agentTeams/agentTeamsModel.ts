@@ -204,7 +204,6 @@ function memberNames(member: TeamMember): string[] {
     member.agentId,
     member.agentId.split('@')[0] ?? '',
     member.name ?? '',
-    member.role,
   ].filter(Boolean)
 }
 

@@ -273,7 +273,7 @@ export const goldenScenarios: GoldenScenario[] = [
   },
   {
     id: 'task-lifecycle',
-    description: 'Background task frames drive the task cards the desktop and adapters both render.',
+    description: 'Detached task frames update Activity without reviving an idle foreground turn.',
     messages: [
       { type: 'system', subtype: 'task_started', task_id: 'task_golden', description: 'build the thing' },
       { type: 'system', subtype: 'task_progress', task_id: 'task_golden', progress: 'halfway' },

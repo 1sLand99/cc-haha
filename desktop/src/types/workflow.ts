@@ -49,6 +49,11 @@ export type WorkflowRunStatus = 'running' | 'completed' | 'failed' | 'stopped'
 /** One workflow run as the desktop knows it, live or just finished. */
 export type WorkflowRun = {
   taskId: string
+  /** Root session that owns persisted artifacts and server events. */
+  sourceSessionId: string
+  /** Agent transcript that launched this run; absent means root. */
+  ownerAgentId?: string
+  /** Session/tab currently rendering the run (synthetic for agent detail). */
   sessionId: string
   runId?: string
   workflowName: string
@@ -89,6 +94,7 @@ export type WorkflowRunSummary = {
   scriptPath: string
   startedAt: number
   completedAgents: number
+  status: WorkflowRunStatus | 'unknown'
 }
 
 export type WorkflowRunDetail = WorkflowRunSummary & {
@@ -120,13 +126,23 @@ export function isWorkflowAgentEvent(
  */
 export type ReconstructedWorkflowRun = {
   runId: string
+  taskId: string
+  ownerAgentId?: string
   workflowName: string
+  status: WorkflowRunStatus
   startedAt: number
+  updatedAt: number
+  endedAt?: number
+  result?: string
+  error?: string
   agents: Array<{
     agentId: string
     label: string
     phaseIndex: number
     phaseTitle?: string
     agentIndex: number
+    state: WorkflowAgentRunState
+    error?: string
+    skipped?: boolean
   }>
 }

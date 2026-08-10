@@ -1757,6 +1757,7 @@ export const SDKTaskNotificationMessageSchema = lazySchema(() =>
         duration_ms: z.number(),
       })
       .optional(),
+    owner_agent_id: z.string().optional(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
   }),
@@ -1779,6 +1780,7 @@ export const SDKTaskStartedMessageSchema = lazySchema(() =>
       ),
     workflow_run_id: z.string().optional(),
     prompt: z.string().optional(),
+    owner_agent_id: z.string().optional(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
   }),
@@ -1814,6 +1816,7 @@ export const SDKTaskProgressMessageSchema = lazySchema(() =>
     last_tool_name: z.string().optional(),
     summary: z.string().optional(),
     workflow_run_id: z.string().optional(),
+    owner_agent_id: z.string().optional(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
   }),

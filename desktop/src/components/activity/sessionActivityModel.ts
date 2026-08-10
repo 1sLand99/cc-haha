@@ -29,6 +29,11 @@ export type ActivityRow = {
   taskId?: string
   taskType?: BackgroundAgentTask['taskType']
   workflowName?: string
+  /** Persisted Agent Teams launch identity for routing this row to the
+   * incarnation-scoped member run instead of the ordinary subagent endpoint. */
+  teamName?: string
+  teamMemberName?: string
+  teamStartedAt?: number
   dismissKey?: string
   outputFile?: string
   usage?: BackgroundAgentTaskUsage
@@ -58,6 +63,21 @@ export type SessionActivityModel = {
 export type BuildSessionActivityModelInput = {
   sessionId: string
   messages?: UIMessage[]
+  /**
+   * Session transcripts can contain forwarded child-tool activity. A session
+   * owns only root messages, while an agent detail transcript owns the
+   * parent-linked messages forwarded for that agent run.
+   */
+  runScope?: 'session' | 'agent'
+  /**
+   * Agent Teams coordinates through one shared task list. In that scope the
+   * caller supplies the member-owned projection via `tasks`; Task* transcript
+   * events must not recreate the whole shared list in this run.
+   */
+  taskScope?: 'run' | 'team' | 'team-session'
+  /** Explicit lifecycle windows cover the live gap before TeamCreate appears
+   * in history and truncated transcripts that no longer contain that call. */
+  teamTaskWindows?: Array<{ startedAt: number; endedAt?: number }>
   tasks: CLITask[]
   completedAndDismissed: boolean
   isForegroundTurnActive?: boolean
@@ -301,33 +321,101 @@ function collectToolResults(
   return resultsByToolUseId
 }
 
-function collectSubagentCreatedTaskIds(messages: UIMessage[]): Set<string> {
-  const taskIds = new Set<string>()
-  const resultsByToolUseId = collectToolResults(messages)
-
-  for (const message of messages) {
-    if (
-      message.type !== 'tool_use' ||
-      message.toolName !== 'TaskCreate' ||
-      !message.parentToolUseId
-    ) {
-      continue
-    }
-
-    const result = resultsByToolUseId.get(message.toolUseId)
-    if (!result || result.isError) continue
-    const createdTask = parseCreatedTaskResult(result.content)
-    if (createdTask) taskIds.add(createdTask.id)
-  }
-
-  return taskIds
-}
-
-function keepSessionLevelTaskMessage(message: UIMessage): boolean {
+function keepSessionRunMessage(message: UIMessage): boolean {
   return !(
     (message.type === 'tool_use' || message.type === 'tool_result') &&
     message.parentToolUseId
   )
+}
+
+function projectMessagesToRun(messages: UIMessage[], runScope: 'session' | 'agent'): UIMessage[] {
+  return runScope === 'agent' ? messages : messages.filter(keepSessionRunMessage)
+}
+
+function isWithinTeamTaskWindow(
+  timestamp: number,
+  windows: Array<{ startedAt: number; endedAt?: number }>,
+): boolean {
+  return windows.some((window) => (
+    timestamp >= window.startedAt &&
+    (window.endedAt === undefined || timestamp <= window.endedAt)
+  ))
+}
+
+function explicitSuccessFlag(value: unknown): boolean | undefined {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = explicitSuccessFlag(item)
+      if (nested !== undefined) return nested
+    }
+    return undefined
+  }
+  if (isRecordValue(value)) {
+    if (typeof value.success === 'boolean') return value.success
+    if ('content' in value) return explicitSuccessFlag(value.content)
+    if ('text' in value) return explicitSuccessFlag(value.text)
+    return undefined
+  }
+  if (typeof value !== 'string') return undefined
+  const text = value.trim()
+  if (!text.startsWith('{') && !text.startsWith('[')) return undefined
+  try {
+    return explicitSuccessFlag(JSON.parse(text))
+  } catch {
+    return undefined
+  }
+}
+
+function teamLifecycleSucceeded(
+  result: Extract<UIMessage, { type: 'tool_result' }> | undefined,
+): boolean {
+  if (!result || result.isError) return false
+  return explicitSuccessFlag(result.content) !== false
+}
+
+function projectMessagesToTaskScope(
+  messages: UIMessage[],
+  taskScope: 'run' | 'team' | 'team-session',
+  teamTaskWindows: Array<{ startedAt: number; endedAt?: number }>,
+): UIMessage[] {
+  if (taskScope === 'run') return messages
+
+  const sharedTaskToolUseIds = new Set<string>()
+  const resultsByToolUseId = collectToolResults(messages)
+  let transcriptTeamActive: boolean | undefined
+  for (const message of messages) {
+    if (taskScope === 'team-session' && message.type === 'tool_use') {
+      const lifecycleSucceeded = teamLifecycleSucceeded(
+        resultsByToolUseId.get(message.toolUseId),
+      )
+      if (message.toolName === 'TeamCreate' && lifecycleSucceeded) transcriptTeamActive = true
+      if (message.toolName === 'TeamDelete' && lifecycleSucceeded) transcriptTeamActive = false
+    }
+    if (
+      message.type === 'tool_use' &&
+      (message.toolName === 'TaskCreate' || message.toolName === 'TaskUpdate') &&
+      (
+        taskScope === 'team' ||
+        (
+          transcriptTeamActive === undefined
+            ? isWithinTeamTaskWindow(message.timestamp, teamTaskWindows)
+            : transcriptTeamActive
+        )
+      )
+    ) {
+      sharedTaskToolUseIds.add(message.toolUseId)
+    }
+  }
+
+  return messages.filter((message) => {
+    if (
+      message.type === 'tool_use' &&
+      (message.toolName === 'TaskCreate' || message.toolName === 'TaskUpdate')
+    ) {
+      return !sharedTaskToolUseIds.has(message.toolUseId)
+    }
+    return message.type !== 'tool_result' || !sharedTaskToolUseIds.has(message.toolUseId)
+  })
 }
 
 /**
@@ -510,6 +598,9 @@ function buildAgentRowsFromMessages(messages: UIMessage[]): ActivityRow[] {
 
     const result = resultsByToolUseId.get(message.toolUseId)
     const resultText = result ? stripAgentMetadata(extractTextContent(result.content)) : ''
+    const input = isRecordValue(message.input) ? message.input : {}
+    const teamName = stringField(input, 'team_name')
+    const teamMemberName = stringField(input, 'name')
     rows.push({
       id: message.toolUseId,
       section: 'subagents',
@@ -524,6 +615,9 @@ function buildAgentRowsFromMessages(messages: UIMessage[]): ActivityRow[] {
       summary: resultText ? compactText(resultText) : undefined,
       toolUseId: message.toolUseId,
       taskType: 'local_agent',
+      ...(teamName ? { teamName } : {}),
+      ...(teamMemberName ? { teamMemberName } : {}),
+      ...(teamName && teamMemberName ? { teamStartedAt: message.timestamp } : {}),
       updatedAt: result?.timestamp ?? message.timestamp,
       openable: true,
     })
@@ -691,17 +785,21 @@ function buildHistoricalTasksRow(groups: TaskTurnRows[]): ActivityRow | null {
   }
 }
 
-function buildTaskRowsFromMessages(messages: UIMessage[], liveTasks: CLITask[]): ActivityRow[] {
-  const subagentCreatedTaskIds = collectSubagentCreatedTaskIds(messages)
-  const sessionMessages = messages.filter(keepSessionLevelTaskMessage)
-  const deletedTaskIds = collectDeletedTaskIds(messages)
-  const resultsByToolUseId = collectToolResults(sessionMessages)
+function buildTaskRowsFromMessages(
+  runMessages: UIMessage[],
+  liveTasks: CLITask[],
+  taskScope: 'run' | 'team' | 'team-session',
+  teamTaskWindows: Array<{ startedAt: number; endedAt?: number }>,
+): ActivityRow[] {
+  const taskMessages = projectMessagesToTaskScope(runMessages, taskScope, teamTaskWindows)
+  const deletedTaskIds = collectDeletedTaskIds(taskMessages)
+  const resultsByToolUseId = collectToolResults(taskMessages)
   const isSessionTaskRow = (row: ActivityRow) => row.taskId
-    ? !deletedTaskIds.has(row.taskId) && !subagentCreatedTaskIds.has(row.taskId)
+    ? !deletedTaskIds.has(row.taskId)
     : true
   // 任务列表要等 tool_result 到达后才异步刷新，这中间 liveTasks 里还留着已删的任务
   const liveRows = liveTasks.map(buildTaskRow).filter(isSessionTaskRow)
-  const taskTurnRows = splitMessagesIntoTurns(sessionMessages)
+  const taskTurnRows = splitMessagesIntoTurns(taskMessages)
     .map((turn) => {
       const builtRows = buildTaskRowsFromTurnMessages(turn.messages, resultsByToolUseId)
       return {
@@ -885,7 +983,13 @@ function buildOutputRow(key: string, outputFile: string): ActivityRow {
 export function buildSessionActivityModel(input: BuildSessionActivityModelInput): SessionActivityModel {
   const sections = createEmptySections()
   let badgeCount = 0
-  const taskRows = buildTaskRowsFromMessages(input.messages ?? [], input.tasks)
+  const runMessages = projectMessagesToRun(input.messages ?? [], input.runScope ?? 'session')
+  const taskRows = buildTaskRowsFromMessages(
+    runMessages,
+    input.tasks,
+    input.taskScope ?? 'run',
+    input.teamTaskWindows ?? [],
+  )
   sections.tasks.rows = input.isForegroundTurnActive === false
     ? sealUnfinishedTaskRows(taskRows)
     : taskRows
@@ -921,7 +1025,7 @@ export function buildSessionActivityModel(input: BuildSessionActivityModelInput)
   const dismissedNotificationTaskIds = new Set<string>()
   const visibleBackgroundTaskIds = new Set<string>()
 
-  for (const row of buildAgentRowsFromMessages(input.messages ?? [])) {
+  for (const row of buildAgentRowsFromMessages(runMessages)) {
     subagentRowsByKey.set(row.id, mergeSubagentRow(subagentRowsByKey.get(row.id), row))
   }
 

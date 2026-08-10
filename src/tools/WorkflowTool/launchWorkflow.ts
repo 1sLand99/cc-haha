@@ -331,6 +331,7 @@ function createProgressBatcher(params: {
       summary: params.summary,
       workflowRunId: task.workflowRunId,
       workflowProgress: task.workflowProgress.filter(isDurableWorkflowEvent),
+      ownerAgentId: task.ownerAgentId,
     })
   }
 

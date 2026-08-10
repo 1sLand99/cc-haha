@@ -114,6 +114,30 @@ describe('tabStore', () => {
     expect(useTabStore.getState().tabs.map((tab) => tab.sessionId)).toEqual(['session-a', 'session-b'])
   })
 
+  it('returns a nested subagent to the agent tab that opened it', () => {
+    useTabStore.getState().openTab('session-root', 'Root session')
+    const parentTabId = useTabStore.getState().openSubagentTab(
+      'session-root',
+      'agent-a',
+      'Agent A',
+    )
+    const nestedTabId = useTabStore.getState().openSubagentTab(
+      'session-root',
+      'agent-a/worker-a/agent-b',
+      'Agent B',
+      undefined,
+      parentTabId,
+    )
+
+    useTabStore.getState().returnFromSubagent(nestedTabId)
+
+    expect(useTabStore.getState().activeTabId).toBe(parentTabId)
+    expect(useTabStore.getState().tabs.map((tab) => tab.sessionId)).toEqual([
+      'session-root',
+      parentTabId,
+    ])
+  })
+
   it('closes a subagent tab even when its source session is gone', () => {
     useTabStore.getState().openTab('session-a', 'Session A')
     const tabId = useTabStore.getState().openSubagentTab('session-missing', 'tool-1', 'SubAgent run')
@@ -210,6 +234,29 @@ describe('tabStore', () => {
 
     expect(useTabStore.getState().activeTabId).toBe(workbenchTabId)
     expect(useTabStore.getState().tabs.some((tab) => tab.sessionId === memberTabId)).toBe(false)
+  })
+
+  it('isolates the same member id across Team incarnations', () => {
+    const oldTabId = useTabStore.getState().openTeamMemberTab(
+      'shared-lead',
+      'reviewer@same-name',
+      'Old reviewer',
+      undefined,
+      'old-incarnation',
+    )
+    const newTabId = useTabStore.getState().openTeamMemberTab(
+      'shared-lead',
+      'reviewer@same-name',
+      'New reviewer',
+      undefined,
+      'new-incarnation',
+    )
+
+    expect(newTabId).not.toBe(oldTabId)
+    expect(useTabStore.getState().tabs.filter((tab) => tab.type === 'team-member')).toEqual([
+      expect.objectContaining({ sessionId: oldTabId, teamIncarnationId: 'old-incarnation' }),
+      expect.objectContaining({ sessionId: newTabId, teamIncarnationId: 'new-incarnation' }),
+    ])
   })
 
   it('does not let async tab restore overwrite tabs opened while restore is in flight', async () => {

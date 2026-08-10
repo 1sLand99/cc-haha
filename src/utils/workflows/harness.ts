@@ -297,6 +297,7 @@ export function createWorkflowHarness(
           toolUseContext,
           canUseTool,
           runId,
+          ownerAgentId: toolUseContext.agentId,
           // Written to the agent's sidecar before it starts, so a finished
           // run can be rebuilt from disk long after the progress stream is
           // gone. Nothing else persists which phase an agent belonged to.

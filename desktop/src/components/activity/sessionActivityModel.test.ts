@@ -391,6 +391,37 @@ describe('buildSessionActivityModel', () => {
     expect(model.badgeCount).toBe(1)
   })
 
+  it('preserves Agent Teams launch identity on an Agent activity row', () => {
+    const model = buildSessionActivityModel({
+      sessionId: 'team-agent-session',
+      messages: [{
+        id: 'team-agent-tool',
+        type: 'tool_use',
+        toolName: 'Agent',
+        toolUseId: 'team-agent-tool',
+        input: {
+          team_name: 'review-team',
+          name: 'ui-reviewer',
+          description: 'Review ownership UI',
+        },
+        timestamp: 1,
+      }],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.subagents.rows).toEqual([
+      expect.objectContaining({
+        id: 'team-agent-tool',
+        teamName: 'review-team',
+        teamMemberName: 'ui-reviewer',
+        teamStartedAt: 1,
+      }),
+    ])
+  })
+
   it('restores task rows from the latest TodoWrite message', () => {
     const model = buildSessionActivityModel({
       sessionId: 'session-1',
@@ -664,7 +695,7 @@ describe('buildSessionActivityModel', () => {
     expect(model.badgeCount).toBe(1)
   })
 
-  it('keeps parent-linked SubAgent tasks out of the session task section', () => {
+  it('does not confuse a main task with a child task that has the same list-local id', () => {
     const model = buildSessionActivityModel({
       sessionId: 'session-1',
       messages: [
@@ -698,7 +729,7 @@ describe('buildSessionActivityModel', () => {
           toolName: 'TaskCreate',
           toolUseId: 'agent-tool-call/child-task-create-call',
           originalToolUseId: 'child-task-create-call',
-          input: { subject: '审查最近七天全部提交' },
+          input: { subject: '子代理内部检查' },
           parentToolUseId: 'agent-tool-call',
           timestamp: 1003,
         },
@@ -707,7 +738,7 @@ describe('buildSessionActivityModel', () => {
           type: 'tool_result',
           toolUseId: 'agent-tool-call/child-task-create-call',
           originalToolUseId: 'child-task-create-call',
-          content: 'Task #2 created successfully: 审查最近七天全部提交',
+          content: 'Task #1 created successfully: 子代理内部检查',
           isError: false,
           parentToolUseId: 'agent-tool-call',
           timestamp: 1004,
@@ -715,7 +746,6 @@ describe('buildSessionActivityModel', () => {
       ],
       tasks: [
         task({ id: '1', subject: '审查最近七天全部 Git 提交' }),
-        task({ id: '2', subject: '审查最近七天全部提交' }),
       ],
       completedAndDismissed: false,
       backgroundTasks: [],
@@ -729,6 +759,37 @@ describe('buildSessionActivityModel', () => {
       }),
     ])
     expect(model.badgeCount).toBe(2)
+  })
+
+  it('does not let a child deletion remove a main task with the same list-local id', () => {
+    const model = buildSessionActivityModel({
+      sessionId: 'session-1',
+      messages: [
+        {
+          id: 'child-task-delete',
+          type: 'tool_use',
+          toolName: 'TaskUpdate',
+          toolUseId: 'agent-tool-call/child-task-delete-call',
+          originalToolUseId: 'child-task-delete-call',
+          input: { taskId: '1', status: 'deleted' },
+          parentToolUseId: 'agent-tool-call',
+          timestamp: 1000,
+        },
+        {
+          ...successfulTaskUpdateResult('agent-tool-call/child-task-delete-call', '1', 1001, 'deleted'),
+          parentToolUseId: 'agent-tool-call',
+        },
+      ],
+      tasks: [task({ id: '1', subject: '主会话验收' })],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.tasks.rows).toEqual([
+      expect.objectContaining({ id: '1', label: '主会话验收' }),
+    ])
+    expect(model.badgeCount).toBe(1)
   })
 
   it('does not restore parent-linked SubAgent TodoWrite rows as session tasks', () => {
@@ -754,6 +815,289 @@ describe('buildSessionActivityModel', () => {
 
     expect(model.sections.tasks.rows).toEqual([])
     expect(model.badgeCount).toBe(0)
+  })
+
+  it('keeps parent-linked TodoWrite rows in an agent run', () => {
+    const model = buildSessionActivityModel({
+      sessionId: 'agent-1',
+      runScope: 'agent',
+      messages: [{
+        id: 'child-todo',
+        type: 'tool_use',
+        toolName: 'TodoWrite',
+        toolUseId: 'agent-tool-call/child-todo-call',
+        originalToolUseId: 'child-todo-call',
+        input: {
+          todos: [{ content: '子代理内部检查项', status: 'in_progress' }],
+        },
+        parentToolUseId: 'agent-tool-call',
+        timestamp: 1000,
+      }],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.tasks.rows).toEqual([
+      expect.objectContaining({ label: '子代理内部检查项', status: 'in_progress' }),
+    ])
+    expect(model.badgeCount).toBe(1)
+  })
+
+  it('uses explicit member tasks and TodoWrite without rebuilding shared team Task events', () => {
+    const model = buildSessionActivityModel({
+      sessionId: 'team-member:agent-1',
+      runScope: 'agent',
+      taskScope: 'team',
+      messages: [
+        {
+          id: 'shared-task-create',
+          type: 'tool_use',
+          toolName: 'TaskCreate',
+          toolUseId: 'team-agent/shared-task-create-call',
+          input: { subject: '其他成员的共享任务' },
+          parentToolUseId: 'team-agent',
+          timestamp: 1000,
+        },
+        {
+          id: 'shared-task-create-result',
+          type: 'tool_result',
+          toolUseId: 'team-agent/shared-task-create-call',
+          content: 'Task #9 created successfully: 其他成员的共享任务',
+          isError: false,
+          parentToolUseId: 'team-agent',
+          timestamp: 1001,
+        },
+        {
+          id: 'shared-task-delete',
+          type: 'tool_use',
+          toolName: 'TaskUpdate',
+          toolUseId: 'team-agent/shared-task-delete-call',
+          input: { taskId: '1', status: 'deleted' },
+          parentToolUseId: 'team-agent',
+          timestamp: 1002,
+        },
+        {
+          ...successfulTaskUpdateResult('team-agent/shared-task-delete-call', '1', 1003, 'deleted'),
+          parentToolUseId: 'team-agent',
+        },
+        {
+          id: 'member-todo',
+          type: 'tool_use',
+          toolName: 'TodoWrite',
+          toolUseId: 'team-agent/member-todo-call',
+          input: {
+            todos: [{ content: '成员自己的检查项', status: 'in_progress' }],
+          },
+          parentToolUseId: 'team-agent',
+          timestamp: 1004,
+        },
+      ],
+      tasks: [task({ id: '1', subject: '分配给当前成员的任务' })],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.tasks.rows).toEqual([
+      expect.objectContaining({ label: '成员自己的检查项', status: 'in_progress' }),
+      expect.objectContaining({ id: '1', label: '分配给当前成员的任务', status: 'pending' }),
+    ])
+    expect(model.sections.tasks.rows).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: '其他成员的共享任务' }),
+    ]))
+    expect(model.badgeCount).toBe(2)
+  })
+
+  it('filters shared tasks only inside a successful TeamCreate to TeamDelete lifecycle', () => {
+    const taskCall = (id: string, subject: string, timestamp: number): UIMessage[] => [{
+      id: `${id}-use`,
+      type: 'tool_use',
+      toolName: 'TaskCreate',
+      toolUseId: id,
+      input: { subject },
+      timestamp,
+    }, {
+      id: `${id}-result`,
+      type: 'tool_result',
+      toolUseId: id,
+      content: `Task #${id} created successfully: ${subject}`,
+      isError: false,
+      timestamp: timestamp + 1,
+    }]
+    const model = buildSessionActivityModel({
+      sessionId: 'team-lifecycle-session',
+      taskScope: 'team-session',
+      // The workbench can close a little after TeamDelete succeeds. Once the
+      // transcript has an authoritative lifecycle marker, it must win over
+      // this still-open discovery window.
+      teamTaskWindows: [{ startedAt: 1500 }],
+      messages: [
+        ...taskCall('1', 'Keep the pre-team task', 1000),
+        {
+          id: 'team-create',
+          type: 'tool_use',
+          toolName: 'TeamCreate',
+          toolUseId: 'team-create-call',
+          input: { team_name: 'review-team' },
+          timestamp: 2000,
+        },
+        {
+          id: 'team-create-result',
+          type: 'tool_result',
+          toolUseId: 'team-create-call',
+          content: { team_name: 'review-team' },
+          isError: false,
+          timestamp: 2001,
+        },
+        ...taskCall('2', 'Hide the shared team task', 3000),
+        {
+          id: 'team-delete',
+          type: 'tool_use',
+          toolName: 'TeamDelete',
+          toolUseId: 'team-delete-call',
+          input: { team_name: 'review-team' },
+          timestamp: 4000,
+        },
+        {
+          id: 'team-delete-result',
+          type: 'tool_result',
+          toolUseId: 'team-delete-call',
+          content: { team_name: 'review-team' },
+          isError: false,
+          timestamp: 4001,
+        },
+        ...taskCall('3', 'Keep the post-team task', 5000),
+      ],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.tasks.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Keep the pre-team task' }),
+      expect.objectContaining({ label: 'Keep the post-team task' }),
+    ]))
+    expect(model.sections.tasks.rows).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Hide the shared team task' }),
+    ]))
+  })
+
+  it('does not enter team task scope after a failed TeamCreate', () => {
+    const model = buildSessionActivityModel({
+      sessionId: 'failed-team-create-session',
+      taskScope: 'team-session',
+      messages: [
+        {
+          id: 'failed-team-create',
+          type: 'tool_use',
+          toolName: 'TeamCreate',
+          toolUseId: 'failed-team-create-call',
+          input: { team_name: 'review-team' },
+          timestamp: 1000,
+        },
+        {
+          id: 'failed-team-create-result',
+          type: 'tool_result',
+          toolUseId: 'failed-team-create-call',
+          content: 'Team creation failed',
+          isError: true,
+          timestamp: 1001,
+        },
+        {
+          id: 'session-task',
+          type: 'tool_use',
+          toolName: 'TaskCreate',
+          toolUseId: 'session-task-call',
+          input: { subject: 'Keep the session task' },
+          timestamp: 2000,
+        },
+        {
+          id: 'session-task-result',
+          type: 'tool_result',
+          toolUseId: 'session-task-call',
+          content: 'Task #1 created successfully: Keep the session task',
+          isError: false,
+          timestamp: 2001,
+        },
+      ],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.tasks.rows).toEqual([
+      expect.objectContaining({ label: 'Keep the session task' }),
+    ])
+  })
+
+  it('keeps team scope active when TeamDelete returns success false', () => {
+    const model = buildSessionActivityModel({
+      sessionId: 'failed-team-delete-session',
+      taskScope: 'team-session',
+      messages: [
+        {
+          id: 'team-create',
+          type: 'tool_use',
+          toolName: 'TeamCreate',
+          toolUseId: 'team-create-call',
+          input: { team_name: 'review-team' },
+          timestamp: 1000,
+        },
+        {
+          id: 'team-create-result',
+          type: 'tool_result',
+          toolUseId: 'team-create-call',
+          content: { success: true, team_name: 'review-team' },
+          isError: false,
+          timestamp: 1001,
+        },
+        {
+          id: 'failed-team-delete',
+          type: 'tool_use',
+          toolName: 'TeamDelete',
+          toolUseId: 'team-delete-call',
+          input: { team_name: 'review-team' },
+          timestamp: 2000,
+        },
+        {
+          id: 'failed-team-delete-result',
+          type: 'tool_result',
+          toolUseId: 'team-delete-call',
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ success: false, message: 'Active members remain' }),
+          }],
+          isError: false,
+          timestamp: 2001,
+        },
+        {
+          id: 'shared-task',
+          type: 'tool_use',
+          toolName: 'TaskCreate',
+          toolUseId: 'shared-task-call',
+          input: { subject: 'Keep this in the team task list' },
+          timestamp: 3000,
+        },
+        {
+          id: 'shared-task-result',
+          type: 'tool_result',
+          toolUseId: 'shared-task-call',
+          content: 'Task #1 created successfully: Keep this in the team task list',
+          isError: false,
+          timestamp: 3001,
+        },
+      ],
+      tasks: [],
+      completedAndDismissed: false,
+      backgroundTasks: [],
+      agentNotifications: [],
+    })
+
+    expect(model.sections.tasks.rows).toEqual([])
   })
 
   it('keeps the last successful status when a later TaskUpdate fails', () => {

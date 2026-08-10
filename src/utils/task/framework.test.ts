@@ -120,13 +120,50 @@ test('still exposes a local agent task in the session activity stream', () => {
 
   registerTask(task, harness.setAppState)
 
-  expect(drainSdkEvents()).toContainEqual(expect.objectContaining({
+  const [event] = drainSdkEvents()
+  expect(event).toEqual(expect.objectContaining({
     type: 'system',
     subtype: 'task_started',
     task_id: 'subagent-task',
     tool_use_id: 'agent-tool',
     task_type: 'local_agent',
   }))
+  expect(event).not.toHaveProperty('owner_agent_id')
+})
+
+test('tags a nested local agent start and progress with its owning agent', () => {
+  const harness = makeHarness()
+  const task = makeTask({
+    id: 'nested-agent-task',
+    type: 'local_agent',
+    toolUseId: 'nested-agent-tool',
+    agentId: 'nested-agent-task',
+    ownerAgentId: 'parent-agent',
+  })
+
+  registerTask(task, harness.setAppState)
+  emitTaskProgress({
+    taskId: task.id,
+    toolUseId: task.toolUseId,
+    description: task.description,
+    startTime: task.startTime,
+    totalTokens: 10,
+    toolUses: 1,
+    ownerAgentId: 'parent-agent',
+  })
+
+  expect(drainSdkEvents()).toEqual([
+    expect.objectContaining({
+      subtype: 'task_started',
+      task_id: 'nested-agent-task',
+      owner_agent_id: 'parent-agent',
+    }),
+    expect.objectContaining({
+      subtype: 'task_progress',
+      task_id: 'nested-agent-task',
+      owner_agent_id: 'parent-agent',
+    }),
+  ])
 })
 
 test('includes the stable run id in workflow start events', () => {
@@ -178,6 +215,7 @@ test('keeps the original Agent tool_use id when a resume re-registers the task',
     toolUseId: 'toolu_agent',
     agentId: 'resumable-agent',
     retain: true,
+    ownerAgentId: 'parent-agent',
   })
   registerTask(spawned, harness.setAppState)
   drainSdkEvents()
@@ -193,5 +231,9 @@ test('keeps the original Agent tool_use id when a resume re-registers the task',
   registerTask(resumed, harness.setAppState)
 
   expect(harness.state.tasks['resumable-agent']?.toolUseId).toBe('toolu_agent')
+  expect(
+    (harness.state.tasks['resumable-agent'] as { ownerAgentId?: string })
+      .ownerAgentId,
+  ).toBe('parent-agent')
   expect(drainSdkEvents()).toEqual([])
 })

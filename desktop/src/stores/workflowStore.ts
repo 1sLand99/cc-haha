@@ -15,7 +15,7 @@ import type {
 const MAX_PROGRESS_ROWS = 500
 
 type WorkflowStore = {
-  /** Live and just-finished runs, keyed by CLI task id. */
+  /** Runs keyed by source session, transcript owner, and CLI task id. */
   runs: Record<string, WorkflowRun>
   definitions: WorkflowDefinition[]
   definitionsLoading: boolean
@@ -32,9 +32,23 @@ type WorkflowStore = {
   ): void
   clearSession(sessionId: string): void
   hydrateSession(sessionId: string): Promise<void>
+  hydrateOwnerSession(
+    sourceSessionId: string,
+    ownerAliases: string[],
+    targetSessionId: string,
+    options?: { includeRoot?: boolean },
+  ): Promise<void>
   openRun(taskId: string | null): void
   loadDefinitions(cwd?: string): Promise<void>
   loadHistory(sessionId?: string): Promise<void>
+}
+
+export function workflowRunIdentity(
+  sourceSessionId: string,
+  ownerAgentId: string | undefined,
+  taskId: string,
+): string {
+  return JSON.stringify([sourceSessionId, ownerAgentId ?? null, taskId])
 }
 
 export const useWorkflowStore = create<WorkflowStore>(set => ({
@@ -52,21 +66,32 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
     // workflow_progress (print.ts builds it from the notification XML), so
     // re-deriving "is this a workflow" from the payload would drop it and the
     // run would sit at "running" forever.
-    const known = Boolean(
-      typeof data === 'object' &&
-        data !== null &&
-        typeof (data as { task_id?: unknown }).task_id === 'string' &&
-        useWorkflowStore.getState().runs[(data as { task_id: string }).task_id],
-    )
+    const payload = typeof data === 'object' && data !== null
+      ? data as { task_id?: unknown; owner_agent_id?: unknown }
+      : undefined
+    const rawTaskId = typeof payload?.task_id === 'string' ? payload.task_id : undefined
+    const rawOwnerAgentId = typeof payload?.owner_agent_id === 'string'
+      ? payload.owner_agent_id
+      : undefined
+    const eventKey = rawTaskId
+      ? workflowRunIdentity(sessionId, rawOwnerAgentId, rawTaskId)
+      : undefined
+    const known = Boolean(eventKey && useWorkflowStore.getState().runs[eventKey])
     const event = parseWorkflowTaskEvent(sessionId, subtype, data, known)
     if (!event) return
     set(state => {
-      const existing = state.runs[event.taskId]
+      const key = workflowRunIdentity(
+        event.sourceSessionId,
+        event.ownerAgentId,
+        event.taskId,
+      )
+      const existing = state.runs[key]
       if (!existing && event.runId) {
         const sameRunEntries = Object.entries(state.runs).filter(
-          ([taskId, run]) =>
-            taskId !== event.taskId &&
-            run.sessionId === event.sessionId &&
+          ([candidateKey, run]) =>
+            candidateKey !== key &&
+            run.sourceSessionId === event.sourceSessionId &&
+            run.ownerAgentId === event.ownerAgentId &&
             run.runId === event.runId,
         )
         if (sameRunEntries.length > 0) {
@@ -83,11 +108,11 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
 
           const runs = { ...state.runs }
           const replacedTaskIds = new Set<string>()
-          for (const [taskId] of sameRunEntries) {
-            replacedTaskIds.add(taskId)
-            delete runs[taskId]
+          for (const [candidateKey, run] of sameRunEntries) {
+            replacedTaskIds.add(run.taskId)
+            delete runs[candidateKey]
           }
-          runs[event.taskId] = mergeRun(undefined, event)
+          runs[key] = mergeRun(undefined, event)
           return {
             runs,
             openRunId:
@@ -99,7 +124,7 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
       }
       const merged = mergeRun(existing, event)
       if (merged === existing) return state
-      return { runs: { ...state.runs, [event.taskId]: merged } }
+      return { runs: { ...state.runs, [key]: merged } }
     })
   },
 
@@ -114,20 +139,21 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
   async hydrateSession(sessionId) {
     try {
       const { runs } = await workflowsApi.sessionRuns(sessionId)
-      if (runs.length === 0) return
+      const rootRuns = runs.filter(run => !run.ownerAgentId)
+      if (rootRuns.length === 0) return
       set(state => {
-        const liveRunIds = new Set(
-          Object.values(state.runs)
-            .filter(run => run.sessionId === sessionId)
-            .map(run => run.runId)
-            .filter((runId): runId is string => Boolean(runId)),
-        )
         const next = { ...state.runs }
         let added = false
-        for (const run of runs) {
-          if (liveRunIds.has(run.runId) || next[run.runId]) continue
+        for (const run of rootRuns) {
+          const hasLiveRun = Object.values(next).some(candidate => (
+            candidate.sourceSessionId === sessionId &&
+            !candidate.ownerAgentId &&
+            candidate.runId === run.runId
+          ))
+          const key = workflowRunIdentity(sessionId, undefined, run.taskId)
+          if (hasLiveRun || next[key]) continue
           added = true
-          next[run.runId] = reconstructedToRun(sessionId, run)
+          next[key] = reconstructedToRun(sessionId, sessionId, run)
         }
         return added ? { runs: next } : state
       })
@@ -136,12 +162,43 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
     }
   },
 
+  async hydrateOwnerSession(sourceSessionId, ownerAliases, targetSessionId, options) {
+    if (ownerAliases.length === 0 && !options?.includeRoot) return
+    try {
+      const { runs } = await workflowsApi.sessionRuns(sourceSessionId)
+      const aliases = new Set(ownerAliases)
+      const ownerRuns = runs.filter(run => (
+        (run.ownerAgentId !== undefined && aliases.has(run.ownerAgentId)) ||
+        (options?.includeRoot === true && run.ownerAgentId === undefined)
+      ))
+      if (ownerRuns.length === 0) return
+      set(state => {
+        const next = { ...state.runs }
+        let added = false
+        for (const run of ownerRuns) {
+          const hasLiveRun = Object.values(next).some(candidate => (
+            candidate.sourceSessionId === sourceSessionId &&
+            candidate.ownerAgentId === run.ownerAgentId &&
+            candidate.runId === run.runId
+          ))
+          const key = workflowRunIdentity(sourceSessionId, run.ownerAgentId, run.taskId)
+          if (hasLiveRun || next[key]) continue
+          added = true
+          next[key] = reconstructedToRun(targetSessionId, sourceSessionId, run)
+        }
+        return added ? { runs: next } : state
+      })
+    } catch {
+      // Agent history remains usable when workflow reconstruction is absent.
+    }
+  },
+
   clearSession(sessionId) {
     set(state => {
       const kept: Record<string, WorkflowRun> = {}
       let removed = false
       for (const [taskId, run] of Object.entries(state.runs)) {
-        if (run.sessionId === sessionId) {
+        if (run.sessionId === sessionId || run.sourceSessionId === sessionId) {
           removed = true
           continue
         }
@@ -187,13 +244,13 @@ export const useWorkflowStore = create<WorkflowStore>(set => ({
 /**
  * Turn a disk-reconstructed run into the shape the panel renders.
  *
- * Every agent listed produced a transcript, so `done` is a fact rather than an
- * assumption. Per-agent token counts and the run's own outcome are not
- * persisted, so they are left empty instead of being invented — the panel
- * shows neither for a historical run.
+ * Run and agent lifecycle state comes from the server's transcript/journal
+ * reconstruction. Per-agent token counts are not durably available, so they
+ * remain empty instead of being invented.
  */
 function reconstructedToRun(
   sessionId: string,
+  sourceSessionId: string,
   run: ReconstructedWorkflowRun,
 ): WorkflowRun {
   const phases = new Map<number, string | undefined>()
@@ -219,28 +276,32 @@ function reconstructedToRun(
       type: 'workflow_agent',
       index: agent.agentIndex,
       label: agent.label,
-      state: 'done',
+      state: agent.state,
       phaseIndex: agent.phaseIndex,
       ...(agent.phaseTitle ? { phaseTitle: agent.phaseTitle } : {}),
       agentId: agent.agentId,
+      ...(agent.error ? { error: agent.error } : {}),
+      ...(agent.skipped ? { skipped: true } : {}),
     })
   }
 
   return {
-    // Keyed by run id: a reconstructed run has no CLI task id, and the run id
-    // is what keeps it from colliding with a live run for the same workflow.
-    taskId: run.runId,
+    taskId: run.taskId,
+    sourceSessionId,
+    ...(run.ownerAgentId ? { ownerAgentId: run.ownerAgentId } : {}),
     sessionId,
     runId: run.runId,
     workflowName: run.workflowName,
-    status: 'completed',
+    status: run.status,
     startedAt: run.startedAt,
-    updatedAt: run.startedAt,
-    endedAt: run.startedAt,
+    updatedAt: run.updatedAt,
+    ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
     agentCount: run.agents.length,
     totalTokens: 0,
     toolCalls: 0,
     progress,
+    ...(run.result ? { result: run.result } : {}),
+    ...(run.error ? { error: run.error } : {}),
   }
 }
 
@@ -251,7 +312,22 @@ export function runsForSession(
   sessionId: string,
 ): WorkflowRun[] {
   return Object.values(state.runs)
-    .filter(run => run.sessionId === sessionId)
+    .filter(run => run.sourceSessionId === sessionId && !run.ownerAgentId)
+    .sort((a, b) => b.startedAt - a.startedAt)
+}
+
+export function runsForOwner(
+  state: Pick<WorkflowStore, 'runs'>,
+  sourceSessionId: string,
+  ownerAliases: string[],
+): WorkflowRun[] {
+  const aliases = new Set(ownerAliases)
+  return Object.values(state.runs)
+    .filter(run => (
+      run.sourceSessionId === sourceSessionId &&
+      run.ownerAgentId !== undefined &&
+      aliases.has(run.ownerAgentId)
+    ))
     .sort((a, b) => b.startedAt - a.startedAt)
 }
 
@@ -326,6 +402,8 @@ type ParsedEvent = {
   subtype: 'task_started' | 'task_progress' | 'task_notification'
   taskId: string
   sessionId: string
+  sourceSessionId: string
+  ownerAgentId?: string
   runId?: string
   workflowName?: string
   description?: string
@@ -384,6 +462,10 @@ export function parseWorkflowTaskEvent(
     subtype,
     taskId,
     sessionId,
+    sourceSessionId: sessionId,
+    ...(readString(payload.owner_agent_id)
+      ? { ownerAgentId: readString(payload.owner_agent_id) }
+      : {}),
     runId,
     workflowName,
     // A terminal notification's `summary` describes the outcome, not the run.
@@ -420,6 +502,8 @@ function mergeRun(
   const now = Date.now()
   const base: WorkflowRun = existing ?? {
     taskId: event.taskId,
+    sourceSessionId: event.sourceSessionId,
+    ...(event.ownerAgentId ? { ownerAgentId: event.ownerAgentId } : {}),
     sessionId: event.sessionId,
     runId: event.runId,
     workflowName: event.workflowName ?? 'workflow',

@@ -30,6 +30,7 @@ export type ActiveAgentTaskState = {
   toolUseId: string
   remoteSessionId?: string
   description?: string
+  ownerAgentId?: string
   stopIntent: boolean
   stopRequested: boolean
   localStopConfirmed: boolean
@@ -61,6 +62,7 @@ export type CliBackgroundTaskLifecycle = {
   toolUseId?: string
   remoteSessionId?: string
   description?: string
+  ownerAgentId?: string
   status?: string
   suppressForward?: boolean
 }
@@ -79,13 +81,14 @@ export function getCliBackgroundTaskLifecycle(cliMsg: any): CliBackgroundTaskLif
   const description = optionalString(cliMsg.description) ??
     optionalString(cliMsg.message) ??
     optionalString(cliMsg.title)
+  const ownerAgentId = optionalString(cliMsg.owner_agent_id)
 
   if (cliMsg.subtype === 'task_started') {
-    return { taskId, running: true, taskType, toolUseId, remoteSessionId, description }
+    return { taskId, running: true, taskType, toolUseId, remoteSessionId, description, ownerAgentId }
   }
 
   if (cliMsg.subtype === 'task_notification' && cliMsg.status === 'running') {
-    return { taskId, running: true, taskType, toolUseId, remoteSessionId, description }
+    return { taskId, running: true, taskType, toolUseId, remoteSessionId, description, ownerAgentId }
   }
 
   if (
@@ -95,7 +98,7 @@ export function getCliBackgroundTaskLifecycle(cliMsg: any): CliBackgroundTaskLif
       cliMsg.status === 'stopped' ||
       cliMsg.status === 'killed')
   ) {
-    return { taskId, running: false, status: cliMsg.status }
+    return { taskId, running: false, status: cliMsg.status, ownerAgentId }
   }
 
   return null

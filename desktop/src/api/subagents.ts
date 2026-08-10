@@ -1,5 +1,6 @@
 import { api } from './client'
 import type { MessageEntry } from '../types/session'
+import type { AgentTaskNotification } from '../types/chat'
 
 export type SubagentRunStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'unknown'
 export type SubagentRunSource = 'subagent-jsonl' | 'session-history' | 'live-task' | 'none'
@@ -23,6 +24,12 @@ export type SubagentRunResponse = {
   outputFile?: string
   usage?: SubagentRunUsage
   messages: MessageEntry[]
+  /** Full Activity projection; conversation messages may be truncated. */
+  activityMessages?: MessageEntry[]
+  /** Structured terminal events hidden from the visible transcript. */
+  taskNotifications?: AgentTaskNotification[]
+  /** Terminal events with the same fragment-scoped ids as activityMessages. */
+  activityTaskNotifications?: AgentTaskNotification[]
   truncated: boolean
   updatedAt?: string
   source: SubagentRunSource
@@ -47,7 +54,9 @@ export type SubagentRunResponse = {
 export const AGENT_ID_REF_PREFIX = 'agent:'
 
 export function isAgentIdRef(ref: string): boolean {
-  return ref.startsWith(AGENT_ID_REF_PREFIX)
+  if (!ref.startsWith(AGENT_ID_REF_PREFIX)) return false
+  const agentId = readAgentIdRef(ref)
+  return agentId.length > 0 && !agentId.includes('/')
 }
 
 export function toAgentIdRef(agentId: string): string {

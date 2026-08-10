@@ -380,6 +380,9 @@ export function normalizeCliTaskNotification(cliMsg: any): SessionTaskNotificati
   return {
     taskId: optionalString(cliMsg.task_id) ?? toolUseId,
     toolUseId,
+    ...(optionalString(cliMsg.owner_agent_id)
+      ? { ownerAgentId: optionalString(cliMsg.owner_agent_id) }
+      : {}),
     status,
     ...(optionalString(cliMsg.workflow_run_id)
       ? { workflowRunId: optionalString(cliMsg.workflow_run_id) }

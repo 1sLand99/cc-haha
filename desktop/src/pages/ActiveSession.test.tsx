@@ -86,7 +86,8 @@ vi.mock('./TerminalSettings', () => ({
 }))
 
 import { ActiveSession } from './ActiveSession'
-import { useChatStore } from '../stores/chatStore'
+import { teamsApi } from '../api/teams'
+import { createDefaultSessionState, useChatStore } from '../stores/chatStore'
 import { useCLITaskStore } from '../stores/cliTaskStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -1039,6 +1040,80 @@ describe('ActiveSession task polling', () => {
     expect(within(panel).getByText('Review historical implementation')).toBeInTheDocument()
   })
 
+  it('isolates Agent Teams tasks before the first workbench snapshot while preserving lead activity', async () => {
+    const sessionId = 'team-task-ownership-session'
+    vi.useFakeTimers()
+
+    useActivityPanelStore.getState().open(sessionId)
+    useSessionStore.setState({
+      sessions: [{
+        id: sessionId,
+        title: 'Team Task Ownership',
+        createdAt: '2026-08-10T00:00:00.000Z',
+        modifiedAt: '2026-08-10T00:00:00.000Z',
+        messageCount: 1,
+        projectPath: '/workspace/project',
+        workDir: '/workspace/project',
+        workDirExists: true,
+      }],
+      activeSessionId: sessionId,
+      isLoading: false,
+      error: null,
+    })
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'Team Task Ownership', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    useChatStore.setState({
+      sessions: { [sessionId]: createDefaultSessionState() },
+    })
+    const handleServerMessage = useChatStore.getState().handleServerMessage
+    handleServerMessage(sessionId, {
+      type: 'team_created',
+      teamName: 'test-team',
+    })
+    expect(useTeamStore.getState().teamNameBySession[sessionId]).toBe('test-team')
+    expect(useTeamStore.getState().workbenchesBySession[sessionId]).toBeUndefined()
+    handleServerMessage(sessionId, {
+      type: 'tool_use_complete',
+      toolName: 'TaskCreate',
+      toolUseId: 'team-task-create',
+      input: { subject: 'Review shared auth task' },
+    })
+    handleServerMessage(sessionId, {
+      type: 'tool_use_complete',
+      toolName: 'TodoWrite',
+      toolUseId: 'lead-personal-todo',
+      input: {
+        todos: [{ content: 'Summarize team delivery', status: 'in_progress' }],
+      },
+    })
+    useCLITaskStore.setState({
+      sessionId,
+      tasks: [{
+        id: '1',
+        subject: 'Finish the lead release checklist',
+        description: 'Created before the team task list existed',
+        status: 'in_progress',
+        blocks: [],
+        blockedBy: [],
+        taskListId: sessionId,
+      }],
+      fetchSessionTasks: vi.fn().mockResolvedValue(undefined),
+    })
+
+    await act(async () => {
+      render(<ActiveSession />)
+      await Promise.resolve()
+    })
+
+    const panel = screen.getByTestId('session-activity-panel')
+    expect(within(panel).getByText('Finish the lead release checklist')).toBeInTheDocument()
+    expect(within(panel).getByText('Summarize team delivery')).toBeInTheDocument()
+    expect(within(panel).queryByText('Review shared auth task')).not.toBeInTheDocument()
+    vi.clearAllTimers()
+  })
+
   it('ignores unrelated active team rows when deciding Activity visibility', async () => {
     const sessionId = 'activity-unrelated-team-session'
 
@@ -1202,6 +1277,227 @@ describe('ActiveSession task polling', () => {
       subagentTaskId: 'agent-task-1',
     })
     expect(useTabStore.getState().activeTabId).toBe('__subagent__activity-subagent-open-session__agent-tool-1')
+    expect(useActivityPanelStore.getState().openSessionId).toBe(
+      '__subagent__activity-subagent-open-session__agent-tool-1',
+    )
+  })
+
+  it('routes an Agent Teams activity row to the same member run as the workbench', async () => {
+    const sessionId = 'team-agent-activity-route-session'
+    const incarnationId = 'team-agent-activity-incarnation'
+    const teamName = 'activity-route-team'
+    const memberAgentId = 'ui-reviewer@activity-route-team'
+
+    vi.mocked(teamsApi.getWorkbenchForSession).mockResolvedValueOnce({
+      sessionId,
+      teamName,
+      incarnationId,
+      source: 'live',
+      snapshots: [{
+        version: 'route-v1',
+        generatedAt: '2026-08-10T00:00:00.000Z',
+        team: {
+          name: teamName,
+          incarnationId,
+          leadAgentId: `team-lead@${teamName}`,
+          leadSessionId: sessionId,
+          createdAt: '2026-08-09T00:00:00.000Z',
+          members: [
+            {
+              agentId: `team-lead@${teamName}`,
+              name: 'team-lead',
+              role: 'team-lead',
+              status: 'running',
+              sessionId,
+            },
+            {
+              agentId: memberAgentId,
+              name: 'ui-reviewer',
+              role: 'reviewer',
+              status: 'completed',
+              sessionId: 'reviewer-session',
+            },
+          ],
+        },
+        tasks: [],
+        messages: [],
+      }],
+    })
+    vi.mocked(teamsApi.getMemberTranscript).mockResolvedValueOnce({
+      messages: [],
+      taskNotifications: [],
+    })
+
+    useActivityPanelStore.getState().open(sessionId)
+    useSessionStore.setState({
+      sessions: [{
+        id: sessionId,
+        title: 'Team Agent Activity Route',
+        createdAt: '2026-08-10T00:00:00.000Z',
+        modifiedAt: '2026-08-10T00:00:00.000Z',
+        messageCount: 1,
+        projectPath: '/workspace/project',
+        workDir: '/workspace/project',
+        workDirExists: true,
+      }],
+      activeSessionId: sessionId,
+      isLoading: false,
+      error: null,
+    })
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'Team Agent Activity Route', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    useChatStore.setState({ sessions: { [sessionId]: createDefaultSessionState() } })
+
+    await act(async () => {
+      await useTeamStore.getState().fetchTeamForSession(sessionId, { force: true })
+    })
+    act(() => {
+      const handleServerMessage = useChatStore.getState().handleServerMessage
+      handleServerMessage(sessionId, {
+        type: 'tool_use_complete',
+        toolName: 'Agent',
+        toolUseId: 'team-agent-tool',
+        input: {
+          team_name: teamName,
+          name: 'ui-reviewer',
+          description: 'Review ownership UI',
+        },
+      })
+      handleServerMessage(sessionId, {
+        type: 'tool_result',
+        toolUseId: 'team-agent-tool',
+        content: 'Reviewer ready',
+        isError: false,
+      })
+    })
+
+    render(<ActiveSession />)
+    fireEvent.click(screen.getByRole('button', { name: /Open run Review ownership UI.*Completed/ }))
+
+    const memberTab = useTabStore.getState().tabs.find((tab) => tab.type === 'team-member')
+    expect(memberTab).toMatchObject({
+      teamLeadSessionId: sessionId,
+      teamMemberAgentId: memberAgentId,
+      teamIncarnationId: incarnationId,
+    })
+    expect(useTabStore.getState().activeTabId).toBe(memberTab?.sessionId)
+    expect(useActivityPanelStore.getState().openSessionId).toBe(memberTab?.sessionId)
+    expect(useTabStore.getState().tabs).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'subagent', subagentToolUseId: 'team-agent-tool' }),
+    ]))
+    await waitFor(() => {
+      expect(teamsApi.getMemberTranscript).toHaveBeenCalledWith(
+        teamName,
+        memberAgentId,
+        expect.objectContaining({ incarnationId }),
+      )
+    })
+  })
+
+  it('waits for authoritative Team discovery instead of opening a plain subagent', async () => {
+    const sessionId = 'team-agent-deferred-route-session'
+    const teamName = 'deferred-route-team'
+    const incarnationId = 'deferred-route-incarnation'
+    const memberAgentId = `reviewer@${teamName}`
+    let resolveInitialDiscovery!: () => void
+    const initialDiscovery = new Promise<any>((resolve) => {
+      resolveInitialDiscovery = () => resolve(undefined)
+    })
+    const exactTimeline = {
+      sessionId,
+      teamName,
+      incarnationId,
+      source: 'archive' as const,
+      snapshots: [{
+        version: 'deferred-route-v1',
+        generatedAt: '2026-08-10T00:00:01.000Z',
+        team: {
+          name: teamName,
+          incarnationId,
+          leadAgentId: `team-lead@${teamName}`,
+          leadSessionId: sessionId,
+          createdAt: '2026-08-10T00:00:00.000Z',
+          members: [{
+            agentId: memberAgentId,
+            name: 'reviewer',
+            role: 'reviewer',
+            status: 'completed' as const,
+          }],
+        },
+        tasks: [],
+        messages: [],
+      }],
+    }
+    vi.mocked(teamsApi.getWorkbenchForSession)
+      .mockReturnValueOnce(initialDiscovery)
+      .mockResolvedValueOnce(exactTimeline)
+    vi.mocked(teamsApi.getMemberTranscript).mockResolvedValueOnce({
+      messages: [],
+      taskNotifications: [],
+      ownerAgentIds: [],
+    })
+
+    useActivityPanelStore.getState().open(sessionId)
+    useSessionStore.setState({
+      sessions: [{
+        id: sessionId,
+        title: 'Deferred Team Route',
+        createdAt: '2026-08-10T00:00:00.000Z',
+        modifiedAt: '2026-08-10T00:00:01.000Z',
+        messageCount: 1,
+        projectPath: '/workspace/project',
+        workDir: '/workspace/project',
+        workDirExists: true,
+      }],
+      activeSessionId: sessionId,
+      isLoading: false,
+      error: null,
+    })
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'Deferred Team Route', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    const session = createDefaultSessionState()
+    session.messages = [{
+      id: 'deferred-team-agent',
+      type: 'tool_use',
+      toolName: 'Agent',
+      toolUseId: 'deferred-team-agent-tool',
+      input: {
+        team_name: teamName,
+        name: 'reviewer',
+        description: 'Review deferred ownership',
+      },
+      timestamp: Date.parse('2026-08-10T00:00:00.500Z'),
+    }]
+    useChatStore.setState({ sessions: { [sessionId]: session } })
+
+    render(<ActiveSession />)
+    await waitFor(() => {
+      expect(teamsApi.getWorkbenchForSession).toHaveBeenCalledWith(sessionId)
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Open run Review deferred ownership/ }))
+
+    expect(useTabStore.getState().tabs.some((tab) => tab.type === 'subagent')).toBe(false)
+    await waitFor(() => {
+      expect(teamsApi.getWorkbenchForSession).toHaveBeenCalledWith(sessionId, {
+        teamName,
+        at: Date.parse('2026-08-10T00:00:00.500Z'),
+      })
+      expect(useTabStore.getState().tabs).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'team-member',
+          teamIncarnationId: incarnationId,
+          teamMemberAgentId: memberAgentId,
+        }),
+      ]))
+    })
+
+    // Let the obsolete discovery settle after the exact route has opened; its
+    // generation guard must not replace the selected member lifecycle.
+    resolveInitialDiscovery()
   })
 
   it('opens the full team workbench directly from the header strip', () => {

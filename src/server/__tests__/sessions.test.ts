@@ -3713,6 +3713,37 @@ describe('Sessions API', () => {
     ])
   })
 
+  it('GET /api/sessions/:id/messages exposes persisted terminal ownership', async () => {
+    const sessionId = 'abababab-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+    await writeSessionFile('-tmp-api-owned-terminal', sessionId, [
+      makeSnapshotEntry(),
+      {
+        type: 'cc-haha-task-notification',
+        isMeta: true,
+        taskNotification: {
+          taskId: 'nested-workflow-task',
+          toolUseId: 'Workflow:0',
+          ownerAgentId: 'parent-agent',
+          status: 'completed',
+          summary: 'Nested workflow completed',
+        },
+        timestamp: '2026-08-10T00:00:01.000Z',
+      },
+    ])
+
+    const res = await fetch(`${baseUrl}/api/sessions/${sessionId}/messages`)
+    expect(res.status).toBe(200)
+    const body = await res.json() as { taskNotifications: unknown[] }
+    expect(body.taskNotifications).toEqual([{
+      taskId: 'nested-workflow-task',
+      toolUseId: 'Workflow:0',
+      ownerAgentId: 'parent-agent',
+      status: 'completed',
+      summary: 'Nested workflow completed',
+      timestamp: '2026-08-10T00:00:01.000Z',
+    }])
+  })
+
   it('GET /api/sessions/:id/subagents/by-tool/:toolUseId should return a resolved run', async () => {
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     const projectDir = '-tmp-api-subagent-run'
@@ -3741,6 +3772,21 @@ describe('Sessions API', () => {
         uuid: crypto.randomUUID(),
         timestamp: '2026-01-01T00:00:05.000Z',
       },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: '<task-notification>\n<task-id>child-shell-task</task-id>\n<tool-use-id>child-shell.call</tool-use-id>\n<status>killed</status>\n<summary>Child shell stopped</summary>\n</task-notification>',
+        },
+        uuid: crypto.randomUUID(),
+        timestamp: '2026-01-01T00:00:06.000Z',
+      },
+      {
+        type: 'assistant',
+        message: { role: 'assistant', content: 'Internal notification response' },
+        uuid: crypto.randomUUID(),
+        timestamp: '2026-01-01T00:00:07.000Z',
+      },
     ])
 
     const res = await fetch(`${baseUrl}/api/sessions/${sessionId}/subagents/by-tool/tool-1`)
@@ -3753,6 +3799,7 @@ describe('Sessions API', () => {
       description?: string
       prompt?: string
       messages: unknown[]
+      taskNotifications: unknown[]
       source: string
     }
     expect(body).toMatchObject({
@@ -3764,6 +3811,15 @@ describe('Sessions API', () => {
       source: 'subagent-jsonl',
     })
     expect(body.messages).toHaveLength(2)
+    expect(JSON.stringify(body.messages)).not.toContain('<task-notification>')
+    expect(JSON.stringify(body.messages)).not.toContain('Internal notification response')
+    expect(body.taskNotifications).toEqual([{
+      taskId: 'child-shell-task',
+      toolUseId: 'child-shell.call',
+      status: 'stopped',
+      summary: 'Child shell stopped',
+      timestamp: '2026-01-01T00:00:06.000Z',
+    }])
   })
 
   it('GET /api/sessions/:id/subagents/by-tool/:toolUseId should use a live task id while running', async () => {

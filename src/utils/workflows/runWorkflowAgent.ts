@@ -70,6 +70,8 @@ export type WorkflowAgentRunParams = {
   toolUseContext: ToolUseContext
   canUseTool: CanUseToolFn
   runId: string
+  /** Agent transcript that launched this workflow; persisted on each worker. */
+  ownerAgentId?: string
   /** Workflow/phase provenance stamped onto the agent's sidecar metadata. */
   workflow?: AgentMetadata['workflow']
   /** Per-agent controller so the user can skip or restart a single agent. */
@@ -109,6 +111,7 @@ export async function runWorkflowAgent(
     toolUseContext,
     canUseTool,
     runId,
+    ownerAgentId,
     workflow,
     abortController,
     onAgentId,
@@ -183,6 +186,7 @@ export async function runWorkflowAgent(
         model: opts?.model,
         availableTools,
         description: opts?.label ?? prompt.slice(0, 60),
+        ...(ownerAgentId ? { ownerAgentId } : {}),
         ...(workflow ? { workflow } : {}),
         // Deliberately no `transcriptSubdir`. A workflow agent is an ordinary
         // subagent run by the same runner, so its transcript belongs in the

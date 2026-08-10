@@ -21,6 +21,7 @@ import { isPlaceholderSessionTitle } from '../../lib/sessionTitle'
 import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
 import { useTerminalPanelStore } from '../../stores/terminalPanelStore'
 import { useCLITaskStore } from '../../stores/cliTaskStore'
+import { teamTaskWindowsForSnapshot, useTeamStore } from '../../stores/teamStore'
 import { StatusDot } from '@/components/ui/Badge'
 import { IconButton } from '@/components/ui/IconButton'
 import { useDismissable } from '@/hooks/useDismissable'
@@ -143,6 +144,12 @@ export function TabBar() {
   const cliTasks = useCLITaskStore((state) => state.tasks)
   const cliTasksSessionId = useCLITaskStore((state) => state.sessionId)
   const cliTasksCompletedAndDismissed = useCLITaskStore((state) => state.completedAndDismissed)
+  const agentTeamsSnapshot = useTeamStore((state) => activeTabId
+    ? state.workbenchesBySession[activeTabId]?.snapshots.at(-1)
+    : undefined)
+  const activeTeamStartedAt = useTeamStore((state) => activeTabId
+    ? state.activeTeamStartedAtBySession[activeTabId]
+    : undefined)
   const dismissedBackgroundTaskKeyList = useActivityPanelStore((state) =>
     activeTabId
       ? state.dismissedBackgroundTaskKeysBySession[activeTabId] ?? EMPTY_DISMISSED_BACKGROUND_TASK_KEYS
@@ -158,11 +165,14 @@ export function TabBar() {
     }
     const sessionState = state.sessions[activeTabId]
     const includeCliTasks = cliTasksSessionId === activeTabId
+    const teamTaskWindows = teamTaskWindowsForSnapshot(agentTeamsSnapshot, activeTeamStartedAt)
 
     const model = buildSessionActivityModel({
       sessionId: activeTabId,
       messages: sessionState?.messages ?? [],
       tasks: includeCliTasks ? cliTasks : [],
+      taskScope: 'team-session',
+      teamTaskWindows,
       completedAndDismissed: includeCliTasks ? cliTasksCompletedAndDismissed : false,
       isForegroundTurnActive: Boolean(sessionState && sessionState.chatState !== 'idle'),
       backgroundTasks: Object.values(sessionState?.backgroundAgentTasks ?? {}),

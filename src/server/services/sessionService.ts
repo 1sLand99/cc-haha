@@ -94,7 +94,13 @@ export type SessionListItem = {
 export type SubagentTranscriptFragment = {
   agentId: string
   messages: MessageEntry[]
+  taskNotifications: SessionTaskNotification[]
   modifiedAt: number
+}
+
+export type SubagentTranscript = {
+  messages: MessageEntry[]
+  taskNotifications: SessionTaskNotification[]
 }
 
 export type SessionWorkspaceState = 'available' | 'worktree_removed' | 'missing'
@@ -220,12 +226,22 @@ type SubagentMessagesResult = {
 export type SessionTaskNotification = {
   taskId: string
   toolUseId: string
+  /** Transcript owner for nested lifecycle events. Undefined is root/legacy. */
+  ownerAgentId?: string
   status: 'completed' | 'failed' | 'stopped'
   workflowRunId?: string
   summary?: string
   result?: string
   outputFile?: string
   timestamp?: string
+}
+
+/** Canonical terminal identity within a session. Child agents may reuse the
+ * same raw leaf tool id, so toolUseId alone is not a stable dedupe key. */
+export function sessionTaskNotificationIdentity(
+  notification: Pick<SessionTaskNotification, 'ownerAgentId' | 'toolUseId'>,
+): string {
+  return JSON.stringify([notification.ownerAgentId ?? null, notification.toolUseId])
 }
 
 export type TranscriptUsageSnapshot = {
@@ -1735,7 +1751,8 @@ export class SessionService {
     if (!xml) return null
 
     const toolUseId = this.readXmlTag(xml, 'tool-use-id')
-    const status = this.readXmlTag(xml, 'status')
+    const rawStatus = this.readXmlTag(xml, 'status')
+    const status = rawStatus === 'killed' ? 'stopped' : rawStatus
     if (
       !toolUseId ||
       (status !== 'completed' && status !== 'failed' && status !== 'stopped')
@@ -1748,9 +1765,11 @@ export class SessionService {
     const summary = this.readXmlTag(xml, 'summary')
     const result = this.readXmlTag(xml, 'result')
     const outputFile = this.readXmlTag(xml, 'output-file')
+    const ownerAgentId = this.readXmlTag(xml, 'owner-agent-id')
     return {
       taskId,
       toolUseId,
+      ...(ownerAgentId ? { ownerAgentId } : {}),
       status,
       ...(workflowRunId ? { workflowRunId } : {}),
       ...(summary ? { summary } : {}),
@@ -1785,6 +1804,9 @@ export class SessionService {
     return {
       taskId: optionalString('taskId') ?? toolUseId,
       toolUseId,
+      ...(optionalString('ownerAgentId')
+        ? { ownerAgentId: optionalString('ownerAgentId') }
+        : {}),
       status,
       ...(workflowRunId ? { workflowRunId } : {}),
       ...(optionalString('summary') ? { summary: optionalString('summary') } : {}),
@@ -3610,6 +3632,13 @@ export class SessionService {
     sessionId: string,
     agentId: string,
   ): Promise<MessageEntry[]> {
+    return (await this.getSubagentTranscript(sessionId, agentId)).messages
+  }
+
+  async getSubagentTranscript(
+    sessionId: string,
+    agentId: string,
+  ): Promise<SubagentTranscript> {
     const found = await this.findSessionFile(sessionId)
     if (!found) {
       throw ApiError.notFound(`Session not found: ${sessionId}`)
@@ -3618,7 +3647,10 @@ export class SessionService {
     const entries = await this.readJsonlFile(
       this.subagentTranscriptPath(found.projectDir, sessionId, agentId),
     )
-    return this.entriesToMessages(entries)
+    return {
+      messages: this.entriesToMessages(entries),
+      taskNotifications: this.taskNotificationsFromEntries(entries),
+    }
   }
 
   /**
@@ -3628,10 +3660,13 @@ export class SessionService {
    * this resolves while the run is still in flight. The parent transcript's
    * `tool_result` — the other way to recover an agent id — only lands once the
    * agent has finished, which left live runs pointing at no transcript at all.
+   * `expectedOwnerAgentId` is the physical parent transcript id; null denotes
+   * a root-owned tool call.
    */
   async findSubagentAgentIdByToolUseId(
     sessionId: string,
     toolUseId: string,
+    expectedOwnerAgentId: string | null,
   ): Promise<string | null> {
     const found = await this.findSessionFile(sessionId)
     if (!found) {
@@ -3645,6 +3680,8 @@ export class SessionService {
       'subagents',
     )
     const files = await fs.readdir(subagentsDir).catch(() => [])
+    const candidates: Array<{ agentId: string; ownerAgentId?: string }> = []
+    let metadataComplete = true
 
     for (const metadataFile of files.filter((file) => file.endsWith('.meta.json'))) {
       try {
@@ -3652,10 +3689,36 @@ export class SessionService {
           await fs.readFile(path.join(subagentsDir, metadataFile), 'utf8'),
         ) as Record<string, unknown>
         if (metadata.toolUseId !== toolUseId) continue
-        return metadataFile.replace(/^agent-/, '').replace(/\.meta\.json$/, '')
+        const ownerAgentId = typeof metadata.ownerAgentId === 'string' && metadata.ownerAgentId
+          ? metadata.ownerAgentId
+          : undefined
+        candidates.push({
+          agentId: metadataFile.replace(/^agent-/, '').replace(/\.meta\.json$/, ''),
+          ...(ownerAgentId ? { ownerAgentId } : {}),
+        })
       } catch {
         // A half-written sidecar must not hide the other candidates.
+        metadataComplete = false
       }
+    }
+
+    const exact = candidates.filter(candidate => expectedOwnerAgentId === null
+      ? candidate.ownerAgentId === undefined
+      : candidate.ownerAgentId === expectedOwnerAgentId)
+    if (exact.length === 1) return exact[0]!.agentId
+    if (exact.length > 1) return null
+
+    // Metadata written before ownerAgentId existed can still resolve a nested
+    // call, but only when the raw leaf identifies one sidecar in the complete
+    // session. Picking the first of several legacy candidates recreates the
+    // cross-parent collision this owner join is meant to prevent.
+    if (
+      expectedOwnerAgentId !== null &&
+      metadataComplete &&
+      candidates.length === 1 &&
+      candidates[0]!.ownerAgentId === undefined
+    ) {
+      return candidates[0]!.agentId
     }
 
     return null
@@ -3695,6 +3758,7 @@ export class SessionService {
         fragments.push({
           agentId: transcriptFile.replace(/^agent-/, '').replace(/\.jsonl$/, ''),
           messages: this.entriesToMessages(entries),
+          taskNotifications: this.taskNotificationsFromEntries(entries),
           modifiedAt: stat.mtimeMs,
         })
       } catch {
@@ -4396,6 +4460,12 @@ export class SessionService {
       found,
       ['user', PERSISTED_TASK_NOTIFICATION_ENTRY_TYPE],
     ) ?? await this.readJsonlFile(found.filePath)
+    return this.taskNotificationsFromEntries(entries)
+  }
+
+  private taskNotificationsFromEntries(
+    entries: RawEntry[],
+  ): SessionTaskNotification[] {
     const notifications = new Map<string, SessionTaskNotification>()
     for (const entry of entries) {
       const notification = entry.type === PERSISTED_TASK_NOTIFICATION_ENTRY_TYPE
@@ -4403,7 +4473,9 @@ export class SessionService {
         : entry.message?.role === 'user'
           ? this.parseTaskNotificationContent(entry.message.content, entry.timestamp)
           : null
-      if (notification) notifications.set(notification.toolUseId, notification)
+      if (notification) {
+        notifications.set(sessionTaskNotificationIdentity(notification), notification)
+      }
     }
     return [...notifications.values()]
   }

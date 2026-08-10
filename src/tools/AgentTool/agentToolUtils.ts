@@ -428,6 +428,7 @@ export function emitTaskProgress(
   description: string,
   startTime: number,
   lastToolName: string,
+  ownerAgentId?: string,
 ): void {
   const progress = getProgressUpdate(tracker)
   emitTaskProgressEvent({
@@ -438,6 +439,7 @@ export function emitTaskProgress(
     totalTokens: progress.tokenCount,
     toolUses: progress.toolUseCount,
     lastToolName,
+    ownerAgentId,
   })
 }
 
@@ -572,6 +574,7 @@ export async function runAsyncAgentLifecycle({
   agentIdForCleanup,
   enableSummarization,
   getWorktreeResult,
+  ownerAgentId,
 }: {
   taskId: string
   abortController: AbortController
@@ -592,6 +595,8 @@ export async function runAsyncAgentLifecycle({
     worktreePath?: string
     worktreeBranch?: string
   }>
+  /** Stable lifecycle owner resolved when the run was spawned or resumed. */
+  ownerAgentId?: string
 }): Promise<void> {
   const agentToolUseId = parentToolUseId
   let stopSummarization: (() => void) | undefined
@@ -661,6 +666,7 @@ export async function runAsyncAgentLifecycle({
           description,
           metadata.startTime,
           lastToolName,
+          ownerAgentId,
         )
       }
     }

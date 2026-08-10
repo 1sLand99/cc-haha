@@ -46,7 +46,7 @@ export type WorkflowRunSummary = {
   startedAt: number
   /** Number of agents with a recorded result in the journal. */
   completedAgents: number
-  status: 'completed' | 'failed' | 'unknown'
+  status: ReconstructedWorkflowRunStatus | 'unknown'
 }
 
 export type WorkflowRunDetail = WorkflowRunSummary & {
@@ -62,23 +62,171 @@ export type WorkflowRunDetail = WorkflowRunSummary & {
   totalToolCalls?: number
 }
 
-/** A finished run rebuilt from disk, in the shape the desktop's panel needs. */
+export type ReconstructedWorkflowRunStatus =
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'stopped'
+
+export type ReconstructedWorkflowAgentState =
+  | 'start'
+  | 'progress'
+  | 'done'
+  | 'error'
+
+/** A run rebuilt from durable transcripts, sidecars, and its resume journal. */
 export type ReconstructedRun = {
   runId: string
+  taskId: string
+  ownerAgentId?: string
   workflowName: string
+  status: ReconstructedWorkflowRunStatus
   startedAt: number
+  updatedAt: number
+  endedAt?: number
+  result?: string
+  error?: string
   agents: Array<{
     agentId: string
     label: string
     phaseIndex: number
     phaseTitle?: string
     agentIndex: number
+    state: ReconstructedWorkflowAgentState
+    error?: string
+    skipped?: boolean
   }>
 }
 
 export type WorkflowSaveScope = 'user' | 'project'
 
 const RUN_SCRIPT_PATTERN = /^(.+)\.(wf_[a-z0-9-]{6,})\.js$/
+
+type PersistedWorkflowLaunch = {
+  runId: string
+  taskId: string
+  toolUseId?: string
+  workflowName: string
+  ownerAgentId?: string
+  timestamp?: string
+}
+
+type PersistedWorkflowTerminal = {
+  taskId: string
+  toolUseId?: string
+  ownerAgentId?: string
+  status: Exclude<ReconstructedWorkflowRunStatus, 'running'>
+  summary?: string
+  result?: string
+  outputFile?: string
+  timestamp?: string
+}
+
+type PersistedWorkflowLifecycle = {
+  launchesByRunId: Map<string, PersistedWorkflowLaunch>
+  terminals: PersistedWorkflowTerminal[]
+}
+
+type WorkflowJournalState = {
+  resultAgentIds: Set<string>
+  startedAgentIds: Set<string>
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+function parseTimestamp(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function stringifyResult(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (value === undefined) return undefined
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return undefined
+  }
+}
+
+function normalizePersistedStatus(
+  value: unknown,
+): PersistedWorkflowTerminal['status'] | undefined {
+  if (value === 'completed' || value === 'failed') return value
+  if (value === 'killed' || value === 'stopped') return 'stopped'
+  return undefined
+}
+
+function workflowLaunchFromValue(
+  value: unknown,
+  context: { ownerAgentId?: string; timestamp?: string; toolUseId?: string },
+  seen = new Set<unknown>(),
+): PersistedWorkflowLaunch | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed.startsWith('{')) return null
+    try {
+      return workflowLaunchFromValue(JSON.parse(trimmed), context, seen)
+    } catch {
+      return null
+    }
+  }
+  if (!isObjectRecord(value) || seen.has(value)) return null
+  seen.add(value)
+
+  const runId = nonEmptyString(value.runId) ?? nonEmptyString(value.workflowRunId)
+  const taskId = nonEmptyString(value.taskId) ?? nonEmptyString(value.task_id)
+  const taskType = nonEmptyString(value.taskType) ?? nonEmptyString(value.task_type)
+  const status = nonEmptyString(value.status)
+  if (
+    runId?.startsWith('wf_') &&
+    taskId &&
+    (taskType === 'local_workflow' || status === 'async_launched')
+  ) {
+    return {
+      runId,
+      taskId,
+      ...(context.toolUseId ? { toolUseId: context.toolUseId } : {}),
+      workflowName: nonEmptyString(value.workflowName) ?? 'workflow',
+      ...(context.ownerAgentId ? { ownerAgentId: context.ownerAgentId } : {}),
+      ...(context.timestamp ? { timestamp: context.timestamp } : {}),
+    }
+  }
+
+  for (const nested of Object.values(value)) {
+    const launch = workflowLaunchFromValue(nested, context, seen)
+    if (launch) return launch
+  }
+  return null
+}
+
+function xmlValue(text: string, tag: string): string | undefined {
+  const match = text.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i'))
+  return match?.[1]?.trim() || undefined
+}
+
+function decodeXml(value: string | undefined): string | undefined {
+  return value
+    ?.replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replaceAll('&amp;', '&')
+}
+
+function stringsInValue(value: unknown): string[] {
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) return value.flatMap(stringsInValue)
+  if (!isObjectRecord(value)) return []
+  return Object.values(value).flatMap(stringsInValue)
+}
 
 class WorkflowService {
   private configDir(): string {
@@ -223,23 +371,42 @@ class WorkflowService {
    */
   async reconstructSessionRuns(sessionId: string): Promise<ReconstructedRun[]> {
     this.assertEnabled()
-    const runs = await this.listRuns({ sessionId })
-    if (runs.length === 0) return []
+    const [runs, sessionDirs] = await Promise.all([
+      this.listRuns({ sessionId }),
+      this.findSessionDirs(sessionId),
+    ])
+    const lifecycle = await this.readSessionWorkflowLifecycle(sessionId, sessionDirs)
 
     const byRunId = new Map<string, ReconstructedRun>()
     for (const run of runs) {
       byRunId.set(run.runId, {
         runId: run.runId,
+        taskId: run.runId,
         workflowName: run.workflowName,
+        status: run.status === 'unknown' ? 'running' : run.status,
         startedAt: run.startedAt,
+        updatedAt: run.startedAt,
         agents: [],
       })
     }
+    for (const launch of lifecycle.launchesByRunId.values()) {
+      if (byRunId.has(launch.runId)) continue
+      const startedAt = parseTimestamp(launch.timestamp) ?? 0
+      byRunId.set(launch.runId, {
+        runId: launch.runId,
+        taskId: launch.taskId,
+        ...(launch.ownerAgentId ? { ownerAgentId: launch.ownerAgentId } : {}),
+        workflowName: launch.workflowName,
+        status: 'running',
+        startedAt,
+        updatedAt: startedAt,
+        agents: [],
+      })
+    }
+    if (byRunId.size === 0) return []
 
-    for (const { dir } of await this.findRunDirs(sessionId)) {
-      // `dir` is the session's `workflows/` script directory; the agent
-      // sidecars are its sibling `subagents/`.
-      const subagentsDir = path.join(path.dirname(dir), 'subagents')
+    for (const { dir } of sessionDirs) {
+      const subagentsDir = path.join(dir, 'subagents')
       await this.collectRunAgents(subagentsDir, byRunId)
 
       // Runs from before agents recorded their phase wrote their sidecars
@@ -264,13 +431,80 @@ class WorkflowService {
     }
 
     for (const run of byRunId.values()) {
+      const launch = lifecycle.launchesByRunId.get(run.runId)
+      if (launch) {
+        run.taskId = launch.taskId
+        if (launch.ownerAgentId) run.ownerAgentId = launch.ownerAgentId
+        const launchedAt = parseTimestamp(launch.timestamp)
+        if (launchedAt !== undefined) {
+          run.startedAt = launchedAt
+          run.updatedAt = launchedAt
+        }
+      }
+      const terminal = launch
+        ? this.findWorkflowTerminal(
+            lifecycle.terminals,
+            launch,
+            lifecycle.launchesByRunId.values(),
+          )
+        : undefined
+      if (terminal) {
+        run.status = terminal.status
+        const endedAt = parseTimestamp(terminal.timestamp)
+        if (endedAt !== undefined) {
+          run.updatedAt = endedAt
+          run.endedAt = endedAt
+        }
+        if (terminal.result) run.result = terminal.result
+        if (terminal.status === 'failed' || terminal.status === 'stopped') {
+          run.error = terminal.summary
+        }
+      }
+
+      const journal = await this.readJournalState(sessionId, run.runId)
+      for (const agent of run.agents) {
+        if (journal.resultAgentIds.has(agent.agentId)) {
+          agent.state = 'done'
+          continue
+        }
+        if (run.status === 'running') {
+          agent.state = journal.startedAgentIds.has(agent.agentId) ? 'progress' : 'start'
+          continue
+        }
+        if (run.status === 'completed') {
+          // A caught agent failure or explicit skip can leave `started`
+          // without `result` while the workflow itself still completes. The
+          // optional task output is the only exact per-agent record; without
+          // it, do not fabricate an error that the terminal transition denies.
+          agent.state = 'done'
+          agent.skipped = true
+          continue
+        }
+        agent.state = 'error'
+        agent.error = run.error
+        if (run.status === 'stopped') agent.skipped = true
+      }
       run.agents.sort((a, b) => a.agentIndex - b.agentIndex)
     }
-    // Only runs we could actually rebuild agents for are worth returning; an
-    // empty shell would render as a phantom section.
+    // A workflow can fail before its first agent is spawned. Its persisted
+    // launch and terminal transition are still a real run, not a phantom.
     return [...byRunId.values()]
-      .filter(run => run.agents.length > 0)
       .sort((a, b) => b.startedAt - a.startedAt)
+  }
+
+  async getAgentRunState(
+    sessionId: string,
+    agentId: string,
+  ): Promise<{
+    run: ReconstructedRun
+    agent: ReconstructedRun['agents'][number]
+  } | null> {
+    const runs = await this.reconstructSessionRuns(sessionId)
+    for (const run of runs) {
+      const agent = run.agents.find(candidate => candidate.agentId === agentId)
+      if (agent) return { run, agent }
+    }
+    return null
   }
 
   /**
@@ -297,6 +531,7 @@ class WorkflowService {
       let meta: {
         agentType?: string
         description?: string
+        ownerAgentId?: string
         workflow?: {
           runId: string
           name: string
@@ -314,6 +549,9 @@ class WorkflowService {
       if (!runId) continue
       const run = byRunId.get(runId)
       if (!run) continue
+      if (meta.ownerAgentId && !run.ownerAgentId) {
+        run.ownerAgentId = meta.ownerAgentId
+      }
       const agentId = entry.replace(/^agent-/, '').replace(/\.meta\.json$/, '')
       if (run.agents.some(agent => agent.agentId === agentId)) continue
       fallbackIndex += 1
@@ -327,6 +565,7 @@ class WorkflowService {
           ? { phaseTitle: meta.workflow.phaseTitle }
           : {}),
         agentIndex: meta.workflow?.agentIndex ?? fallbackIndex,
+        state: 'start',
       })
     }
   }
@@ -338,7 +577,11 @@ class WorkflowService {
   }): Promise<WorkflowRunSummary[]> {
     this.assertEnabled()
     const runs: WorkflowRunSummary[] = []
-    for (const { sessionId, dir } of await this.findRunDirs(options?.sessionId)) {
+    const [runDirs, sessionDirs] = await Promise.all([
+      this.findRunDirs(options?.sessionId),
+      this.findSessionDirs(options?.sessionId),
+    ])
+    for (const { sessionId, dir } of runDirs) {
       let entries: string[]
       try {
         entries = await fs.readdir(dir)
@@ -368,6 +611,22 @@ class WorkflowService {
         })
       }
     }
+
+    for (const sessionId of new Set(runs.map(run => run.sessionId))) {
+      const scopedSessionDirs = sessionDirs.filter(sessionDir => sessionDir.sessionId === sessionId)
+      const lifecycle = await this.readSessionWorkflowLifecycle(sessionId, scopedSessionDirs)
+      for (const run of runs.filter(candidate => candidate.sessionId === sessionId)) {
+        const launch = lifecycle.launchesByRunId.get(run.runId)
+        const terminal = launch
+          ? this.findWorkflowTerminal(
+              lifecycle.terminals,
+              launch,
+              lifecycle.launchesByRunId.values(),
+            )
+          : undefined
+        run.status = terminal?.status ?? 'running'
+      }
+    }
     runs.sort((a, b) => b.startedAt - a.startedAt)
     return options?.limit ? runs.slice(0, options.limit) : runs
   }
@@ -395,6 +654,23 @@ class WorkflowService {
   private async findRunDirs(
     sessionId?: string,
   ): Promise<Array<{ sessionId: string; dir: string }>> {
+    const found: Array<{ sessionId: string; dir: string }> = []
+    for (const session of await this.findSessionDirs(sessionId)) {
+      const dir = path.join(session.dir, 'workflows')
+      try {
+        if (!(await fs.stat(dir)).isDirectory()) continue
+      } catch {
+        continue
+      }
+      found.push({ sessionId: session.sessionId, dir })
+    }
+    return found
+  }
+
+  /** Session artifact directories, including transcript-only workflow runs. */
+  private async findSessionDirs(
+    sessionId?: string,
+  ): Promise<Array<{ sessionId: string; dir: string }>> {
     const projectsDir = this.projectsDir()
     let projects: string[]
     try {
@@ -403,27 +679,245 @@ class WorkflowService {
       return []
     }
 
-    const found: Array<{ sessionId: string; dir: string }> = []
+    const found = new Map<string, { sessionId: string; dir: string }>()
     for (const project of projects) {
       const projectPath = path.join(projectsDir, project)
-      let sessions: string[]
+      let entries: string[]
       try {
-        sessions = await fs.readdir(projectPath)
+        entries = await fs.readdir(projectPath)
       } catch {
         continue
       }
-      for (const entry of sessions) {
-        if (sessionId && entry !== sessionId) continue
-        const dir = path.join(projectPath, entry, 'workflows')
+
+      const candidates = sessionId
+        ? entries.some(entry => entry === sessionId || entry === `${sessionId}.jsonl`)
+          ? [sessionId]
+          : []
+        : [...new Set(entries.flatMap((entry) => (
+            entry.endsWith('.jsonl') ? [entry.slice(0, -'.jsonl'.length)] : [entry]
+          )))]
+      for (const candidate of candidates) {
+        const dir = path.join(projectPath, candidate)
+        const transcriptPath = path.join(projectPath, `${candidate}.jsonl`)
+        const hasArtifacts = await fs.stat(dir).then(stat => stat.isDirectory()).catch(() => false)
+        const hasTranscript = await fs.stat(transcriptPath).then(stat => stat.isFile()).catch(() => false)
+        if (!hasArtifacts && !hasTranscript) continue
+        found.set(`${project}\0${candidate}`, { sessionId: candidate, dir })
+      }
+    }
+    return [...found.values()]
+  }
+
+  private async readSessionWorkflowLifecycle(
+    sessionId: string,
+    sessionDirs: Array<{ sessionId: string; dir: string }>,
+  ): Promise<PersistedWorkflowLifecycle> {
+    const lifecycle: PersistedWorkflowLifecycle = {
+      launchesByRunId: new Map(),
+      terminals: [],
+    }
+    const files: Array<{ filePath: string; ownerAgentId?: string; modifiedAt: number }> = []
+
+    for (const session of sessionDirs) {
+      const projectDir = path.dirname(session.dir)
+      files.push({
+        filePath: path.join(projectDir, `${sessionId}.jsonl`),
+        modifiedAt: 0,
+      })
+      const subagentsDir = path.join(session.dir, 'subagents')
+      let entries: string[]
+      try {
+        entries = await fs.readdir(subagentsDir)
+      } catch {
+        continue
+      }
+      for (const entry of entries.filter(name => /^agent-.+\.jsonl$/.test(name))) {
+        const filePath = path.join(subagentsDir, entry)
+        const modifiedAt = await fs.stat(filePath).then(stat => stat.mtimeMs).catch(() => 0)
+        files.push({
+          filePath,
+          ownerAgentId: entry.replace(/^agent-/, '').replace(/\.jsonl$/, ''),
+          modifiedAt,
+        })
+      }
+    }
+
+    const seenPaths = new Set<string>()
+    for (const file of files.sort((left, right) => left.modifiedAt - right.modifiedAt)) {
+      if (seenPaths.has(file.filePath)) continue
+      seenPaths.add(file.filePath)
+      let raw: string
+      try {
+        raw = await fs.readFile(file.filePath, 'utf8')
+      } catch {
+        continue
+      }
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue
+        let entry: Record<string, unknown>
         try {
-          if (!(await fs.stat(dir)).isDirectory()) continue
+          const parsed = JSON.parse(line)
+          if (!isObjectRecord(parsed)) continue
+          entry = parsed
         } catch {
           continue
         }
-        found.push({ sessionId: entry, dir })
+        this.collectWorkflowLifecycleEntry(entry, file.ownerAgentId, lifecycle)
       }
     }
-    return found
+    return lifecycle
+  }
+
+  private collectWorkflowLifecycleEntry(
+    entry: Record<string, unknown>,
+    transcriptOwnerAgentId: string | undefined,
+    lifecycle: PersistedWorkflowLifecycle,
+  ): void {
+    const timestamp = nonEmptyString(entry.timestamp)
+    const message = isObjectRecord(entry.message) ? entry.message : undefined
+    const blocks = Array.isArray(message?.content) ? message.content : []
+    const resultBlock = blocks.find(block => (
+      isObjectRecord(block) && block.type === 'tool_result'
+    ))
+    const toolUseId = isObjectRecord(resultBlock)
+      ? nonEmptyString(resultBlock.tool_use_id)
+      : undefined
+    const launchCandidates = [
+      entry.toolUseResult,
+      ...blocks.flatMap(block => (
+        isObjectRecord(block) && block.type === 'tool_result' ? [block.content] : []
+      )),
+    ]
+    for (const candidate of launchCandidates) {
+      const launch = workflowLaunchFromValue(candidate, {
+        ...(transcriptOwnerAgentId ? { ownerAgentId: transcriptOwnerAgentId } : {}),
+        ...(timestamp ? { timestamp } : {}),
+        ...(toolUseId ? { toolUseId } : {}),
+      })
+      if (!launch) continue
+      const existing = lifecycle.launchesByRunId.get(launch.runId)
+      const existingAt = parseTimestamp(existing?.timestamp) ?? Number.NEGATIVE_INFINITY
+      const launchAt = parseTimestamp(launch.timestamp) ?? Number.NEGATIVE_INFINITY
+      if (!existing || launchAt > existingAt) {
+        lifecycle.launchesByRunId.set(launch.runId, launch)
+      }
+    }
+
+    const persisted = entry.type === 'cc-haha-task-notification' &&
+      isObjectRecord(entry.taskNotification)
+      ? entry.taskNotification
+      : undefined
+    if (persisted) {
+      const status = normalizePersistedStatus(persisted.status)
+      const taskId = nonEmptyString(persisted.taskId)
+      if (status && taskId) {
+        lifecycle.terminals.push({
+          taskId,
+          ...(nonEmptyString(persisted.toolUseId)
+            ? { toolUseId: nonEmptyString(persisted.toolUseId) }
+            : {}),
+          ...(nonEmptyString(persisted.ownerAgentId) ?? transcriptOwnerAgentId
+            ? { ownerAgentId: nonEmptyString(persisted.ownerAgentId) ?? transcriptOwnerAgentId }
+            : {}),
+          status,
+          ...(nonEmptyString(persisted.summary) ? { summary: nonEmptyString(persisted.summary) } : {}),
+          ...(stringifyResult(persisted.result) ? { result: stringifyResult(persisted.result) } : {}),
+          ...(nonEmptyString(persisted.outputFile)
+            ? { outputFile: nonEmptyString(persisted.outputFile) }
+            : {}),
+          ...(nonEmptyString(persisted.timestamp) ?? timestamp
+            ? { timestamp: nonEmptyString(persisted.timestamp) ?? timestamp }
+            : {}),
+        })
+      }
+    }
+
+    for (const text of stringsInValue(message?.content)) {
+      if (!text.includes('<task-notification>')) continue
+      const status = normalizePersistedStatus(xmlValue(text, 'status'))
+      const taskId = xmlValue(text, 'task-id')
+      if (!status || !taskId) continue
+      lifecycle.terminals.push({
+        taskId,
+        ...(xmlValue(text, 'tool-use-id') ? { toolUseId: xmlValue(text, 'tool-use-id') } : {}),
+        ...(transcriptOwnerAgentId ? { ownerAgentId: transcriptOwnerAgentId } : {}),
+        status,
+        ...(decodeXml(xmlValue(text, 'summary')) ? { summary: decodeXml(xmlValue(text, 'summary')) } : {}),
+        ...(decodeXml(xmlValue(text, 'result')) ? { result: decodeXml(xmlValue(text, 'result')) } : {}),
+        ...(decodeXml(xmlValue(text, 'output-file'))
+          ? { outputFile: decodeXml(xmlValue(text, 'output-file')) }
+          : {}),
+        ...(timestamp ? { timestamp } : {}),
+      })
+    }
+  }
+
+  private findWorkflowTerminal(
+    terminals: PersistedWorkflowTerminal[],
+    launch: PersistedWorkflowLaunch,
+    launches: Iterable<PersistedWorkflowLaunch>,
+  ): PersistedWorkflowTerminal | undefined {
+    const launchAt = parseTimestamp(launch.timestamp)
+    const nextLaunchAt = [...launches]
+      .filter(candidate => (
+        candidate.runId !== launch.runId &&
+        candidate.taskId === launch.taskId &&
+        candidate.ownerAgentId === launch.ownerAgentId &&
+        (!launch.toolUseId || !candidate.toolUseId || candidate.toolUseId === launch.toolUseId)
+      ))
+      .map(candidate => parseTimestamp(candidate.timestamp))
+      .filter((timestamp): timestamp is number => (
+        timestamp !== undefined && (launchAt === undefined || timestamp > launchAt)
+      ))
+      .sort((left, right) => left - right)[0]
+    const exact = terminals.filter((terminal) => {
+      const terminalAt = parseTimestamp(terminal.timestamp)
+      return terminal.taskId === launch.taskId &&
+        terminal.ownerAgentId === launch.ownerAgentId &&
+        (!launch.toolUseId || !terminal.toolUseId || terminal.toolUseId === launch.toolUseId) &&
+        (launchAt === undefined || terminalAt === undefined || terminalAt >= launchAt) &&
+        (nextLaunchAt === undefined || terminalAt === undefined || terminalAt < nextLaunchAt)
+    })
+    return exact
+      .sort((left, right) => (
+        (parseTimestamp(right.timestamp) ?? 0) - (parseTimestamp(left.timestamp) ?? 0)
+      ))[0]
+  }
+
+  private async readJournalState(
+    sessionId: string,
+    runId: string,
+  ): Promise<WorkflowJournalState> {
+    const state: WorkflowJournalState = {
+      resultAgentIds: new Set(),
+      startedAgentIds: new Set(),
+    }
+    for (const session of await this.findSessionDirs(sessionId)) {
+      const journalPath = path.join(
+        session.dir,
+        'subagents',
+        'workflows',
+        runId,
+        'journal.jsonl',
+      )
+      let raw: string
+      try {
+        raw = await fs.readFile(journalPath, 'utf8')
+      } catch {
+        continue
+      }
+      for (const line of raw.split('\n')) {
+        try {
+          const entry = JSON.parse(line) as { type?: string; agentId?: string }
+          if (!entry.agentId) continue
+          if (entry.type === 'started') state.startedAgentIds.add(entry.agentId)
+          if (entry.type === 'result') state.resultAgentIds.add(entry.agentId)
+        } catch {
+          // A partially written tail does not invalidate earlier transitions.
+        }
+      }
+    }
+    return state
   }
 
   private async readJournal(
