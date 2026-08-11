@@ -158,6 +158,7 @@ vi.mock('./cliTaskStore', () => ({
 }))
 
 import { sessionsApi } from '../api/sessions'
+import type { ServerMessage } from '../types/chat'
 import { useSettingsStore } from './settingsStore'
 import { runsForOwner, runsForSession, useWorkflowStore } from './workflowStore'
 import {
@@ -5012,6 +5013,180 @@ describe('chatStore history mapping', () => {
       status: 'completed',
       toolUseId: 'nested-agent',
     })
+  })
+
+  it('replays live agent output that arrives before the run page registers its target id', () => {
+    vi.useFakeTimers()
+    const runSessionId = '__subagent__test-session-1__early-workflow'
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession(),
+        [runSessionId]: makeSession(),
+      },
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'agent_run_event',
+      runAgentId: 'early-workflow-agent',
+      streamId: 'early-workflow-stream',
+      targetAgentId: 'early-workflow-agent',
+      event: { type: 'content_delta', text: 'arrived before REST identity' },
+    })
+
+    expect(useChatStore.getState().sessions[runSessionId]?.streamingText).toBe('')
+    const unregister = registerAgentRunSession(
+      TEST_SESSION_ID,
+      runSessionId,
+      ['early-workflow-agent'],
+    )
+    try {
+      vi.advanceTimersByTime(60)
+      expect(useChatStore.getState().sessions[runSessionId]?.streamingText).toBe(
+        'arrived before REST identity',
+      )
+      expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.streamingText).toBe('')
+    } finally {
+      unregister()
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not replay buffered output after an unregistered run has completed', () => {
+    vi.useFakeTimers()
+    const runSessionId = '__subagent__test-session-1__completed-before-open'
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession(),
+        [runSessionId]: makeSession({
+          messages: [{
+            id: 'durable-answer',
+            type: 'assistant_text',
+            content: 'durable completed answer',
+            timestamp: 1,
+          }],
+        }),
+      },
+    })
+
+    for (const event of [
+      { type: 'content_start', blockType: 'text' },
+      { type: 'content_delta', text: 'transient answer' },
+      { type: 'status', state: 'idle' },
+    ] as const) {
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'agent_run_event',
+        runAgentId: 'completed-agent',
+        streamId: 'completed-stream',
+        targetAgentId: 'completed-agent',
+        event,
+      })
+    }
+
+    const unregister = registerAgentRunSession(
+      TEST_SESSION_ID,
+      runSessionId,
+      ['completed-agent'],
+    )
+    try {
+      vi.advanceTimersByTime(60)
+      expect(useChatStore.getState().sessions[runSessionId]?.messages).toEqual([
+        expect.objectContaining({ id: 'durable-answer', content: 'durable completed answer' }),
+      ])
+      expect(useChatStore.getState().sessions[runSessionId]?.streamingText).toBe('')
+    } finally {
+      unregister()
+      vi.useRealTimers()
+    }
+  })
+
+  it('isolates a reused Team member target by creation scope', () => {
+    vi.useFakeTimers()
+    const oldSessionId = 'team-member:old-scope:worker'
+    const newSessionId = 'team-member:new-scope:worker'
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession(),
+        [oldSessionId]: makeSession(),
+        [newSessionId]: makeSession(),
+      },
+    })
+    const unregisterOld = registerAgentRunSession(
+      TEST_SESSION_ID,
+      oldSessionId,
+      ['worker@reused-team'],
+      { streamScopeId: 'old-team-scope' },
+    )
+    const unregisterNew = registerAgentRunSession(
+      TEST_SESSION_ID,
+      newSessionId,
+      ['worker@reused-team'],
+      { streamScopeId: 'new-team-scope' },
+    )
+
+    try {
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'agent_run_event',
+        runAgentId: 'physical-new-worker',
+        streamId: 'new-worker-stream',
+        targetAgentId: 'worker@reused-team',
+        targetAgentScopeId: 'new-team-scope',
+        event: { type: 'content_delta', text: 'new incarnation output' },
+      })
+      vi.advanceTimersByTime(60)
+      expect(useChatStore.getState().sessions[newSessionId]?.streamingText).toBe(
+        'new incarnation output',
+      )
+      expect(useChatStore.getState().sessions[oldSessionId]?.streamingText).toBe('')
+    } finally {
+      unregisterNew()
+      unregisterOld()
+      vi.useRealTimers()
+    }
+  })
+
+  it('ignores a superseded foreground stream after its background continuation starts', () => {
+    vi.useFakeTimers()
+    const runSessionId = '__subagent__test-session-1__background-handoff'
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession(),
+        [runSessionId]: makeSession(),
+      },
+    })
+    const unregister = registerAgentRunSession(
+      TEST_SESSION_ID,
+      runSessionId,
+      ['handoff-agent'],
+    )
+    const send = (streamId: string, event: Extract<ServerMessage, { type: 'agent_run_event' }>['event']) => {
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'agent_run_event',
+        runAgentId: 'handoff-agent',
+        streamId,
+        targetAgentId: 'handoff-agent',
+        event,
+      })
+    }
+
+    try {
+      send('foreground-stream', { type: 'content_delta', text: 'abandoned partial' })
+      vi.advanceTimersByTime(60)
+      send('foreground-stream', { type: 'streaming_fallback', cause: 'stream_retry' })
+      send('foreground-stream', { type: 'status', state: 'idle' })
+      send('background-stream', { type: 'content_start', blockType: 'text' })
+      send('background-stream', { type: 'content_delta', text: 'background answer' })
+      send('foreground-stream', { type: 'content_delta', text: 'late foreground text' })
+      vi.advanceTimersByTime(60)
+
+      const session = useChatStore.getState().sessions[runSessionId]
+      expect(session?.streamingText).toBe('background answer')
+      expect(session?.messages).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ content: expect.stringContaining('abandoned partial') }),
+      ]))
+      expect(session?.chatState).toBe('streaming')
+    } finally {
+      unregister()
+      vi.useRealTimers()
+    }
   })
 
   it('replays owner task events that arrive before the run identity is registered', () => {

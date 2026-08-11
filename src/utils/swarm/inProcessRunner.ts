@@ -94,7 +94,10 @@ import {
   type Task,
 } from '../tasks.js'
 import type { TeammateContext } from '../teammateContext.js'
-import { runWithTeammateContext } from '../teammateContext.js'
+import {
+  createTeamStreamScopeId,
+  runWithTeammateContext,
+} from '../teammateContext.js'
 import {
   createIdleNotification,
   getLastPeerDmSummary,
@@ -115,7 +118,7 @@ import {
   createPermissionRequest,
   sendPermissionRequestViaMailbox,
 } from './permissionSync.js'
-import { setMemberActive } from './teamHelpers.js'
+import { readTeamFile, setMemberActive } from './teamHelpers.js'
 import { TEAMMATE_SYSTEM_PROMPT_ADDENDUM } from './teammatePromptAddendum.js'
 
 type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
@@ -976,6 +979,13 @@ export async function runInProcessTeammate(
     invokingRequestId,
   } = config
   const { setAppState } = toolUseContext
+  const teamFile = readTeamFile(identity.teamName)
+  const scopedTeammateContext: TeammateContext = {
+    ...teammateContext,
+    ...(teamFile
+      ? { streamScopeId: createTeamStreamScopeId(teamFile) }
+      : {}),
+  }
 
   logForDebugging(
     `[inProcessRunner] Starting agent loop for ${identity.agentId}`,
@@ -1207,7 +1217,7 @@ export async function runInProcessTeammate(
       let workWasAborted = false
 
       // Run agent within contexts
-      const runActiveTurn = () => runWithTeammateContext(teammateContext, async () => {
+      const runActiveTurn = () => runWithTeammateContext(scopedTeammateContext, async () => {
         return runWithAgentContext(agentContext, async () => {
           // Mark task as running (not idle)
           updateTaskState(
@@ -1250,6 +1260,7 @@ export async function runInProcessTeammate(
             availableTools: toolUseContext.options.tools,
             allowedTools,
             contentReplacementState: teammateReplacementState,
+            streamTargetAgentId: identity.agentId,
           })) {
             // Check lifecycle abort first (kills whole teammate)
             if (abortController.signal.aborted) {

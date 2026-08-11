@@ -45,6 +45,17 @@ const EMPTY_DISMISSED_BACKGROUND_TASK_KEYS: string[] = []
 const EMPTY_RUN_TASKS: CLITask[] = []
 const EMPTY_OWNER_AGENT_IDS: string[] = []
 
+function teamStreamScopeId(team: {
+  name: string
+  leadSessionId?: string
+  createdAt?: string
+} | undefined): string | undefined {
+  if (!team?.createdAt) return undefined
+  const createdAt = Number(team.createdAt)
+  if (!Number.isFinite(createdAt)) return undefined
+  return JSON.stringify([team.name, team.leadSessionId ?? '', createdAt])
+}
+
 export function SubagentRunPage({
   sourceSessionId,
   toolUseId,
@@ -59,6 +70,7 @@ export function SubagentRunPage({
   const t = useTranslation()
   const [data, setData] = useState<SubagentRunResponse | null>(null)
   const [responseActivityEpoch, setResponseActivityEpoch] = useState(0)
+  const [responseStreamRevision, setResponseStreamRevision] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const requestIdRef = useRef(0)
@@ -156,7 +168,9 @@ export function SubagentRunPage({
   const load = useCallback(async (options?: { resetData?: boolean }) => {
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
-    const requestedActivityEpoch = useChatStore.getState().sessions[tabId]?.historyMutationEpoch ?? 0
+    const requestedSession = useChatStore.getState().sessions[tabId]
+    const requestedActivityEpoch = requestedSession?.historyMutationEpoch ?? 0
+    const requestedStreamRevision = requestedSession?.agentStreamRevision ?? 0
     setLoading(true)
     setError(null)
     if (options?.resetData) setData(null)
@@ -169,6 +183,7 @@ export function SubagentRunPage({
       if (requestIdRef.current !== requestId) return
       setData(nextData)
       setResponseActivityEpoch(requestedActivityEpoch)
+      setResponseStreamRevision(requestedStreamRevision)
     } catch (err) {
       if (requestIdRef.current !== requestId) return
       setError(err instanceof Error ? err.message : String(err))
@@ -214,32 +229,67 @@ export function SubagentRunPage({
       }, runActivity, {
         preferCurrent: (existing.historyMutationEpoch ?? 0) !== responseActivityEpoch,
       })
+      const currentStreamRevision = existing.agentStreamRevision ?? 0
+      const preserveLiveConversation = currentStreamRevision > 0 && (
+        existing.chatState !== 'idle' ||
+        currentStreamRevision !== responseStreamRevision
+      )
       return {
         sessions: {
           ...state.sessions,
           [tabId]: {
             ...existing,
-            messages: [...transcriptMessages, ...localMessages],
+            messages: preserveLiveConversation
+              ? existing.messages
+              : [...transcriptMessages, ...localMessages],
             agentTaskNotifications: mergedActivity.agentTaskNotifications,
             backgroundAgentTasks: mergedActivity.backgroundAgentTasks,
             connectionState: 'connected',
-            chatState: effectiveStatus === 'running' || hasPendingMessage
-              ? 'thinking'
-              : 'idle',
+            chatState: preserveLiveConversation
+              ? existing.chatState
+              : effectiveStatus === 'running' || hasPendingMessage
+                ? 'thinking'
+                : 'idle',
+            ...(!preserveLiveConversation ? {
+              agentStreamRevision: 0,
+              streamingText: '',
+              streamingToolInput: '',
+              activeToolUseId: null,
+              activeToolName: null,
+              activeThinkingId: null,
+            } : {}),
           },
         },
       }
     })
-  }, [data, effectiveStatus, responseActivityEpoch, tabId])
+  }, [data, effectiveStatus, responseActivityEpoch, responseStreamRevision, tabId])
 
   useEffect(() => {
     if (!data?.agentId) return
-    return registerAgentRunSession(sourceSessionId, tabId, [data.agentId], {
-      ...(teamMember || teamAgentName
-        ? { eventIdPrefix: data.agentId }
-        : {}),
-    })
-  }, [data?.agentId, sourceSessionId, tabId, teamAgentName, teamMember])
+    const streamScopeId = teamStreamScopeId(teamSnapshot?.team)
+    const usesTeamFragmentIds = Boolean(teamMember || teamAgentName)
+    const unregisterUnscoped = registerAgentRunSession(
+      sourceSessionId,
+      tabId,
+      [data.agentId],
+      usesTeamFragmentIds ? { eventIdPrefix: data.agentId } : {},
+    )
+    const unregisterScoped = streamScopeId
+      ? registerAgentRunSession(sourceSessionId, tabId, [data.agentId], {
+          streamScopeId,
+          ...(usesTeamFragmentIds
+            ? {
+                eventIdPrefix: data.agentId,
+                streamEventIdPrefix: data.agentId,
+              }
+            : {}),
+        })
+      : () => undefined
+    return () => {
+      unregisterScoped()
+      unregisterUnscoped()
+    }
+  }, [data?.agentId, sourceSessionId, tabId, teamAgentName, teamMember, teamSnapshot?.team])
 
   useEffect(() => {
     if (workflowOwnerAliases.length === 0) return
@@ -338,10 +388,15 @@ export function TeamMemberRunPage({
   useEffect(() => {
     if (!member) return
     const memberTeam = snapshot?.team ?? useTeamStore.getState().getTeamByMemberSessionId(tabId)
+    const streamScopeId = teamStreamScopeId(memberTeam ?? undefined)
     const unregisterLogicalOwners = registerAgentRunSession(leadSessionId, runSessionId, [
       member.agentId,
       member.name,
-    ], { ownerScopeId: memberTeam ? teamIdentityKey(memberTeam) : undefined })
+    ], {
+      ownerScopeId: memberTeam ? teamIdentityKey(memberTeam) : undefined,
+      ...(streamScopeId ? { streamScopeId } : {}),
+      streamEventIdPrefix: 'runAgentId',
+    })
     // Until the first transcript response identifies the concrete fragments,
     // a configured session id might itself be that physical owner. Leave its
     // events pending so the first replay uses the same fragment namespace as
@@ -352,7 +407,11 @@ export function TeamMemberRunPage({
         leadSessionId,
         runSessionId,
         [ownerAgentId],
-        { eventIdPrefix: ownerAgentId },
+        {
+          eventIdPrefix: ownerAgentId,
+          ...(streamScopeId ? { streamScopeId } : {}),
+          streamEventIdPrefix: ownerAgentId,
+        },
       ))
       : []
     const unregisterMemberSession = memberOwnerAgentIdsKnown &&
@@ -361,6 +420,7 @@ export function TeamMemberRunPage({
           leadSessionId,
           runSessionId,
           [member.sessionId],
+          streamScopeId ? { streamScopeId } : undefined,
         )
       : () => undefined
     return () => {

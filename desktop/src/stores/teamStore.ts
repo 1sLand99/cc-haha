@@ -106,6 +106,7 @@ function createMemberSessionState() {
     agentTaskNotifications: {},
     backgroundAgentTasks: {},
     historyMutationEpoch: 0,
+    agentStreamRevision: 0,
     elapsedTimer: null,
   }
 }
@@ -552,6 +553,7 @@ function syncMemberSessionMessages(
   activity?: ReturnType<typeof reconstructRunActivityFromTranscript>,
   requestedMutationEpoch?: number,
   requestedTaskUpdatedAt?: Map<string, number>,
+  requestedStreamRevision?: number,
 ) {
   const isTerminal = member.status === 'completed' ||
     member.status === 'error' ||
@@ -581,6 +583,14 @@ function syncMemberSessionMessages(
   useChatStore.setState((state) => {
     const existing = state.sessions[sessionId]
     const nextState = existing ?? createMemberSessionState()
+    const currentStreamRevision = nextState.agentStreamRevision ?? 0
+    const preserveLiveConversation = currentStreamRevision > 0 && (
+      nextState.chatState !== 'idle' ||
+      (
+        requestedStreamRevision !== undefined &&
+        currentStreamRevision !== requestedStreamRevision
+      )
+    )
     const mutationEpochChanged = requestedMutationEpoch !== undefined &&
       (nextState.historyMutationEpoch ?? 0) !== requestedMutationEpoch
     const taskFreshnessChanged = existing && Object.values(
@@ -627,13 +637,25 @@ function syncMemberSessionMessages(
         ...state.sessions,
         [sessionId]: {
           ...nextState,
-          messages,
+          messages: preserveLiveConversation ? nextState.messages : messages,
           ...(activity ? {
             agentTaskNotifications: mergedActivity!.agentTaskNotifications,
             backgroundAgentTasks: mergedActivity!.backgroundAgentTasks,
           } : {}),
           connectionState: 'connected',
-          chatState: isActive ? 'thinking' : 'idle',
+          chatState: preserveLiveConversation
+            ? nextState.chatState
+            : isActive
+              ? 'thinking'
+              : 'idle',
+          ...(!preserveLiveConversation ? {
+            agentStreamRevision: 0,
+            streamingText: '',
+            streamingToolInput: '',
+            activeToolUseId: null,
+            activeToolName: null,
+            activeThinkingId: null,
+          } : {}),
         },
       },
     }
@@ -1059,6 +1081,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
     const incarnationKey = memberIncarnationKey(team, member)
     const requestedSession = useChatStore.getState().sessions[sessionId]
     const requestedMutationEpoch = requestedSession?.historyMutationEpoch ?? 0
+    const requestedStreamRevision = requestedSession?.agentStreamRevision ?? 0
     const requestedTaskUpdatedAt = new Map<string, number>()
     for (const task of Object.values(requestedSession?.backgroundAgentTasks ?? {})) {
       requestedTaskUpdatedAt.set(task.taskId, task.updatedAt)
@@ -1175,6 +1198,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
           activity,
           requestedMutationEpoch,
           requestedTaskUpdatedAt,
+          requestedStreamRevision,
         )
       } catch {
         const currentTeam = get().getTeamByMemberSessionId(sessionId)
@@ -1197,6 +1221,10 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
           currentMember,
           snapshot,
           existingMessages,
+          undefined,
+          undefined,
+          undefined,
+          requestedStreamRevision,
         )
       }
     })()

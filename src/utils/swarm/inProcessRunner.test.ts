@@ -31,6 +31,7 @@ import {
 } from '../tasks.js'
 import {
   createTeammateContext,
+  getTeammateContext,
   runWithTeammateContext,
 } from '../teammateContext.js'
 import {
@@ -788,12 +789,14 @@ describe('in-process teammate activity synchronization', () => {
         parentSessionId: 'leader-session',
       }
       const member = createMember(agentName, teamName)
-      await writeTeamFileAsync(teamName, {
+      const teamFile: TeamFile = {
         name: teamName,
         createdAt: Date.now(),
         leadAgentId: `team-lead@${teamName}`,
+        leadSessionId: identity.parentSessionId,
         members: [member],
-      })
+      }
+      await writeTeamFileAsync(teamName, teamFile)
       await createTask(teamName, {
         subject: 'Earlier explicit assignment',
         description: 'Makes an accidental first-turn claim observable',
@@ -848,9 +851,13 @@ describe('in-process teammate activity synchronization', () => {
       } as unknown as ToolUseContext
 
       let firstPrompt = ''
+      let streamTargetAgentId: string | undefined
+      let streamScopeId: string | undefined
       const runAgent = spyOn(runAgentModule, 'runAgent').mockImplementation(
         async function* (input: Parameters<typeof runAgentModule.runAgent>[0]) {
           firstPrompt = JSON.stringify(input.promptMessages[0])
+          streamTargetAgentId = input.streamTargetAgentId
+          streamScopeId = getTeammateContext()?.streamScopeId
           expect(readTeamFile(teamName)?.members[0]?.isActive).toBe(true)
           abortController.abort()
         },
@@ -874,6 +881,12 @@ describe('in-process teammate activity synchronization', () => {
         expect(result.success).toBe(true)
         expect(firstPrompt).toContain('Review the release')
         expect(firstPrompt).not.toContain('Audit first-turn delivery')
+        expect(streamTargetAgentId).toBe(identity.agentId)
+        expect(streamScopeId).toBe(JSON.stringify([
+          teamName,
+          identity.parentSessionId,
+          teamFile.createdAt,
+        ]))
         expect(readTeamFile(teamName)?.members[0]?.isActive).toBe(false)
         const unclaimedTask = (await listTasks(teamName))
           .find(task => task.subject === 'Audit first-turn delivery')

@@ -943,6 +943,85 @@ describe('teamStore incremental transcript polling', () => {
     }
   })
 
+  it('keeps a settled live member turn when an older terminal poll resolves', async () => {
+    const staleTerminalPoll = deferred<any>()
+    getMemberTranscriptMock
+      .mockResolvedValueOnce({ messages: [] })
+      .mockReturnValueOnce(staleTerminalPoll.promise)
+      .mockResolvedValueOnce({
+        messages: [{
+          id: 'durable-live-answer',
+          type: 'assistant',
+          content: [{ type: 'text', text: 'Durable teammate answer' }],
+          timestamp: '2026-08-10T00:00:02.000Z',
+        }],
+      })
+    const member = {
+      agentId: 'worker@terminal-race-team',
+      name: 'worker',
+      role: 'worker',
+      status: 'running' as const,
+    }
+    const team = {
+      name: 'terminal-race-team',
+      leadSessionId: 'terminal-race-lead',
+      incarnationId: 'terminal-race-incarnation',
+      createdAt: '2026-08-10T00:00:00.000Z',
+      members: [member],
+    }
+    const sessionId = memberSessionId(member.agentId, team.incarnationId)
+    useTeamStore.setState({
+      activeTeam: team,
+      memberTeamBySession: { [sessionId]: team },
+    })
+    await useTeamStore.getState().refreshMemberSession(sessionId)
+    const unregister = registerAgentRunSession(
+      team.leadSessionId,
+      sessionId,
+      [member.agentId],
+    )
+
+    try {
+      const pendingPoll = useTeamStore.getState().refreshMemberSession(sessionId)
+      const send = (event: Extract<import('../types/chat').ServerMessage, { type: 'agent_run_event' }>['event']) => {
+        useChatStore.getState().handleServerMessage(team.leadSessionId, {
+          type: 'agent_run_event',
+          runAgentId: 'terminal-race-worker-run',
+          streamId: 'terminal-race-stream',
+          targetAgentId: member.agentId,
+          event,
+        })
+      }
+      send({ type: 'content_start', blockType: 'text' })
+      send({ type: 'content_delta', text: 'Live teammate answer' })
+      send({ type: 'status', state: 'idle' })
+
+      const completedTeam = {
+        ...team,
+        members: [{ ...member, status: 'completed' as const }],
+      }
+      useTeamStore.setState({
+        activeTeam: completedTeam,
+        memberTeamBySession: { [sessionId]: completedTeam },
+      })
+      staleTerminalPoll.resolve({ messages: [] })
+      await pendingPoll
+
+      expect(useChatStore.getState().sessions[sessionId]?.messages).toEqual([
+        expect.objectContaining({ content: 'Live teammate answer' }),
+      ])
+      expect(useChatStore.getState().sessions[sessionId]?.agentStreamRevision).toBe(2)
+
+      await useTeamStore.getState().refreshMemberSession(sessionId)
+      expect(useChatStore.getState().sessions[sessionId]?.messages).toEqual([
+        expect.objectContaining({ content: 'Durable teammate answer' }),
+      ])
+      expect(useChatStore.getState().sessions[sessionId]?.agentStreamRevision).toBe(0)
+    } finally {
+      unregister()
+    }
+  })
+
   it('joins physical-owner live activity with its fragment-scoped transcript identity', async () => {
     getMemberTranscriptMock
       .mockResolvedValueOnce({
