@@ -312,6 +312,92 @@ describe('TeamService', () => {
     expect(detail.members[1]!.agentId).toBe('agent-worker')
   })
 
+  it('keeps a member idle while it still owns an in-progress task', async () => {
+    // A teammate marks a task started and then finishes its turn, and an
+    // umbrella task stays open across every turn underneath it. Deriving
+    // activity from task state is what made every member look busy for a whole
+    // run, so the roster's own turn marker has to win.
+    await writeTeamConfig('activity-team', makeTeamConfig({
+      name: 'activity-team',
+      leadSessionId: 'lead-session-activity',
+      members: [{
+        agentId: 'backend-dev@activity-team',
+        name: 'backend-dev',
+        agentType: 'backend-dev',
+        joinedAt: 1700000000000,
+        cwd: '/tmp/project',
+        isActive: false,
+      }],
+    }))
+    await writeTeamTask('activity-team', {
+      id: '1',
+      subject: 'Umbrella task',
+      description: '',
+      status: 'in_progress',
+      owner: 'backend-dev',
+      blocks: [],
+      blockedBy: [],
+    })
+
+    const snapshot = await service.getWorkbench('activity-team')
+    const member = snapshot.team.members.find(m => m.name === 'backend-dev')!
+    expect(member.activity).toBe('idle')
+    expect(snapshot.tasks.find(task => task.id === '1')!.status).toBe('in_progress')
+  })
+
+  it('falls back to transcript writes when a backend records no turn markers', async () => {
+    await writeTeamConfig('probe-team', makeTeamConfig({
+      name: 'probe-team',
+      leadSessionId: 'lead-session-probe',
+      members: [
+        {
+          agentId: 'fresh@probe-team',
+          name: 'fresh',
+          agentType: 'fresh',
+          joinedAt: 1700000000000,
+          cwd: '/tmp/project',
+        },
+        {
+          agentId: 'stale@probe-team',
+          name: 'stale',
+          agentType: 'stale',
+          joinedAt: 1700000000000,
+          cwd: '/tmp/project',
+        },
+        {
+          agentId: 'silent@probe-team',
+          name: 'silent',
+          agentType: 'silent',
+          joinedAt: 1700000000000,
+          cwd: '/tmp/project',
+        },
+      ],
+    }))
+
+    for (const name of ['fresh', 'stale']) {
+      const filePath = await writeSubagentTranscriptFile(
+        '-tmp-project',
+        'lead-session-probe',
+        `agent-${name}.jsonl`,
+        [{
+          type: 'assistant',
+          agentName: name,
+          uuid: `${name}-entry`,
+          message: { role: 'assistant', content: 'work' },
+          timestamp: '2026-01-01T00:00:01.000Z',
+        }],
+      )
+      const writtenAt = name === 'fresh' ? new Date() : new Date(Date.now() - 60_000)
+      await fs.utimes(filePath, writtenAt, writtenAt)
+    }
+
+    const detail = await service.getTeam('probe-team')
+    const activityByName = new Map(detail.members.map(m => [m.name, m.activity]))
+    expect(activityByName.get('fresh')).toBe('active')
+    expect(activityByName.get('stale')).toBe('idle')
+    expect(activityByName.get('silent')).toBe('unknown')
+  })
+
   it('should discover missing in-process members from subagent transcripts', async () => {
     await writeTeamConfig(
       'subagent-team',
@@ -348,6 +434,241 @@ describe('TeamService', () => {
 
     const detail = await service.getTeam('subagent-team')
     expect(detail.members.some((member) => member.name === 'security-reviewer')).toBe(true)
+  })
+
+  it('replays a cumulative snapshot chain once instead of per fragment', async () => {
+    await writeTeamConfig('cumulative-team', makeTeamConfig({
+      name: 'cumulative-team',
+      leadSessionId: 'lead-session-cumulative',
+      members: [{
+        agentId: 'backend-dev@cumulative-team',
+        name: 'backend-dev',
+        agentType: 'backend-dev',
+        joinedAt: 1700000000000,
+        cwd: '/tmp/project',
+        isActive: false,
+      }],
+    }))
+
+    // Every turn rewrites the whole transcript, so each fragment repeats all of
+    // its predecessor's entries and appends the new ones. The rewrite restamps
+    // the session and turn an entry was written into -- fragment id, slug, cwd
+    // and promptId -- so the shared history is never byte-identical.
+    const entry = (fragment: string, index: number) => ({
+      type: 'assistant',
+      agentName: 'backend-dev',
+      agentId: fragment,
+      slug: `slug-${fragment}`,
+      cwd: `/tmp/project/${fragment}`,
+      promptId: `prompt-${fragment}`,
+      uuid: `turn-${index}`,
+      message: { role: 'assistant', content: `step ${index}` },
+      timestamp: `2026-01-01T00:00:0${index}.000Z`,
+    })
+    for (const [index, length] of [2, 4, 6].entries()) {
+      const fragment = `snapshot-${index}`
+      const filePath = await writeSubagentTranscriptFile(
+        '-tmp-project',
+        'lead-session-cumulative',
+        `agent-${fragment}.jsonl`,
+        Array.from({ length }, (_unused, position) => entry(fragment, position)),
+      )
+      await fs.utimes(filePath, new Date(1_000 * (index + 1)), new Date(1_000 * (index + 1)))
+    }
+
+    const page = await service.getMemberTranscriptPage(
+      'cumulative-team',
+      'backend-dev@cumulative-team',
+    )
+
+    const ids = page.messages.map(message => message.id)
+    expect(ids).toEqual([
+      'snapshot-2/turn-0',
+      'snapshot-2/turn-1',
+      'snapshot-2/turn-2',
+      'snapshot-2/turn-3',
+      'snapshot-2/turn-4',
+      'snapshot-2/turn-5',
+    ])
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(page.ownerAgentIds).toEqual(['snapshot-2'])
+  })
+
+  it('keeps a superseded fragment tool call paired inside the surviving fragment', async () => {
+    await writeTeamConfig('cumulative-pairing-team', makeTeamConfig({
+      name: 'cumulative-pairing-team',
+      leadSessionId: 'lead-session-cumulative-pairing',
+      members: [{
+        agentId: 'backend-dev@cumulative-pairing-team',
+        name: 'backend-dev',
+        agentType: 'backend-dev',
+        joinedAt: 1700000000000,
+        cwd: '/tmp/project',
+        isActive: false,
+      }],
+    }))
+
+    // The call lands in the earlier snapshot and its result only arrives in the
+    // rewrite, so a per-fragment scope would split the pair across two owners.
+    const toolUse = {
+      type: 'assistant',
+      agentName: 'backend-dev',
+      uuid: 'tool-call',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'Bash:0', name: 'Bash', input: { command: 'ls' } }],
+      },
+      timestamp: '2026-01-01T00:00:01.000Z',
+    }
+    const toolResult = {
+      type: 'user',
+      agentName: 'backend-dev',
+      uuid: 'tool-result',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'Bash:0', content: 'ok' }],
+      },
+      timestamp: '2026-01-01T00:00:02.000Z',
+    }
+    const truncated = await writeSubagentTranscriptFile(
+      '-tmp-project',
+      'lead-session-cumulative-pairing',
+      'agent-partial.jsonl',
+      [toolUse],
+    )
+    const complete = await writeSubagentTranscriptFile(
+      '-tmp-project',
+      'lead-session-cumulative-pairing',
+      'agent-complete.jsonl',
+      [toolUse, toolResult],
+    )
+    await fs.utimes(truncated, new Date(1_000), new Date(1_000))
+    await fs.utimes(complete, new Date(2_000), new Date(2_000))
+
+    const page = await service.getMemberTranscriptPage(
+      'cumulative-pairing-team',
+      'backend-dev@cumulative-pairing-team',
+    )
+
+    const blocks = page.messages.flatMap(message => (
+      Array.isArray(message.content)
+        ? message.content.filter((block): block is Record<string, unknown> => (
+            !!block && typeof block === 'object'
+          ))
+        : []
+    ))
+    expect(blocks.find(block => block.type === 'tool_use')?.id).toBe('complete/Bash:0')
+    expect(blocks.find(block => block.type === 'tool_result')?.tool_use_id).toBe('complete/Bash:0')
+  })
+
+  it('marks where a member started and finished each task in its transcript', async () => {
+    await writeTeamConfig('anchor-team', makeTeamConfig({
+      name: 'anchor-team',
+      leadSessionId: 'lead-session-anchor',
+      members: [{
+        agentId: 'backend-dev@anchor-team',
+        name: 'backend-dev',
+        agentType: 'backend-dev',
+        joinedAt: 1700000000000,
+        cwd: '/tmp/project',
+        isActive: false,
+      }],
+    }))
+    const taskUpdate = (uuid: string, taskId: string, status: string, second: number) => ({
+      type: 'assistant',
+      agentName: 'backend-dev',
+      uuid,
+      message: {
+        role: 'assistant',
+        content: [{
+          type: 'tool_use',
+          id: `TaskUpdate:${uuid}`,
+          name: 'TaskUpdate',
+          input: { taskId, status },
+        }],
+      },
+      timestamp: `2026-01-01T00:00:0${second}.000Z`,
+    })
+    await writeSubagentTranscriptFile(
+      '-tmp-project',
+      'lead-session-anchor',
+      'agent-anchors.jsonl',
+      [
+        taskUpdate('start-11', '11', 'in_progress', 1),
+        {
+          type: 'assistant',
+          agentName: 'backend-dev',
+          uuid: 'prose',
+          message: { role: 'assistant', content: 'Working' },
+          timestamp: '2026-01-01T00:00:02.000Z',
+        },
+        taskUpdate('done-11', '11', 'completed', 3),
+        taskUpdate('start-10', '10', 'in_progress', 4),
+      ],
+    )
+
+    const page = await service.getMemberTranscriptPage(
+      'anchor-team',
+      'backend-dev@anchor-team',
+    )
+
+    expect(page.taskAnchors.map(anchor => [anchor.taskId, anchor.status])).toEqual([
+      ['11', 'in_progress'],
+      ['11', 'completed'],
+      ['10', 'in_progress'],
+    ])
+    // Each anchor points at a real message so the conversation can be split by task.
+    const messageIds = new Set(page.messages.map(message => message.id))
+    expect(page.taskAnchors.every(anchor => messageIds.has(anchor.messageId))).toBe(true)
+  })
+
+  it('exposes task anchors on the full-page transcript read as well as the incremental one', async () => {
+    await writeTeamConfig('anchor-route-team', makeTeamConfig({
+      name: 'anchor-route-team',
+      leadSessionId: 'lead-session-anchor-route',
+      members: [{
+        agentId: 'backend-dev@anchor-route-team',
+        name: 'backend-dev',
+        agentType: 'backend-dev',
+        joinedAt: 1700000000000,
+        cwd: '/tmp/project',
+        isActive: false,
+      }],
+    }))
+    await writeSubagentTranscriptFile(
+      '-tmp-project',
+      'lead-session-anchor-route',
+      'agent-route.jsonl',
+      [{
+        type: 'assistant',
+        agentName: 'backend-dev',
+        uuid: 'start-3',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'TaskUpdate:0',
+            name: 'TaskUpdate',
+            input: { taskId: '3', status: 'in_progress' },
+          }],
+        },
+        timestamp: '2026-01-01T00:00:01.000Z',
+      }],
+    )
+
+    // The full-page read hand-picks response fields, so a new one has to be
+    // added there too or the desktop silently loses it on first load.
+    const full = await service.getMemberTranscriptPage(
+      'anchor-route-team',
+      'backend-dev@anchor-route-team',
+    )
+    const incremental = await service.getMemberTranscriptPage(
+      'anchor-route-team',
+      'backend-dev@anchor-route-team',
+      { afterOrdinal: -1 },
+    )
+    expect(full.taskAnchors).toEqual(incremental.taskAnchors)
+    expect(full.taskAnchors).toHaveLength(1)
   })
 
   it('aggregates every resumed transcript fragment into one member conversation', async () => {
@@ -4547,15 +4868,20 @@ describe('Teams API', () => {
       messages: Array<{ id: string }>
       ownerAgentIds: string[]
       taskNotifications: unknown[]
+      taskAnchors: unknown[]
     }
+    // This route hand-picks its fields, so anything the page gains has to be
+    // added here on purpose. Growing the set is additive; losing one is not.
     expect(Object.keys(legacyBody).sort()).toEqual([
       'messages',
       'ownerAgentIds',
+      'taskAnchors',
       'taskNotifications',
     ])
     expect(legacyBody.ownerAgentIds).toEqual([])
     expect(legacyBody.messages.map(message => message.id)).toEqual(['x1', 'b1', 'x2'])
     expect(legacyBody.taskNotifications).toEqual([])
+    expect(legacyBody.taskAnchors).toEqual([])
   })
 
   it('GET /api/teams/:name/members/:id/transcript should 404 for unknown member', async () => {

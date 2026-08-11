@@ -1,9 +1,11 @@
 import { create } from 'zustand'
 import { teamsApi } from '../api/teams'
+import type { TeamTaskAnchor } from '../api/teams'
 import type {
   TeamSummary,
   TeamDetail,
   TeamMember,
+  TeamMemberActivity,
   AgentColor,
   TeamWorkbenchSnapshot,
   TeamWorkbenchTimeline,
@@ -14,7 +16,6 @@ import type {
   TeamMemberStatus,
   UIMessage,
 } from '../types/chat'
-import { runningTaskForMember } from '../components/agentTeams/agentTeamsModel'
 import {
   useChatStore,
   mapHistoryMessagesToUiMessages,
@@ -118,6 +119,15 @@ function normalizeMemberStatus(status: string | undefined): TeamMember['status']
   return status === 'failed' ? 'error' : 'idle'
 }
 
+function normalizeMemberActivity(activity: unknown): TeamMemberActivity | undefined {
+  return activity === 'active' ||
+    activity === 'idle' ||
+    activity === 'exited' ||
+    activity === 'unknown'
+    ? activity
+    : undefined
+}
+
 function toTeamMember(raw: Record<string, unknown>): TeamMember {
   return {
     agentId: (raw.agentId as string) || '',
@@ -129,6 +139,7 @@ function toTeamMember(raw: Record<string, unknown>): TeamMember {
       (raw.agentId as string) ||
       '',
     status: normalizeMemberStatus(raw.status as string | undefined),
+    activity: normalizeMemberActivity(raw.activity),
     currentTask: raw.currentTask as string | undefined,
     color: raw.color as AgentColor | undefined,
     sessionId: raw.sessionId as string | undefined,
@@ -225,7 +236,10 @@ function mergeTeamMemberStatuses(
       agentId: member.agentId,
       role: member.role,
       status: normalizeMemberStatus(member.status),
-      currentTask: member.currentTask,
+      // The watcher omits whatever it could not determine from the roster
+      // alone, so an absent field must not erase what a full team read knew.
+      activity: normalizeMemberActivity(member.activity) ?? existing?.activity,
+      currentTask: member.currentTask ?? existing?.currentTask,
       color: existing?.color ?? AGENT_COLORS[index % AGENT_COLORS.length]!,
       sessionId: existing?.sessionId,
     }
@@ -444,16 +458,39 @@ function latestWorkbenchSnapshotForTeam(
     ?.snapshots.at(-1)
 }
 
-function memberHasActiveTask(
+/**
+ * Whether the member's own run is still producing output, which is what decides
+ * if its conversation shows a busy indicator. Owning an `in_progress` task used
+ * to stand in for this and kept a teammate marked busy for as long as its
+ * umbrella task stayed open.
+ *
+ * This needs positive evidence, unlike the workbench figure: an unresolved
+ * activity would leave a spinner running forever, and a member that really is
+ * mid-turn still reads as busy through its unsettled replies.
+ */
+function memberIsWorking(
   member: TeamMember,
   snapshot: TeamWorkbenchSnapshot | undefined,
 ): boolean {
   if (member.status === 'completed' || member.status === 'error' || snapshot?.deletedAt) {
     return false
   }
-  if (!snapshot) return member.status === 'running'
+  return member.activity === 'active'
+}
 
-  return Boolean(runningTaskForMember(snapshot.tasks, member))
+/**
+ * Anchors are append-only records of a task transition, so a repeated cursor
+ * page must not duplicate them. Identity is the transition itself.
+ */
+function mergeTaskAnchors(
+  existing: TeamTaskAnchor[],
+  incoming: TeamTaskAnchor[],
+): TeamTaskAnchor[] {
+  const key = (anchor: TeamTaskAnchor) =>
+    `${anchor.messageId}\u0000${anchor.taskId}\u0000${anchor.status}`
+  const byTransition = new Map(existing.map((anchor) => [key(anchor), anchor]))
+  for (const anchor of incoming) byTransition.set(key(anchor), anchor)
+  return [...byTransition.values()]
 }
 
 function memberMessageKey(message: UIMessage): string {
@@ -577,7 +614,7 @@ function syncMemberSessionMessages(
     awaitingMemberReplies.set(sessionId, unsettledReplies)
   }
   const isActive = !isTerminal && (
-    memberHasActiveTask(member, snapshot) ||
+    memberIsWorking(member, snapshot) ||
     unsettledReplies.length > 0
   )
   useChatStore.setState((state) => {
@@ -731,6 +768,8 @@ type TeamStore = {
   memberTeamBySession: Record<string, TeamDetail | undefined>
   memberSnapshotBySession: Record<string, TeamWorkbenchSnapshot | undefined>
   memberOwnerAgentIdsBySession: Record<string, string[] | undefined>
+  /** Task boundaries inside each member conversation, keyed by member session. */
+  memberTaskAnchorsBySession: Record<string, TeamTaskAnchor[] | undefined>
 
   fetchTeams: () => Promise<void>
   fetchTeamDetail: (name: string) => Promise<void>
@@ -791,6 +830,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
   memberTeamBySession: {},
   memberSnapshotBySession: {},
   memberOwnerAgentIdsBySession: {},
+  memberTaskAnchorsBySession: {},
 
   fetchTeams: async () => {
     set({ error: null })
@@ -1150,6 +1190,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
         memberTranscriptEntries.set(sessionId, mergedEntries)
         memberTranscriptNotifications.set(sessionId, mergedNotifications)
         const incomingOwnerAgentIds = response.ownerAgentIds ?? []
+        const incomingTaskAnchors = response.taskAnchors ?? []
         set((state) => ({
           memberOwnerAgentIdsBySession: {
             ...state.memberOwnerAgentIdsBySession,
@@ -1159,6 +1200,17 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
                   ...(state.memberOwnerAgentIdsBySession[sessionId] ?? []),
                   ...incomingOwnerAgentIds,
                 ])],
+          },
+          // Anchors arrive per cursor page, so a delta appends the same way the
+          // transcript does and a reset replaces the whole run.
+          memberTaskAnchorsBySession: {
+            ...state.memberTaskAnchorsBySession,
+            [sessionId]: mergeTaskAnchors(
+              response.reset || !cursorMatchesMember
+                ? []
+                : state.memberTaskAnchorsBySession[sessionId] ?? [],
+              incomingTaskAnchors,
+            ),
           },
         }))
         // Mapping the complete durable transcript preserves suppression state
@@ -1461,6 +1513,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
       memberTeamBySession: {},
       memberSnapshotBySession: {},
       memberOwnerAgentIdsBySession: {},
+      memberTaskAnchorsBySession: {},
     })
   },
 

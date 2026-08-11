@@ -53,6 +53,86 @@ describe('AgentTeamsCommunicationFeed', () => {
     expect(screen.getByTestId('agent-teams-message-m2').getAttribute('data-message-body')).toBe('lifecycle')
   })
 
+  it('counts task handovers as communication instead of hiding them as noise', () => {
+    // The reported symptom: a team whose only traffic so far was handing out
+    // work reported "0 messages" and tucked all of it behind a status toggle.
+    const assignment = (id: string, taskId: string, from: string, to: string) => message({
+      id,
+      from,
+      to,
+      recipients: [to],
+      kind: 'system',
+      protocolType: 'task_assignment',
+      taskId,
+      text: `{"type":"task_assignment","taskId":"${taskId}","subject":"Task ${taskId}"}`,
+    })
+    render(<AgentTeamsCommunicationFeed snapshot={snapshot([
+      assignment('a1', '2', 'team-lead', 'backend-dev'),
+      assignment('a2', '7', 'backend-dev', 'backend-dev'),
+      message({
+        id: 'idle',
+        from: 'backend-dev',
+        to: 'team-lead',
+        recipients: ['team-lead'],
+        text: '{"type":"idle_notification","from":"backend-dev","timestamp":"2026-08-08T07:42:16.666Z"}',
+      }),
+    ])} />)
+
+    expect(screen.getByText('2 messages')).toBeTruthy()
+    expect(screen.getByTestId('agent-teams-message-a1').getAttribute('data-message-body')).toBe('assignment')
+    // Being handed work and picking it up are different events.
+    expect(screen.getByText(/Assigned #2 Task 2 to backend-dev/)).toBeTruthy()
+    expect(screen.getByText(/backend-dev claimed #7 Task 7/)).toBeTruthy()
+    // Only the genuine status chatter stays folded away.
+    expect(screen.getByTestId('agent-teams-lifecycle-toggle').textContent).toContain('1')
+  })
+
+  it('filters to handovers without reclassifying them on the server', () => {
+    const assignment = message({
+      id: 'a1',
+      from: 'team-lead',
+      to: 'backend-dev',
+      recipients: ['backend-dev'],
+      kind: 'system',
+      protocolType: 'task_assignment',
+      taskId: '2',
+      text: '{"type":"task_assignment","taskId":"2","subject":"Build it"}',
+    })
+    render(<AgentTeamsCommunicationFeed snapshot={snapshot([
+      assignment,
+      message({ id: 'm1', text: 'Race condition confirmed' }),
+    ])} />)
+
+    fireEvent.click(screen.getByTestId('agent-teams-filter-assignment'))
+
+    expect(screen.getByTestId('agent-teams-message-a1')).toBeTruthy()
+    expect(screen.queryByTestId('agent-teams-message-m1')).toBeNull()
+  })
+
+  it('folds a repeated status signal into one row with its count', () => {
+    // A waiting teammate re-announces itself every few seconds; one real run
+    // sent eight identical notices inside a minute.
+    const idle = (id: string) => message({
+      id,
+      from: 'backend-dev',
+      to: 'team-lead',
+      recipients: ['team-lead'],
+      text: '{"type":"idle_notification","from":"backend-dev","timestamp":"2026-08-08T07:42:16.666Z"}',
+    })
+    render(<AgentTeamsCommunicationFeed snapshot={snapshot([
+      idle('i1'),
+      idle('i2'),
+      idle('i3'),
+      message({ id: 'm1', text: 'Race condition confirmed' }),
+    ])} />)
+
+    fireEvent.click(screen.getByTestId('agent-teams-lifecycle-toggle'))
+
+    expect(screen.getByText('2 messages')).toBeTruthy()
+    expect(screen.getByTestId('agent-teams-message-i3-repeats').textContent).toBe('×3')
+    expect(screen.queryByTestId('agent-teams-message-i1')).toBeNull()
+  })
+
   it('stamps each row with its own send time rather than a shared snapshot index', () => {
     render(<AgentTeamsCommunicationFeed snapshot={snapshot([
       message({ id: 'm1', text: 'first', timestamp: '2026-08-08T07:42:00.000Z' }),

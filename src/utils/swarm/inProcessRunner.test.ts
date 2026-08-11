@@ -34,6 +34,7 @@ import {
   getTeammateContext,
   runWithTeammateContext,
 } from '../teammateContext.js'
+import { readMailbox } from '../teammateMailbox.js'
 import {
   buildInProcessTeammateAgentDefinition,
   claimNextInProcessTask,
@@ -296,6 +297,127 @@ describe('in-process teammate task claiming', () => {
       } finally {
         if (originalUserType === undefined) delete process.env.USER_TYPE
         else process.env.USER_TYPE = originalUserType
+      }
+    })
+  })
+
+  test('records the teammate that closes a task it never marked in progress', async () => {
+    await withTempConfig(async () => {
+      const taskListId = 'task-update-batch-owner'
+      const taskId = await createTask(taskListId, {
+        subject: 'Close batched work',
+        description: 'Small tasks get resolved together without ever starting',
+        status: 'pending',
+        blocks: [],
+        blockedBy: [],
+      })
+      const originalUserType = process.env.USER_TYPE
+      process.env.USER_TYPE = 'ant'
+      const teammateContext = createTeammateContext({
+        agentId: 'worker@task-update-batch-owner',
+        agentName: 'worker',
+        teamName: taskListId,
+        planModeRequired: false,
+        parentSessionId: 'leader-session',
+        abortController: new AbortController(),
+      })
+      const toolContext = {
+        agentId: 'worker@task-update-batch-owner',
+        abortController: new AbortController(),
+        getAppState: () => ({}),
+        setAppState: () => {},
+      } as unknown as ToolUseContext
+
+      try {
+        await runWithTeammateContext(
+          teammateContext,
+          () => TaskUpdateTool.call({ taskId, status: 'completed' }, toolContext),
+        )
+
+        expect(await getTask(taskListId, taskId)).toMatchObject({
+          owner: 'worker',
+          status: 'completed',
+        })
+        // Handing someone a task that is already finished is not an assignment,
+        // and delivering one would wake an idle teammate for nothing.
+        expect(await readMailbox('worker', taskListId)).toEqual([])
+      } finally {
+        if (originalUserType === undefined) delete process.env.USER_TYPE
+        else process.env.USER_TYPE = originalUserType
+      }
+    })
+  })
+
+  test('leaves a task ownerless when the lead closes it from the main thread', async () => {
+    await withTempConfig(async () => {
+      const taskListId = 'task-update-lead-close'
+      const taskId = await createTask(taskListId, {
+        subject: 'Close on behalf of the team',
+        description: 'The lead resolving a task must not take credit for it',
+        status: 'pending',
+        blocks: [],
+        blockedBy: [],
+      })
+      const originalUserType = process.env.USER_TYPE
+      const originalTaskListId = process.env.CLAUDE_CODE_TASK_LIST_ID
+      process.env.USER_TYPE = 'ant'
+      process.env.CLAUDE_CODE_TASK_LIST_ID = taskListId
+      const toolContext = {
+        abortController: new AbortController(),
+        getAppState: () => ({}),
+        setAppState: () => {},
+      } as unknown as ToolUseContext
+
+      try {
+        // No teammate context: this is the lead's own thread, which has no
+        // agent name, so automatic attribution has to stay out of it.
+        await TaskUpdateTool.call({ taskId, status: 'completed' }, toolContext)
+
+        const task = await getTask(taskListId, taskId)
+        expect(task?.status).toBe('completed')
+        expect(task?.owner).toBeUndefined()
+      } finally {
+        if (originalUserType === undefined) delete process.env.USER_TYPE
+        else process.env.USER_TYPE = originalUserType
+        if (originalTaskListId === undefined) delete process.env.CLAUDE_CODE_TASK_LIST_ID
+        else process.env.CLAUDE_CODE_TASK_LIST_ID = originalTaskListId
+      }
+    })
+  })
+
+  test('still announces an assignment when unfinished work changes hands', async () => {
+    await withTempConfig(async () => {
+      const taskListId = 'task-update-open-assignment'
+      const taskId = await createTask(taskListId, {
+        subject: 'Hand over open work',
+        description: 'An unfinished task still has to reach its new owner',
+        status: 'pending',
+        blocks: [],
+        blockedBy: [],
+      })
+      const originalUserType = process.env.USER_TYPE
+      const originalTaskListId = process.env.CLAUDE_CODE_TASK_LIST_ID
+      process.env.USER_TYPE = 'ant'
+      process.env.CLAUDE_CODE_TASK_LIST_ID = taskListId
+      const toolContext = {
+        abortController: new AbortController(),
+        setAppState: () => {},
+      } as unknown as ToolUseContext
+
+      try {
+        await TaskUpdateTool.call({ taskId, owner: 'worker' }, toolContext)
+
+        const delivered = await readMailbox('worker', taskListId)
+        expect(delivered).toHaveLength(1)
+        expect(JSON.parse(delivered[0]!.text)).toMatchObject({
+          type: 'task_assignment',
+          taskId,
+        })
+      } finally {
+        if (originalUserType === undefined) delete process.env.USER_TYPE
+        else process.env.USER_TYPE = originalUserType
+        if (originalTaskListId === undefined) delete process.env.CLAUDE_CODE_TASK_LIST_ID
+        else process.env.CLAUDE_CODE_TASK_LIST_ID = originalTaskListId
       }
     })
   })

@@ -18,6 +18,7 @@ import {
   hasVisibleSessionActivity,
 } from '../components/activity/sessionActivityModel'
 import { taskOwnedByMember } from '../components/agentTeams/agentTeamsModel'
+import type { TeamTaskAnchor } from '../api/teams'
 import { Badge, type Tone as BadgeTone } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
@@ -44,6 +45,7 @@ const LIVE_RUN_REFRESH_MS = 2000
 const EMPTY_DISMISSED_BACKGROUND_TASK_KEYS: string[] = []
 const EMPTY_RUN_TASKS: CLITask[] = []
 const EMPTY_OWNER_AGENT_IDS: string[] = []
+const EMPTY_TASK_ANCHORS: TeamTaskAnchor[] = []
 
 function teamStreamScopeId(team: {
   name: string
@@ -361,6 +363,9 @@ export function TeamMemberRunPage({
   const memberOwnerAgentIds = useTeamStore(
     (state) => state.memberOwnerAgentIdsBySession[tabId] ?? EMPTY_OWNER_AGENT_IDS,
   )
+  const memberTaskAnchors = useTeamStore(
+    (state) => state.memberTaskAnchorsBySession[tabId] ?? EMPTY_TASK_ANCHORS,
+  )
   const memberOwnerAgentIdsKnown = useTeamStore((state) => (
     Object.prototype.hasOwnProperty.call(state.memberOwnerAgentIdsBySession, tabId)
   ))
@@ -479,12 +484,33 @@ export function TeamMemberRunPage({
         : 'unknown'
   const teamName = snapshot?.team.name ?? useTeamStore.getState().getTeamByMemberSessionId(tabId)?.name
   const canSendMessage = Boolean(member && !snapshot?.deletedAt && member.status !== 'completed')
-  const memberTasks = useMemo(
-    () => member && snapshot
-      ? snapshot.tasks.filter((task) => taskOwnedByMember(task, member))
-      : [],
-    [member, snapshot],
-  )
+  // The member's own `TaskUpdate` calls are the only record of the order it
+  // actually worked in. Task ids record the order the tasks were written down,
+  // which for a teammate that plans its work up front is close to the reverse.
+  const memberTasks = useMemo(() => {
+    if (!member || !snapshot) return []
+    const owned = snapshot.tasks.filter((task) => taskOwnedByMember(task, member))
+    const workOrder = new Map<string, number>()
+    memberTaskAnchors.forEach((anchor, index) => {
+      if (!workOrder.has(anchor.taskId)) workOrder.set(anchor.taskId, index)
+    })
+    if (workOrder.size === 0) return owned
+    return [...owned].sort((left, right) => (
+      (workOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+      (workOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+    ))
+  }, [member, memberTaskAnchors, snapshot])
+  const currentTaskSubject = useMemo(() => {
+    const resolved = new Set(
+      memberTaskAnchors.filter((anchor) => anchor.status === 'completed').map((a) => a.taskId),
+    )
+    const openAnchor = [...memberTaskAnchors]
+      .reverse()
+      .find((anchor) => anchor.status === 'in_progress' && !resolved.has(anchor.taskId))
+    return openAnchor
+      ? snapshot?.tasks.find((task) => task.id === openAnchor.taskId)?.subject
+      : undefined
+  }, [memberTaskAnchors, snapshot])
   const handleReturn = useCallback(() => {
     if (useActivityPanelStore.getState().isOpen(tabId)) {
       useActivityPanelStore.getState().open(leadSessionId)
@@ -511,7 +537,9 @@ export function TeamMemberRunPage({
         <>
           <span>{t('subagentRun.agent')}: {member.agentId}</span>
           <span>{member.role}</span>
-          {member.currentTask ? <span>{member.currentTask}</span> : null}
+          {currentTaskSubject ?? member.currentTask
+            ? <span>{currentTaskSubject ?? member.currentTask}</span>
+            : null}
         </>
       ) : null}
       backLabel={t('agentTeams.backToOverview')}

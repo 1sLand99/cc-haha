@@ -21,6 +21,14 @@ export type MemberAvatarKey =
 export type PositionedWorkbenchTask = {
   task: TeamWorkbenchTask
   state: WorkbenchTaskState
+  /**
+   * How many dependencies deep the task sits, counted along its longest path.
+   * This is the number that describes where a task falls in the plan; the task
+   * id only records the order the lead happened to write the tasks down, which
+   * is why review work created first carries the lowest ids while hanging off
+   * the bottom of the graph.
+   */
+  depth: number
   x: number
   y: number
 }
@@ -164,15 +172,76 @@ export function resolveTeamMemberIdentity(
   return { member, isLead }
 }
 
+export type MemberWorkState = 'working' | 'idle' | 'stopped' | 'exited' | 'error'
+
+/**
+ * What the member itself is doing, which is never what its tasks say. A task
+ * stays `in_progress` from the moment a teammate claims it until the teammate
+ * remembers to close it -- across turn boundaries, and for umbrella tasks
+ * across the whole run -- so reading activity off the task list reported every
+ * member as permanently working.
+ *
+ * The lead has no runner writing turn markers for it, so its caller supplies
+ * whether its session is streaming.
+ */
+export function getMemberWorkState(
+  member: TeamMember,
+  options: { isLead?: boolean; leadIsStreaming?: boolean } = {},
+): MemberWorkState {
+  if (member.status === 'completed' || member.activity === 'exited') return 'exited'
+  if (member.status === 'error') return 'error'
+  if (options.isLead) return options.leadIsStreaming ? 'working' : 'idle'
+  if (member.activity === 'active') return 'working'
+  if (member.activity === 'idle') return 'idle'
+  // `unknown` means the backend records no turn markers and left no transcript
+  // to date, so fall back to the coarser roster status.
+  return member.status === 'running' ? 'working' : 'idle'
+}
+
+export type TaskOwnerAttribution = {
+  identity: string
+  /** True when the name was recovered from the mailbox rather than recorded. */
+  inferred: boolean
+}
+
+/**
+ * Who did a task. `task.owner` is authoritative, but runs archived before
+ * batch-closed tasks recorded an owner left some finished work attributed to
+ * nobody. The assignment envelope that reached a teammate's inbox names the
+ * same person, so it recovers the answer for that history. The result is marked
+ * inferred so the UI can present it as a reconstruction rather than as fact.
+ */
+export function inferTaskOwner(
+  task: TeamWorkbenchTask,
+  snapshot: TeamWorkbenchSnapshot,
+): TaskOwnerAttribution | undefined {
+  const owner = task.owner?.trim()
+  if (owner) return { identity: owner, inferred: false }
+
+  const assignment = snapshot.messages.find((message) => (
+    message.protocolType === 'task_assignment' &&
+    message.taskId === task.id &&
+    message.recipients.length > 0
+  ))
+  const recipient = assignment?.recipients[0]?.trim()
+  return recipient ? { identity: recipient, inferred: true } : undefined
+}
+
 export function getWorkbenchTaskState(
   task: TeamWorkbenchTask,
   tasksById: Map<string, TeamWorkbenchTask>,
 ): WorkbenchTaskState {
   if (task.status === 'completed') return 'completed'
   if (task.status === 'in_progress') return 'running'
-  const hasOpenDependency = task.blockedBy.some(
-    (dependencyId) => tasksById.get(dependencyId)?.status !== 'completed',
-  )
+  // A dependency the task list no longer contains was deleted, and the runtime
+  // treats a blocker it cannot find as resolved -- it only refuses to claim a
+  // task while a blocker is still open. Reading a missing blocker as unfinished
+  // stranded such a task in `blocked` forever, and disagreed with `taskDepths`,
+  // which has always ignored dependencies outside the list.
+  const hasOpenDependency = task.blockedBy.some((dependencyId) => {
+    const dependency = tasksById.get(dependencyId)
+    return dependency !== undefined && dependency.status !== 'completed'
+  })
   return hasOpenDependency ? 'blocked' : 'open'
 }
 
@@ -232,6 +301,7 @@ export function layoutWorkbenchTasks(
         positioned.push({
           task,
           state: getWorkbenchTaskState(task, tasksById),
+          depth,
           x: startX + index * (TASK_WIDTH + HORIZONTAL_GAP),
           y: DAG_TOP + row * ROW_HEIGHT,
         })
@@ -275,6 +345,51 @@ export function runningTaskForMember(
   return tasks.find((task) => task.status === 'in_progress' && taskOwnedByMember(task, member))
 }
 
+/**
+ * The one task a member is on right now, which is what decides where its
+ * character stands on the map.
+ *
+ * A member routinely owns several open tasks at once: the umbrella task its
+ * lead assigned stays `in_progress` for the whole run while the member works
+ * through the smaller tasks it created underneath. Picking the first owned task
+ * therefore parked every member on its umbrella, because the task list is
+ * ordered by id and the umbrella was created first. Reading the snapshot
+ * history instead -- which task most recently *became* `in_progress` -- follows
+ * the member through its actual work.
+ */
+export function currentTaskForMember(
+  snapshots: TeamWorkbenchSnapshot[],
+  selectedIndex: number,
+  member: TeamMember,
+): TeamWorkbenchTask | undefined {
+  const selected = snapshots[selectedIndex]
+  if (!selected) return undefined
+  const running = selected.tasks.filter((task) => (
+    task.status === 'in_progress' && taskOwnedByMember(task, member)
+  ))
+  if (running.length <= 1) return running[0]
+
+  const startedBefore = new Set<string>()
+  let latest: TeamWorkbenchTask | undefined
+  for (const snapshot of snapshots.slice(0, selectedIndex + 1)) {
+    for (const task of snapshot.tasks) {
+      if (task.status !== 'in_progress') continue
+      if (!startedBefore.has(task.id)) {
+        startedBefore.add(task.id)
+        const match = running.find((candidate) => candidate.id === task.id)
+        if (match) latest = match
+      }
+    }
+  }
+  if (latest) return latest
+
+  // A timeline that starts mid-run (an archive opened cold) never witnessed the
+  // transitions. A task that blocks nothing is a leaf the member is doing now,
+  // whereas an umbrella task exists to hold others up.
+  return running.find((task) => task.blocks.length === 0) ??
+    running[running.length - 1]
+}
+
 export function getWorkbenchPhase(snapshot: TeamWorkbenchSnapshot): WorkbenchPhase {
   if (snapshot.deletedAt) return 'completed'
   if (snapshot.tasks.length === 0) return 'forming'
@@ -302,13 +417,20 @@ export function getWorkbenchProgress(snapshot: TeamWorkbenchSnapshot) {
  */
 export type WorkbenchMessageBody =
   | { kind: 'text'; text: string }
+  | { kind: 'assignment'; taskId?: string; subject?: string; selfClaim: boolean }
   | { kind: 'lifecycle'; type: string; detail?: string }
 
-/** Protocol payloads the feed states in words rather than dumping verbatim. */
+/**
+ * Protocol payloads the feed states in words rather than dumping verbatim.
+ *
+ * `task_assignment` is deliberately absent: it records a task being picked up,
+ * which is the first half of everything a team does. Filing it with shutdown
+ * and idle chatter hid it behind a collapsed toggle and left the feed reporting
+ * "0 messages" for a team that had just handed out all of its work.
+ */
 const NARRATED_PROTOCOL_TYPES = new Set([
   ...AGENT_LIFECYCLE_TYPES,
   'shutdown_response',
-  'task_assignment',
 ])
 
 const LIFECYCLE_DETAIL_FIELDS = ['idleReason', 'reason', 'detail', 'message'] as const
@@ -338,12 +460,28 @@ function firstNonEmptyString(
 }
 
 export function parseWorkbenchMessageBody(
-  message: Pick<TeamWorkbenchMessage, 'text' | 'protocolType'>,
+  message: Pick<TeamWorkbenchMessage, 'text' | 'protocolType'> &
+    Partial<Pick<TeamWorkbenchMessage, 'from' | 'recipients'>>,
 ): WorkbenchMessageBody {
   const raw = message.text?.trim() ?? ''
+  const senderAliases = identityAliases(message.from ?? '')
+  const selfClaim = Boolean(message.recipients?.some((recipient) => (
+    identityAliases(recipient).some((alias) => senderAliases.includes(alias))
+  )))
   const payload = parseJsonObject(raw)
   const payloadType = typeof payload?.type === 'string' ? payload.type : undefined
   const type = message.protocolType ?? payloadType
+
+  if (type === 'task_assignment') {
+    // A teammate that claims its own next task addresses the envelope to
+    // itself, which is what separates picking work up from being handed it.
+    return {
+      kind: 'assignment',
+      selfClaim,
+      ...(typeof payload?.taskId === 'string' ? { taskId: payload.taskId } : {}),
+      ...(typeof payload?.subject === 'string' ? { subject: payload.subject } : {}),
+    }
+  }
 
   if (type && NARRATED_PROTOCOL_TYPES.has(type)) {
     return {

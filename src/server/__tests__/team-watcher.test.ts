@@ -134,14 +134,28 @@ describe('TeamWatcher.extractMemberStatuses', () => {
       agentId: 'agent-lead',
       role: 'Lead Agent',
       status: 'running',
+      activity: 'active',
       currentTask: undefined,
     })
     expect(statuses[1]).toEqual({
       agentId: 'agent-worker',
       role: 'Worker Agent',
       status: 'idle',
+      activity: 'idle',
       currentTask: undefined,
     })
+  })
+
+  it('reports no activity for a member whose runner never recorded a turn', () => {
+    const config = makeTeamConfig()
+    delete (config.members[0] as Record<string, unknown>).isActive
+
+    // `status` still defaults to running for backwards compatibility, but the
+    // watcher must not claim the member is mid-turn -- the last full team read,
+    // which can consult the transcript, stays authoritative.
+    const status = watcher.extractMemberStatuses(config)[0]!
+    expect(status.status).toBe('running')
+    expect(status.activity).toBeUndefined()
   })
 
   it('should return running status when isActive is undefined', () => {

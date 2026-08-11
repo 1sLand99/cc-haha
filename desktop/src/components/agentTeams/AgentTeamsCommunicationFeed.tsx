@@ -15,7 +15,13 @@ import {
 } from './agentTeamsModel'
 
 type TranslationFn = ReturnType<typeof useTranslation>
-type FeedFilter = 'all' | TeamWorkbenchMessage['kind']
+/**
+ * `assignment` cuts across the transport kinds rather than replacing one: the
+ * server files every protocol payload as `system`, and rewriting that would
+ * rewrite history already sitting in the workbench archive. Filtering on the
+ * parsed body keeps the classification in the reader.
+ */
+type FeedFilter = 'all' | 'assignment' | TeamWorkbenchMessage['kind']
 type TimeFilter = 'all' | 'early' | 'middle' | 'late'
 
 /** Beyond this the body collapses behind a "show more" toggle. */
@@ -103,26 +109,41 @@ function kindLabel(kind: TeamWorkbenchMessage['kind'], t: TranslationFn): string
 
 function lifecycleNarration(
   body: Extract<WorkbenchMessageBody, { kind: 'lifecycle' }>,
+  t: TranslationFn,
+): string {
+  const narration = t(`agentTeams.communication.lifecycle.${body.type}` as TranslationKey)
+  return body.detail ? `${narration} · ${body.detail}` : narration
+}
+
+/** Picking work up and being handed it are different events, so they read differently. */
+function assignmentNarration(
+  body: Extract<WorkbenchMessageBody, { kind: 'assignment' }>,
   message: TeamWorkbenchMessage,
   t: TranslationFn,
 ): string {
-  if (body.type === 'task_assignment') {
-    return t('agentTeams.communication.taskAssignment', {
-      task: message.taskId ? `#${message.taskId}` : '',
-      subject: body.detail ?? '',
-    })
-  }
-  const narration = t(`agentTeams.communication.lifecycle.${body.type}` as TranslationKey)
-  return body.detail ? `${narration} · ${body.detail}` : narration
+  const taskId = body.taskId ?? message.taskId
+  return t(
+    body.selfClaim
+      ? 'agentTeams.communication.taskClaimed'
+      : 'agentTeams.communication.taskAssignment',
+    {
+      task: taskId ? `#${taskId}` : '',
+      subject: body.subject ?? '',
+      name: body.selfClaim ? message.from : (message.recipients[0] ?? message.to),
+    },
+  )
 }
 
 export function AgentTeamsCommunicationFeed({
   snapshot,
   fill = false,
+  onFocusTask,
 }: {
   snapshot: TeamWorkbenchSnapshot
   /** Full-height layouts let the feed own its column instead of a fixed strip. */
   fill?: boolean
+  /** Lights up the task a row is about on the map, reusing its focus channel. */
+  onFocusTask?: (taskId: string | null) => void
 }) {
   const t = useTranslation()
   const [showLifecycle, setShowLifecycle] = useState(false)
@@ -154,20 +175,45 @@ export function AgentTeamsCommunicationFeed({
     ? readableRows
     : readableRows.filter(({ message }) => timePhase(message.timestamp, timeRange!) === effectiveTimeFilter)
   const kindCounts = useMemo(() => ({
+    assignment: timeFilteredRows.filter(({ body }) => body.kind === 'assignment').length,
     direct: timeFilteredRows.filter(({ message }) => message.kind === 'direct').length,
     broadcast: timeFilteredRows.filter(({ message }) => message.kind === 'broadcast').length,
     system: timeFilteredRows.filter(({ message }) => message.kind === 'system').length,
   }), [timeFilteredRows])
   const filters: Array<{ key: FeedFilter; label: string; count: number }> = [
     { key: 'all', label: t('agentTeams.communication.all'), count: timeFilteredRows.length },
+    { key: 'assignment', label: t('agentTeams.communication.assignment'), count: kindCounts.assignment },
     { key: 'direct', label: kindLabel('direct', t), count: kindCounts.direct },
     { key: 'broadcast', label: kindLabel('broadcast', t), count: kindCounts.broadcast },
     { key: 'system', label: kindLabel('system', t), count: kindCounts.system },
   ]
   const visibleFilters = filters.filter(({ key, count }) => key === 'all' || count > 0)
-  const visibleRows = filter === 'all'
+  const filteredRows = filter === 'all'
     ? timeFilteredRows
-    : timeFilteredRows.filter(({ message }) => message.kind === filter)
+    : filter === 'assignment'
+      ? timeFilteredRows.filter(({ body }) => body.kind === 'assignment')
+      : timeFilteredRows.filter(({ message }) => message.kind === filter)
+  // A teammate waiting for work repeats the same idle notice every few seconds
+  // -- one real run sent eight identical ones inside a minute. Repeats say
+  // nothing the first one did not, so they fold into a count.
+  const visibleRows = useMemo(() => {
+    const collapsed: Array<ParsedMessageRow & { repeats: number }> = []
+    for (const row of filteredRows) {
+      const previous = collapsed[collapsed.length - 1]
+      if (
+        previous &&
+        previous.body.kind === 'lifecycle' &&
+        row.body.kind === 'lifecycle' &&
+        previous.body.type === row.body.type &&
+        previous.message.from === row.message.from
+      ) {
+        previous.repeats += 1
+        continue
+      }
+      collapsed.push({ ...row, repeats: 1 })
+    }
+    return collapsed
+  }, [filteredRows])
   const timeOptions: Array<{
     key: TimeFilter
     label: string
@@ -314,13 +360,15 @@ export function AgentTeamsCommunicationFeed({
           </div>
         ) : (
           <div className="divide-y divide-[var(--color-border)]">
-            {visibleRows.map(({ message, body }, index) => (
+            {visibleRows.map(({ message, body, repeats }, index) => (
               <FeedRow
                 key={message.id}
                 message={message}
                 body={body}
+                repeats={repeats}
                 isLatest={index === 0}
                 snapshot={snapshot}
+                onFocusTask={onFocusTask}
                 t={t}
               />
             ))}
@@ -334,22 +382,30 @@ export function AgentTeamsCommunicationFeed({
 function FeedRow({
   message,
   body,
+  repeats,
   isLatest,
   snapshot,
+  onFocusTask,
   t,
 }: {
   message: TeamWorkbenchMessage
   body: WorkbenchMessageBody
+  /** How many identical signals in a row this one stands for. */
+  repeats: number
   isLatest: boolean
   snapshot: TeamWorkbenchSnapshot
+  onFocusTask?: (taskId: string | null) => void
   t: TranslationFn
 }) {
   const [expanded, setExpanded] = useState(false)
+  const focusedTaskId = (body.kind === 'assignment' ? body.taskId : undefined) ?? message.taskId
   const Icon = kindIcon(message.kind)
   const time = formatWorkbenchMessageTime(message.timestamp)
   const text = body.kind === 'lifecycle'
-    ? lifecycleNarration(body, message, t)
-    : body.text
+    ? lifecycleNarration(body, t)
+    : body.kind === 'assignment'
+      ? assignmentNarration(body, message, t)
+      : body.text
   const isTruncatable = body.kind === 'text' && text.length > COLLAPSED_BODY_CHARS
   const collapsed = isTruncatable && !expanded
   const recipient = message.kind === 'broadcast'
@@ -367,6 +423,8 @@ function FeedRow({
       data-testid={`agent-teams-message-${message.id}`}
       data-message-body={body.kind}
       data-message-kind={message.kind}
+      onMouseEnter={focusedTaskId ? () => onFocusTask?.(focusedTaskId) : undefined}
+      onMouseLeave={focusedTaskId ? () => onFocusTask?.(null) : undefined}
       className={[
         'relative px-4 py-3.5',
         body.kind === 'lifecycle' ? 'bg-[var(--color-surface-container-low)]' : '',
@@ -386,6 +444,14 @@ function FeedRow({
             {message.taskId ? (
               <span className="shrink-0 rounded-full bg-[var(--color-surface-container-high)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--color-text-tertiary)]">
                 #{message.taskId}
+              </span>
+            ) : null}
+            {repeats > 1 ? (
+              <span
+                data-testid={`agent-teams-message-${message.id}-repeats`}
+                className="shrink-0 rounded-full bg-[var(--color-surface-container-high)] px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-[var(--color-text-tertiary)]"
+              >
+                ×{repeats}
               </span>
             ) : null}
           </div>

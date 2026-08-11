@@ -84,6 +84,7 @@ export async function handleTeamsApi(
         messages: page.messages,
         ownerAgentIds: page.ownerAgentIds,
         taskNotifications: page.taskNotifications,
+        taskAnchors: page.taskAnchors,
       })
     }
 

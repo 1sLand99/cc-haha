@@ -166,6 +166,11 @@ export type TeamMemberStatus = {
   agentId: string
   role: string
   status: 'running' | 'idle' | 'completed' | 'error'
+  /**
+   * Omitted when the watcher cannot tell, so a receiver keeps whatever the last
+   * full team read established rather than being told the member went quiet.
+   */
+  activity?: 'active' | 'idle' | 'exited' | 'unknown'
   currentTask?: string
 }
 

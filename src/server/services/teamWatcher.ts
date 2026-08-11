@@ -360,6 +360,11 @@ export class TeamWatcher {
         agentId: (m.agentId as string) || '',
         role: (m.name as string) || (m.agentType as string) || 'member',
         status,
+        // Only the runner's own turn markers are cheap enough to read on every
+        // poll. Without one, say nothing so the last full team read stands.
+        ...(typeof m.isActive === 'boolean'
+          ? { activity: (m.isActive ? 'active' : 'idle') as const }
+          : {}),
         currentTask: (m.currentTask as string) || undefined,
       }
     })
@@ -399,6 +404,8 @@ export class TeamWatcher {
           agentId: `${name}@${teamName}`,
           role: name,
           status: 'running', // assume running — they have an inbox
+          // An inbox proves the member exists, never that it is mid-turn.
+          activity: 'unknown',
         })
       }
 
@@ -458,6 +465,7 @@ export class TeamWatcher {
               agentId: `${inferredName}@${teamName}`,
               role: inferredName,
               status: 'running',
+              activity: 'unknown',
             })
           }
         }

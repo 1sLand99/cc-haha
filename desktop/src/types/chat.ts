@@ -199,6 +199,11 @@ export type TeamMemberStatus = {
   agentId: string
   role: string
   status: 'running' | 'idle' | 'completed' | 'error'
+  /**
+   * Omitted when the watcher cannot tell from the roster alone, so a receiver
+   * keeps whatever the last full team read established.
+   */
+  activity?: 'active' | 'idle' | 'exited' | 'unknown'
   currentTask?: string
 }
 

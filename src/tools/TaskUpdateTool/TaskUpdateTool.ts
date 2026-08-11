@@ -220,9 +220,14 @@ export const TaskUpdateTool = buildTool({
       }
     }
 
+    // A teammate that batches several small tasks closed at once never passes
+    // through `in_progress`, so those tasks used to finish with no owner at all
+    // and the workbench could only report them as done by nobody. `getAgentName`
+    // is undefined on the lead's main thread, so a lead closing out someone
+    // else's task still cannot take credit for it.
     const automaticOwner = (
       isAgentSwarmsEnabled() &&
-      status === 'in_progress' &&
+      (status === 'in_progress' || status === 'completed') &&
       owner === undefined
     ) ? getAgentName() : undefined
     const mutation = await updateTaskAtomically(taskListId, taskId, (current) => {
@@ -286,10 +291,13 @@ export const TaskUpdateTool = buildTool({
       ? { from: previousTask.status, to: committedTask.status }
       : undefined
 
-    // Notify new owner via mailbox when ownership changes
+    // Notify new owner via mailbox when ownership changes. Work that is already
+    // finished is excluded: "this is now yours" is not true of a completed task,
+    // and delivering it would wake an idle teammate for nothing.
     if (
       committedTask.owner &&
       committedTask.owner !== previousTask.owner &&
+      committedTask.status !== 'completed' &&
       isAgentSwarmsEnabled()
     ) {
       const senderName = getAgentName() || 'team-lead'

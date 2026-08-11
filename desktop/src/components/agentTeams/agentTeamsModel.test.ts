@@ -6,6 +6,7 @@ import {
   getWorkbenchProgress,
   getWorkbenchTaskState,
   getMemberAvatarKey,
+  inferTaskOwner,
   layoutWorkbenchTasks,
   parseWorkbenchMessageBody,
   resolveTeamMemberIdentity,
@@ -64,11 +65,53 @@ describe('Agent Teams workbench model', () => {
     expect(layout.byId.get('3')!.y).toBeGreaterThan(layout.byId.get('1')!.y)
     expect(layout.byId.get('3')!.y).toBeGreaterThan(layout.byId.get('2')!.y)
     expect(getWorkbenchTaskState(tasks[2]!, byId)).toBe('blocked')
-    expect(getWorkbenchTaskState(tasks[3]!, byId)).toBe('blocked')
+    // A blocker that is no longer in the task list was deleted. `claimTask`
+    // only counts blockers it can still find and that are not completed
+    // (src/utils/tasks.ts), so this task is claimable rather than stranded --
+    // and `layoutWorkbenchTasks` already ignores dependencies outside the list.
+    expect(getWorkbenchTaskState(tasks[3]!, byId)).toBe('open')
 
     tasks[1] = task('2', 'completed')
     const completedParents = new Map(tasks.map((entry) => [entry.id, entry]))
     expect(getWorkbenchTaskState(tasks[2]!, completedParents)).toBe('open')
+  })
+
+  it('keeps a task blocked while a dependency it can still see is unfinished', () => {
+    const tasks = [task('1', 'in_progress'), task('2', 'pending', ['1'])]
+    const byId = new Map(tasks.map((entry) => [entry.id, entry]))
+
+    expect(getWorkbenchTaskState(tasks[1]!, byId)).toBe('blocked')
+  })
+
+  it('recovers an ownerless task attribution from its assignment envelope', () => {
+    const orphan = task('7', 'completed')
+    const base = snapshot([task('2', 'completed', [], 'backend-dev'), orphan])
+    const withAssignment: TeamWorkbenchSnapshot = {
+      ...base,
+      messages: [{
+        id: 'mailbox-1',
+        from: 'backend-dev',
+        to: 'backend-dev',
+        recipients: ['backend-dev'],
+        kind: 'system',
+        protocolType: 'task_assignment',
+        taskId: '7',
+        text: '{"type":"task_assignment","taskId":"7"}',
+        timestamp: '2026-08-08T00:00:01.000Z',
+      }],
+    }
+
+    expect(inferTaskOwner(orphan, withAssignment)).toEqual({
+      identity: 'backend-dev',
+      inferred: true,
+    })
+    // A recorded owner is fact and must never be relabelled as a guess.
+    expect(inferTaskOwner(withAssignment.tasks[0]!, withAssignment)).toEqual({
+      identity: 'backend-dev',
+      inferred: false,
+    })
+    // Nothing to recover from leaves the task unattributed rather than guessing.
+    expect(inferTaskOwner(orphan, base)).toBeUndefined()
   })
 
   it('falls back deterministically for cyclic dependencies instead of recursing forever', () => {

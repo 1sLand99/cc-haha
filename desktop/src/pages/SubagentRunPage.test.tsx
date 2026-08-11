@@ -1604,17 +1604,21 @@ describe('SubagentRunPage', () => {
       role: 'ui-designer',
       status: 'running' as const,
     }
+    // The member's own turn marker says whether it is producing output. Its
+    // task status cannot: a teammate marks a task started and can then end its
+    // turn, and an umbrella task stays open across every turn beneath it.
     const workbench = (
       version: string,
       taskStatus: 'in_progress' | 'completed',
       owner: string | null = 'ui-designer',
+      activity: 'active' | 'idle' = taskStatus === 'in_progress' ? 'active' : 'idle',
     ) => ({
       version,
       generatedAt: `2026-08-09T00:00:0${version.slice(-1)}.000Z`,
       team: {
         name: 'review-team',
         leadSessionId: 'lead-session',
-        members: [member],
+        members: [{ ...member, activity }],
       },
       tasks: [{
         id: 'design-system',
@@ -1643,7 +1647,7 @@ describe('SubagentRunPage', () => {
     getWorkbenchMock
       .mockResolvedValueOnce(workbench('v1', 'in_progress'))
       .mockResolvedValueOnce(workbench('v2', 'completed'))
-      .mockResolvedValueOnce(workbench('v3', 'in_progress', null))
+      .mockResolvedValueOnce(workbench('v3', 'in_progress', null, 'idle'))
     getMemberTranscriptMock
       .mockResolvedValueOnce({
         messages: [initialTranscriptMessage],

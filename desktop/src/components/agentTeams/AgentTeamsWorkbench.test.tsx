@@ -131,7 +131,10 @@ describe('AgentTeamsWorkbench', () => {
     expect(container.querySelectorAll('[data-edge-kind="leader-root"]')).toHaveLength(1)
     expect(container.querySelectorAll('[data-edge-kind="dependency-primary"]')).toHaveLength(2)
     expect(container.querySelectorAll('[data-edge-kind="dependency-secondary"]')).toHaveLength(1)
-    expect(screen.getByTestId('agent-teams-task-2').querySelector('img')).toBeTruthy()
+    // reviewer's task is finished, so its card carries an owner chip rather
+    // than the character -- the character stands on whatever its member is on.
+    expect(screen.getByTestId('agent-teams-task-2').querySelector('img')).toBeNull()
+    expect(screen.getByTestId('agent-teams-task-owner-2').textContent).toContain('reviewer')
     expect(screen.getByTestId('agent-teams-member-builder@visual-team').className).toContain('cursor-pointer')
 
     fireEvent.mouseEnter(screen.getByTestId('agent-teams-task-3'))
@@ -191,6 +194,71 @@ describe('AgentTeamsWorkbench', () => {
     })
   })
 
+  it('keeps a member idle while it still owns an in-progress task', async () => {
+    // A teammate marks a task started and can then end its turn, and an
+    // umbrella task stays open across every turn underneath it. Reading member
+    // activity off the task list is what made every member look permanently
+    // busy, so the card and the figure have to disagree here.
+    const snapshot = workbench('v1', ['in_progress', 'pending', 'pending'])
+    snapshot.team.members = snapshot.team.members.map((member) => (
+      member.name === 'builder'
+        ? { ...member, status: 'running' as const, activity: 'idle' as const }
+        : member
+    ))
+    getWorkbenchMock.mockResolvedValueOnce(snapshot)
+
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    expect(
+      screen.getByTestId('agent-teams-member-builder@visual-team').getAttribute('data-member-state'),
+    ).toBe('idle')
+    expect(screen.getByTestId('agent-teams-task-1').getAttribute('data-state')).toBe('running')
+  })
+
+  it('shows a member working while it owns no task at all', async () => {
+    const snapshot = unownedWorkbench('v1', 'idle')
+    snapshot.team.members = snapshot.team.members.map((member) => (
+      member.name === 'builder'
+        ? { ...member, activity: 'active' as const }
+        : member
+    ))
+    getWorkbenchMock.mockResolvedValueOnce(snapshot)
+
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    expect(
+      screen.getByTestId('agent-teams-member-builder@visual-team').getAttribute('data-member-state'),
+    ).toBe('working')
+  })
+
+  it('labels a task card by dependency depth rather than by the id it was created with', async () => {
+    // Reviews are planned first and so own the lowest ids while depending on
+    // the work above them. Showing that id where a step number belongs read as
+    // "step 1" for the very last thing the team does.
+    const snapshot = workbench('v1', ['pending', 'pending', 'pending'])
+    getWorkbenchMock.mockResolvedValueOnce(snapshot)
+
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    // task 1 is a root, task 2 depends on it, task 3 depends on both.
+    expect(screen.getByTestId('agent-teams-task-1').textContent).toContain('Layer 1')
+    expect(screen.getByTestId('agent-teams-task-2').textContent).toContain('Layer 2')
+    expect(screen.getByTestId('agent-teams-task-3').textContent).toContain('Layer 3')
+    expect(screen.getByTestId('agent-teams-task-3').textContent).not.toContain('#3')
+    expect(
+      screen.getByTestId('agent-teams-task-3').querySelector('[data-task-id="3"]'),
+    ).toBeTruthy()
+  })
+
   it('opens a teammate in the shared agent run desktop instead of replacing the map', async () => {
     getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
     await act(async () => {
@@ -211,21 +279,44 @@ describe('AgentTeamsWorkbench', () => {
     expect(screen.queryByTestId('agent-teams-member-view')).toBeNull()
   })
 
-  it('opens a teammate when the user clicks or keyboards anywhere on an owned task card', async () => {
+  it('describes the task when its card is opened, and reaches the owner only on request', async () => {
+    // A card carries a task's status, so opening one used to land the user in
+    // the owner's conversation -- which is how a card reading "completed" led
+    // to a teammate that was still streaming its next task.
     getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
     await act(async () => {
       await useTeamStore.getState().fetchWorkbench('visual-team')
     })
     render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
-    const builderTask = screen.getByTestId('agent-teams-task-1')
-    fireEvent.click(builderTask)
-    expect(useTabStore.getState().activeTabId).toBe('team-member:builder@visual-team')
+    fireEvent.click(screen.getByTestId('agent-teams-task-1'))
+    expect(useTabStore.getState().activeTabId).toBeNull()
+    expect(screen.getByTestId('agent-teams-task-detail').getAttribute('data-task-id')).toBe('1')
+    expect(screen.getByTestId('agent-teams-task-detail').textContent).toContain('Task 1 detail')
 
-    act(() => useTabStore.setState({ tabs: [], activeTabId: null }))
-    const reviewerTask = screen.getByTestId('agent-teams-task-2')
-    fireEvent.keyDown(reviewerTask, { key: 'Enter' })
+    fireEvent.keyDown(screen.getByTestId('agent-teams-task-2'), { key: 'Enter' })
+    expect(useTabStore.getState().activeTabId).toBeNull()
+    expect(screen.getByTestId('agent-teams-task-detail').getAttribute('data-task-id')).toBe('2')
+
+    fireEvent.click(screen.getByTestId('agent-teams-task-owner-2'))
     expect(useTabStore.getState().activeTabId).toBe('team-member:reviewer@visual-team')
+  })
+
+  it('draws a member once even while it owns several open tasks', async () => {
+    const snapshot = workbench('v1', ['in_progress', 'in_progress', 'pending'])
+    snapshot.tasks = snapshot.tasks.map((entry) => ({ ...entry, owner: 'builder' }))
+    getWorkbenchMock.mockResolvedValueOnce(snapshot)
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    const { container } = render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    // One teammate owning six cards used to be drawn as six characters.
+    expect(
+      container.querySelectorAll('[data-testid="agent-teams-member-builder@visual-team"]'),
+    ).toHaveLength(1)
+    // The other cards still say who has them.
+    expect(screen.getByTestId('agent-teams-task-owner-2').textContent).toContain('builder')
   })
 
   it('opens an archived teammate in the same shared agent run desktop', async () => {
@@ -282,7 +373,7 @@ describe('AgentTeamsWorkbench', () => {
     const restoredOwnerTask = screen.getByTestId('agent-teams-task-1')
     expect(restoredOwnerTask.getAttribute('data-owner-agent-id')).toBe('builder@visual-team')
     expect(within(restoredOwnerTask).getByText('builder')).toBeTruthy()
-    fireEvent.click(restoredOwnerTask)
+    fireEvent.click(screen.getByTestId('agent-teams-task-owner-1'))
     expect(useTabStore.getState().activeTabId).toBe('team-member:builder@visual-team')
 
     const rawOwnerTask = screen.getByTestId('agent-teams-task-3')

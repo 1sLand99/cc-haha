@@ -7,17 +7,19 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { ChevronLeft, ChevronRight, Radio } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Radio, X } from 'lucide-react'
 import { Badge, StatusDot, type Tone } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { Progress } from '@/components/ui/Progress'
 import { useTranslation, type TranslationKey } from '../../i18n'
+import { useChatStore } from '../../stores/chatStore'
 import { useTeamStore } from '../../stores/teamStore'
 import type {
   TeamMember,
   TeamWorkbenchMessage,
   TeamWorkbenchSnapshot,
+  TeamWorkbenchTask,
 } from '../../types/team'
 import { MEMBER_AVATARS, memberAccentColor } from './agentTeamsAvatars'
 import { AgentTeamsCommunicationFeed } from './AgentTeamsCommunicationFeed'
@@ -26,17 +28,18 @@ import {
   getWorkbenchProgress,
   getMemberAvatarKey,
   layoutWorkbenchTasks,
-  runningTaskForMember,
+  currentTaskForMember,
+  getMemberWorkState,
+  getWorkbenchTaskState,
+  inferTaskOwner,
   snapshotWithHistoricalMembers,
-  taskOwnedByMember,
   WORKBENCH_TASK_HEIGHT,
   WORKBENCH_TASK_WIDTH,
+  type MemberWorkState,
   type PositionedWorkbenchTask,
   type WorkbenchPhase,
   type WorkbenchTaskState,
 } from './agentTeamsModel'
-
-type MemberWorkState = 'working' | 'idle' | 'stopped' | 'exited' | 'error'
 
 type BotPosition = {
   x: number
@@ -93,16 +96,10 @@ function memberState(
   member: TeamMember,
   snapshot: TeamWorkbenchSnapshot,
   isLead: boolean,
+  leadIsStreaming = false,
 ): MemberWorkState {
-  if (snapshot.deletedAt || member.status === 'completed') return 'exited'
-  if (member.status === 'error') return 'error'
-  if (
-    member.status === 'running' ||
-    runningTaskForMember(snapshot.tasks, member) ||
-    isLead
-  ) return 'working'
-  if (member.status === 'idle') return 'idle'
-  return 'idle'
+  if (snapshot.deletedAt) return 'exited'
+  return getMemberWorkState(member, { isLead, leadIsStreaming })
 }
 
 function memberStateLabel(state: MemberWorkState, t: TranslationFn): string {
@@ -142,11 +139,17 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
   const historyIndex = useTeamStore((state) => state.workbenchHistoryIndexBySession[sessionId] ?? null)
   const setHistoryIndex = useTeamStore((state) => state.setWorkbenchHistoryIndex)
   const openMemberSession = useTeamStore((state) => state.openMemberSession)
+  // The lead has no in-process runner writing turn markers for it, but its
+  // session is the one this tab was opened from, so ask the chat store directly.
+  const leadIsStreaming = useChatStore(
+    (state) => (state.sessions[sessionId]?.chatState ?? 'idle') !== 'idle',
+  )
   const splitViewportRef = useRef<HTMLDivElement>(null)
   const officeViewportRef = useRef<HTMLDivElement>(null)
   const [officeWidth, setOfficeWidth] = useState(604)
   const [communicationWidth, setCommunicationWidth] = useState(COMMUNICATION_DEFAULT_WIDTH)
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
+  const [selectedTask, setSelectedTask] = useState<TeamWorkbenchTask | null>(null)
   const communicationWidthRef = useRef(communicationWidth)
   const communicationDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   communicationWidthRef.current = communicationWidth
@@ -264,12 +267,15 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
   const members = snapshot.team.members
   const leadMember = members.find((member) => member.agentId === leadId) ?? members[0]
   const workerMembers = members.filter((member) => member.agentId !== leadId)
-  const primaryTaskByMemberId = new Map<string, string>()
+  // Exactly one place on the map per member. A member owns many tasks at once,
+  // so drawing its character on each of them turned one teammate into a crowd
+  // and made a completed card look like a finished person.
+  const currentTaskByMemberId = new Map<string, string>()
   for (const member of workerMembers) {
-    const firstOwnedTask = snapshot.tasks.find((task) => taskOwnedByMember(task, member))
-    if (firstOwnedTask) primaryTaskByMemberId.set(member.agentId, firstOwnedTask.id)
+    const currentTask = currentTaskForMember(snapshots, selectedIndex, member)
+    if (currentTask) currentTaskByMemberId.set(member.agentId, currentTask.id)
   }
-  const unassignedMembers = workerMembers.filter((member) => !primaryTaskByMemberId.has(member.agentId))
+  const unassignedMembers = workerMembers.filter((member) => !currentTaskByMemberId.has(member.agentId))
   const archivedUnassignedMembers = unassignedMembers.filter((member) => (
     memberState(member, snapshot, false) === 'exited'
   ))
@@ -283,10 +289,10 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
 
   members.forEach((member) => {
     const isLead = member.agentId === leadId
-    const state = memberState(member, snapshot, isLead)
+    const state = memberState(member, snapshot, isLead, leadIsStreaming)
     const taskPosition = isLead
       ? undefined
-      : layout.byId.get(primaryTaskByMemberId.get(member.agentId) ?? '')
+      : layout.byId.get(currentTaskByMemberId.get(member.agentId) ?? '')
     if (isLead) {
       memberPositions.set(member.agentId, { x: layout.width / 2, y: 66, opacity: 1, state })
     } else if (taskPosition) {
@@ -516,14 +522,28 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
               positioned={positioned}
               members={members}
               snapshot={snapshot}
-              primaryTaskByMemberId={primaryTaskByMemberId}
+              currentTaskByMemberId={currentTaskByMemberId}
               latestMessage={hasNewMessage ? latestMessage : undefined}
+              leadIsStreaming={leadIsStreaming}
               onSelectMember={selectMember}
+              onSelectTask={setSelectedTask}
               onFocusTask={setFocusedTaskId}
               t={t}
             />
           ))}
         </div>
+        {selectedTask ? (
+          <TaskDetailPanel
+            task={
+              snapshot.tasks.find((entry) => entry.id === selectedTask.id) ?? selectedTask
+            }
+            snapshot={snapshot}
+            members={members}
+            onSelectMember={selectMember}
+            onClose={() => setSelectedTask(null)}
+            t={t}
+          />
+        ) : null}
       </div>
 
       <div
@@ -556,7 +576,7 @@ export function AgentTeamsWorkbench({ sessionId }: { sessionId: string }) {
           maxWidth: `calc(100% - ${DAG_MIN_WIDTH}px)`,
         }}
       >
-        <AgentTeamsCommunicationFeed snapshot={snapshot} fill />
+        <AgentTeamsCommunicationFeed snapshot={snapshot} fill onFocusTask={setFocusedTaskId} />
       </div>
       </div>
     </section>
@@ -846,38 +866,47 @@ function TaskCard({
   positioned,
   members,
   snapshot,
-  primaryTaskByMemberId,
+  currentTaskByMemberId,
   latestMessage,
+  leadIsStreaming,
   onSelectMember,
+  onSelectTask,
   onFocusTask,
   t,
 }: {
   positioned: PositionedWorkbenchTask
   members: TeamMember[]
   snapshot: TeamWorkbenchSnapshot
-  primaryTaskByMemberId: Map<string, string>
+  currentTaskByMemberId: Map<string, string>
   latestMessage?: TeamWorkbenchMessage
+  leadIsStreaming: boolean
   onSelectMember: (member: TeamMember) => void
+  onSelectTask: (task: TeamWorkbenchTask) => void
   onFocusTask: (taskId: string | null) => void
   t: TranslationFn
 }) {
-  const { task, state, x, y } = positioned
-  const owner = task.owner
-    ? members.find((member) => taskOwnedByMember(task, member))
+  const { task, state, depth, x, y } = positioned
+  const attribution = inferTaskOwner(task, snapshot)
+  const owner = attribution
+    ? members.find((member) => memberMatchesIdentity(member, attribution.identity))
     : undefined
-  const ownerLabel = owner ? memberName(owner) : task.owner?.trim()
+  const ownerName = owner ? memberName(owner) : attribution?.identity
+  const ownerLabel = ownerName && attribution?.inferred
+    ? t('agentTeams.task.inferredOwner', { name: ownerName })
+    : ownerName
   const dependencyLabel = task.blockedBy.map((dependency) => `#${dependency}`).join(' ')
+  const isLeadOwner = owner?.agentId === snapshot.team.leadAgentId
   const ownerState = owner
-    ? memberState(owner, snapshot, owner.agentId === snapshot.team.leadAgentId)
+    ? memberState(owner, snapshot, isLeadOwner, leadIsStreaming)
     : undefined
-  const isPrimaryOwnerFigure = Boolean(
+  // The character only stands on the task its member is actually on. Every
+  // other card it owns gets a chip, which reads as "assigned to" rather than
+  // "this person is here".
+  const showsMemberFigure = Boolean(
     owner
-    && owner.agentId !== snapshot.team.leadAgentId
-    && primaryTaskByMemberId.get(owner.agentId) === task.id,
+    && !isLeadOwner
+    && currentTaskByMemberId.get(owner.agentId) === task.id,
   )
-  const openOwner = () => {
-    if (owner) onSelectMember(owner)
-  }
   return (
     <article
       data-testid={`agent-teams-task-${task.id}`}
@@ -885,16 +914,20 @@ function TaskCard({
       data-owner-agent-id={owner?.agentId}
       data-owner-identity={task.owner}
       tabIndex={0}
-      role={owner ? 'button' : undefined}
-      aria-label={owner ? t('agentTeams.openMember', { name: memberName(owner) }) : undefined}
+      role="button"
+      // Opening the card describes the task. It used to open the owner's whole
+      // conversation, so a card reading "completed" led straight to a teammate
+      // still streaming its next task.
+      aria-label={t('agentTeams.openTask', { subject: task.subject })}
       onClick={(event) => {
-        if (!owner || (event.target as HTMLElement).closest('button')) return
-        openOwner()
+        if ((event.target as HTMLElement).closest('button')) return
+        onSelectTask(task)
       }}
       onKeyDown={(event) => {
-        if (!owner || (event.key !== 'Enter' && event.key !== ' ')) return
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        if ((event.target as HTMLElement).closest('button')) return
         event.preventDefault()
-        openOwner()
+        onSelectTask(task)
       }}
       onMouseEnter={() => onFocusTask(task.id)}
       onMouseLeave={() => onFocusTask(null)}
@@ -902,22 +935,22 @@ function TaskCard({
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) onFocusTask(null)
       }}
-      className={`agent-teams-task absolute h-[94px] w-[216px] rounded-[var(--radius-xl)] border bg-[var(--color-surface-container-lowest)] py-[10px] pr-3 shadow-[var(--shadow-card)] outline-none transition-[transform,box-shadow,border-color] duration-200 focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${owner ? 'cursor-pointer pl-[58px] hover:-translate-y-px hover:shadow-[var(--shadow-composer)] active:scale-[0.99]' : 'pl-3'}`}
+      className={`agent-teams-task absolute h-[94px] w-[216px] cursor-pointer rounded-[var(--radius-xl)] border bg-[var(--color-surface-container-lowest)] py-[10px] pr-3 shadow-[var(--shadow-card)] outline-none transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-px hover:shadow-[var(--shadow-composer)] focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] active:scale-[0.99] ${showsMemberFigure ? 'pl-[58px]' : 'pl-3'}`}
       style={{
         left: x,
         top: y,
         borderColor: taskBorder(state),
       }}
     >
-      {owner && ownerState ? (
+      {owner && ownerState && showsMemberFigure ? (
         <div className="absolute -left-[18px] top-[13px]">
           <MemberFigure
             member={owner}
             state={ownerState}
             accent={memberAccent(owner, members.indexOf(owner))}
-            isLead={owner.agentId === snapshot.team.leadAgentId}
+            isLead={isLeadOwner}
             isMessageSender={Boolean(latestMessage && memberMatchesIdentity(owner, latestMessage.from))}
-            testId={isPrimaryOwnerFigure ? `agent-teams-member-${owner.agentId}` : `agent-teams-task-owner-${task.id}`}
+            testId={`agent-teams-member-${owner.agentId}`}
             className="h-[66px] w-[66px]"
             onSelect={() => onSelectMember(owner)}
             t={t}
@@ -925,8 +958,17 @@ function TaskCard({
         </div>
       ) : null}
       <div className="flex items-center gap-1">
-        <span className={`font-mono text-[10px] font-extrabold ${state === 'running' ? 'text-[var(--color-brand)]' : 'text-[var(--color-text-tertiary)]'}`}>
-          #{task.id}
+        {/* The leading slot reads as "which step is this", so it carries the
+            dependency layer. A task id records only the order the lead wrote
+            the tasks down: review work planned first owns the lowest ids while
+            depending on everything above it. The id stays addressable through
+            the tooltip and `data-task-id`. */}
+        <span
+          data-task-id={task.id}
+          title={`#${task.id} · ${task.subject}`}
+          className={`font-mono text-[10px] font-extrabold ${state === 'running' ? 'text-[var(--color-brand)]' : 'text-[var(--color-text-tertiary)]'}`}
+        >
+          {t('agentTeams.task.layer', { layer: depth + 1 })}
         </span>
         <span className="flex-1" />
         <span className="inline-flex items-center gap-1 text-[9px] font-extrabold" style={{ color: taskBorder(state) }}>
@@ -939,9 +981,21 @@ function TaskCard({
       </div>
       <div className="mt-1 flex min-h-4 items-center gap-1.5">
         {ownerLabel ? (
-          <span className="truncate font-mono text-[10px] font-semibold text-[var(--color-text-secondary)]">
-            {ownerLabel}
-          </span>
+          owner ? (
+            <button
+              type="button"
+              data-testid={`agent-teams-task-owner-${task.id}`}
+              aria-label={t('agentTeams.openMember', { name: memberName(owner) })}
+              onClick={() => onSelectMember(owner)}
+              className="-mx-1 min-w-0 truncate rounded-[var(--radius-sm)] px-1 font-mono text-[10px] font-semibold text-[var(--color-text-secondary)] underline-offset-2 outline-none transition-colors duration-150 hover:bg-[var(--color-surface-hover)] hover:underline focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+            >
+              {ownerLabel}
+            </button>
+          ) : (
+            <span className="truncate font-mono text-[10px] font-semibold text-[var(--color-text-secondary)]">
+              {ownerLabel}
+            </span>
+          )
         ) : state === 'completed' ? (
           <span className="truncate text-[9.5px] text-[var(--color-text-tertiary)]">
             {t('agentTeams.task.completedNoOwner')}
@@ -955,5 +1009,110 @@ function TaskCard({
         )}
       </div>
     </article>
+  )
+}
+
+/**
+ * What a task is and who has it, so opening a card explains the work instead of
+ * jumping into a teammate's conversation. Reaching the person is still one
+ * click, but it is now a deliberate one.
+ */
+function TaskDetailPanel({
+  task,
+  snapshot,
+  members,
+  onSelectMember,
+  onClose,
+  t,
+}: {
+  task: TeamWorkbenchTask
+  snapshot: TeamWorkbenchSnapshot
+  members: TeamMember[]
+  onSelectMember: (member: TeamMember) => void
+  onClose: () => void
+  t: TranslationFn
+}) {
+  const tasksById = new Map(snapshot.tasks.map((entry) => [entry.id, entry]))
+  const state = getWorkbenchTaskState(task, tasksById)
+  const attribution = inferTaskOwner(task, snapshot)
+  const owner = attribution
+    ? members.find((member) => memberMatchesIdentity(member, attribution.identity))
+    : undefined
+  const dependencies = task.blockedBy
+    .map((dependencyId) => tasksById.get(dependencyId))
+    .filter((dependency): dependency is TeamWorkbenchTask => Boolean(dependency))
+  const unblocks = task.blocks
+    .map((blockedId) => tasksById.get(blockedId))
+    .filter((blocked): blocked is TeamWorkbenchTask => Boolean(blocked))
+
+  return (
+    <aside
+      data-testid="agent-teams-task-detail"
+      data-task-id={task.id}
+      aria-label={task.subject}
+      className="absolute inset-x-3 bottom-3 z-10 max-h-[62%] overflow-y-auto rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] p-3 shadow-[var(--shadow-composer)]"
+    >
+      <div className="flex items-start gap-2">
+        <span className="mt-px inline-flex shrink-0 items-center gap-1 text-[9px] font-extrabold" style={{ color: taskBorder(state) }}>
+          <StatusDot tone={taskTone(state)} pulse={state === 'running'} />
+          {taskStateLabel(state, t)}
+        </span>
+        <span className="shrink-0 font-mono text-[10px] font-extrabold text-[var(--color-text-tertiary)]">
+          #{task.id}
+        </span>
+        <h2 className="min-w-0 flex-1 text-[12px] font-bold leading-[1.4]">{task.subject}</h2>
+        <IconButton
+          icon={<X aria-hidden="true" />}
+          label={t('agentTeams.task.closeDetail')}
+          size="sm"
+          tone="muted"
+          onClick={onClose}
+        />
+      </div>
+
+      {task.activeForm ? (
+        <p className="mt-1.5 text-[10.5px] font-semibold text-[var(--color-text-secondary)]">
+          {task.activeForm}
+        </p>
+      ) : null}
+      {task.description ? (
+        <p className="mt-1.5 whitespace-pre-wrap text-[11px] leading-[1.6] text-[var(--color-text-secondary)]">
+          {task.description}
+        </p>
+      ) : null}
+
+      <dl className="mt-2.5 flex flex-col gap-1.5 text-[10.5px]">
+        <div className="flex items-baseline gap-2">
+          <dt className="shrink-0 text-[var(--color-text-tertiary)]">{t('agentTeams.task.ownerLabel')}</dt>
+          <dd className="min-w-0">
+            {owner ? (
+              <Button variant="ghost" size="sm" onClick={() => onSelectMember(owner)}>
+                {t('agentTeams.openExecution', { name: memberName(owner) })}
+              </Button>
+            ) : (
+              <span className="text-[var(--color-text-tertiary)]">
+                {attribution?.identity ?? t('agentTeams.task.unclaimed')}
+              </span>
+            )}
+          </dd>
+        </div>
+        {dependencies.length > 0 ? (
+          <div className="flex items-baseline gap-2">
+            <dt className="shrink-0 text-[var(--color-text-tertiary)]">{t('agentTeams.task.dependsOn')}</dt>
+            <dd className="min-w-0 text-[var(--color-text-secondary)]">
+              {dependencies.map((dependency) => `#${dependency.id} ${dependency.subject}`).join(' · ')}
+            </dd>
+          </div>
+        ) : null}
+        {unblocks.length > 0 ? (
+          <div className="flex items-baseline gap-2">
+            <dt className="shrink-0 text-[var(--color-text-tertiary)]">{t('agentTeams.task.unblocks')}</dt>
+            <dd className="min-w-0 text-[var(--color-text-secondary)]">
+              {unblocks.map((blocked) => `#${blocked.id} ${blocked.subject}`).join(' · ')}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </aside>
   )
 }

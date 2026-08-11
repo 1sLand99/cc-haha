@@ -35,6 +35,15 @@ import type { TaskInfo } from './taskService.js'
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
+/**
+ * Whether a teammate is mid-turn right now. This is deliberately separate from
+ * `status`, which answers whether the member is still part of the run at all.
+ * Owning an `in_progress` task is not evidence of either: a teammate marks a
+ * task started and can then finish its turn, and an umbrella task stays open
+ * across every turn underneath it.
+ */
+export type TeamMemberActivity = 'active' | 'idle' | 'exited' | 'unknown'
+
 export type TeamMember = {
   agentId: string
   name: string
@@ -43,6 +52,11 @@ export type TeamMember = {
   color?: string
   backendType?: string
   status: 'running' | 'completed' | 'idle' | 'failed'
+  /**
+   * Absent on workbench archives written before this was recorded, which is why
+   * readers fall back to `status` rather than assuming a member went quiet.
+   */
+  activity?: TeamMemberActivity
   joinedAt: number
   cwd: string
   sessionId?: string
@@ -131,10 +145,24 @@ export type TeamTranscriptPage = {
    * cache when `reset` is true.
    */
   taskNotifications: SessionTaskNotification[]
+  /**
+   * Where this member's work on each team task begins and ends, taken from the
+   * `TaskUpdate` calls it made. Lets a member's conversation be read as the
+   * sequence of tasks it worked through rather than one undifferentiated log.
+   */
+  taskAnchors: TeamTaskAnchor[]
   signature: string
   cursor: string
   afterOrdinal: number
   reset?: boolean
+}
+
+export type TeamTaskAnchor = {
+  taskId: string
+  status: 'pending' | 'in_progress' | 'completed'
+  /** Id of the transcript message carrying the `TaskUpdate` call. */
+  messageId: string
+  timestamp: string
 }
 
 export type TeamTranscriptPageOptions = {
@@ -177,6 +205,15 @@ const TASK_NOTIFICATION_BLOCK_RE = /<task-notification>\s*[\s\S]*?<\/task-notifi
 
 const TEAM_WORKBENCH_ARCHIVE_SCHEMA_VERSION = 1
 const TEAM_WORKBENCH_ARCHIVE_HISTORY_LIMIT = 200
+
+/**
+ * How recently a teammate must have written to its transcript to still count as
+ * mid-turn. Only consulted for members whose backend does not record `isActive`,
+ * so it is a fallback rather than the primary signal. It has to clear the
+ * watcher's 3s poll by a wide margin, and stay under the gap a teammate leaves
+ * while waiting on a single slow tool call.
+ */
+const TEAM_MEMBER_ACTIVE_WINDOW_MS = 15_000
 
 type TeamWorkbenchArchiveEntry = {
   teamName: string
@@ -236,6 +273,7 @@ function carryForwardArchivedMembers(
       status: historicalMember.status === 'failed'
         ? 'failed' as const
         : 'completed' as const,
+      activity: 'exited' as const,
     }
   })
   for (const member of snapshot.team.members) {
@@ -341,6 +379,67 @@ function fragmentScopedId(ownerAgentId: string, value: string): string {
     : `${ownerAgentId}/${value}`
 }
 
+/**
+ * Content identity of each parseable entry, positionally aligned with the
+ * ordinals `parseTranscriptBufferPage` assigns. Unparseable lines are skipped on
+ * both sides, so a rewritten snapshot stays comparable to the shorter one it
+ * supersedes.
+ *
+ * A rewrite restamps the entry with the session and turn it was written into,
+ * so these fields say where the record lives rather than what the teammate did.
+ * They are the only fields observed to change across a rewritten chain, measured
+ * over two real runs. Everything else
+ * — `uuid`, `timestamp`, `message`, tool results — stays part of the identity,
+ * so an unrecognised new field makes two entries look different and the pair is
+ * simply not folded. Under-folding shows duplicates; over-folding would drop a
+ * teammate's work, so the list stays a deny list rather than an allow list.
+ */
+const REWRITTEN_ENTRY_ENVELOPE_FIELDS = ['agentId', 'slug', 'cwd', 'promptId'] as const
+
+function transcriptEntryIdentities(bytes: Buffer): string[] {
+  const identities: string[] = []
+  for (const line of bytes.toString('utf8').split('\n')) {
+    if (!line.trim()) continue
+    try {
+      const entry = JSON.parse(line) as Record<string, unknown>
+      for (const field of REWRITTEN_ENTRY_ENVELOPE_FIELDS) delete entry[field]
+      identities.push(hash(JSON.stringify(entry, Object.keys(entry).sort())))
+    } catch {
+      // Keep this aligned with parseTranscriptBufferPage's ordinal rules.
+    }
+  }
+  return identities
+}
+
+function isStrictPrefix(shorter: string[], longer: string[]): boolean {
+  if (shorter.length >= longer.length) return false
+  return shorter.every((identity, index) => identity === longer[index])
+}
+
+/**
+ * A teammate's `agent-<id>.jsonl` files are cumulative snapshots: each turn
+ * rewrites the whole transcript into a new physical fragment, so one run leaves
+ * a chain where every fragment repeats all of its predecessor's entries. Naive
+ * concatenation replayed that history once per fragment (a ten-turn teammate
+ * rendered its work ~8x over) because `fragmentScopedId` gives the same `uuid` a
+ * different id in every fragment, which defeats id-based deduplication
+ * downstream.
+ *
+ * Only a *strict* prefix of matching entry content is treated as superseded.
+ * Independent resumes may reuse uuids while doing different work, so identity
+ * has to come from the entries themselves; those fragments are all preserved
+ * and keep their own scope.
+ */
+function dropSupersededTranscriptFragments<T extends { bytes: Buffer }>(
+  fragments: T[],
+): T[] {
+  if (fragments.length < 2) return fragments
+  const identities = fragments.map(fragment => transcriptEntryIdentities(fragment.bytes))
+  return fragments.filter((_, index) => !identities.some((candidate, other) => (
+    other !== index && isStrictPrefix(identities[index]!, candidate)
+  )))
+}
+
 function projectFragmentContent(content: unknown, ownerAgentId: string): unknown {
   if (Array.isArray(content)) {
     return content.map(value => projectFragmentContent(value, ownerAgentId))
@@ -404,6 +503,26 @@ function projectFragmentTaskNotification(
     taskId: fragmentScopedId(ownerAgentId, notification.taskId),
     toolUseId: fragmentScopedId(ownerAgentId, notification.toolUseId),
   }
+}
+
+/**
+ * The `TaskUpdate` calls a teammate makes are the only durable record of when
+ * it started and finished a given task, and they sit in the transcript it is
+ * already streaming.
+ */
+function taskAnchorsFromMessage(message: TranscriptMessage): TeamTaskAnchor[] {
+  if (!Array.isArray(message.content)) return []
+  const anchors: TeamTaskAnchor[] = []
+  for (const block of message.content) {
+    const tool = objectValue(block)
+    if (tool?.type !== 'tool_use' || stringValue(tool.name) !== 'TaskUpdate') continue
+    const input = objectValue(tool.input)
+    const taskId = stringValue(input?.taskId)
+    const status = taskStatus(input?.status)
+    if (!taskId || !status) continue
+    anchors.push({ taskId, status, messageId: message.id, timestamp: message.timestamp })
+  }
+  return anchors
 }
 
 function taskNotificationFromEntry(
@@ -1058,6 +1177,7 @@ export function projectTeamWorkbenchesFromTranscript(
           name: 'team-lead',
           agentType: stringValue(input.agent_type) ?? 'team-lead',
           status: 'completed',
+          activity: 'exited',
           joinedAt: team.createdAt,
           cwd: stringValue(message.cwd) ?? '',
           sessionId,
@@ -1104,6 +1224,7 @@ export function projectTeamWorkbenchesFromTranscript(
             ? 'in-process'
             : undefined,
           status: 'completed',
+          activity: 'exited',
           joinedAt: Date.parse(timestamp),
           cwd: stringValue(message.cwd) ?? '',
         })
@@ -1368,6 +1489,10 @@ export class TeamService {
 
   async getTeam(name: string): Promise<TeamDetail> {
     const config = await this.loadTeamConfig(name)
+    const now = Date.now()
+    const lastWrites = config.leadSessionId
+      ? await this.discoverSubagentLastWrites(config.leadSessionId)
+      : new Map<string, number>()
 
     const members: TeamMember[] = config.members.map((m) => ({
       agentId: m.agentId,
@@ -1377,6 +1502,7 @@ export class TeamService {
       color: m.color,
       backendType: m.backendType,
       status: this.deriveStatus(m.isActive),
+      activity: this.deriveActivity(m.isActive, lastWrites.get(m.name), now),
       joinedAt: m.joinedAt,
       cwd: m.cwd,
       sessionId: m.sessionId,
@@ -1393,29 +1519,27 @@ export class TeamService {
           name: inboxName,
           agentType: 'general-purpose',
           status: 'running', // assume running since we can see their inbox
+          // Having an inbox says a member exists, never that it is mid-turn.
+          activity: this.deriveActivity(undefined, lastWrites.get(inboxName), now),
           joinedAt: config.createdAt,
           cwd: config.members[0]?.cwd || '',
         })
       }
     }
 
-    if (config.leadSessionId) {
-      const subagentNames = await this.discoverSubagentMembers(
-        config.leadSessionId,
-      )
-      for (const subagentName of subagentNames) {
-        if (
-          !configNames.has(subagentName) &&
-          !members.some((member) => member.name === subagentName)
-        ) {
-          members.push({
-            agentId: `${subagentName}@${name}`,
-            name: subagentName,
-            status: 'running',
-            joinedAt: config.createdAt,
-            cwd: config.members[0]?.cwd || '',
-          })
-        }
+    for (const subagentName of lastWrites.keys()) {
+      if (
+        !configNames.has(subagentName) &&
+        !members.some((member) => member.name === subagentName)
+      ) {
+        members.push({
+          agentId: `${subagentName}@${name}`,
+          name: subagentName,
+          status: 'running',
+          activity: this.deriveActivity(undefined, lastWrites.get(subagentName), now),
+          joinedAt: config.createdAt,
+          cwd: config.members[0]?.cwd || '',
+        })
       }
     }
 
@@ -1591,6 +1715,7 @@ export class TeamService {
         messages: [],
         ownerAgentIds: [],
         taskNotifications: [],
+        taskAnchors: [],
         signature: 'missing',
         cursor: encodeTranscriptCursor(cursorForBuffer(Buffer.alloc(0), null, 0, -1)),
         afterOrdinal: -1,
@@ -1962,6 +2087,7 @@ export class TeamService {
           members: reconciledLatest.team.members.map((member) => ({
             ...member,
             status: 'completed' as const,
+            activity: 'exited' as const,
           })),
         },
       }
@@ -2384,6 +2510,26 @@ export class TeamService {
     return 'running'
   }
 
+  /**
+   * `isActive` is written by the in-process runner around each turn, so when it
+   * is present it is the strongest possible answer and costs nothing -- the
+   * config has already been read. It is absent for backends that do not run
+   * teammates in-process and for a member that has not taken its first turn, so
+   * a recent write to the member's own transcript stands in. Saying `unknown`
+   * is better than guessing `active`, which is what made every member look busy
+   * for the whole run.
+   */
+  private deriveActivity(
+    isActive: boolean | undefined,
+    lastWriteMs: number | undefined,
+    now: number,
+  ): TeamMemberActivity {
+    if (isActive === true) return 'active'
+    if (isActive === false) return 'idle'
+    if (lastWriteMs === undefined) return 'unknown'
+    return now - lastWriteMs < TEAM_MEMBER_ACTIVE_WINDOW_MS ? 'active' : 'idle'
+  }
+
   private async resolveMemberName(
     config: TeamFileRaw,
     teamName: string,
@@ -2413,15 +2559,28 @@ export class TeamService {
   }
 
   private async discoverSubagentMembers(leadSessionId: string): Promise<string[]> {
+    return [...(await this.discoverSubagentLastWrites(leadSessionId)).keys()]
+  }
+
+  /**
+   * One walk of the lead's subagent transcripts that answers both "who is on
+   * this team" and "when did each of them last write". The sidecar metadata is
+   * tried before the transcript head because it is two orders of magnitude
+   * smaller, and the `stat` an activity probe needs rides along on a directory
+   * this method already has to open.
+   */
+  private async discoverSubagentLastWrites(
+    leadSessionId: string,
+  ): Promise<Map<string, number>> {
     const projectsDir = this.getProjectsDir()
+    const lastWrites = new Map<string, number>()
 
     try {
       await fs.access(projectsDir)
     } catch {
-      return []
+      return lastWrites
     }
 
-    const discovered = new Set<string>()
     const projectEntries = await fs.readdir(projectsDir, {
       withFileTypes: true,
     })
@@ -2445,16 +2604,24 @@ export class TeamService {
 
       for (const file of files) {
         if (!file.endsWith('.jsonl')) continue
-        const discoveredName = await this.extractSubagentName(
-          path.join(subagentsDir, file),
-        )
-        if (discoveredName && discoveredName !== 'team-lead') {
-          discovered.add(discoveredName)
+        const filePath = path.join(subagentsDir, file)
+        const discoveredName = await this.extractSubagentMetadataName(filePath) ??
+          await this.extractSubagentName(filePath)
+        if (!discoveredName || discoveredName === 'team-lead') continue
+        let mtimeMs = 0
+        try {
+          mtimeMs = (await fs.stat(filePath)).mtimeMs
+        } catch {
+          // A fragment can vanish while a finished team is being opened.
         }
+        lastWrites.set(
+          discoveredName,
+          Math.max(lastWrites.get(discoveredName) ?? 0, mtimeMs),
+        )
       }
     }
 
-    return [...discovered]
+    return lastWrites
   }
 
   /** Search ~/.claude/projects/ for a JSONL file matching the sessionId. */
@@ -2949,13 +3116,14 @@ export class TeamService {
     sources: Array<{ filePath: string; ownerAgentId?: string }>,
     options: TeamTranscriptPageOptions,
   ): Promise<TeamTranscriptPage> {
-    const fragments = await Promise.all(sources.map(async source => {
+    const allFragments = await Promise.all(sources.map(async source => {
       const [bytes, stat] = await Promise.all([
         fs.readFile(source.filePath),
         fs.stat(source.filePath),
       ])
       return { ...source, bytes, ctimeMs: stat.ctimeMs }
     }))
+    const fragments = dropSupersededTranscriptFragments(allFragments)
     const ownerAgentIdByOrdinal: Array<string | undefined> = []
     for (const fragment of fragments) {
       for (const line of fragment.bytes.toString('utf8').split('\n')) {
@@ -2998,6 +3166,7 @@ export class TeamService {
       ordinal: number
       message?: TranscriptMessage
       taskNotification?: SessionTaskNotification
+      taskAnchors?: TeamTaskAnchor[]
     }> = []
     let ordinal = -1
     for (const line of bytes.toString('utf8').split('\n')) {
@@ -3009,11 +3178,13 @@ export class TeamService {
           projection.ownerAgentId
         const message = this.transcriptMessageFromEntry(entry, ownerAgentId)
         const taskNotification = taskNotificationFromEntry(entry, ownerAgentId)
+        const taskAnchors = message ? taskAnchorsFromMessage(message) : []
         if (message || taskNotification) {
           entries.push({
             ordinal,
             ...(message ? { message } : {}),
             ...(taskNotification ? { taskNotification } : {}),
+            ...(taskAnchors.length > 0 ? { taskAnchors } : {}),
           })
         }
       } catch {
@@ -3076,6 +3247,9 @@ export class TeamService {
         ))
         .map(entry => entry.message),
       ownerAgentIds: projection.ownerAgentIds ?? [],
+      taskAnchors: entries
+        .filter(entry => entry.ordinal > afterOrdinal && entry.taskAnchors !== undefined)
+        .flatMap(entry => entry.taskAnchors!),
       taskNotifications: [...entries
         .filter((entry): entry is typeof entry & { taskNotification: SessionTaskNotification } => (
           entry.ordinal > afterOrdinal && entry.taskNotification !== undefined
