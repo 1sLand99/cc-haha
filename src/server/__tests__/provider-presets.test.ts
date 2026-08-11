@@ -186,6 +186,7 @@ describe('provider presets API', () => {
     const xuanshuapi = PROVIDER_PRESETS.find((preset) => preset.id === 'xuanshuapi')
     const fennoai = PROVIDER_PRESETS.find((preset) => preset.id === 'fennoai')
     const qiniuai = PROVIDER_PRESETS.find((preset) => preset.id === 'qiniuai')
+    const atlascloud = PROVIDER_PRESETS.find((preset) => preset.id === 'atlascloud')
     const custom = PROVIDER_PRESETS.find((preset) => preset.id === 'custom')
 
     expect(lmstudio?.needsApiKey).toBe(false)
@@ -251,6 +252,10 @@ describe('provider presets API', () => {
     expect(qiniuai?.modelContextWindows?.['deepseek/deepseek-v4-flash']).toBe(1000000)
     expect(qiniuai?.modelContextWindows?.['z-ai/glm-5.2']).toBe(1000000)
     expect(qiniuai?.modelContextWindows?.['moonshotai/kimi-k3']).toBe(262144)
+    expect(atlascloud?.apiKeyUrl).toBe(
+      'https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=cc-haha',
+    )
+    expect(atlascloud?.featured).toBe(true)
     expect(custom?.promoText).toBeUndefined()
     expect(custom?.authStrategy).toBe('auth_token')
     expect(custom?.defaultEnv).toBeUndefined()
