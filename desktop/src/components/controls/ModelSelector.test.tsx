@@ -1013,12 +1013,12 @@ describe('ModelSelector', () => {
 
   it('replaces a stale Grok runtime model with the current official default', async () => {
     const grokModels: ModelInfo[] = [{
-      id: 'grok-4.5',
-      name: 'Grok 4.5',
-      description: 'Grok frontier text model',
+      id: 'grok-4.6',
+      name: 'Grok 4.6',
+      description: "SpaceXAI's latest frontier model",
       context: '500000',
       defaultReasoningEffort: 'high',
-      supportedReasoningEfforts: ['low', 'medium', 'high'],
+      supportedReasoningEfforts: ['xhigh', 'high', 'medium', 'low'],
     }]
     useHahaGrokOAuthStore.setState({
       status: { loggedIn: true, expiresAt: null, email: 'grok@example.com' },
@@ -1045,11 +1045,11 @@ describe('ModelSelector', () => {
     render(<ModelSelector runtimeKey="session-stale-grok" />)
 
     expect(screen.queryByText('grok-build')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Grok 4.5, Grok Official' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Grok 4.6, Grok Official' })).toBeInTheDocument()
     await waitFor(() => {
       expect(useSessionRuntimeStore.getState().selections['session-stale-grok']).toEqual({
         providerId: 'grok-official',
-        modelId: 'grok-4.5',
+        modelId: 'grok-4.6',
         effortLevel: 'high',
       })
     })
