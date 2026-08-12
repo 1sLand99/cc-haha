@@ -1,10 +1,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useChatStore } from '../../stores/chatStore'
-import { useSettingsStore } from '../../stores/settingsStore'
-import { useTeamStore } from '../../stores/teamStore'
-import { useTabStore } from '../../stores/tabStore'
-import type { TeamWorkbenchSnapshot, TeamWorkbenchTask } from '../../types/team'
+
+import { useChatStore } from '@/stores/chatStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { useTeamStore } from '@/stores/teamStore'
+import { useTabStore } from '@/stores/tabStore'
+import type { TeamWorkbenchSnapshot, TeamWorkbenchTask } from '@/types/team'
+
 import { AgentTeamsWorkbench } from './AgentTeamsWorkbench'
 
 const { getWorkbenchForSessionMock, getWorkbenchMock } = vi.hoisted(() => ({
@@ -12,7 +14,7 @@ const { getWorkbenchForSessionMock, getWorkbenchMock } = vi.hoisted(() => ({
   getWorkbenchMock: vi.fn(),
 }))
 
-vi.mock('../../api/teams', () => ({
+vi.mock('@/api/teams', () => ({
   teamsApi: {
     list: vi.fn(),
     get: vi.fn(),
@@ -41,15 +43,6 @@ function task(
     blockedBy,
     taskListId: 'visual-team',
   }
-}
-
-function firePointer(target: Node | Window, type: string, clientX: number, button = 0) {
-  const event = new Event(type, { bubbles: true, cancelable: true })
-  Object.defineProperties(event, {
-    clientX: { value: clientX },
-    button: { value: button },
-  })
-  fireEvent(target, event)
 }
 
 function workbench(
@@ -109,7 +102,7 @@ describe('AgentTeamsWorkbench', () => {
     useSettingsStore.setState({ locale: 'en' })
   })
 
-  it('renders a multi-dependency team and keeps history fixed while live updates continue', async () => {
+  it('keeps live controls simple, then supports seeking, speed, playback, and returning live', async () => {
     getWorkbenchMock
       .mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
       .mockResolvedValueOnce(workbench('v2', ['completed', 'completed', 'in_progress']))
@@ -119,44 +112,97 @@ describe('AgentTeamsWorkbench', () => {
       await useTeamStore.getState().fetchWorkbench('visual-team')
       await useTeamStore.getState().fetchWorkbench('visual-team')
     })
-    const { container } = render(<AgentTeamsWorkbench sessionId="lead-session" />)
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
-    expect(screen.getByTestId('agent-teams-task-2').getAttribute('data-state')).toBe('completed')
-    expect(screen.getByTestId('agent-teams-task-3').getAttribute('data-state')).toBe('running')
-    expect(screen.getByText('Snapshot v2 ready')).toBeTruthy()
-    expect(screen.getByTestId('agent-teams-member-team-lead@visual-team').getAttribute('data-avatar-key')).toBe('team-lead')
-    expect(screen.getByTestId('agent-teams-member-builder@visual-team').getAttribute('data-avatar-key')).toBe('ui-designer')
-    expect(screen.getByTestId('agent-teams-member-builder@visual-team').querySelector('img')).toBeTruthy()
-    expect(container.querySelector('[data-layout-role="leader-root"]')?.getAttribute('data-center-x')).toBe('302')
-    expect(container.querySelectorAll('[data-edge-kind="leader-root"]')).toHaveLength(1)
-    expect(container.querySelectorAll('[data-edge-kind="dependency-primary"]')).toHaveLength(2)
-    expect(container.querySelectorAll('[data-edge-kind="dependency-secondary"]')).toHaveLength(1)
-    // reviewer's task is finished, so its card carries an owner chip rather
-    // than the character -- the character stands on whatever its member is on.
-    expect(screen.getByTestId('agent-teams-task-2').querySelector('img')).toBeNull()
-    expect(screen.getByTestId('agent-teams-task-owner-2').textContent).toContain('reviewer')
-    expect(screen.getByTestId('agent-teams-member-builder@visual-team').className).toContain('cursor-pointer')
-
-    fireEvent.mouseEnter(screen.getByTestId('agent-teams-task-3'))
-    expect(container.querySelectorAll('[data-edge-active="true"]')).toHaveLength(2)
-    fireEvent.mouseLeave(screen.getByTestId('agent-teams-task-3'))
-    expect(container.querySelectorAll('[data-edge-active="true"]')).toHaveLength(0)
+    expect(screen.getByTestId('agent-teams-live-controls')).toBeTruthy()
+    expect(screen.queryByTestId('agent-teams-replay-controls')).toBeNull()
+    expect(screen.queryByRole('slider', { name: 'Replay timeline · click to seek' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^(Play|Pause|Replay)$/ })).toBeNull()
+    expect(screen.getByTestId('agent-teams-communication-rail').className).toContain('w-14')
+    expect(screen.getByTestId('agent-teams-canvas-task-2').getAttribute('data-state')).toBe('completed')
+    expect(screen.getByTestId('agent-teams-canvas-task-3').getAttribute('data-state')).toBe('running')
 
     fireEvent.click(screen.getByRole('button', { name: 'Review history' }))
-    expect(screen.getByTestId('agent-teams-task-2').getAttribute('data-state')).toBe('running')
-    expect(screen.getByTestId('agent-teams-task-3').getAttribute('data-state')).toBe('blocked')
+    expect(screen.queryByTestId('agent-teams-live-controls')).toBeNull()
+    expect(screen.getByTestId('agent-teams-replay-controls')).toBeTruthy()
+
+    const timeline = screen.getByRole('slider', { name: 'Replay timeline · click to seek' }) as HTMLInputElement
+    expect(timeline.value).toBe('1000')
+    fireEvent.change(timeline, { target: { value: '0' } })
+    expect(screen.getByTestId('agent-teams-canvas-task-2').getAttribute('data-state')).toBe('running')
+    expect(screen.getByTestId('agent-teams-canvas-task-3').getAttribute('data-state')).toBe('blocked')
+
+    const quadrupleSpeed = screen.getByRole('button', { name: '4×' })
+    fireEvent.click(quadrupleSpeed)
+    expect(quadrupleSpeed.getAttribute('aria-pressed')).toBe('true')
 
     await act(async () => {
       await useTeamStore.getState().fetchWorkbench('visual-team')
     })
-    expect(screen.getByTestId('agent-teams-task-2').getAttribute('data-state')).toBe('running')
-    expect(screen.getByText('Snapshot v1 ready')).toBeTruthy()
+    expect(timeline.max).toBe('2000')
+    expect(timeline.value).toBe('0')
+    expect(screen.getByTestId('agent-teams-canvas-task-2').getAttribute('data-state')).toBe('running')
+
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+      expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy()
+      act(() => {
+        vi.advanceTimersByTime(251)
+      })
+      expect(screen.getByTestId('agent-teams-canvas-task-2').getAttribute('data-state')).toBe('completed')
+      expect(screen.getByTestId('agent-teams-canvas-task-3').getAttribute('data-state')).toBe('running')
+      fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    } finally {
+      vi.useRealTimers()
+    }
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to live' }))
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-teams-task-3').getAttribute('data-state')).toBe('completed')
-    })
-    expect(screen.getByText('Snapshot v3 ready')).toBeTruthy()
+    expect(screen.getByTestId('agent-teams-live-controls')).toBeTruthy()
+    expect(screen.getByTestId('agent-teams-canvas-task-3').getAttribute('data-state')).toBe('completed')
+  })
+
+  it('positions and plays replay snapshots by their real timestamps', async () => {
+    vi.useFakeTimers()
+    try {
+      const first = workbench('v1', ['in_progress', 'pending', 'pending'])
+      const middle = workbench('v2', ['completed', 'in_progress', 'pending'])
+      const last = workbench('v3', ['completed', 'completed', 'completed'])
+      first.generatedAt = '2026-08-08T00:00:00.000Z'
+      middle.generatedAt = '2026-08-08T00:00:01.000Z'
+      last.generatedAt = '2026-08-08T00:01:40.000Z'
+      middle.messages = [...first.messages, ...middle.messages]
+      last.messages = [...middle.messages, ...last.messages]
+      getWorkbenchMock
+        .mockResolvedValueOnce(first)
+        .mockResolvedValueOnce(middle)
+        .mockResolvedValueOnce(last)
+
+      await act(async () => {
+        await useTeamStore.getState().fetchWorkbench('visual-team')
+        await useTeamStore.getState().fetchWorkbench('visual-team')
+        await useTeamStore.getState().fetchWorkbench('visual-team')
+      })
+      render(<AgentTeamsWorkbench sessionId="lead-session" />)
+      fireEvent.click(screen.getByRole('button', { name: 'Review history' }))
+
+      const timeline = screen.getByRole('slider', { name: 'Replay timeline · click to seek' }) as HTMLInputElement
+      expect(timeline.max).toBe('100000')
+      fireEvent.change(timeline, { target: { value: '1000' } })
+      expect(screen.getByTestId('agent-teams-replay-progress').getAttribute('style')).toContain('width: 1%')
+      expect(screen.getByTestId('agent-teams-replay-thumb').getAttribute('style')).toContain('left: 1%')
+
+      fireEvent.change(timeline, { target: { value: '0' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+      act(() => vi.advanceTimersByTime(1001))
+      expect(screen.getByTestId('agent-teams-canvas-task-2').getAttribute('data-state')).toBe('running')
+      act(() => vi.advanceTimersByTime(98_000))
+      expect(screen.getByTestId('agent-teams-canvas-task-3').getAttribute('data-state')).toBe('blocked')
+      act(() => vi.advanceTimersByTime(1001))
+      expect(screen.getByTestId('agent-teams-canvas-task-3').getAttribute('data-state')).toBe('completed')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('follows server-driven idle to running to idle member lifecycle without an owned task', async () => {
@@ -170,7 +216,7 @@ describe('AgentTeamsWorkbench', () => {
     })
     render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
-    const builder = () => screen.getByTestId('agent-teams-member-builder@visual-team')
+    const builder = () => screen.getByTestId('agent-teams-canvas-member-builder@visual-team')
     expect(builder().getAttribute('data-member-state')).toBe('idle')
 
     act(() => {
@@ -195,10 +241,6 @@ describe('AgentTeamsWorkbench', () => {
   })
 
   it('keeps a member idle while it still owns an in-progress task', async () => {
-    // A teammate marks a task started and can then end its turn, and an
-    // umbrella task stays open across every turn underneath it. Reading member
-    // activity off the task list is what made every member look permanently
-    // busy, so the card and the figure have to disagree here.
     const snapshot = workbench('v1', ['in_progress', 'pending', 'pending'])
     snapshot.team.members = snapshot.team.members.map((member) => (
       member.name === 'builder'
@@ -213,9 +255,9 @@ describe('AgentTeamsWorkbench', () => {
     render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
     expect(
-      screen.getByTestId('agent-teams-member-builder@visual-team').getAttribute('data-member-state'),
+      screen.getByTestId('agent-teams-canvas-member-builder@visual-team').getAttribute('data-member-state'),
     ).toBe('idle')
-    expect(screen.getByTestId('agent-teams-task-1').getAttribute('data-state')).toBe('running')
+    expect(screen.getByTestId('agent-teams-canvas-task-1').getAttribute('data-state')).toBe('running')
   })
 
   it('shows a member working while it owns no task at all', async () => {
@@ -233,76 +275,104 @@ describe('AgentTeamsWorkbench', () => {
     render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
     expect(
-      screen.getByTestId('agent-teams-member-builder@visual-team').getAttribute('data-member-state'),
+      screen.getByTestId('agent-teams-canvas-member-builder@visual-team').getAttribute('data-member-state'),
     ).toBe('working')
   })
 
-  it('labels a task card by dependency depth rather than by the id it was created with', async () => {
-    // Reviews are planned first and so own the lowest ids while depending on
-    // the work above them. Showing that id where a step number belongs read as
-    // "step 1" for the very last thing the team does.
-    const snapshot = workbench('v1', ['pending', 'pending', 'pending'])
-    getWorkbenchMock.mockResolvedValueOnce(snapshot)
-
-    await act(async () => {
-      await useTeamStore.getState().fetchWorkbench('visual-team')
-    })
-    render(<AgentTeamsWorkbench sessionId="lead-session" />)
-
-    // task 1 is a root, task 2 depends on it, task 3 depends on both.
-    expect(screen.getByTestId('agent-teams-task-1').textContent).toContain('Layer 1')
-    expect(screen.getByTestId('agent-teams-task-2').textContent).toContain('Layer 2')
-    expect(screen.getByTestId('agent-teams-task-3').textContent).toContain('Layer 3')
-    expect(screen.getByTestId('agent-teams-task-3').textContent).not.toContain('#3')
-    expect(
-      screen.getByTestId('agent-teams-task-3').querySelector('[data-task-id="3"]'),
-    ).toBeTruthy()
-  })
-
-  it('opens a teammate in the shared agent run desktop instead of replacing the map', async () => {
+  it('opens a 400px member inspector before the explicit execution handoff', async () => {
     getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
     await act(async () => {
       await useTeamStore.getState().fetchWorkbench('visual-team')
     })
     render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('agent-teams-member-reviewer@visual-team'))
-    })
+    const reviewer = screen.getByTestId('agent-teams-canvas-member-reviewer@visual-team')
+    fireEvent.click(reviewer)
 
+    expect(useTabStore.getState().activeTabId).toBeNull()
+    expect(reviewer.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('agent-teams-member-inspector')).toBeTruthy()
+    expect(screen.getByTestId('agent-teams-communication-pane').className).toContain('w-[400px]')
+
+    fireEvent.click(screen.getByRole('button', { name: 'View reviewer execution' }))
     expect(useTabStore.getState().activeTabId).toBe('team-member:reviewer@visual-team')
     expect(useTabStore.getState().tabs.find((tab) => tab.sessionId === 'team-member:reviewer@visual-team')).toMatchObject({
       type: 'team-member',
       teamLeadSessionId: 'lead-session',
     })
-    expect(screen.getByTestId('agent-teams-office')).toBeTruthy()
-    expect(screen.queryByTestId('agent-teams-member-view')).toBeNull()
   })
 
-  it('describes the task when its card is opened, and reaches the owner only on request', async () => {
-    // A card carries a task's status, so opening one used to land the user in
-    // the owner's conversation -- which is how a card reading "completed" led
-    // to a teammate that was still streaming its next task.
+  it('closes an open member inspector when the selected member is clicked again', async () => {
     getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
     await act(async () => {
       await useTeamStore.getState().fetchWorkbench('visual-team')
     })
     render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
-    fireEvent.click(screen.getByTestId('agent-teams-task-1'))
+    const reviewer = screen.getByTestId('agent-teams-canvas-member-reviewer@visual-team')
+    fireEvent.click(reviewer)
+    expect(screen.getByTestId('agent-teams-member-inspector')).toBeTruthy()
+    fireEvent.click(reviewer)
+    expect(screen.queryByTestId('agent-teams-member-inspector')).toBeNull()
+    expect(screen.getByTestId('agent-teams-communication-rail')).toBeTruthy()
+  })
+
+  it('returns to the real lead session instead of creating a synthetic lead member run', async () => {
+    getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    fireEvent.click(screen.getByTestId('agent-teams-canvas-member-team-lead@visual-team'))
+    fireEvent.click(screen.getByRole('button', { name: 'View team-lead execution' }))
+
+    expect(useTabStore.getState().activeTabId).toBe('lead-session')
+    expect(useTabStore.getState().tabs).toContainEqual(expect.objectContaining({
+      sessionId: 'lead-session',
+      type: 'session',
+    }))
+    expect(useTabStore.getState().tabs.some(tab => tab.type === 'team-member')).toBe(false)
+  })
+
+  it('opens task details without navigating to a member execution', async () => {
+    getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    fireEvent.click(screen.getByTestId('agent-teams-canvas-task-1'))
     expect(useTabStore.getState().activeTabId).toBeNull()
     expect(screen.getByTestId('agent-teams-task-detail').getAttribute('data-task-id')).toBe('1')
     expect(screen.getByTestId('agent-teams-task-detail').textContent).toContain('Task 1 detail')
 
-    fireEvent.keyDown(screen.getByTestId('agent-teams-task-2'), { key: 'Enter' })
+    fireEvent.click(screen.getByTestId('agent-teams-canvas-task-2'))
     expect(useTabStore.getState().activeTabId).toBeNull()
     expect(screen.getByTestId('agent-teams-task-detail').getAttribute('data-task-id')).toBe('2')
-
-    fireEvent.click(screen.getByTestId('agent-teams-task-owner-2'))
-    expect(useTabStore.getState().activeTabId).toBe('team-member:reviewer@visual-team')
   })
 
-  it('draws a member once even while it owns several open tasks', async () => {
+  it('does not leak a selected task into replay frames before that task existed', async () => {
+    const beforeCreation = workbench('v1', ['completed', 'pending', 'pending'])
+    beforeCreation.tasks = beforeCreation.tasks.filter(entry => entry.id !== '3')
+    const afterCreation = workbench('v2', ['completed', 'completed', 'in_progress'])
+    getWorkbenchMock.mockResolvedValueOnce(beforeCreation).mockResolvedValueOnce(afterCreation)
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    fireEvent.click(screen.getByTestId('agent-teams-canvas-task-3'))
+    expect(screen.getByTestId('agent-teams-task-detail')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Review history' }))
+    fireEvent.change(screen.getByRole('slider', { name: 'Replay timeline · click to seek' }), {
+      target: { value: '0' },
+    })
+    expect(screen.queryByTestId('agent-teams-task-detail')).toBeNull()
+  })
+
+  it('draws a teammate once while retaining its owner labels across several tasks', async () => {
     const snapshot = workbench('v1', ['in_progress', 'in_progress', 'pending'])
     snapshot.tasks = snapshot.tasks.map((entry) => ({ ...entry, owner: 'builder' }))
     getWorkbenchMock.mockResolvedValueOnce(snapshot)
@@ -311,33 +381,13 @@ describe('AgentTeamsWorkbench', () => {
     })
     const { container } = render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
-    // One teammate owning six cards used to be drawn as six characters.
     expect(
-      container.querySelectorAll('[data-testid="agent-teams-member-builder@visual-team"]'),
+      container.querySelectorAll('[data-testid="agent-teams-canvas-member-builder@visual-team"]'),
     ).toHaveLength(1)
-    // The other cards still say who has them.
-    expect(screen.getByTestId('agent-teams-task-owner-2').textContent).toContain('builder')
+    expect(within(screen.getByTestId('agent-teams-canvas-task-2')).getByText('builder')).toBeTruthy()
   })
 
-  it('opens an archived teammate in the same shared agent run desktop', async () => {
-    const archived = workbench('v1', ['completed', 'completed', 'completed'])
-    archived.deletedAt = '2026-08-08T00:10:00.000Z'
-    archived.team.members = archived.team.members.map((member) => ({
-      ...member,
-      status: 'completed',
-    }))
-    getWorkbenchMock.mockResolvedValueOnce(archived)
-    await act(async () => {
-      await useTeamStore.getState().fetchWorkbench('visual-team')
-    })
-    render(<AgentTeamsWorkbench sessionId="lead-session" />)
-
-    fireEvent.click(screen.getByTestId('agent-teams-member-reviewer@visual-team'))
-
-    expect(useTabStore.getState().activeTabId).toBe('team-member:reviewer@visual-team')
-  })
-
-  it('replays a shrinking archived roster without orphaning owners or hanging exited observers under the lead', async () => {
+  it('restores archived roster members and task owners across replay snapshots', async () => {
     const beforeRemoval = workbench('roster-1', ['in_progress', 'in_progress', 'pending'])
     beforeRemoval.team.members.push({
       agentId: 'observer@visual-team',
@@ -370,37 +420,104 @@ describe('AgentTeamsWorkbench', () => {
     })
     render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
-    const restoredOwnerTask = screen.getByTestId('agent-teams-task-1')
-    expect(restoredOwnerTask.getAttribute('data-owner-agent-id')).toBe('builder@visual-team')
-    expect(within(restoredOwnerTask).getByText('builder')).toBeTruthy()
-    fireEvent.click(screen.getByTestId('agent-teams-task-owner-1'))
-    expect(useTabStore.getState().activeTabId).toBe('team-member:builder@visual-team')
+    expect(within(screen.getByTestId('agent-teams-canvas-task-1')).getByText('builder')).toBeTruthy()
+    expect(within(screen.getByTestId('agent-teams-canvas-task-3')).getByText('legacy-owner')).toBeTruthy()
 
-    const rawOwnerTask = screen.getByTestId('agent-teams-task-3')
-    expect(within(rawOwnerTask).getByText('legacy-owner')).toBeTruthy()
-    expect(within(rawOwnerTask).queryByText('Waiting for a teammate')).toBeNull()
-
-    const archivedRoster = screen.getByTestId('agent-teams-archived-members')
-    const observer = screen.getByTestId('agent-teams-member-observer@visual-team')
-    expect(archivedRoster.contains(observer)).toBe(true)
+    const restoredBuilder = screen.getByTestId('agent-teams-canvas-member-builder@visual-team')
+    const observer = screen.getByTestId('agent-teams-canvas-member-observer@visual-team')
+    expect(restoredBuilder.getAttribute('data-member-state')).toBe('exited')
     expect(observer.getAttribute('data-member-state')).toBe('exited')
-    fireEvent.click(observer)
-    expect(useTabStore.getState().activeTabId).toBe('team-member:observer@visual-team')
+    expect(restoredBuilder.querySelector('img')).toBeTruthy()
+
+    fireEvent.click(restoredBuilder)
+    expect(useTabStore.getState().activeTabId).toBeNull()
+    expect(screen.getByTestId('agent-teams-member-inspector').getAttribute('data-member-id')).toBe('builder@visual-team')
+    fireEvent.click(screen.getByRole('button', { name: 'View builder execution' }))
+    expect(useTabStore.getState().activeTabId).toBe('team-member:builder@visual-team')
   })
 
-  it('carries no docked-panel chrome of its own', async () => {
+  it('expands the 56px communication rail to a fixed panel and closes it again', async () => {
     getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
     await act(async () => {
       await useTeamStore.getState().fetchWorkbench('visual-team')
     })
     render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
-    expect(screen.queryByRole('button', { name: /Open the workbench full screen/i })).toBeNull()
-    expect(screen.queryByRole('button', { name: /Close Agent Teams workbench/i })).toBeNull()
-    // The feed always owns a column here; the 210px docked strip is gone.
-    const feed = screen.getByTestId('agent-teams-communication')
-    expect(feed.className).toContain('h-full')
-    expect(feed.className).not.toContain('h-[210px]')
+    const rail = screen.getByTestId('agent-teams-communication-rail')
+    expect(rail.className).toContain('w-14')
+    expect(screen.queryByTestId('agent-teams-communication-pane')).toBeNull()
+
+    fireEvent.click(rail)
+    const pane = screen.getByTestId('agent-teams-communication-pane')
+    expect(pane.className).toContain('w-[400px]')
+    expect(screen.getByTestId('agent-teams-communication').className).toContain('h-full')
+    expect(screen.queryByTestId('agent-teams-communication-rail')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close communication panel' }))
+    expect(screen.queryByTestId('agent-teams-communication-pane')).toBeNull()
+    expect(screen.getByTestId('agent-teams-communication-rail')).toBeTruthy()
+  })
+
+  it('lights the dependency chain while a task-linked communication row is hovered', async () => {
+    const snapshot = workbench('v1', ['completed', 'in_progress', 'pending'])
+    snapshot.messages[0] = { ...snapshot.messages[0]!, taskId: '2' }
+    getWorkbenchMock.mockResolvedValueOnce(snapshot)
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    fireEvent.click(screen.getByTestId('agent-teams-communication-rail'))
+    const row = screen.getByTestId('agent-teams-message-message-v1')
+    fireEvent.mouseEnter(row)
+    expect(screen.getByTestId('agent-teams-canvas-task-1').getAttribute('data-chain-active')).toBe('true')
+    expect(screen.getByTestId('agent-teams-canvas-task-2').getAttribute('data-chain-active')).toBe('true')
+    fireEvent.mouseLeave(row)
+    expect(screen.getByTestId('agent-teams-canvas-task-2').getAttribute('data-chain-active')).toBe('false')
+    fireEvent.mouseEnter(row)
+    fireEvent.click(screen.getByRole('button', { name: 'Close communication panel' }))
+    expect(screen.getByTestId('agent-teams-canvas-task-2').getAttribute('data-chain-active')).toBe('false')
+  })
+
+  it('animates every message in a CLI polling batch in arrival order', async () => {
+    const first = workbench('v1', ['completed', 'in_progress', 'pending'])
+    const second = workbench('v2', ['completed', 'in_progress', 'pending'])
+    const peerMessage = {
+      ...first.messages[0]!,
+      id: 'batch-peer',
+      from: 'reviewer',
+      to: 'builder',
+      recipients: ['builder'],
+      taskId: '2',
+    }
+    const reportMessage = {
+      ...first.messages[0]!,
+      id: 'batch-report',
+      from: 'builder',
+      to: 'team-lead',
+      recipients: ['team-lead'],
+      taskId: '1',
+    }
+    second.messages = [...first.messages, peerMessage, reportMessage]
+    getWorkbenchMock.mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+    await act(async () => {
+      await useTeamStore.getState().fetchWorkbench('visual-team')
+    })
+    render(<AgentTeamsWorkbench sessionId="lead-session" />)
+
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        await useTeamStore.getState().fetchWorkbench('visual-team')
+      })
+      expect(screen.getByTestId('agent-teams-active-flight-path').getAttribute('data-flight-channel')).toBe('peer')
+      act(() => vi.advanceTimersByTime(1501))
+      expect(screen.getByTestId('agent-teams-active-flight-path').getAttribute('data-flight-channel')).toBe('lead')
+      act(() => vi.advanceTimersByTime(1501))
+      expect(screen.queryByTestId('agent-teams-active-flight-path')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('never describes an ownerless completed task as waiting to be claimed', async () => {
@@ -417,99 +534,12 @@ describe('AgentTeamsWorkbench', () => {
 
     render(<AgentTeamsWorkbench sessionId="lead-session" />)
 
-    const completed = screen.getByTestId('agent-teams-task-1')
+    const completed = screen.getByTestId('agent-teams-canvas-task-1')
     expect(within(completed).getByText('Completed · owner not recorded')).toBeTruthy()
     expect(within(completed).queryByText('Waiting for a teammate')).toBeNull()
 
-    const available = screen.getByTestId('agent-teams-task-2')
+    const available = screen.getByTestId('agent-teams-canvas-task-2')
     expect(within(available).getByText('Waiting for a teammate')).toBeTruthy()
     expect(within(available).queryByText('Completed · owner not recorded')).toBeNull()
-  })
-
-  it('resizes the communication column by pointer and keyboard without collapsing the DAG', async () => {
-    getWorkbenchMock.mockResolvedValueOnce(workbench('v1', ['completed', 'in_progress', 'pending']))
-    await act(async () => {
-      await useTeamStore.getState().fetchWorkbench('visual-team')
-    })
-    render(<AgentTeamsWorkbench sessionId="lead-session" />)
-
-    const divider = screen.getByTestId('agent-teams-split-divider')
-    const pane = screen.getByTestId('agent-teams-communication-pane')
-    expect(pane.style.width).toBe('440px')
-
-    firePointer(divider, 'pointerdown', 800)
-    firePointer(window, 'pointermove', 700)
-    firePointer(window, 'pointerup', 700)
-    expect(pane.style.width).toBe('540px')
-
-    fireEvent.keyDown(divider, { key: 'ArrowRight' })
-    expect(pane.style.width).toBe('508px')
-    expect(screen.getByTestId('agent-teams-office')).toBeTruthy()
-  })
-
-  it('keeps every archived teammate character visible inside the organization tree', async () => {
-    const archived = workbench('v1', ['completed', 'completed', 'completed'])
-    archived.deletedAt = '2026-08-08T00:10:00.000Z'
-    archived.team.members = archived.team.members.map((member) => ({
-      ...member,
-      status: 'completed',
-    }))
-    getWorkbenchMock.mockResolvedValueOnce(archived)
-    await act(async () => {
-      await useTeamStore.getState().fetchWorkbench('visual-team')
-    })
-
-    render(<AgentTeamsWorkbench sessionId="lead-session" />)
-
-    for (const member of archived.team.members) {
-      const figure = screen.getByTestId(`agent-teams-member-${member.agentId}`)
-      expect(figure.getAttribute('data-member-state')).toBe('exited')
-      expect(figure.querySelector('img')).toBeTruthy()
-      expect(figure.getAttribute('style') ?? '').not.toContain('opacity: 0')
-    }
-
-    fireEvent.click(screen.getByTestId('agent-teams-member-reviewer@visual-team'))
-    expect(useTabStore.getState().activeTabId).toBe('team-member:reviewer@visual-team')
-  })
-
-  it('keeps a crowded archived roster in a scrollable narrow lane with touch-sized targets', async () => {
-    const archived = workbench('v1', ['completed', 'completed', 'completed'])
-    archived.deletedAt = '2026-08-08T00:10:00.000Z'
-    archived.team.members = [
-      ...archived.team.members.map((member) => ({
-        ...member,
-        status: 'completed' as const,
-      })),
-      ...Array.from({ length: 12 }, (_, index) => ({
-        agentId: `observer-${index}@visual-team`,
-        name: `observer-${index}`,
-        role: 'observer',
-        status: 'completed' as const,
-      })),
-    ]
-    getWorkbenchMock.mockResolvedValueOnce(archived)
-    await act(async () => {
-      await useTeamStore.getState().fetchWorkbench('visual-team')
-    })
-
-    render(<AgentTeamsWorkbench sessionId="lead-session" />)
-
-    const archivedRoster = screen.getByTestId('agent-teams-archived-members')
-    expect(archivedRoster.className).toContain('left-3')
-    expect(archivedRoster.className).toContain('right-3')
-    expect(archivedRoster.className).toContain('h-16')
-    expect(archivedRoster.className).toContain('overflow-x-auto')
-    expect(archivedRoster.className).toContain('overflow-y-hidden')
-
-    const observers = screen.getAllByTestId(/^agent-teams-member-observer-/)
-    expect(observers).toHaveLength(12)
-    for (const observer of observers) {
-      expect(observer.className).toContain('h-11')
-      expect(observer.className).toContain('w-11')
-      expect(observer.className).toContain('shrink-0')
-    }
-
-    fireEvent.click(observers.at(-1)!)
-    expect(useTabStore.getState().activeTabId).toBe('team-member:observer-11@visual-team')
   })
 })

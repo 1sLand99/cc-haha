@@ -50,7 +50,7 @@ function snapshot(tasks: TeamWorkbenchTask[]): TeamWorkbenchSnapshot {
 }
 
 describe('Agent Teams workbench model', () => {
-  it('lays out a multi-parent DAG after every dependency and keeps edge states honest', () => {
+  it('lays out dependency depth as horizontal lanes and keeps edge states honest', () => {
     const tasks = [
       task('1', 'completed'),
       task('2', 'in_progress'),
@@ -62,8 +62,18 @@ describe('Agent Teams workbench model', () => {
 
     expect(layout.columns).toBe(2)
     expect(layout.tasks.every((entry) => entry.x >= 0 && entry.x + WORKBENCH_TASK_WIDTH <= layout.width)).toBe(true)
-    expect(layout.byId.get('3')!.y).toBeGreaterThan(layout.byId.get('1')!.y)
-    expect(layout.byId.get('3')!.y).toBeGreaterThan(layout.byId.get('2')!.y)
+    expect(layout.byId.get('3')!.x).toBeGreaterThan(layout.byId.get('1')!.x)
+    expect(layout.byId.get('3')!.x).toBeGreaterThan(layout.byId.get('2')!.x)
+    expect(layout.byId.get('1')!.row).toBe(0)
+    expect(layout.byId.get('2')!.row).toBe(1)
+    expect(layout.byId.get('4')!.row).toBe(2)
+    expect(layout.byId.get('3')!.row).toBe(0)
+    expect(layout.height).toBe(824)
+    expect(layout.lanes).toEqual([
+      { depth: 0, x: 76, y: 410, width: 216, height: 368, count: 3 },
+      { depth: 1, x: 312, y: 410, width: 216, height: 368, count: 1 },
+    ])
+    expect(layout.legendY).toBe(790)
     expect(getWorkbenchTaskState(tasks[2]!, byId)).toBe('blocked')
     // A blocker that is no longer in the task list was deleted. `claimTask`
     // only counts blockers it can still find and that are not completed
@@ -114,6 +124,42 @@ describe('Agent Teams workbench model', () => {
     expect(inferTaskOwner(orphan, base)).toBeUndefined()
   })
 
+  it('uses the latest assignment when an ownerless task was reassigned', () => {
+    const orphan = task('7', 'completed')
+    const withReassignment: TeamWorkbenchSnapshot = {
+      ...snapshot([orphan]),
+      messages: [
+        {
+          id: 'mailbox-first-owner',
+          from: 'team-lead',
+          to: 'backend-dev',
+          recipients: ['backend-dev'],
+          kind: 'system',
+          protocolType: 'task_assignment',
+          taskId: '7',
+          text: 'Build the API',
+          timestamp: '2026-08-08T00:00:01.000Z',
+        },
+        {
+          id: 'mailbox-final-owner',
+          from: 'team-lead',
+          to: 'reviewer',
+          recipients: ['reviewer'],
+          kind: 'system',
+          protocolType: 'task_assignment',
+          taskId: '7',
+          text: 'Build the API',
+          timestamp: '2026-08-08T00:00:02.000Z',
+        },
+      ],
+    }
+
+    expect(inferTaskOwner(orphan, withReassignment)).toEqual({
+      identity: 'reviewer',
+      inferred: true,
+    })
+  })
+
   it('falls back deterministically for cyclic dependencies instead of recursing forever', () => {
     const tasks = [
       task('a', 'pending', ['b']),
@@ -121,20 +167,82 @@ describe('Agent Teams workbench model', () => {
     ]
 
     const layout = layoutWorkbenchTasks(tasks, 440)
+    const reversed = layoutWorkbenchTasks([...tasks].reverse(), 440)
 
     expect(layout.tasks.map((entry) => entry.task.id).sort()).toEqual(['a', 'b'])
-    expect(layout.columns).toBe(1)
+    expect(layout.columns).toBeGreaterThan(0)
+    expect(layout.tasks.map(({ task: entry, depth, row, x }) => ({
+      id: entry.id,
+      depth,
+      row,
+      x,
+    }))).toEqual(reversed.tasks.map(({ task: entry, depth, row, x }) => ({
+      id: entry.id,
+      depth,
+      row,
+      x,
+    })))
     expect(layout.tasks.every((entry) => entry.x >= 0 && entry.x + WORKBENCH_TASK_WIDTH <= layout.width)).toBe(true)
     expect(layout.height).toBeGreaterThan(0)
   })
 
-  it('uses a three-column organization tree only when complete person nodes fit', () => {
-    const tasks = [task('1', 'pending'), task('2', 'pending'), task('3', 'pending')]
+  it('uses the six prototype lanes at their natural 1460px width', () => {
+    const tasks = [
+      task('1', 'completed'),
+      task('2', 'completed', ['1']),
+      task('3', 'completed', ['2']),
+      task('4', 'completed', ['3']),
+      task('5', 'completed', ['4']),
+      task('6', 'pending', ['5']),
+    ]
 
-    const layout = layoutWorkbenchTasks(tasks, 760)
+    const layout = layoutWorkbenchTasks(tasks, 604)
 
-    expect(layout.columns).toBe(3)
-    expect(layout.tasks.every((entry) => entry.x >= 0 && entry.x + WORKBENCH_TASK_WIDTH <= layout.width)).toBe(true)
+    expect(layout.columns).toBe(6)
+    expect(layout.width).toBe(1460)
+    expect(layout.lanes.map(({ depth, x, count }) => ({ depth, x, count }))).toEqual([
+      { depth: 0, x: 32, count: 1 },
+      { depth: 1, x: 268, count: 1 },
+      { depth: 2, x: 504, count: 1 },
+      { depth: 3, x: 740, count: 1 },
+      { depth: 4, x: 976, count: 1 },
+      { depth: 5, x: 1212, count: 1 },
+    ])
+    expect(layout.tasks.map(({ depth, row, x, y }) => ({ depth, row, x, y }))).toEqual([
+      { depth: 0, row: 0, x: 40, y: 442 },
+      { depth: 1, row: 0, x: 276, y: 442 },
+      { depth: 2, row: 0, x: 512, y: 442 },
+      { depth: 3, row: 0, x: 748, y: 442 },
+      { depth: 4, row: 0, x: 984, y: 442 },
+      { depth: 5, row: 0, x: 1220, y: 442 },
+    ])
+  })
+
+  it('stacks same-depth tasks naturally and centers lanes inside a requested minimum width', () => {
+    const tasks = [
+      task('task-10', 'pending'),
+      task('task-2', 'pending'),
+      task('task-1', 'pending'),
+      task('next', 'pending', ['task-1']),
+    ]
+
+    const layout = layoutWorkbenchTasks(tasks, 800)
+
+    expect(layout.width).toBe(800)
+    expect(layout.lanes.map(({ x }) => x)).toEqual([174, 410])
+    expect(layout.tasks.map(({ task: entry, depth, row, x, y }) => ({
+      id: entry.id,
+      depth,
+      row,
+      x,
+      y,
+    }))).toEqual([
+      { id: 'task-1', depth: 0, row: 0, x: 182, y: 442 },
+      { id: 'task-2', depth: 0, row: 1, x: 182, y: 548 },
+      { id: 'task-10', depth: 0, row: 2, x: 182, y: 654 },
+      { id: 'next', depth: 1, row: 0, x: 418, y: 442 },
+    ])
+    expect(layout.height).toBe(824)
   })
 
   it('normalizes bare owner names and full agent ids for active work', () => {
@@ -284,6 +392,29 @@ describe('Agent Teams workbench model', () => {
     // protocolType wins over the body, and is enough on its own.
     expect(parseWorkbenchMessageBody({ text: 'shutting down', protocolType: 'shutdown_request' }))
       .toEqual({ kind: 'lifecycle', type: 'shutdown_request', detail: undefined })
+
+    // `TeamService.toWorkbenchMessage` replaces the assignment JSON body with
+    // its subject while retaining the protocol metadata and routing fields.
+    expect(parseWorkbenchMessageBody({
+      text: 'Repair queue',
+      protocolType: 'task_assignment',
+      from: 'team-lead',
+      recipients: ['builder'],
+    })).toEqual({
+      kind: 'assignment',
+      selfClaim: false,
+      subject: 'Repair queue',
+    })
+    expect(parseWorkbenchMessageBody({
+      text: '{"type":"task_assignment","taskId":"7"}',
+      protocolType: 'task_assignment',
+      from: 'team-lead',
+      recipients: ['builder'],
+    })).toEqual({
+      kind: 'assignment',
+      selfClaim: false,
+      taskId: '7',
+    })
 
     // Authored prose is never reclassified.
     expect(parseWorkbenchMessageBody({ text: 'Race condition confirmed in queue.ts' }))

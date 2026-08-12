@@ -452,9 +452,9 @@ export class TeamWatcher {
 
         for (const file of files) {
           if (!file.endsWith('.jsonl')) continue
-          const inferredName = this.extractSubagentName(
-            path.join(subagentsDir, file),
-          )
+          const filePath = path.join(subagentsDir, file)
+          const inferredName = this.extractSubagentMetadataName(filePath) ??
+            this.extractSubagentName(filePath)
           if (
             inferredName &&
             inferredName !== 'team-lead' &&
@@ -514,6 +514,18 @@ export class TeamWatcher {
     return members
   }
 
+  private extractSubagentMetadataName(filePath: string): string | null {
+    try {
+      const metadataPath = filePath.replace(/\.jsonl$/, '.meta.json')
+      const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8')) as Record<string, unknown>
+      return typeof metadata.agentType === 'string' && metadata.agentType.trim()
+        ? metadata.agentType
+        : null
+    } catch {
+      return null
+    }
+  }
+
   private extractSubagentName(filePath: string): string | null {
     try {
       const head = fs.readFileSync(filePath, 'utf-8').slice(0, 8192)
@@ -533,12 +545,7 @@ export class TeamWatcher {
         }
       }
 
-      const match =
-        head.match(/"agentName"\s*:\s*"([^"]+)"/) ||
-        head.match(/"name"\s*:\s*"([^"]+)"/) ||
-        head.match(/\*\*([a-zA-Z0-9_-]+)\*\*/)
-
-      return match?.[1] ?? null
+      return null
     } catch {
       return null
     }

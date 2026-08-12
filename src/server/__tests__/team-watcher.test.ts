@@ -278,6 +278,111 @@ describe('TeamWatcher polling', () => {
     // No error means the diff detection worked
   })
 
+  it('uses subagent identity metadata instead of tool names when projecting members', async () => {
+    const deliveries: Array<{ message: ServerMessage; sessionId?: string }> = []
+    watcher = new TeamWatcher(
+      (message, sessionId) => deliveries.push({ message, sessionId }),
+      {
+        getWorkbench: async () => ({}) as never,
+        markWorkbenchArchiveDeleted: async () => {},
+      },
+    )
+    const config = makeTeamConfig({
+      name: 'identity-team',
+      leadSessionId: 'lead-session-identity',
+    })
+    await writeTeamConfig('identity-team', config)
+    await writeJsonFile(
+      'projects/project/lead-session-identity/subagents/agent-reviewer.jsonl',
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', id: 'tool-read', name: 'Read', input: {} },
+            { type: 'tool_use', id: 'tool-task-create', name: 'TaskCreate', input: {} },
+          ],
+        },
+      },
+    )
+    await writeJsonFile(
+      'projects/project/lead-session-identity/subagents/agent-reviewer.meta.json',
+      { agentType: 'real-reviewer' },
+    )
+
+    await watcher.checkNow()
+    deliveries.length = 0
+    await writeTeamConfig('identity-team', { ...config, description: 'updated' })
+    await watcher.checkNow()
+
+    const update = deliveries.find(({ message }) => message.type === 'team_update')
+    if (update?.message.type !== 'team_update') throw new Error('Expected team_update')
+    expect(update.message.members.find((member) => member.role === 'real-reviewer')).toMatchObject({
+      agentId: 'real-reviewer@identity-team',
+      role: 'real-reviewer',
+    })
+    const roles = update.message.members.map((member) => member.role)
+    expect(roles).not.toContain('Read')
+    expect(roles).not.toContain('TaskCreate')
+  })
+
+  it('only discovers structured top-level identities from subagent transcripts', async () => {
+    const deliveries: Array<{ message: ServerMessage; sessionId?: string }> = []
+    watcher = new TeamWatcher(
+      (message, sessionId) => deliveries.push({ message, sessionId }),
+      {
+        getWorkbench: async () => ({}) as never,
+        markWorkbenchArchiveDeleted: async () => {},
+      },
+    )
+    const config = makeTeamConfig({
+      name: 'structured-identity-team',
+      leadSessionId: 'lead-session-structured-identity',
+    })
+    await writeTeamConfig('structured-identity-team', config)
+    await writeJsonFile(
+      'projects/project/lead-session-structured-identity/subagents/agent-named.jsonl',
+      {
+        type: 'assistant',
+        agentName: 'named-worker',
+        message: {
+          content: [{ type: 'tool_use', id: 'tool-read', name: 'Read', input: {} }],
+        },
+      },
+    )
+    await writeJsonFile(
+      'projects/project/lead-session-structured-identity/subagents/agent-identified.jsonl',
+      {
+        type: 'assistant',
+        agentId: 'identified-worker@structured-identity-team',
+        message: {
+          content: [{ type: 'tool_use', id: 'tool-task-create', name: 'TaskCreate', input: {} }],
+        },
+      },
+    )
+    await writeJsonFile(
+      'projects/project/lead-session-structured-identity/subagents/agent-tool-only.jsonl',
+      {
+        type: 'assistant',
+        message: {
+          content: [{ type: 'tool_use', id: 'tool-only', name: 'TaskCreate', input: {} }],
+        },
+      },
+    )
+
+    await watcher.checkNow()
+    deliveries.length = 0
+    await writeTeamConfig('structured-identity-team', { ...config, description: 'updated' })
+    await watcher.checkNow()
+
+    const update = deliveries.find(({ message }) => message.type === 'team_update')
+    if (update?.message.type !== 'team_update') throw new Error('Expected team_update')
+    const roles = update.message.members.map((member) => member.role)
+    expect(roles).toContain('named-worker')
+    expect(roles).toContain('identified-worker')
+    expect(roles).not.toContain('Read')
+    expect(roles).not.toContain('TaskCreate')
+  })
+
   it('invalidates the joined workbench when tasks or mailboxes change', async () => {
     const deliveries: Array<{ message: ServerMessage; sessionId?: string }> = []
     watcher = new TeamWatcher((message, sessionId) => deliveries.push({ message, sessionId }))

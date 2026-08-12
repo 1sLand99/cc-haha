@@ -24,28 +24,56 @@ export type PositionedWorkbenchTask = {
   /**
    * How many dependencies deep the task sits, counted along its longest path.
    * This is the number that describes where a task falls in the plan; the task
-   * id only records the order the lead happened to write the tasks down, which
-   * is why review work created first carries the lowest ids while hanging off
-   * the bottom of the graph.
+   * id only records the order the lead happened to write the tasks down. Each
+   * depth owns one left-to-right lane regardless of that authored order.
    */
+  depth: number
+  /** Stable vertical slot inside the dependency lane. */
+  row: number
+  x: number
+  y: number
+}
+
+export type WorkbenchLane = {
   depth: number
   x: number
   y: number
+  width: number
+  height: number
+  count: number
 }
 
 export type WorkbenchLayout = {
   tasks: PositionedWorkbenchTask[]
   byId: Map<string, PositionedWorkbenchTask>
+  lanes: WorkbenchLane[]
   width: number
   height: number
+  legendY: number
   columns: number
 }
 
-const TASK_WIDTH = 216
-const TASK_HEIGHT = 94
-const HORIZONTAL_GAP = 32
-const ROW_HEIGHT = 154
-const DAG_TOP = 196
+const LANE_WIDTH = 216
+const LANE_GAP = 20
+const TASK_WIDTH = 200
+const TASK_HEIGHT = 92
+const HORIZONTAL_PADDING = 32
+const LANE_TOP = 410
+const TASK_TOP = 442
+const ROW_GAP = 14
+const LEGEND_GAP = 12
+const CANVAS_BOTTOM_PADDING = 46
+
+const TASK_ID_COLLATOR = new Intl.Collator('en', {
+  numeric: true,
+  sensitivity: 'base',
+})
+
+function compareTaskIds(left: string, right: string): number {
+  const naturalOrder = TASK_ID_COLLATOR.compare(left, right)
+  if (naturalOrder !== 0) return naturalOrder
+  return left < right ? -1 : left > right ? 1 : 0
+}
 
 const WORKER_AVATARS: Array<{
   key: Exclude<MemberAvatarKey, 'team-lead'>
@@ -218,13 +246,19 @@ export function inferTaskOwner(
   const owner = task.owner?.trim()
   if (owner) return { identity: owner, inferred: false }
 
-  const assignment = snapshot.messages.find((message) => (
-    message.protocolType === 'task_assignment' &&
-    message.taskId === task.id &&
-    message.recipients.length > 0
-  ))
-  const recipient = assignment?.recipients[0]?.trim()
-  return recipient ? { identity: recipient, inferred: true } : undefined
+  // Messages are stored in send order. A task can be reassigned before it is
+  // completed, so the last matching envelope is the only one that describes
+  // its final owner in this frame.
+  for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
+    const assignment = snapshot.messages[index]!
+    if (
+      assignment.protocolType !== 'task_assignment' ||
+      assignment.taskId !== task.id
+    ) continue
+    const recipient = assignment.recipients[0]?.trim()
+    if (recipient) return { identity: recipient, inferred: true }
+  }
+  return undefined
 }
 
 export function getWorkbenchTaskState(
@@ -259,7 +293,9 @@ function taskDepths(tasks: TeamWorkbenchTask[]): Map<string, number> {
     if (!task) return 0
 
     visiting.add(taskId)
-    const dependencies = task.blockedBy.filter((dependencyId) => byId.has(dependencyId))
+    const dependencies = task.blockedBy
+      .filter((dependencyId) => byId.has(dependencyId))
+      .sort(compareTaskIds)
     const depth = dependencies.length === 0
       ? 0
       : 1 + Math.max(...dependencies.map(depthOf))
@@ -276,48 +312,70 @@ export function layoutWorkbenchTasks(
   tasks: TeamWorkbenchTask[],
   requestedWidth: number,
 ): WorkbenchLayout {
-  const width = Math.max(360, Math.min(760, Math.round(requestedWidth || 604)))
-  const columns = width >= 704 ? 3 : width >= 480 ? 2 : 1
-  const depths = taskDepths(tasks)
+  const sortedTasks = tasks
+    .map((task, index) => ({ task, index }))
+    .sort((left, right) => (
+      compareTaskIds(left.task.id, right.task.id) || left.index - right.index
+    ))
+    .map(({ task }) => task)
+  const depths = taskDepths(sortedTasks)
   const byLayer = new Map<number, TeamWorkbenchTask[]>()
 
-  for (const task of tasks) {
+  for (const task of sortedTasks) {
     const depth = depths.get(task.id) ?? 0
     const layer = byLayer.get(depth)
     if (layer) layer.push(task)
     else byLayer.set(depth, [task])
   }
 
-  const tasksById = new Map(tasks.map((task) => [task.id, task]))
+  const columns = sortedTasks.length === 0
+    ? 0
+    : Math.max(...Array.from(depths.values())) + 1
+  const naturalWidth = HORIZONTAL_PADDING * 2
+    + columns * LANE_WIDTH
+    + Math.max(0, columns - 1) * LANE_GAP
+  const minimumWidth = Number.isFinite(requestedWidth)
+    ? Math.max(0, Math.round(requestedWidth))
+    : 0
+  const width = Math.max(naturalWidth, minimumWidth)
+  const startX = (width - naturalWidth) / 2 + HORIZONTAL_PADDING
+  const maxRows = Math.max(0, ...Array.from(byLayer.values(), layer => layer.length))
+  const taskStackHeight = maxRows === 0
+    ? 0
+    : maxRows * TASK_HEIGHT + (maxRows - 1) * ROW_GAP
+  const laneHeight = (TASK_TOP - LANE_TOP) * 2 + taskStackHeight
+  const lanes: WorkbenchLane[] = Array.from({ length: columns }, (_, depth) => ({
+    depth,
+    x: startX + depth * (LANE_WIDTH + LANE_GAP),
+    y: LANE_TOP,
+    width: LANE_WIDTH,
+    height: laneHeight,
+    count: byLayer.get(depth)?.length ?? 0,
+  }))
+
+  const tasksById = new Map(sortedTasks.map((task) => [task.id, task]))
   const positioned: PositionedWorkbenchTask[] = []
-  let row = 0
-  for (const depth of Array.from(byLayer.keys()).sort((left, right) => left - right)) {
-    const layer = byLayer.get(depth)!
-    for (let offset = 0; offset < layer.length; offset += columns) {
-      const chunk = layer.slice(offset, offset + columns)
-      const chunkWidth = chunk.length * TASK_WIDTH + (chunk.length - 1) * HORIZONTAL_GAP
-      const startX = Math.round((width - chunkWidth) / 2)
-      chunk.forEach((task, index) => {
-        positioned.push({
-          task,
-          state: getWorkbenchTaskState(task, tasksById),
-          depth,
-          x: startX + index * (TASK_WIDTH + HORIZONTAL_GAP),
-          y: DAG_TOP + row * ROW_HEIGHT,
-        })
+  for (const lane of lanes) {
+    const layer = byLayer.get(lane.depth) ?? []
+    layer.forEach((task, row) => {
+      positioned.push({
+        task,
+        state: getWorkbenchTaskState(task, tasksById),
+        depth: lane.depth,
+        row,
+        x: lane.x + (LANE_WIDTH - TASK_WIDTH) / 2,
+        y: TASK_TOP + row * (TASK_HEIGHT + ROW_GAP),
       })
-      row += 1
-    }
+    })
   }
 
   return {
     tasks: positioned,
     byId: new Map(positioned.map((task) => [task.task.id, task])),
+    lanes,
     width,
-    // Leave enough room for a 44px historical-member target plus a classic
-    // horizontal scrollbar, which consumes layout height on Windows and on
-    // macOS when scrollbars are configured to stay visible.
-    height: DAG_TOP + Math.max(0, row - 1) * ROW_HEIGHT + TASK_HEIGHT + 70,
+    height: LANE_TOP + laneHeight + CANVAS_BOTTOM_PADDING,
+    legendY: LANE_TOP + laneHeight + LEGEND_GAP,
     columns,
   }
 }
@@ -475,11 +533,21 @@ export function parseWorkbenchMessageBody(
   if (type === 'task_assignment') {
     // A teammate that claims its own next task addresses the envelope to
     // itself, which is what separates picking work up from being handed it.
+    // The server projects a structured assignment to `text = subject` while
+    // retaining `protocolType`; archives can still contain the original JSON.
+    const structuredSubject = payloadType === 'task_assignment' && typeof payload?.subject === 'string'
+      ? payload.subject.trim()
+      : ''
+    const subject = structuredSubject || (
+      message.protocolType === 'task_assignment' && payloadType !== 'task_assignment'
+        ? raw
+        : ''
+    )
     return {
       kind: 'assignment',
       selfClaim,
       ...(typeof payload?.taskId === 'string' ? { taskId: payload.taskId } : {}),
-      ...(typeof payload?.subject === 'string' ? { subject: payload.subject } : {}),
+      ...(subject ? { subject } : {}),
     }
   }
 
