@@ -367,10 +367,17 @@ export function TabBar() {
           useChatStore.getState().stopGeneration(tab.sessionId)
         }
         if (!isRunning || stopRunning) {
-          // Auto-delete empty sessions (placeholder title, no messages sent)
+          // Auto-delete only when both server metadata and the loaded transcript
+          // confirm this is an empty placeholder. Missing state can mean a timed-out
+          // recovery load, so treating it as empty risks deleting a real session.
           const sessionEntry = useSessionStore.getState().sessions.find((s) => s.id === tab.sessionId)
           const chatEntry = useChatStore.getState().sessions[tab.sessionId]
-          if (isPlaceholderSessionTitle(sessionEntry?.title) && (!chatEntry || chatEntry.messages.length === 0)) {
+          if (
+            sessionEntry?.messageCount === 0 &&
+            isPlaceholderSessionTitle(sessionEntry.title) &&
+            chatEntry?.historyStatus === 'ready' &&
+            chatEntry.messages.length === 0
+          ) {
             void useSessionStore.getState().deleteSession(tab.sessionId)
           }
           disconnectSession(tab.sessionId)

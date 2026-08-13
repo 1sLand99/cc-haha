@@ -2167,6 +2167,122 @@ describe('TabBar', () => {
     expect(useTabStore.getState().activeTabId).toBe('tab-2')
   })
 
+  it('does not delete a session when its list and history failed to load', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+    const { useSessionStore } = await import('../../stores/sessionStore')
+
+    useTabStore.setState({
+      tabs: [
+        { sessionId: 'recovered-session', title: 'Recovered Session', type: 'session', status: 'idle' },
+      ],
+      activeTabId: 'recovered-session',
+    })
+    useSessionStore.setState({
+      sessions: [],
+      isLoading: false,
+      error: 'Session list request timed out',
+    })
+    useChatStore.setState({
+      sessions: {},
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    fireEvent.click(screen.getByLabelText('Close Recovered Session'))
+
+    expect(sessionsApiMock.delete).not.toHaveBeenCalled()
+    expect(useTabStore.getState().tabs).toEqual([])
+  })
+
+  it('does not delete a session whose server metadata reports messages', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+    const { useSessionStore } = await import('../../stores/sessionStore')
+    const sessionId = 'persisted-session'
+
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'New Session', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    useSessionStore.setState({
+      sessions: [{
+        id: sessionId,
+        title: 'New Session',
+        createdAt: '2026-08-13T00:00:00.000Z',
+        modifiedAt: '2026-08-13T00:00:00.000Z',
+        messageCount: 2,
+        projectPath: '/repo',
+        workDir: '/repo',
+        workDirExists: true,
+      }],
+      isLoading: false,
+      error: null,
+    })
+    useChatStore.setState({
+      sessions: {
+        [sessionId]: { ...makeChatSession('idle'), historyStatus: 'ready' },
+      },
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    fireEvent.click(screen.getByLabelText('Close New Session'))
+
+    expect(sessionsApiMock.delete).not.toHaveBeenCalled()
+  })
+
+  it('deletes a confirmed empty placeholder session when closing its tab', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+    const { useSessionStore } = await import('../../stores/sessionStore')
+    const sessionId = 'empty-session'
+
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'New Session', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    useSessionStore.setState({
+      sessions: [{
+        id: sessionId,
+        title: 'New Session',
+        createdAt: '2026-08-13T00:00:00.000Z',
+        modifiedAt: '2026-08-13T00:00:00.000Z',
+        messageCount: 0,
+        projectPath: '/repo',
+        workDir: '/repo',
+        workDirExists: true,
+      }],
+      isLoading: false,
+      error: null,
+    })
+    useChatStore.setState({
+      sessions: {
+        [sessionId]: { ...makeChatSession('idle'), historyStatus: 'ready' },
+      },
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    await act(async () => {
+      render(<TabBar />)
+    })
+
+    fireEvent.click(screen.getByLabelText('Close New Session'))
+
+    await waitFor(() => {
+      expect(sessionsApiMock.delete).toHaveBeenCalledWith(sessionId)
+    })
+  })
+
   it('closes terminal tabs without disconnecting chat sessions', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')
