@@ -3340,6 +3340,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }
           const hasPermissionMessage = s.messages.some((message) =>
             message.type === 'permission_request' && message.requestId === msg.requestId)
+          const isAskUserQuestion = msg.toolName === 'AskUserQuestion'
 
           return {
             pendingPermission,
@@ -3349,8 +3350,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             apiRetry: null,
             streamingFallback: null,
             messages:
-              msg.toolName === 'AskUserQuestion' || hasPermissionMessage
-                ? s.messages
+              isAskUserQuestion && msg.toolUseId
+                ? upsertToolUseMessage(s.messages, msg.toolUseId, (existing) => ({
+                    id: existing?.id ?? nextId(),
+                    type: 'tool_use',
+                    toolName: msg.toolName,
+                    toolUseId: msg.toolUseId!,
+                    originalToolUseId: existing?.originalToolUseId,
+                    input: msg.input,
+                    timestamp: existing?.timestamp ?? Date.now(),
+                    parentToolUseId: existing?.parentToolUseId,
+                    isPending: false,
+                    partialInput: existing?.partialInput,
+                  }))
+                : isAskUserQuestion || hasPermissionMessage
+                  ? s.messages
                 : [...s.messages, {
                     id: nextId(),
                     type: 'permission_request',

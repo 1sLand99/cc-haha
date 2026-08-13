@@ -4054,6 +4054,92 @@ describe('chatStore history mapping', () => {
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.runtimeConfigReadyCount).toBe(1)
   })
 
+  it('shows AskUserQuestion when permission arrives before the streamed tool block', () => {
+    const input = {
+      questions: [
+        {
+          question: 'Should we persist data?',
+          options: [{ label: 'No' }, { label: 'Yes' }],
+        },
+      ],
+    }
+    useChatStore.setState({
+      sessions: { [TEST_SESSION_ID]: makeSession() },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'permission_request',
+      requestId: 'perm-ask-permission-first',
+      toolName: 'AskUserQuestion',
+      toolUseId: 'tool-ask-permission-first',
+      input,
+    })
+
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toContainEqual(
+      expect.objectContaining({
+        type: 'tool_use',
+        toolName: 'AskUserQuestion',
+        toolUseId: 'tool-ask-permission-first',
+        input,
+      }),
+    )
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_use_complete',
+      toolName: 'AskUserQuestion',
+      toolUseId: 'tool-ask-permission-first',
+      input,
+    })
+
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]?.messages.filter(
+        (message) => message.type === 'tool_use' &&
+          message.toolUseId === 'tool-ask-permission-first',
+      ),
+    ).toHaveLength(1)
+  })
+
+  it('keeps one AskUserQuestion when the streamed tool block arrives first', () => {
+    const input = {
+      questions: [
+        {
+          question: 'Which scope?',
+          options: [{ label: 'Current file' }, { label: 'Repository' }],
+        },
+      ],
+    }
+    useChatStore.setState({
+      sessions: { [TEST_SESSION_ID]: makeSession() },
+    })
+    const store = useChatStore.getState()
+
+    store.handleServerMessage(TEST_SESSION_ID, {
+      type: 'tool_use_complete',
+      toolName: 'AskUserQuestion',
+      toolUseId: 'tool-ask-stream-first',
+      input,
+    })
+    store.handleServerMessage(TEST_SESSION_ID, {
+      type: 'permission_request',
+      requestId: 'perm-ask-stream-first',
+      toolName: 'AskUserQuestion',
+      toolUseId: 'tool-ask-stream-first',
+      input,
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.pendingPermission).toMatchObject({
+      requestId: 'perm-ask-stream-first',
+      toolUseId: 'tool-ask-stream-first',
+    })
+    expect(
+      session?.messages.filter(
+        (message) => message.type === 'tool_use' &&
+          message.toolUseId === 'tool-ask-stream-first',
+      ),
+    ).toHaveLength(1)
+  })
+
   it('keeps AskUserQuestion permission requests out of the message list while tracking the pending request', () => {
     useChatStore.setState({
       sessions: {
