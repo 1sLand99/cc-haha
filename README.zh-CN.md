@@ -65,16 +65,6 @@ Claude Code Haha 是一个**桌面端 Claude Code 工作台**：多会话与全�
   <tbody>
     <tr>
       <td align="center" valign="middle">
-        <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">
-          <img src="docs/images/sponsors/teamorouter-logo.svg" width="180" alt="TeamoRouter">
-        </a>
-      </td>
-      <td valign="middle">
-        感谢 <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">TeamoRouter</a> 赞助本项目！TeamoRouter 是面向开发者、AI 团队与企业的企业级 Agentic LLM 网关：无需订阅，通过一个统一 API 即可使用 Claude Code、Codex、Gemini CLI 等热门 AI Agent，价格最高可享 90% 折扣。平台聚合 OpenAI、Anthropic、Vertex、Azure、AWS Bedrock 等数百家官方模型提供商，全部经过 Agent 协议兼容验证，官方直连、非逆向，提供接近官方的 TTFT、99.6% SLA 与行业领先的缓存命中率；同时支持集中账单、团队管理、BYOK、用量分析，并可用 Teamo Desktop 一键接入。新用户通过 <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">专属链接</a> 注册，首次充值可享 10% 折扣。
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="middle">
         <a href="https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA">
           <img src="docs/images/sponsors/xuanshuapi-logo.svg" width="120" alt="玄枢API">
         </a>

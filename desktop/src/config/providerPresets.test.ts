@@ -85,10 +85,8 @@ describe('bundled provider presets', () => {
     expect(shengsuanyun?.apiKeyUrl).toBeUndefined()
     expect(shengsuanyun?.promoText).toBeUndefined()
     expect(shengsuanyun?.featured).toBeUndefined()
-
     const selectableIds = selectableProviderPresets(BUNDLED_PROVIDER_PRESETS).map((p) => p.id)
     expect(selectableIds).not.toContain('shengsuanyun')
-    expect(selectableIds).toContain('teamorouter')
     expect(selectableIds).toContain('xuanshuapi')
     expect(selectableIds).toContain('fennoai')
     expect(selectableIds).toContain('qiniuai')
@@ -126,5 +124,9 @@ describe('bundled provider presets', () => {
 
     expect(selectableProviderPresets(BUNDLED_PROVIDER_PRESETS).map((p) => p.id))
       .not.toContain('jiekouai')
+  })
+
+  it('does not bundle the removed TeamoRouter preset', () => {
+    expect(BUNDLED_PROVIDER_PRESETS.some((preset) => preset.id === 'teamorouter')).toBe(false)
   })
 })

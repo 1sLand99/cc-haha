@@ -65,16 +65,6 @@ This project is maintained in the author's spare time. Corporate or individual s
   <tbody>
     <tr>
       <td align="center" valign="middle">
-        <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">
-          <img src="docs/images/sponsors/teamorouter-logo.svg" width="180" alt="TeamoRouter">
-        </a>
-      </td>
-      <td valign="middle">
-        Thanks to <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">TeamoRouter</a> for sponsoring this project. TeamoRouter is an enterprise-grade Agentic LLM gateway: run Claude Code, Codex, Gemini CLI, and other popular AI agents through one unified API with no subscription and up to 90% off official pricing. It aggregates hundreds of official model providers (OpenAI, Anthropic, Vertex, Azure, AWS Bedrock) verified for Agent protocol compatibility, with near-official TTFT, a 99.6% SLA, and industry-leading cache hit rates. It also adds centralized billing, team management, BYOK, usage analytics, and one-click Teamo Desktop. New users who register through <a href="https://teamorouter.com/?utm_source=cc_haha&utm_medium=referral&utm_campaign=ai_directory">this link</a> get 10% off their first top-up.
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="middle">
         <a href="https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA">
           <img src="docs/images/sponsors/xuanshuapi-logo.svg" width="120" alt="XuanShu API">
         </a>
