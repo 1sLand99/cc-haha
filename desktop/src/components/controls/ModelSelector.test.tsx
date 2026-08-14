@@ -363,6 +363,38 @@ describe('ModelSelector', () => {
     expect(onChange).toHaveBeenCalledWith('beta')
   })
 
+  it('uses caller-supplied models in the reusable field appearance', async () => {
+    const onChange = vi.fn()
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: MODELS,
+      currentModel: MODELS[0],
+    })
+    const agentModels: ModelInfo[] = [
+      { id: 'inherit', name: 'Inherit from parent', description: 'Use the parent model', context: '' },
+      { id: 'provider-model', name: 'Provider Model', description: 'Configured model', context: '200k' },
+    ]
+
+    render(
+      <ModelSelector
+        value="inherit"
+        onChange={onChange}
+        models={agentModels}
+        ariaLabel="Model"
+        appearance="field"
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Model' })
+    expect(trigger.parentElement).toHaveClass('h-10', 'border-[var(--color-border)]')
+    fireEvent.click(trigger)
+    const dropdown = screen.getByTestId('model-selector-dropdown')
+    expect(within(dropdown).queryByRole('button', { name: /Alpha/ })).not.toBeInTheDocument()
+    fireEvent.click(within(dropdown).getByRole('button', { name: /Provider Model/ }))
+
+    expect(onChange).toHaveBeenCalledWith('provider-model')
+  })
+
   it('routes uncontrolled model changes through settings actions', async () => {
     const setModel = vi.fn(async () => {})
     useSettingsStore.setState({
