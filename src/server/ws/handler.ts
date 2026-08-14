@@ -38,6 +38,7 @@ import {
 import { GROK_DEFAULT_MAIN_MODEL } from '../../services/grokAuth/models.js'
 import { getGrokModelCatalog } from '../../services/grokAuth/modelCatalog.js'
 import { hahaGrokOAuthService } from '../services/hahaGrokOAuthService.js'
+import { resolveClaudeOfficialRuntimeModel } from '../services/claudeOfficialRuntime.js'
 import {
   getModelReasoningCapabilityOverride,
   isModelReasoningEffort,
@@ -4220,6 +4221,10 @@ async function getRuntimeSettings(sessionId?: string): Promise<RuntimeSettings> 
       effort = effort && grokEffort.supportedEfforts.includes(effort)
         ? effort
         : grokEffort.defaultEffort
+    } else if (runtimeOverride.providerId === null) {
+      runtimeOverride.modelId = await resolveClaudeOfficialRuntimeModel(
+        runtimeOverride.modelId,
+      ) ?? runtimeOverride.modelId
     }
 
     return {
@@ -4289,12 +4294,16 @@ async function getDefaultRuntimeSettings(): Promise<RuntimeSettings> {
       effort = (await getGrokReasoningEfforts(model)).defaultEffort
     }
   } else {
-    // No provider — pass model normally
+    // Claude Official is represented by a null provider id. Only a valid
+    // desktop-managed Claude OAuth token activates the subscription-aware
+    // resolver; API-key/PAYG and original third-party settings keep the old path.
     const baseModel =
       typeof userSettings.model === 'string' && userSettings.model.trim()
         ? userSettings.model
         : undefined
-    model = baseModel ? (modelContext ? `${baseModel}:${modelContext}` : baseModel) : undefined
+    const claudeOfficialModel = await resolveClaudeOfficialRuntimeModel(baseModel)
+    model = claudeOfficialModel
+      ?? (baseModel ? (modelContext ? `${baseModel}:${modelContext}` : baseModel) : undefined)
   }
 
   return {
