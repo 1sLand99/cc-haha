@@ -1445,6 +1445,7 @@ export const jp: Record<TranslationKey, string> = {
 
   // Settings > General
   'settings.general.appearanceTitle': '外観',
+  'settings.general.proxyManagedSettingsWarning': 'ユーザー設定が PROXY_MANAGED プロキシのプレースホルダーだけになっており、他の設定がプロキシツールに上書きされた可能性があります。意図した設定でなければ、CC Switch のルーティング引き継ぎを無効にして、バックアップから settings.json を復元してください。意図した設定なら、この通知は無視できます。',
   'settings.general.appearanceDescription': '紙と墨の 6 つの配色を切り替えます。',
   'settings.general.appearance.paper': '紙墨',
   'settings.general.appearance.warmClassic': 'クラシックウォーム',

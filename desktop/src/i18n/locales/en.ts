@@ -1443,6 +1443,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
 
   // Settings > General
   'settings.general.appearanceTitle': 'Appearance',
+  'settings.general.proxyManagedSettingsWarning': 'Your user settings contain only a PROXY_MANAGED proxy placeholder, so another proxy tool may have replaced the remaining settings. If this was not intentional, disable CC Switch routing takeover and restore settings.json from a backup. Otherwise, you can ignore this notice.',
   'settings.general.appearanceDescription': 'Switch between the six paper and ink palettes.',
   'settings.general.appearance.paper': 'Paper',
   'settings.general.appearance.warmClassic': 'Warm Classic',

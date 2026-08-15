@@ -1444,6 +1444,7 @@ export const zh: Record<TranslationKey, string> = {
 
   // Settings > General
   'settings.general.appearanceTitle': '配色主題',
+  'settings.general.proxyManagedSettingsWarning': '偵測到使用者設定只剩 PROXY_MANAGED 代理占位資訊，其他設定可能被代理工具覆寫。若這不是你的主動設定，請先關閉 CC Switch 路由接管並從備份還原 settings.json；主動使用此設定可忽略。',
   'settings.general.appearanceDescription': '在紙、墨、印六套配色之間切換。',
   'settings.general.appearance.paper': '紙墨',
   'settings.general.appearance.warmClassic': '經典暖色',

@@ -246,6 +246,7 @@ describe('Settings > General tab', () => {
       traceCapture: { enabled: true, storageDir: '/Users/test/.claude/cc-haha/traces' },
       chatSendBehavior: 'enter',
       responseLanguage: '',
+      proxyManagedSettingsWarning: false,
       uiZoom: 1,
       webSearch: { mode: 'auto', tavilyApiKey: '', braveApiKey: '' },
       network: {
@@ -1709,6 +1710,17 @@ describe('Settings > General tab', () => {
     expect(screen.getByText('Terminal')).toBeInTheDocument()
     expect(screen.getByText('MCP')).toBeInTheDocument()
     expect(screen.getByText('Plugins')).toBeInTheDocument()
+  })
+
+  it('warns when the user settings contain only a proxy-managed placeholder', async () => {
+    useSettingsStore.setState({ proxyManagedSettingsWarning: true })
+
+    render(<Settings />)
+    fireEvent.click(screen.getByRole('button', { name: 'General' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Your user settings contain only a PROXY_MANAGED proxy placeholder',
+    )
   })
 })
 

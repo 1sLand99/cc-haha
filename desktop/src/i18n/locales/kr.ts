@@ -1445,6 +1445,7 @@ export const kr: Record<TranslationKey, string> = {
 
   // Settings > General
   'settings.general.appearanceTitle': '모양',
+  'settings.general.proxyManagedSettingsWarning': '사용자 설정에 PROXY_MANAGED 프록시 자리표시자만 남아 있어 다른 설정이 프록시 도구에 의해 덮어쓰였을 수 있습니다. 의도한 설정이 아니라면 CC Switch 라우팅 인계를 끄고 백업에서 settings.json을 복원하세요. 직접 설정한 경우에는 이 알림을 무시해도 됩니다.',
   'settings.general.appearanceDescription': '종이와 먹의 여섯 가지 배색을 전환합니다.',
   'settings.general.appearance.paper': '지묵',
   'settings.general.appearance.warmClassic': '따뜻한 클래식',

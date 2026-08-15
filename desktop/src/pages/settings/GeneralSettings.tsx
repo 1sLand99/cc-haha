@@ -88,6 +88,7 @@ export function GeneralSettings() {
     setAppMode: setAppModeAction,
     uiZoom,
     setUiZoom,
+    proxyManagedSettingsWarning,
   } = useSettingsStore()
   // Read the theme from the store that owns it. settingsStore keeps a copy for
   // its own consumers, but that copy is only refreshed on an explicit setTheme
@@ -616,6 +617,14 @@ export function GeneralSettings() {
 
   return (
     <div className="max-w-xl">
+      {proxyManagedSettingsWarning && (
+        <div
+          role="alert"
+          className="mb-5 rounded-[var(--radius-lg)] border border-[var(--color-warning)] bg-[var(--color-warning-container)] px-3 py-2 text-xs leading-5 text-[var(--color-on-warning-container)]"
+        >
+          {t('settings.general.proxyManagedSettingsWarning')}
+        </div>
+      )}
       {/* No page header here on purpose: the only title it could carry is the nav
           label verbatim, with no description to add. The pane opens on its first
           section instead. */}
