@@ -14,7 +14,11 @@ import {
   trailingStreamingRailPosition,
 } from './MessageList'
 import type { ConversationNavigationItem } from './ConversationNavigator'
-import type { VirtualRenderItemMetric } from './virtualHeightCache'
+import {
+  dropSession,
+  getHeightsForSession,
+  type VirtualRenderItemMetric,
+} from './virtualHeightCache'
 import { relativizeWorkspacePath } from './CurrentTurnChangeCard'
 import { sessionsApi } from '../../api/sessions'
 import { teamsApi } from '../../api/teams'
@@ -360,6 +364,75 @@ describe('MessageList nested tool calls', () => {
     for (const item of container.querySelectorAll('[data-virtual-message-item]')) {
       expect((item as HTMLElement).className).not.toContain('chat-render-item--cv')
     }
+  })
+
+  it('keeps fractional border-box jitter from invalidating a settled virtual row', async () => {
+    const sessionId = 'virtual-row-measurement-jitter'
+    const observers: Array<{
+      callback: ResizeObserverCallback
+      targets: Element[]
+    }> = []
+    class TestResizeObserver {
+      targets: Element[] = []
+      observe = vi.fn((target: Element) => {
+        this.targets.push(target)
+      })
+      unobserve = vi.fn()
+      disconnect = vi.fn()
+
+      constructor(callback: ResizeObserverCallback) {
+        observers.push({ callback, targets: this.targets })
+      }
+    }
+    vi.stubGlobal('ResizeObserver', TestResizeObserver)
+    dropSession(sessionId)
+    useChatStore.setState({
+      sessions: {
+        [sessionId]: makeSessionState({
+          messages: Array.from({ length: 220 }, (_, index) => ({
+            id: `fractional-assistant-${index}`,
+            type: 'assistant_text' as const,
+            content: `fractional transcript line ${index}`,
+            timestamp: index,
+          })),
+        }),
+      },
+    })
+
+    const { container } = render(<MessageList sessionId={sessionId} />)
+    const item = container.querySelector<HTMLElement>('[data-virtual-message-item]')
+    expect(item).toBeTruthy()
+    const itemKey = item!.dataset.virtualMessageItem!
+    const itemObserver = observers.find(({ targets }) => targets.includes(item!))
+    expect(itemObserver).toBeTruthy()
+
+    const reportHeight = async (height: number) => {
+      act(() => {
+        itemObserver?.callback([{
+          target: item!,
+          borderBoxSize: [{ blockSize: height, inlineSize: 800 }],
+          contentRect: { height: height - 8 },
+        } as unknown as ResizeObserverEntry], {} as ResizeObserver)
+      })
+      await waitForProgrammaticScrollReset()
+    }
+
+    // Windows fractional DPI can place a stable border box on opposite sides
+    // of an integer boundary. Ceil turned this sub-pixel noise into an endless
+    // 1px cache update and MessageList repaint (#1223).
+    await reportHeight(117.99)
+    expect(getHeightsForSession(sessionId).get(itemKey)).toBeCloseTo(117.99)
+
+    await reportHeight(118.01)
+    expect(getHeightsForSession(sessionId).get(itemKey)).toBeCloseTo(117.99)
+
+    await reportHeight(119.99)
+    expect(getHeightsForSession(sessionId).get(itemKey)).toBeCloseTo(117.99)
+
+    // A real layout change still has to update the virtual offsets.
+    await reportHeight(121.25)
+    expect(getHeightsForSession(sessionId).get(itemKey)).toBeCloseTo(121.25)
+    dropSession(sessionId)
   })
 
   it('finds, mounts, navigates, and highlights matches outside a 120-item virtual window', async () => {
