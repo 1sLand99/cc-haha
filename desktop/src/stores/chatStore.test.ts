@@ -6757,6 +6757,7 @@ describe('chatStore history mapping', () => {
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'session_state',
       turnState: 'idle',
+      activeBackgroundTaskIds: [],
     })
 
     await vi.waitFor(() => {
@@ -6797,6 +6798,7 @@ describe('chatStore history mapping', () => {
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'session_state',
       turnState: 'idle',
+      activeBackgroundTaskIds: ['agent-task-1'],
     })
 
     await vi.waitFor(() => {
@@ -6807,6 +6809,47 @@ describe('chatStore history mapping', () => {
       useChatStore.getState().sessions[TEST_SESSION_ID]
         ?.backgroundAgentTasks?.['agent-task-1']?.status,
     ).toBe('running')
+  })
+
+  it('settles a stale H5 SubAgent when reconnect says no background task is still active', async () => {
+    vi.mocked(sessionsApi.getMessages).mockClear()
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [],
+      taskNotifications: [],
+    })
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          backgroundAgentTasks: {
+            'agent-task-missed-terminal': {
+              taskId: 'agent-task-missed-terminal',
+              toolUseId: 'agent-tool-missed-terminal',
+              status: 'running',
+              taskType: 'local_agent',
+              description: 'Finished while H5 was offline',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+      activeBackgroundTaskIds: [],
+    })
+
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'idle')
+    })
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]
+        ?.backgroundAgentTasks?.['agent-task-missed-terminal']?.status,
+    ).toBe('completed')
   })
 
   it('does not let an older persisted terminal overwrite a new lifecycle with the same Agent id', async () => {
