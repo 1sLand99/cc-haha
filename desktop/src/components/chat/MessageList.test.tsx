@@ -5979,6 +5979,41 @@ describe('MessageList nested tool calls', () => {
     expect(getTurnCheckpoints).toHaveBeenCalledTimes(2)
   })
 
+  it('aborts the stale turn checkpoint request when the viewed session changes', async () => {
+    const requests: Array<{ sessionId: string; signal?: AbortSignal }> = []
+    vi.mocked(sessionsApi.getTurnCheckpoints).mockImplementation((sessionId, options) => {
+      requests.push({ sessionId, signal: options?.signal })
+      return new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => {
+          reject(options.signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'))
+        }, { once: true })
+      })
+    })
+
+    const completedMessages: UIMessage[] = [
+      { id: 'user-1', type: 'user_text', content: 'Generate a file', timestamp: 1 },
+      { id: 'assistant-1', type: 'assistant_text', content: 'Done', timestamp: 2 },
+    ]
+    useChatStore.setState({
+      sessions: {
+        'session-one': makeSessionState({ messages: completedMessages }),
+        'session-two': makeSessionState({ messages: completedMessages }),
+      },
+    })
+
+    const { rerender } = render(<MessageList sessionId="session-one" />)
+    await waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0]).toMatchObject({ sessionId: 'session-one' })
+    expect(requests[0]?.signal?.aborted).toBe(false)
+
+    rerender(<MessageList sessionId="session-two" />)
+
+    await waitFor(() => expect(requests).toHaveLength(2))
+    expect(requests[0]?.signal?.aborted).toBe(true)
+    expect(requests[1]).toMatchObject({ sessionId: 'session-two' })
+    expect(requests[1]?.signal?.aborted).toBe(false)
+  })
+
   it('rewinds a live turn with the authoritative checkpoint id when the local UI id differs', async () => {
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
       checkpoints: [

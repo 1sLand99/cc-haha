@@ -2949,11 +2949,12 @@ export function MessageList({
     }
 
     let cancelled = false
+    const controller = new AbortController()
     setIsLoadingTurnChangeCards(true)
     setTurnChangeLoadError(null)
 
     Promise.all([
-      sessionsApi.getTurnCheckpoints(resolvedSessionId),
+      sessionsApi.getTurnCheckpoints(resolvedSessionId, { signal: controller.signal }),
       sessionsApi.getWorkspaceStatus(resolvedSessionId).catch(() => null),
     ])
       .then(([checkpointResponse, workspaceStatus]) => {
@@ -2995,6 +2996,7 @@ export function MessageList({
 
     return () => {
       cancelled = true
+      controller.abort()
     }
   }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, historyMutationEpoch, isDirectAgentSession, latestCompletedTurnId, resolvedSessionId])
 
