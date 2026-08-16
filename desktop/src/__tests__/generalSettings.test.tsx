@@ -2267,7 +2267,7 @@ describe('Settings > Providers tab', () => {
     })
   })
 
-  it('defaults Tool Search on and persists an explicit disable from the provider form', async () => {
+  it('defaults Tool Search off and requires confirmation before persisting an explicit enable', async () => {
     MOCK_GET_SETTINGS.mockResolvedValue({ env: { EXISTING_ENV: '1' } })
     providerStoreState.createProvider = vi.fn().mockResolvedValue({
       id: 'provider-new',
@@ -2276,7 +2276,7 @@ describe('Settings > Providers tab', () => {
       apiKey: 'sk-test',
       baseUrl: 'https://api.example.com/anthropic',
       apiFormat: 'anthropic',
-      toolSearchEnabled: false,
+      toolSearchEnabled: true,
       models: {
         main: 'custom-main',
         haiku: 'custom-main',
@@ -2307,18 +2307,25 @@ describe('Settings > Providers tab', () => {
     const dialog = screen.getByRole('dialog')
     const toolSearchCheckbox = within(dialog).getByRole('checkbox', { name: 'Enable Tool Search' })
 
-    expect(toolSearchCheckbox).toBeChecked()
+    expect(toolSearchCheckbox).not.toBeChecked()
     await waitFor(() => {
       expect(within(dialog).getByDisplayValue((value) => (
-        typeof value === 'string' && value.includes('"ENABLE_TOOL_SEARCH": "true"')
+        typeof value === 'string' && value.includes('"ENABLE_TOOL_SEARCH": "false"')
       ))).toBeInTheDocument()
     })
 
     fireEvent.click(toolSearchCheckbox)
     expect(toolSearchCheckbox).not.toBeChecked()
+
+    const confirmDialog = screen.getByRole('dialog', { name: 'Enable Tool Search?' })
+    expect(within(confirmDialog).getByText(/final LLM upstream or gateway explicitly supports/)).toBeInTheDocument()
+    expect(within(confirmDialog).getByText(/may return HTTP 400/)).toBeInTheDocument()
+    fireEvent.click(within(confirmDialog).getByRole('button', { name: 'Enable anyway' }))
+
+    expect(toolSearchCheckbox).toBeChecked()
     await waitFor(() => {
       expect(within(dialog).getByDisplayValue((value) => (
-        typeof value === 'string' && value.includes('"ENABLE_TOOL_SEARCH": "false"')
+        typeof value === 'string' && value.includes('"ENABLE_TOOL_SEARCH": "true"')
       ))).toBeInTheDocument()
     })
 
@@ -2327,13 +2334,13 @@ describe('Settings > Providers tab', () => {
 
     await waitFor(() => {
       expect(providerStoreState.createProvider).toHaveBeenCalledWith(expect.objectContaining({
-        toolSearchEnabled: false,
+        toolSearchEnabled: true,
       }))
     })
     expect(MOCK_UPDATE_SETTINGS).toHaveBeenCalledWith(expect.objectContaining({
       env: expect.objectContaining({
         EXISTING_ENV: '1',
-        ENABLE_TOOL_SEARCH: 'false',
+        ENABLE_TOOL_SEARCH: 'true',
       }),
     }))
   })
