@@ -120,10 +120,10 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
     const triggerEl = event.currentTarget
     const anchor = triggerEl.getBoundingClientRect()
     void (async () => {
-      await useOpenTargetStore.getState().ensureTargets()
+      const targets = await useOpenTargetStore.getState().getTargetsForPath(attachment.path!)
       const items = buildOpenWithItems(
         { kind: 'file', absolutePath: attachment.path! },
-        useOpenTargetStore.getState().targets,
+        targets,
         {
           openInAppBrowser: () => {},
           openSystem: (path) => {

@@ -156,6 +156,7 @@ export const zh: Record<TranslationKey, string> = {
   'openWith.title': '打开方式',
   'openWith.inAppBrowser': '应用内浏览器',
   'openWith.systemBrowser': '系统浏览器',
+  'openWith.systemDefault': '系统默认应用',
   'openWith.workspacePreview': '工作台预览',
   'openWith.openInTarget': '用 {target} 打开',
   'openWith.revealInTarget': '在 {target} 中显示',
@@ -1935,6 +1936,7 @@ export const zh: Record<TranslationKey, string> = {
   'chat.turnChangesLatestConfirmUndo': '撤销当前轮次',
   'chat.turnChangesHistoricalConfirmUndo': '回滚到这一轮之前',
   'chat.turnChangesOpenInWorkspaceAria': '在工作区打开 {path}',
+  'chat.turnChangesOpenFileAria': '打开 {path}',
   'chat.turnChangesShowMore': '再显示 {count} 个文件',
   'chat.turnChangesShowLess': '收起',
 

@@ -154,6 +154,7 @@ export const en = {
   'openWith.title': 'Open with',
   'openWith.inAppBrowser': 'In-app browser',
   'openWith.systemBrowser': 'System browser',
+  'openWith.systemDefault': 'Default application',
   'openWith.workspacePreview': 'Workspace preview',
   'openWith.openInTarget': 'Open in {target}',
   'openWith.revealInTarget': 'Reveal in {target}',
@@ -1934,6 +1935,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'chat.turnChangesLatestConfirmUndo': 'Undo current turn',
   'chat.turnChangesHistoricalConfirmUndo': 'Rewind to before this turn',
   'chat.turnChangesOpenInWorkspaceAria': 'Open {path} in workspace',
+  'chat.turnChangesOpenFileAria': 'Open {path}',
   'chat.turnChangesShowMore': 'Show {count} more files',
   'chat.turnChangesShowLess': 'Show less',
 

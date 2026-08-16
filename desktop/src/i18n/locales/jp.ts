@@ -156,6 +156,7 @@ export const jp: Record<TranslationKey, string> = {
   'openWith.title': '開く方法',
   'openWith.inAppBrowser': 'アプリ内ブラウザ',
   'openWith.systemBrowser': 'システムブラウザ',
+  'openWith.systemDefault': 'デフォルトのアプリ',
   'openWith.workspacePreview': 'ワークスペースプレビュー',
   'openWith.openInTarget': '{target} で開く',
   'openWith.revealInTarget': '{target} で表示',
@@ -1936,6 +1937,7 @@ export const jp: Record<TranslationKey, string> = {
   'chat.turnChangesLatestConfirmUndo': '現在のターンを元に戻す',
   'chat.turnChangesHistoricalConfirmUndo': 'このターンの前まで巻き戻す',
   'chat.turnChangesOpenInWorkspaceAria': '{path} をワークスペースで開く',
+  'chat.turnChangesOpenFileAria': '{path} を開く',
   'chat.turnChangesShowMore': 'さらに {count} 個のファイルを表示',
   'chat.turnChangesShowLess': '表示を減らす',
 

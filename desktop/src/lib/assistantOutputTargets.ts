@@ -1,4 +1,6 @@
 import { trimTrailingPunctuation } from './urlBoundary'
+import { isLinkableFilePath, splitTextByFilePaths } from './filePathBoundary'
+import { isGeneratedArtifactFile, isOutputResourceFile } from './fileCapabilities'
 
 export type AssistantOutputTargetKind =
   | 'local-html'
@@ -6,11 +8,13 @@ export type AssistantOutputTargetKind =
   | 'image'
   | 'video'
   | 'markdown'
+  | 'file'
 
 export type AssistantOutputTargetSource =
   | 'markdown-link'
   | 'plain-url'
   | 'plain-path'
+  | 'changed-file'
 
 export type AssistantOutputTarget = {
   id: string
@@ -79,8 +83,6 @@ type DirectoryTreeFileMatch = {
 // shared trimTrailingPunctuation, which knows the full CJK terminator set.
 const localhostUrlPattern =
   /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/[^\s`"'<>，。；、）\])}]*)?/gi
-const previewablePathPattern =
-  /(^|[\s("'`[])((?:\.{1,2}\/)?(?:[\w.-]+\/)*[\w.-]+\.(?:html?|md|markdown|png|jpe?g|gif|webp|svg|mp4|webm|mov|m4v))(?![\w/-])/gi
 
 export function extractAssistantOutputTargets(
   content: string,
@@ -193,8 +195,14 @@ export function extractAssistantOutputTargets(
     }, createFileKey(fileTarget), treeMatch.position)
   }
 
-  for (const match of content.matchAll(previewablePathPattern)) {
-    const position = match.index ?? 0
+  let plainTextPosition = 0
+  for (const segment of splitTextByFilePaths(content)) {
+    const position = plainTextPosition
+    plainTextPosition += segment.value.length
+
+    if (segment.type !== 'path') {
+      continue
+    }
 
     if (isInMarkdownLink(position, markdownLinks)) {
       continue
@@ -204,7 +212,7 @@ export function extractAssistantOutputTargets(
       continue
     }
 
-    const href = trimTrailingPunctuation(match[2] ?? '')
+    const href = segment.ref.path
     const fileTarget = toWorkspaceFileTarget(href, workDir)
 
     if (!fileTarget) {
@@ -299,6 +307,34 @@ function reconcileTargetsWithChangedFiles(
       subtitle: corrected,
     })
     if (out.length >= limit) break
+  }
+
+  // A generated document is still a deliverable when the assistant forgets to
+  // repeat its path in the final prose. The checkpoint is upstream identity:
+  // unlike text extraction, it tells us which path this turn actually wrote.
+  for (const changedFile of changedFiles) {
+    if (out.length >= limit) break
+    if (!isGeneratedArtifactFile(changedFile)) continue
+
+    const resolved = resolveFilePath(changedFile)
+    const corrected = workDir && isWithinWorkDir(resolved, workDir)
+      ? relativeFilePath(workDir, resolved)
+      : toPosixPath(changedFile)
+    const kind = classifyFileTarget(corrected) ?? 'file'
+    const key = `${kind}:${corrected}`
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    out.push({
+      id: createId(kind, corrected),
+      kind,
+      title: getBasename(corrected),
+      subtitle: corrected,
+      href: corrected,
+      normalizedPath: corrected,
+      confidence: 'high',
+      source: 'changed-file',
+    })
   }
 
   return out
@@ -404,6 +440,10 @@ function classifyFileTarget(candidate: string): FileTargetMatch['kind'] | null {
 
   if (['.mp4', '.webm', '.mov', '.m4v'].includes(extension)) {
     return 'video'
+  }
+
+  if (isLinkableFilePath(candidate) && isOutputResourceFile(candidate)) {
+    return 'file'
   }
 
   return null

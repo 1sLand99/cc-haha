@@ -24,6 +24,11 @@ describe('AttachmentGallery', () => {
       fetchedAt: Date.now(),
       loading: false,
       error: null,
+      getTargetsForPath: vi.fn().mockResolvedValue([
+        { id: 'code', kind: 'ide', label: 'VS Code', icon: 'vscode', platform: 'darwin' },
+        { id: 'system-default', kind: 'system_default', label: 'System default', icon: 'system', platform: 'darwin' },
+        { id: 'finder', kind: 'file_manager', label: 'Finder', icon: 'finder', platform: 'darwin' },
+      ]),
     })
     window.desktopHost = {
       ...browserHost,
@@ -209,6 +214,7 @@ describe('AttachmentGallery', () => {
     fireEvent.click(view.getByRole('button', { name: 'Open with' }))
 
     expect(await view.findByText('Open in VS Code')).toBeInTheDocument()
+    expect(view.getByText('Default application')).toBeInTheDocument()
     expect(view.getByText('Reveal in Finder')).toBeInTheDocument()
     expect(openPath).not.toHaveBeenCalled()
   })
