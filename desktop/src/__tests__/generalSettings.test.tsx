@@ -237,6 +237,15 @@ describe('Settings > General tab', () => {
     useSettingsStore.setState({
       locale: 'en',
       permissionMode: 'default',
+      currentModel: {
+        id: 'claude-opus-4-8',
+        name: 'Opus 4.8',
+        description: 'Highest capability for long-running tasks',
+        context: '1m',
+        defaultReasoningEffort: 'high',
+        supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      },
+      effortLevel: 'max',
       autoModeOptInAccepted: false,
       thinkingEnabled: true,
       workflowKeywordTriggerEnabled: true,
@@ -283,6 +292,9 @@ describe('Settings > General tab', () => {
       }),
       setThinkingEnabled: vi.fn().mockImplementation(async (enabled: boolean) => {
         useSettingsStore.setState({ thinkingEnabled: enabled })
+      }),
+      setEffort: vi.fn().mockImplementation(async (effortLevel) => {
+        useSettingsStore.setState({ effortLevel })
       }),
       setAutoDreamEnabled: vi.fn().mockImplementation(async (enabled: boolean) => {
         useSettingsStore.setState({ autoDreamEnabled: enabled })
@@ -898,6 +910,41 @@ describe('Settings > General tab', () => {
     fireEvent.click(toggle)
 
     expect(useSettingsStore.getState().setThinkingEnabled).toHaveBeenCalledWith(false)
+  })
+
+  it('sets the new-session effort through the current model capability profile', async () => {
+    useSettingsStore.setState({
+      currentModel: {
+        id: 'claude-sonnet-4-6',
+        name: 'Sonnet 4.6',
+        description: 'Balanced Claude model',
+        context: '1m',
+        defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: ['low', 'medium', 'high'],
+      },
+      // A default from another provider must not create a stop that this
+      // model cannot actually use. The visible value falls back to the
+      // model default until the user selects a supported level.
+      effortLevel: 'max',
+    })
+
+    render(<Settings />)
+    fireEvent.click(screen.getByText('General'))
+
+    const trigger = screen.getByRole('button', { name: 'Default reasoning effort: Medium' })
+    fireEvent.click(trigger)
+
+    const slider = screen.getByRole('slider', { name: 'Default reasoning effort' })
+    expect(slider).toHaveAttribute('aria-valuemax', '2')
+    expect(slider).toHaveAttribute('aria-valuenow', '1')
+    expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(3)
+
+    fireEvent.keyDown(slider, { key: 'ArrowRight' })
+
+    await waitFor(() => {
+      expect(useSettingsStore.getState().setEffort).toHaveBeenCalledWith('high')
+    })
+    expect(useSettingsStore.getState().effortLevel).toBe('high')
   })
 
   it('lets the user disable and restore the Ultracode keyword trigger', async () => {
