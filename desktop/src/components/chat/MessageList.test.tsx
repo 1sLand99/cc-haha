@@ -366,6 +366,72 @@ describe('MessageList nested tool calls', () => {
     }
   })
 
+  it('renders a single optimistic image attachment at readable size through the real send transition', () => {
+    render(<MessageList sessionId={ACTIVE_TAB} />)
+
+    act(() => {
+      useChatStore.getState().sendMessage(ACTIVE_TAB, '', [{
+        type: 'image',
+        name: 'single.png',
+        data: 'data:image/png;base64,AAAA',
+        mimeType: 'image/png',
+      }])
+    })
+
+    const className = screen.getByRole('img', { name: 'single.png' }).className
+    expect(className).toContain('max-h-[340px]')
+    expect(className).toContain('max-w-[360px]')
+  })
+
+  it('keeps the ImageGen result as the only image owner when final Markdown repeats its managed path', () => {
+    const generatedPath = '/Users/me/.claude/cc-haha/generated-images/session/result.png'
+    render(<MessageList sessionId={ACTIVE_TAB} />)
+    const store = useChatStore.getState()
+
+    act(() => {
+      store.sendMessage(ACTIVE_TAB, 'Generate an image')
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_start',
+        blockType: 'tool_use',
+        toolName: 'ImageGen',
+        toolUseId: 'imagegen-1',
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'tool_use_complete',
+        toolName: 'ImageGen',
+        toolUseId: 'imagegen-1',
+        input: { prompt: 'A paper-cut fox', count: 1 },
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'tool_result',
+        toolUseId: 'imagegen-1',
+        content: JSON.stringify({
+          type: 'image_generation_result',
+          operation: 'generate',
+          inputImageCount: 0,
+          providerId: 'openai-official',
+          providerKind: 'openai_oauth',
+          model: 'gpt-image-2',
+          prompt: 'A paper-cut fox',
+          images: [{ path: generatedPath, mimeType: 'image/png' }],
+          durationMs: 1200,
+        }),
+        isError: false,
+      })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_delta',
+        text: `Created ![result](${generatedPath})`,
+      })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+    })
+
+    const images = screen.getAllByRole('img')
+    expect(images).toHaveLength(1)
+    expect(images[0]?.getAttribute('src')).toContain(encodeURIComponent(generatedPath))
+    expect(document.querySelector('img:not([src])')).toBeNull()
+  })
+
   it('keeps fractional border-box jitter from invalidating a settled virtual row', async () => {
     const sessionId = 'virtual-row-measurement-jitter'
     const observers: Array<{

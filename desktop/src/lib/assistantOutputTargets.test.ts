@@ -21,6 +21,28 @@ describe('extractAssistantOutputTargets', () => {
     ])
   })
 
+  it('extracts Markdown images with empty alt text or a destination title', () => {
+    const targets = extractAssistantOutputTargets(
+      '![](outputs/empty-alt.png) ![preview](outputs/titled.png "Rendered preview")',
+      { workDir },
+    )
+
+    expect(targets).toMatchObject([
+      {
+        kind: 'image',
+        title: 'empty-alt.png',
+        href: 'outputs/empty-alt.png',
+        normalizedPath: 'outputs/empty-alt.png',
+      },
+      {
+        kind: 'image',
+        title: 'preview',
+        href: 'outputs/titled.png',
+        normalizedPath: 'outputs/titled.png',
+      },
+    ])
+  })
+
   it('detects a naked relative video path as a video target', () => {
     const targets = extractAssistantOutputTargets('渲染完成，见 outputs/clip.mp4 。', { workDir })
 

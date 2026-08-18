@@ -78,6 +78,15 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
       }),
     [attachments, unloadableImageSources],
   )
+  // Keep the layout decision tied to the authored attachment set, not to
+  // transient load failures. Otherwise a two-image thumbnail row jumps to a
+  // large single-image layout when one source errors and falls back to a card.
+  const previewableImageCount = useMemo(
+    () => attachments.filter((attachment) => (
+      attachment.type === 'image' && Boolean(attachmentImageSource(attachment))
+    )).length,
+    [attachments],
+  )
 
   const markImageUnloadable = (src: string) => {
     setUnloadableImageSources((previous) => {
@@ -234,7 +243,9 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                     className={
                       isComposer
                         ? 'h-16 w-16 object-cover'
-                        : 'h-28 w-28 object-cover'
+                        : previewableImageCount === 1
+                          ? 'max-h-[340px] w-full max-w-[360px] object-cover'
+                          : 'h-28 w-28 object-cover'
                     }
                   />
                 </button>

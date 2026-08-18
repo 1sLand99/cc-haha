@@ -62,6 +62,7 @@ type CandidateTarget = {
 type MarkdownLinkMatch = {
   title: string
   href: string
+  isImage: boolean
   start: number
   end: number
 }
@@ -108,7 +109,7 @@ export function extractAssistantOutputTargets(
   }
 
   for (const match of markdownLinks) {
-    const title = match.title
+    const authoredTitle = match.title
     const href = match.href
     const localhostTarget = toLocalhostTarget(href)
     const fileTarget = toWorkspaceFileTarget(href, workDir)
@@ -117,7 +118,7 @@ export function extractAssistantOutputTargets(
       continue
     }
 
-    if (!title) {
+    if (!authoredTitle && !(match.isImage && fileTarget?.kind === 'image')) {
       continue
     }
 
@@ -125,7 +126,7 @@ export function extractAssistantOutputTargets(
       queueTarget({
         id: createId(localhostTarget.kind, localhostTarget.href),
         kind: localhostTarget.kind,
-        title,
+        title: authoredTitle,
         href: localhostTarget.href,
         confidence: 'high',
         source: 'markdown-link',
@@ -136,6 +137,8 @@ export function extractAssistantOutputTargets(
     if (!fileTarget) {
       continue
     }
+
+    const title = authoredTitle || getBasename(fileTarget.normalizedPath)
 
     queueTarget({
       id: createId(fileTarget.kind, fileTarget.normalizedPath),
@@ -502,11 +505,13 @@ function extractMarkdownLinks(content: string): MarkdownLinkMatch[] {
     const title = content.slice(index + 1, labelEnd).trim()
     const rawDestination = content.slice(labelEnd + 2, destinationEnd)
     const href = normalizeMarkdownDestination(rawDestination)
+    const isImage = content[index - 1] === '!'
 
     matches.push({
       title,
       href,
-      start: index,
+      isImage,
+      start: isImage ? index - 1 : index,
       end: destinationEnd + 1,
     })
 
@@ -542,6 +547,12 @@ function findMarkdownDestinationEnd(content: string, start: number): number {
 
 function normalizeMarkdownDestination(destination: string): string {
   let normalized = destination.trim()
+  const titleMatch = normalized.match(
+    /^(.*\S)\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^)\\]|\\.)*\))\s*$/,
+  )
+  if (titleMatch?.[1]) {
+    normalized = titleMatch[1].trim()
+  }
 
   if (normalized.startsWith('<') && normalized.endsWith('>')) {
     normalized = normalized.slice(1, -1).trim()
