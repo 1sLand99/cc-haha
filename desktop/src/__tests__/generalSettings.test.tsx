@@ -2431,6 +2431,7 @@ describe('Settings > Providers tab', () => {
     fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }))
     const dialog = screen.getByRole('dialog')
     const disableBetasCheckbox = within(dialog).getByRole('checkbox', { name: 'Disable experimental beta headers' })
+    expect(within(dialog).getByText(/also disables reasoning effort forwarding/i)).toBeInTheDocument()
     const settingsTextarea = await waitFor(() => {
       const textarea = dialog.querySelector('textarea')
       expect(textarea?.value).toContain('"ANTHROPIC_MODEL"')

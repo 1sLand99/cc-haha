@@ -783,7 +783,7 @@ export const kr: Record<TranslationKey, string> = {
   'settings.providers.toolSearchConfirmRisk': 'LM Studio, Ollama 및 많은 타사 호환 엔드포인트는 HTTP 400을 반환하여 현재 세션을 계속할 수 없게 만들 수 있습니다.',
   'settings.providers.toolSearchConfirmEnable': '계속 사용',
   'settings.providers.disableExperimentalBetas': '실험적 Beta 헤더 비활성화',
-  'settings.providers.disableExperimentalBetasDesc': '이 공급자에 CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1을 설정해 타사 게이트웨이가 거부할 수 있는 beta API 형식을 피합니다.',
+  'settings.providers.disableExperimentalBetasDesc': '이 공급자에 CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1을 설정해 타사 게이트웨이가 거부할 수 있는 beta API 형식을 피합니다. Anthropic 호환 공급자에 직접 연결할 때는 추론 강도 전달도 비활성화되어 선택한 강도가 게이트웨이 기본값으로 돌아갑니다.',
   'settings.providers.imageGenerationEnabled': '이미지 생성 사용',
   'settings.providers.imageGenerationEnabledDesc': 'OpenAI 호환 Images API를 통해 채팅에서 이미지를 생성합니다. 인증 정보는 Skill이 아니라 공급자 설정에 저장됩니다.',
   'settings.providers.imageGenerationModel': '이미지 모델',

@@ -782,7 +782,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.providers.toolSearchConfirmRisk': 'LM Studio、Ollama 及许多第三方兼容接口可能返回 HTTP 400，并导致当前会话无法继续。',
   'settings.providers.toolSearchConfirmEnable': '仍然启用',
   'settings.providers.disableExperimentalBetas': '关闭实验性 Beta 头',
-  'settings.providers.disableExperimentalBetasDesc': '为此服务商设置 CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1，避免第三方通道拒绝 beta API 形态。',
+  'settings.providers.disableExperimentalBetasDesc': '为此服务商设置 CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1，避免第三方通道拒绝 beta API 形态。对于直连的 Anthropic 兼容服务商，这也会停止转发推理强度，已选强度将回退为通道默认值。',
   'settings.providers.imageGenerationEnabled': '启用图片生成',
   'settings.providers.imageGenerationEnabledDesc': '允许聊天通过 OpenAI 兼容的 Images API 生图。凭证保存在服务商设置中，不写进 Skill。',
   'settings.providers.imageGenerationModel': '生图模型',

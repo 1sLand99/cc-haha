@@ -6852,6 +6852,47 @@ describe('chatStore history mapping', () => {
     ).toBe('completed')
   })
 
+  it('settles a stale background Bash task when reconnect reports no active process', async () => {
+    vi.mocked(sessionsApi.getMessages).mockClear()
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [],
+      taskNotifications: [],
+    })
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          backgroundAgentTasks: {
+            bqngtpsp2: {
+              taskId: 'bqngtpsp2',
+              toolUseId: 'bash-tool-1',
+              status: 'running',
+              taskType: 'shell',
+              description: 'Background Bash command',
+              startedAt: 1,
+              updatedAt: 2,
+            },
+          },
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'session_state',
+      turnState: 'idle',
+      activeBackgroundTaskIds: [],
+    })
+
+    await vi.waitFor(() => {
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'idle')
+    })
+    expect(
+      useChatStore.getState().sessions[TEST_SESSION_ID]
+        ?.backgroundAgentTasks?.bqngtpsp2?.status,
+    ).toBe('completed')
+  })
+
   it('does not let an older persisted terminal overwrite a new lifecycle with the same Agent id', async () => {
     vi.mocked(sessionsApi.getMessages).mockClear()
     vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({

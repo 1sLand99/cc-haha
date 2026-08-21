@@ -783,7 +783,7 @@ export const jp: Record<TranslationKey, string> = {
   'settings.providers.toolSearchConfirmRisk': 'LM Studio、Ollama、および多くのサードパーティ互換エンドポイントでは HTTP 400 が返され、現在のセッションを継続できなくなる可能性があります。',
   'settings.providers.toolSearchConfirmEnable': '有効にする',
   'settings.providers.disableExperimentalBetas': '実験的な Beta ヘッダーを無効化',
-  'settings.providers.disableExperimentalBetasDesc': 'このプロバイダーに CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 を設定し、サードパーティゲートウェイが拒否する可能性のある beta API 形式を避けます。',
+  'settings.providers.disableExperimentalBetasDesc': 'このプロバイダーに CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 を設定し、サードパーティゲートウェイが拒否する可能性のある beta API 形式を避けます。Anthropic 互換プロバイダーへの直接接続では推論強度も転送されず、選択した強度はゲートウェイの既定値に戻ります。',
   'settings.providers.imageGenerationEnabled': '画像生成を有効にする',
   'settings.providers.imageGenerationEnabledDesc': 'OpenAI 互換 Images API を通じてチャットから画像を生成します。認証情報は Skill ではなくプロバイダー設定に保存されます。',
   'settings.providers.imageGenerationModel': '画像モデル',
