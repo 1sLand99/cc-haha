@@ -42,6 +42,11 @@ export type ExtractAssistantOutputTargetOptions = {
    * an empty array confirms the turn changed no files, so file targets are dropped.
    */
   changedFiles?: string[]
+  /**
+   * Whether generated artifacts from changedFiles may be appended when the prose
+   * did not mention them. Reconciliation still runs when false. Defaults to true.
+   */
+  includeChangedFileFallback?: boolean
 }
 
 type FileTargetMatch = {
@@ -257,7 +262,13 @@ export function extractAssistantOutputTargets(
   }
 
   if (options.changedFiles !== undefined) {
-    return reconcileTargetsWithChangedFiles(results, options.changedFiles, workDir, limit)
+    return reconcileTargetsWithChangedFiles(
+      results,
+      options.changedFiles,
+      workDir,
+      limit,
+      options.includeChangedFileFallback !== false,
+    )
   }
 
   return results
@@ -311,6 +322,7 @@ function reconcileTargetsWithChangedFiles(
   changedFiles: string[],
   workDir: string | null,
   limit: number,
+  includeChangedFileFallback: boolean,
 ): AssistantOutputTarget[] {
   if (limit <= 0) return []
 
@@ -362,6 +374,8 @@ function reconcileTargetsWithChangedFiles(
     })
     if (out.length >= limit) break
   }
+
+  if (!includeChangedFileFallback) return out
 
   // A generated document is still a deliverable when the assistant forgets to
   // repeat its path in the final prose. The checkpoint is upstream identity:

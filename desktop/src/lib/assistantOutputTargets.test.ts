@@ -330,6 +330,23 @@ describe('extractAssistantOutputTargets with changedFiles reconciliation', () =>
     expect(targets.some((target) => target.normalizedPath === 'src/main.ts')).toBe(false)
   })
 
+  it('reconciles mentioned paths without sweeping unmentioned artifacts for a non-owner reply', () => {
+    const targets = extractAssistantOutputTargets('正在处理 `index.html`。', {
+      workDir: '/work',
+      changedFiles: ['/work/app/index.html', '/work/reports/brief.docx'],
+      includeChangedFileFallback: false,
+    })
+
+    expect(targets).toMatchObject([
+      {
+        kind: 'local-html',
+        href: 'app/index.html',
+        normalizedPath: 'app/index.html',
+      },
+    ])
+    expect(targets.some((target) => target.normalizedPath === 'reports/brief.docx')).toBe(false)
+  })
+
   it('corrects a bare mention to the real changed path in a subfolder', () => {
     // The reported bug: the model writes /private/tmp/todo-app/index.html but the
     // prose only says `index.html`, so the chip used to point at the (missing)

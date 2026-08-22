@@ -6871,6 +6871,161 @@ describe('MessageList nested tool calls', () => {
     })
   })
 
+  it('assigns changed-file output fallback to only the final assistant text in a turn', async () => {
+    const generatedPath = '/private/tmp/ink-survey-philosophy.md'
+    vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
+      checkpoints: [
+        {
+          target: {
+            targetUserMessageId: 'transcript-user-1',
+            userMessageIndex: 0,
+            userMessageCount: 1,
+          },
+          workDir: '/private/tmp',
+          code: {
+            available: true,
+            filesChanged: [generatedPath],
+            insertions: 15,
+            deletions: 0,
+          },
+        },
+      ],
+    })
+
+    render(<MessageList sessionId={ACTIVE_TAB} />)
+    const store = useChatStore.getState()
+
+    act(() => {
+      store.sendMessage(ACTIVE_TAB, 'Create one Markdown document')
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_start',
+        blockType: 'tool_use',
+        toolName: 'Skill',
+        toolUseId: 'skill-1',
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'tool_use_complete',
+        toolName: 'Skill',
+        toolUseId: 'skill-1',
+        input: { skill: 'imagegen' },
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'tool_result',
+        toolUseId: 'skill-1',
+        content: 'Launching skill: imagegen',
+        isError: false,
+      })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_delta', text: 'SKILL_PROGRESS' })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_start',
+        blockType: 'tool_use',
+        toolName: 'ToolSearch',
+        toolUseId: 'search-1',
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'tool_use_complete',
+        toolName: 'ToolSearch',
+        toolUseId: 'search-1',
+        input: { query: 'select:ImageGen' },
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'tool_result',
+        toolUseId: 'search-1',
+        content: 'ImageGen',
+        isError: false,
+      })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_delta', text: 'TOOLSEARCH_PROGRESS' })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_start',
+        blockType: 'tool_use',
+        toolName: 'Write',
+        toolUseId: 'write-1',
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'tool_use_complete',
+        toolName: 'Write',
+        toolUseId: 'write-1',
+        input: { file_path: generatedPath, content: '# 墨痕测绘' },
+      })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'tool_result',
+        toolUseId: 'write-1',
+        content: `File created successfully at: ${generatedPath}`,
+        isError: false,
+      })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_delta',
+        text: `FINAL_DELIVERY\n\n\`${generatedPath}\``,
+      })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+    })
+
+    const turnCard = await screen.findByLabelText('Turn changed files')
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'Open' })).toHaveLength(1)
+    })
+
+    const firstProgressItem = screen.getByText('SKILL_PROGRESS').closest('[data-chat-render-item-key]')
+    const secondProgressItem = screen.getByText('TOOLSEARCH_PROGRESS').closest('[data-chat-render-item-key]')
+    const finalItem = screen.getByText('FINAL_DELIVERY').closest('[data-chat-render-item-key]')
+    expect(firstProgressItem).not.toBeNull()
+    expect(secondProgressItem).not.toBeNull()
+    expect(finalItem).not.toBeNull()
+    expect(within(firstProgressItem as HTMLElement).queryByRole('button', { name: 'Open' })).toBeNull()
+    expect(within(secondProgressItem as HTMLElement).queryByRole('button', { name: 'Open' })).toBeNull()
+    expect(within(finalItem as HTMLElement).getByRole('button', { name: 'Open' })).toBeTruthy()
+    expect(within(turnCard).getByText('ink-survey-philosophy.md')).toBeTruthy()
+  })
+
+  it('keeps one output card per turn when separate turns generate the same path', async () => {
+    const generatedPath = '/private/tmp/repeated-report.md'
+    vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
+      checkpoints: [0, 1].map((userMessageIndex) => ({
+        target: {
+          targetUserMessageId: `transcript-user-${userMessageIndex + 1}`,
+          userMessageIndex,
+          userMessageCount: 2,
+        },
+        workDir: '/private/tmp',
+        code: {
+          available: true,
+          filesChanged: [generatedPath],
+          insertions: 1,
+          deletions: 0,
+        },
+      })),
+    })
+
+    render(<MessageList sessionId={ACTIVE_TAB} />)
+    const store = useChatStore.getState()
+
+    act(() => {
+      store.sendMessage(ACTIVE_TAB, 'Generate the first report')
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_delta',
+        text: 'FIRST_REPORT',
+      })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+
+      store.sendMessage(ACTIVE_TAB, 'Update the same report again')
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_delta',
+        text: 'SECOND_REPORT',
+      })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+    })
+
+    expect(await screen.findAllByLabelText('Turn changed files')).toHaveLength(2)
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: 'Open' })).toHaveLength(2)
+    })
+  })
+
   it('keeps an inline absolute image when the turn checkpoint recorded no tracked changes', async () => {
     // Regression: Bash-written files (e.g. a PIL render at /tmp/result.png) are
     // invisible to the checkpoint, so filesChanged=[] must NOT hide the image.

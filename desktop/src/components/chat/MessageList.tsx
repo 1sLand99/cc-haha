@@ -1307,6 +1307,41 @@ function buildChangedFilesByRenderIndex(
 }
 
 /**
+ * Pick one assistant message per checkpointed turn to own generated-artifact
+ * fallback cards. Every assistant message still receives changedFiles for path
+ * reconciliation; only the last visible reply may append files absent from its
+ * prose, otherwise each progress update repeats the same turn-wide artifacts.
+ */
+function buildTurnOutputOwnerIndexes(
+  renderItems: RenderItem[],
+  turnChangeCards: TurnChangeCardModel[],
+): Set<number> {
+  const checkpointTurnIds = new Set(
+    turnChangeCards.map((card) => card.target.messageId),
+  )
+  if (checkpointTurnIds.size === 0) return new Set()
+
+  const lastAssistantIndexByTurnId = new Map<string, number>()
+  let activeTurnId: string | null = null
+  renderItems.forEach((item, index) => {
+    if (item.kind === 'message' && item.message.type === 'user_text' && !item.message.pending) {
+      activeTurnId = item.message.id
+      return
+    }
+    if (
+      activeTurnId &&
+      checkpointTurnIds.has(activeTurnId) &&
+      item.kind === 'message' &&
+      item.message.type === 'assistant_text'
+    ) {
+      lastAssistantIndexByTurnId.set(activeTurnId, index)
+    }
+  })
+
+  return new Set(lastAssistantIndexByTurnId.values())
+}
+
+/**
  * Where a render item sits inside its turn, which is what decides its spacing.
  *
  * `none` is the user bubble: it opens an exchange, so it carries the large gap
@@ -1320,10 +1355,11 @@ export type TurnRailPosition = 'none' | 'start' | 'middle' | 'end' | 'solo'
 /**
  * Rail position for every render item, indexed alongside `renderItems`.
  *
- * Deliberately breaks on EVERY `user_text`, unlike the three turn walks above
+ * Deliberately breaks on EVERY `user_text`, unlike the turn-attribution walks above
  * (`buildTurnCardInsertionMap`, `buildChangedFilesByRenderIndex`,
- * `getBranchableMessageTargets`) which skip `pending` ones. Those answer "which
- * turn owns this checkpoint", and a member session's pending echo must not steal
+ * `buildTurnOutputOwnerIndexes`, `getBranchableMessageTargets`) which skip
+ * `pending` ones. Those answer "which turn owns this checkpoint", and a member
+ * session's pending echo must not steal
  * ownership. This answers "where does the line stop", and a pending message still
  * renders as a visible right-aligned bubble (see the `user_text` case in
  * `MessageBlock`) — a bubble mid-column is a break whatever it means for
@@ -2796,6 +2832,10 @@ export function MessageList({
     () => buildChangedFilesByRenderIndex(renderItems, turnChangeCards),
     [renderItems, turnChangeCards],
   )
+  const turnOutputOwnerIndexes = useMemo(
+    () => buildTurnOutputOwnerIndexes(renderItems, turnChangeCards),
+    [renderItems, turnChangeCards],
+  )
   const hasTrailingStreamingItem = streamingText.trim().length > 0
   const turnRailPositions = useMemo(
     () => buildTurnRailPositions(renderItems, { hasTrailingStreamingItem }),
@@ -3459,6 +3499,7 @@ export function MessageList({
             }
             branchAction={branchActionByMessageId.get(item.message.id)}
             turnChangedFiles={changedFilesByRenderIndex.get(index)}
+            isTurnOutputOwner={turnOutputOwnerIndexes.has(index)}
             turnCompletion={turnCompletionByMessageId.get(item.message.id)}
           />
         )}
@@ -3628,6 +3669,7 @@ export const MessageBlock = memo(function MessageBlock({
   toolResult,
   branchAction,
   turnChangedFiles,
+  isTurnOutputOwner,
   turnCompletion,
 }: {
   sessionId?: string | null
@@ -3642,6 +3684,7 @@ export const MessageBlock = memo(function MessageBlock({
     onBranch: () => void
   }
   turnChangedFiles?: string[]
+  isTurnOutputOwner?: boolean
   turnCompletion?: TurnCompletion
 }) {
   const t = useTranslation()
@@ -3693,6 +3736,7 @@ export const MessageBlock = memo(function MessageBlock({
             branchAction={branchAction}
             sessionId={sessionId ?? undefined}
             turnChangedFiles={turnChangedFiles}
+            isTurnOutputOwner={isTurnOutputOwner}
             turnCompletion={turnCompletion}
           />
         </SelectableChatMessage>
