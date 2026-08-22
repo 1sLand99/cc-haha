@@ -8,7 +8,10 @@ describe('openTargetsApi', () => {
     vi.restoreAllMocks()
   })
 
-  it('normalizes relative icon URLs to the configured desktop server URL', async () => {
+  it('keeps the icon path server-relative so it is fetched through the credential path', async () => {
+    // Absolute URLs only existed to feed an `<img src>`, and that shape is exactly
+    // what the server's fetch-metadata policy rejects: a cross-origin no-cors
+    // subresource carries no Authorization header and comes back 401.
     const fetchMock = vi.spyOn(globalThis, 'fetch')
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       platform: 'darwin',
@@ -36,7 +39,7 @@ describe('openTargetsApi', () => {
       targets: [
         {
           id: 'vscode',
-          iconUrl: 'http://127.0.0.1:49237/api/open-targets/icons/vscode',
+          iconUrl: '/api/open-targets/icons/vscode',
         },
       ],
     })

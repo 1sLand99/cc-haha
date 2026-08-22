@@ -79,7 +79,7 @@ describe('WorkspaceFileOpenWith', () => {
     const labels = getAllByRole('menuitem').map((el) => el.textContent)
     expect(labels).toHaveLength(4)
     expect(labels.some((l) => l?.includes('VS Code'))).toBe(true)
-    expect(labels.some((l) => l?.includes('Finder'))).toBe(true)
+    expect(labels.some((l) => l?.includes('openWith.revealIn.darwin'))).toBe(true)
     // Added with #1146. "Copy path" is deliberately absent: WorkspacePanel
     // already renders its own copy-path pair directly above this block.
     expect(labels).toContain('openWith.copyFileContent')
@@ -135,7 +135,7 @@ describe('WorkspaceFileOpenWith', () => {
     expect(labels.some((l) => l?.includes('openWith.workspacePreview'))).toBe(true)
     expect(labels.some((l) => l?.includes('openWith.inAppBrowser'))).toBe(true)
     expect(labels.some((l) => l?.includes('VS Code'))).toBe(true)
-    expect(labels.some((l) => l?.includes('Finder'))).toBe(true)
+    expect(labels.some((l) => l?.includes('openWith.revealIn.darwin'))).toBe(true)
   })
 
   it('opens the in-app browser preview URL from workspace html files', () => {

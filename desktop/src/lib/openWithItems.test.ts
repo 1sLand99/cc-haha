@@ -166,20 +166,161 @@ describe('buildOpenWithItems – file context with targets', () => {
     expect(deps.openSystem).toHaveBeenCalledWith('/w/a.md')
   })
 
-  it('offers path-specific native applications before system default for a binary document', () => {
+  it('names the default application on the system-default row instead of listing it twice', () => {
     const deps = makeDeps()
     const ctx: OpenWithContext = { kind: 'file', absolutePath: '/w/brief.docx', previewable: false }
 
     const items = buildOpenWithItems(ctx, [appTarget, systemTarget, ideTarget, fmTarget], deps)
+    const system = items.find((item) => item.id === 'system')!
 
-    expect(items.map((item) => item.id)).toEqual([
-      'app:application:pages',
-      'system',
-      'ide:code',
-      'fm:finder',
+    expect(system.label).toBe('openWith.openInDefaultTarget:Pages')
+    // Its icon comes from the application, so the row reads as that application.
+    expect(system.target).toBe(appTarget)
+    // ...and the application does not also appear as a row of its own.
+    expect(items.some((item) => item.id === 'app:application:pages')).toBe(false)
+  })
+
+  it('still launches the named default row through the guarded system-default target', () => {
+    // The label is cosmetic. Routing it through the application target instead
+    // would skip the check that refuses to hand an executable to the shell.
+    const deps = makeDeps()
+    const ctx: OpenWithContext = { kind: 'file', absolutePath: '/w/brief.docx', previewable: false }
+
+    const items = buildOpenWithItems(ctx, [appTarget, systemTarget, ideTarget, fmTarget], deps)
+    items.find((item) => item.id === 'system')!.onSelect()
+
+    expect(deps.openTarget).toHaveBeenCalledWith('system-default', '/w/brief.docx')
+  })
+
+  it('keeps the generic system-default row when no application is marked default', () => {
+    // Windows and Linux never report one, so that path has to stay untouched.
+    const deps = makeDeps()
+    const ctx: OpenWithContext = { kind: 'file', absolutePath: '/w/brief.docx', previewable: false }
+    const nonDefaultApp: OpenTarget = { ...appTarget, isDefault: false }
+
+    const items = buildOpenWithItems(ctx, [nonDefaultApp, systemTarget, fmTarget], deps)
+
+    expect(items.map((item) => item.id)).toEqual(['system', 'app:application:pages', 'fm:finder'])
+    expect(items[0]!.label).toBe('openWith.systemDefault')
+  })
+
+  it('offers no editor for a file an editor cannot meaningfully open', () => {
+    const deps = makeDeps()
+    const editors = [ideTarget, { ...ideTarget, id: 'sublime', label: 'Sublime Text' }]
+
+    const binary = buildOpenWithItems(
+      { kind: 'file', absolutePath: '/w/brief.docx', previewable: false },
+      [systemTarget, ...editors, fmTarget],
+      deps,
+    )
+    expect(binary.some((item) => item.id.startsWith('ide:'))).toBe(false)
+
+    const source = buildOpenWithItems(
+      { kind: 'file', absolutePath: '/w/app.py', relPath: 'app.py', previewable: true },
+      [systemTarget, ...editors, fmTarget],
+      deps,
+    )
+    expect(source.filter((item) => item.id.startsWith('ide:')).length).toBeGreaterThan(0)
+  })
+
+  it('puts the configured editor first, and otherwise the first detected one', () => {
+    const deps = makeDeps()
+    const ctx: OpenWithContext = { kind: 'file', absolutePath: '/w/app.py', relPath: 'app.py', previewable: true }
+    const sublime: OpenTarget = { ...ideTarget, id: 'sublime', label: 'Sublime Text' }
+
+    const byDefault = buildOpenWithItems(ctx, [systemTarget, ideTarget, sublime, fmTarget], deps)
+    expect(byDefault.filter((item) => item.id.startsWith('ide:'))[0]!.id).toBe('ide:code')
+
+    const configured = buildOpenWithItems(
+      ctx,
+      [systemTarget, ideTarget, sublime, fmTarget],
+      { ...deps, preferredEditorTargetId: 'sublime' },
+    )
+    expect(configured.filter((item) => item.id.startsWith('ide:'))[0]!.id).toBe('ide:sublime')
+    // ...and no editor is listed twice once the rest fill in behind it.
+    const ids = configured.map((item) => item.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('gives the editors only the room the associated applications leave', () => {
+    // macOS fills this group with LaunchServices results, so one editor is all
+    // that fits. Windows and Linux have no such list, and there the other
+    // installed editors would otherwise be dropped for nothing.
+    const deps = makeDeps()
+    const ctx: OpenWithContext = { kind: 'file', absolutePath: '/w/app.py', relPath: 'app.py', previewable: true }
+    const editors: OpenTarget[] = ['code', 'sublime', 'goland', 'pycharm']
+      .map((id) => ({ ...ideTarget, id, label: id }))
+    const apps: OpenTarget[] = ['a', 'b', 'c', 'd']
+      .map((id) => ({ ...appTarget, id: `application:${id}`, label: id, isDefault: false }))
+
+    const crowded = buildOpenWithItems(ctx, [appTarget, systemTarget, ...apps, ...editors, fmTarget], deps)
+    const crowdedGroup = crowded.filter((item) => item.id === 'system' || /^(ide|app):/.test(item.id))
+    expect(crowdedGroup).toHaveLength(6)
+    expect(crowdedGroup.filter((item) => item.id.startsWith('ide:'))).toHaveLength(1)
+
+    const roomy = buildOpenWithItems(ctx, [systemTarget, ...editors, fmTarget], deps)
+    expect(roomy.filter((item) => item.id.startsWith('ide:')).map((item) => item.id))
+      .toEqual(['ide:code', 'ide:sublime', 'ide:goland', 'ide:pycharm'])
+  })
+
+  it('names the file manager after the platform, not after the server label', () => {
+    // The server label is a bare identifier with no locale behind it, so
+    // interpolating it produced "在 Explorer 中显示" on Windows — an English name
+    // inside a Chinese sentence, and not the name Windows uses.
+    const deps = makeDeps()
+    const ctx: OpenWithContext = { kind: 'file', absolutePath: '/w/app.py', relPath: 'app.py', previewable: true }
+    const revealLabel = (platform: OpenTarget['platform'], id: string, label: string) => {
+      const fm: OpenTarget = { id, kind: 'file_manager', label, icon: 'folder', platform }
+      return buildOpenWithItems(ctx, [fm], deps).find((item) => item.id === `fm:${id}`)!.label
+    }
+
+    expect(revealLabel('darwin', 'finder', 'Finder')).toBe('openWith.revealIn.darwin')
+    expect(revealLabel('win32', 'explorer', 'Explorer')).toBe('openWith.revealIn.win32')
+    expect(revealLabel('linux', 'file-manager', 'File Manager')).toBe('openWith.revealIn.linux')
+    expect(revealLabel('freebsd', 'file-manager', 'File Manager')).toBe('openWith.revealIn.default')
+  })
+
+  it('builds the whole Windows menu, where no application is ever discovered', () => {
+    // `discoverNativeApplications` returns nothing off macOS, so Windows and Linux
+    // never get a named default row — that path has to keep working untouched.
+    const deps = makeDeps({ copyPath: vi.fn(), copyFileContent: vi.fn() })
+    const windowsTargets: OpenTarget[] = [
+      { id: 'system-default', kind: 'system_default', label: 'System default', icon: 'system', platform: 'win32' },
+      { id: 'vscode', kind: 'ide', label: 'VS Code', icon: 'vscode', platform: 'win32' },
+      { id: 'pycharm', kind: 'ide', label: 'PyCharm', icon: 'pycharm', platform: 'win32' },
+      { id: 'explorer', kind: 'file_manager', label: 'Explorer', icon: 'folder', platform: 'win32' },
+    ]
+
+    // Real Windows paths, backslashes and all — that is what the server hands back,
+    // and the file-type gate has to read the extension off them.
+    const source = buildOpenWithItems(
+      { kind: 'file', absolutePath: 'C:\\w\\app.py', relPath: 'app.py', previewable: true },
+      windowsTargets,
+      deps,
+    )
+    expect(source.map((item) => item.id)).toEqual([
+      'preview', 'system', 'ide:vscode', 'ide:pycharm', 'copy-path', 'copy-content', 'fm:explorer',
     ])
-    items[0]!.onSelect()
-    expect(deps.openTarget).toHaveBeenCalledWith('application:pages', '/w/brief.docx')
+    expect(source.find((item) => item.id === 'system')!.label).toBe('openWith.systemDefault')
+
+    // ...and the editor gate is platform-independent, so a Windows PDF drops it too.
+    for (const absolutePath of ['C:\\w\\report.pdf', '\\\\server\\share\\brief.docx']) {
+      const binary = buildOpenWithItems({ kind: 'file', absolutePath, previewable: false }, windowsTargets, deps)
+      expect(binary.some((item) => item.id.startsWith('ide:'))).toBe(false)
+      expect(binary.find((item) => item.id === 'system')!.label).toBe('openWith.systemDefault')
+    }
+  })
+
+  it('rules a line between the open, copy and reveal groups', () => {
+    const deps = makeDeps({ copyPath: vi.fn(), copyFileContent: vi.fn() })
+    const ctx: OpenWithContext = { kind: 'file', absolutePath: '/w/app.py', relPath: 'app.py', previewable: true }
+
+    const items = buildOpenWithItems(ctx, [systemTarget, ideTarget, fmTarget], deps)
+
+    expect(items.filter((item) => item.separatorBefore).map((item) => item.id))
+      .toEqual(['system', 'copy-path', 'fm:finder'])
+    // Never above the first row — there is nothing to separate it from.
+    expect(items[0]!.separatorBefore).toBeUndefined()
   })
 
   it('ide item carries the target object', () => {

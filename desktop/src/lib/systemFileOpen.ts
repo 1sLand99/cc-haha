@@ -1,5 +1,20 @@
 import { openTargetsApi } from '../api/openTargets'
 import { getDesktopHost } from './desktopHost'
+import { t } from '../i18n'
+import { useUIStore } from '../stores/uiStore'
+
+/**
+ * Say that a path could not be opened, naming it.
+ *
+ * Every one of these paths comes from something the assistant wrote — prose, a
+ * checkpoint, a directory listing — and any of them can outlive the file. The
+ * failures used to land in floating promises, so a click on a stale reference
+ * did nothing at all and read as a broken button.
+ */
+export function reportOpenFailure(path: string): void {
+  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path
+  useUIStore.getState().addToast({ type: 'error', message: t('openWith.openFailed', { name }) })
+}
 
 export function resolveAbsoluteOpenPath(path: string, workDir?: string): string {
   if (path === '~' || path.startsWith('~/') || path.startsWith('~\\')) return path

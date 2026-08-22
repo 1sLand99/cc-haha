@@ -5,17 +5,17 @@ import type { SessionTurnCheckpoint } from '../../api/sessions'
 import { useTranslation, type TranslationKey } from '../../i18n'
 import { Button } from '@/components/ui/Button'
 import { OpenWithMenu } from '@/components/composite/OpenWithMenu'
-import { buildOpenWithItems, describeFileType, isPreviewableChangedFile, type OpenWithItem } from '../../lib/openWithItems'
+import { describeFileType, isPreviewableChangedFile, type OpenWithItem } from '../../lib/openWithItems'
+import { buildOpenWithMenuItems } from '../../lib/openWithMenuItems'
 import { openWithContextForWorkspaceFile } from '../../lib/openWithContextForHref'
 import { isAbsoluteLocalPath, localFileUrl } from '../../lib/handlePreviewLink'
 import { shouldOfferStaticHtmlPreview } from '../../lib/htmlPreviewPolicy'
 import { getServerBaseUrl } from '../../lib/desktopRuntime'
-import { getDesktopHost } from '../../lib/desktopHost'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { useBrowserPanelStore } from '../../stores/browserPanelStore'
 import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
 import { isWorkspacePreviewableFile } from '../../lib/fileCapabilities'
-import { openLocalFileWithSystem } from '../../lib/systemFileOpen'
+import { openLocalFileWithSystem, reportOpenFailure } from '../../lib/systemFileOpen'
 
 type CurrentTurnChangeCardProps = {
   sessionId: string
@@ -75,7 +75,7 @@ export function CurrentTurnChangeCard({
       sourceElementId: event.currentTarget.id,
     }
     if (!isWorkspacePreviewableFile(fileEntry.displayPath)) {
-      void openLocalFileWithSystem(fileEntry.apiPath)
+      void openLocalFileWithSystem(fileEntry.apiPath).catch(() => reportOpenFailure(fileEntry.apiPath))
       return
     }
     // A changed file outside the workdir (absolute displayPath — e.g. another
@@ -114,11 +114,11 @@ export function CurrentTurnChangeCard({
         serverBaseUrl: getServerBaseUrl(),
         siblingFiles: files.map((entry) => entry.displayPath),
       })
-      const items = buildOpenWithItems(ctx, targets, {
-        openInAppBrowser: (url) => useBrowserPanelStore.getState().open(sessionId, url),
-        openSystem: (p) => { void getDesktopHost().shell.openPath(p).catch(() => {}) },
-        openWorkspacePreview: (rel) => { void useWorkspacePanelStore.getState().openPreview(sessionId, rel, 'file') },
-        openTarget: (id, abs) => { void useOpenTargetStore.getState().openTarget(id, abs) },
+      // The shared dependency factory, not a fourth hand-copied set: this call
+      // site was the one that never adopted it, which is why the changed-file
+      // menu was missing the copy entries every other surface has.
+      const items = buildOpenWithMenuItems(ctx, targets, {
+        sessionId,
         t: (k, v) => t(k as TranslationKey, v),
       })
       setOpenWith({ items, anchor: rect, triggerEl })

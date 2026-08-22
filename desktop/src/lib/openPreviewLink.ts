@@ -3,7 +3,7 @@ import { getServerBaseUrl } from './desktopRuntime'
 import { getDesktopHost } from './desktopHost'
 import { useBrowserPanelStore } from '../stores/browserPanelStore'
 import { useWorkspacePanelStore } from '../stores/workspacePanelStore'
-import { openLocalFileWithSystem, resolveAbsoluteOpenPath } from './systemFileOpen'
+import { openLocalFileWithSystem, reportOpenFailure, resolveAbsoluteOpenPath } from './systemFileOpen'
 
 /**
  * Route a clicked link the way the chat surface always has: a loopback URL opens
@@ -26,7 +26,8 @@ export function openPreviewLink(href: string, sessionId: string): boolean {
     },
     openSystemFile: (path) => {
       const workDir = useWorkspacePanelStore.getState().statusBySession[sessionId]?.workDir
-      void openLocalFileWithSystem(resolveAbsoluteOpenPath(path, workDir))
+      const absolutePath = resolveAbsoluteOpenPath(path, workDir)
+      void openLocalFileWithSystem(absolutePath).catch(() => reportOpenFailure(absolutePath))
     },
     openExternal: (url) => {
       void getDesktopHost().shell.open(url)

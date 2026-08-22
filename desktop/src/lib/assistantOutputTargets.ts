@@ -1,6 +1,6 @@
 import { trimTrailingPunctuation } from './urlBoundary'
 import { isLinkableFilePath, splitTextByFilePaths } from './filePathBoundary'
-import { isGeneratedArtifactFile, isOutputResourceFile } from './fileCapabilities'
+import { isGeneratedArtifactFile, isOutputResourceFile, isShellProducedDeliverable } from './fileCapabilities'
 
 export type AssistantOutputTargetKind =
   | 'local-html'
@@ -34,8 +34,10 @@ export type ExtractAssistantOutputTargetOptions = {
    * The turn's REAL changed files (absolute paths from the turn checkpoint). When
    * provided, file chips are reconciled against this ground truth: a mentioned
    * file is corrected to the actual changed path (so `index.html` resolves to the
-   * `todo-app/index.html` that was really written), and a mentioned file that the
-   * turn never changed is dropped instead of pointing at a non-existent path.
+   * `todo-app/index.html` that was really written), and a mentioned source file
+   * that the turn never changed is dropped instead of pointing at a non-existent
+   * path. A mentioned *document deliverable* survives an unmatched lookup, because
+   * the checkpoint cannot see files a shell command wrote.
    * Localhost URLs are unaffected. Omitted → fall back to text-only behavior;
    * an empty array confirms the turn changed no files, so file targets are dropped.
    */
@@ -262,11 +264,47 @@ export function extractAssistantOutputTargets(
 }
 
 /**
+ * Place a bare filename in the directory this turn actually wrote into.
+ *
+ * A deliverable is usually named without one — the prose says where the batch
+ * went once ("都在 /private/tmp/three_docs/") and then lists basenames in a
+ * table. Resolved against the work dir instead, every one of those points at a
+ * file that is not there, and the card is dead on arrival.
+ *
+ * The changed files are the evidence: whatever the shell command wrote, it wrote
+ * next to the script the turn also created. Only used when every changed file
+ * agrees on one directory — with the turn spread across several there is nothing
+ * to infer, and guessing would produce the same dead card less predictably.
+ */
+function anchorToChangedDirectory(mentioned: string, changedFiles: string[]): string {
+  if (/[\\/]/.test(mentioned)) return mentioned
+
+  const directories = new Set(changedFiles.map((file) => {
+    const posix = toPosixPath(file)
+    const cut = posix.lastIndexOf('/')
+    return cut === -1 ? '' : posix.slice(0, cut)
+  }))
+  if (directories.size !== 1) return mentioned
+
+  const [directory] = [...directories]
+  return directory ? `${directory}/${mentioned}` : mentioned
+}
+
+/** Express a changed file relative to the work dir, when it lives inside one. */
+function correctedChangedFilePath(changedFile: string, workDir: string | null): string {
+  const resolved = resolveFilePath(changedFile)
+  return workDir && isWithinWorkDir(resolved, workDir)
+    ? relativeFilePath(workDir, resolved)
+    : toPosixPath(changedFile)
+}
+
+/**
  * Re-anchor file chips onto the turn's real changed files. A mentioned file that
  * matches a changed file (by exact relative-path suffix, else by basename) is
- * rewritten to that real path; a mentioned file with no match is dropped so we
- * never render a chip that opens "file does not exist". Localhost URLs pass
- * through untouched.
+ * rewritten to that real path; a mentioned source file with no match is dropped
+ * so we never render a chip that opens "file does not exist". A document
+ * deliverable is the documented exception — see the comment at the drop.
+ * Localhost URLs pass through untouched.
  */
 function reconcileTargetsWithChangedFiles(
   targets: AssistantOutputTarget[],
@@ -288,14 +326,27 @@ function reconcileTargetsWithChangedFiles(
 
     const mentioned = target.normalizedPath ?? target.href
     const match = matchChangedFile(mentioned, changedFiles)
-    if (!match) {
+    // A deliverable produced by a shell command is never in `changedFiles` — the
+    // checkpoint only records the file-editing tools. When the turn *also* edited
+    // a tracked file, that list is non-empty and every unmatched mention was being
+    // dropped, so `Write plan.md` plus `python make_report.py` lost the report.
+    //
+    // Two things keep this from resurrecting the mentions reconciliation exists to
+    // drop. It needs a non-empty list, which is this function's documented "the
+    // turn changed nothing" signal; and it needs a format nothing reads as source,
+    // so "I'm about to look at notes.md" stays a mention rather than becoming a
+    // deliverable.
+    //
+    // The trade: an unmatched path cannot be corrected, so such a card may point
+    // at a file that is not there. Bounded to a closed set of document formats.
+    // Source files keep the old behavior, which is what this was written for.
+    if (!match && !(changedFiles.length > 0 && isShellProducedDeliverable(mentioned))) {
       continue
     }
 
-    const resolvedMatch = resolveFilePath(match)
-    const corrected = workDir && isWithinWorkDir(resolvedMatch, workDir)
-      ? relativeFilePath(workDir, resolvedMatch)
-      : toPosixPath(match)
+    const corrected = match
+      ? correctedChangedFilePath(match, workDir)
+      : correctedChangedFilePath(anchorToChangedDirectory(mentioned, changedFiles), workDir)
 
     const key = `${target.kind}:${corrected}`
     if (seen.has(key)) {
@@ -319,10 +370,7 @@ function reconcileTargetsWithChangedFiles(
     if (out.length >= limit) break
     if (!isGeneratedArtifactFile(changedFile)) continue
 
-    const resolved = resolveFilePath(changedFile)
-    const corrected = workDir && isWithinWorkDir(resolved, workDir)
-      ? relativeFilePath(workDir, resolved)
-      : toPosixPath(changedFile)
+    const corrected = correctedChangedFilePath(changedFile, workDir)
     const kind = classifyFileTarget(corrected) ?? 'file'
     const key = `${kind}:${corrected}`
     if (seen.has(key)) continue

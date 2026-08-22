@@ -398,6 +398,86 @@ describe('extractAssistantOutputTargets with changedFiles reconciliation', () =>
     })
   })
 
+  it('keeps a generated document the turn wrote through a shell command', () => {
+    // `Write plan.md` plus `python make_report.py`: the checkpoint records only
+    // the first, so reconciling the mention of the second against it used to drop
+    // the actual deliverable.
+    const targets = extractAssistantOutputTargets(
+      '计划见 plan.md，报告已生成：out/report.docx',
+      { workDir: '/w', changedFiles: ['/w/plan.md'] },
+    )
+
+    expect(targets.map((target) => target.normalizedPath))
+      .toEqual(['plan.md', 'out/report.docx'])
+  })
+
+  it('places a bare deliverable name in the directory the turn actually wrote into', () => {
+    // The real shape of a "generate three documents" turn: the prose gives the
+    // directory once and then lists basenames. Resolved against the work dir those
+    // point nowhere, and the card renders but cannot be opened.
+    const targets = extractAssistantOutputTargets(
+      '三个文档已完成，都在 /private/tmp/three_docs/：`sales_data.xlsx`、`sales_report.docx`',
+      {
+        workDir: '/private/tmp',
+        changedFiles: ['/private/tmp/three_docs/make_xlsx.py', '/private/tmp/three_docs/make_docx.js'],
+      },
+    )
+
+    expect(targets.map((target) => target.normalizedPath))
+      .toEqual(['three_docs/sales_data.xlsx', 'three_docs/sales_report.docx'])
+  })
+
+  it('leaves a bare name alone when the turn wrote into more than one directory', () => {
+    // Two candidate directories is no evidence at all, and picking one would give
+    // the same dead card less predictably.
+    const targets = extractAssistantOutputTargets(
+      '产出：`report.docx`',
+      { workDir: '/w', changedFiles: ['/w/a/make.py', '/w/b/other.py'] },
+    )
+
+    expect(targets.map((target) => target.normalizedPath)).toEqual(['report.docx'])
+  })
+
+  it('does not re-anchor a deliverable that already carries a directory', () => {
+    const targets = extractAssistantOutputTargets(
+      '产出：`out/report.docx`',
+      { workDir: '/w', changedFiles: ['/w/scripts/make.py'] },
+    )
+
+    expect(targets.map((target) => target.normalizedPath)).toEqual(['out/report.docx'])
+  })
+
+  it('still drops an unmatched markdown mention, which is as often a file being read', () => {
+    // Markdown is a deliverable *and* the format this product reads all day, so a
+    // mention of one carries no evidence that the turn produced it.
+    const targets = extractAssistantOutputTargets(
+      '我正准备查看 test123.md',
+      { workDir: '/w', changedFiles: ['/w/src/first.ts'] },
+    )
+
+    expect(targets).toEqual([])
+  })
+
+  it('still drops an unmatched source file, so reconciliation keeps doing its job', () => {
+    const targets = extractAssistantOutputTargets(
+      '改了 plan.md，也看了 src/helper.ts',
+      { workDir: '/w', changedFiles: ['/w/plan.md'] },
+    )
+
+    expect(targets.map((target) => target.normalizedPath)).toEqual(['plan.md'])
+  })
+
+  it('does not list a generated document twice when it is also a changed file', () => {
+    // The mention and the changed-file sweep must share one seen-set, or the
+    // document gets a card from each.
+    const targets = extractAssistantOutputTargets(
+      '报告已生成：report.docx',
+      { workDir: '/w', changedFiles: ['/w/report.docx'] },
+    )
+
+    expect(targets.map((target) => target.normalizedPath)).toEqual(['report.docx'])
+  })
+
   it('drops file mentions when changedFiles explicitly confirms no files changed', () => {
     const targets = extractAssistantOutputTargets(
       '我正准备查看 test123.md，服务地址是 http://localhost:5173/',

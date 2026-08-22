@@ -205,8 +205,8 @@ describe('AttachmentGallery', () => {
       <AttachmentGallery
         attachments={[{
           type: 'file',
-          name: 'report.pdf',
-          path: '/Users/example/Desktop/report.pdf',
+          name: 'notes.md',
+          path: '/Users/example/Desktop/notes.md',
         }]}
       />,
     )
@@ -217,6 +217,23 @@ describe('AttachmentGallery', () => {
     expect(view.getByText('Default application')).toBeInTheDocument()
     expect(view.getByText('Reveal in Finder')).toBeInTheDocument()
     expect(openPath).not.toHaveBeenCalled()
+  })
+
+  it('leaves the editor out for an attachment no editor can open', async () => {
+    const view = render(
+      <AttachmentGallery
+        attachments={[{
+          type: 'file',
+          name: 'report.pdf',
+          path: '/Users/example/Desktop/report.pdf',
+        }]}
+      />,
+    )
+
+    fireEvent.click(view.getByRole('button', { name: 'Open with' }))
+
+    expect(await view.findByText('Default application')).toBeInTheDocument()
+    expect(view.queryByText('Open in VS Code')).not.toBeInTheDocument()
   })
 
   it('removes a quoted workspace attachment by id', () => {

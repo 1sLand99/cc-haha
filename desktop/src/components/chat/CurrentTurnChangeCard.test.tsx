@@ -396,6 +396,21 @@ describe('CurrentTurnChangeCard – open-with buttons', () => {
     expect(await screen.findByText('openWith.workspacePreview')).toBeInTheDocument()
   })
 
+  it('offers the copy entries every other open-with surface has', async () => {
+    // This card built its dependencies by hand instead of using the shared
+    // factory, so it silently lacked the two clipboard rows the prose links and
+    // the file tree both offer.
+    renderCard(['/w/proj/README.md'])
+    const [openWithBtn] = screen.getAllByRole('button', { name: 'openWith.title' })
+
+    await act(async () => {
+      fireEvent.click(openWithBtn!)
+    })
+
+    expect(await screen.findByText('openWith.copyPath')).toBeInTheDocument()
+    expect(screen.getByText('openWith.copyFileContent')).toBeInTheDocument()
+  })
+
   it('clicking workspace preview item in README.md menu calls openPreview', async () => {
     renderCard(['/w/proj/README.md'])
     const [openWithBtn] = screen.getAllByRole('button', { name: 'openWith.title' })

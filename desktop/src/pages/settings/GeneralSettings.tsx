@@ -16,6 +16,7 @@ import type { ThemeMode, NetworkProxyMode, WebSearchMode, AppMode, ChatSendBehav
 import type { Locale } from '../../i18n'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useUIStore } from '../../stores/uiStore'
+import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { isDesktopRuntime } from '../../lib/desktopRuntime'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { getDesktopNotificationPermission, notifyDesktop, getDesktopNotificationPlatform, openDesktopNotificationSettings, requestDesktopNotificationPermission, type DesktopNotificationPermission } from '../../lib/desktopNotifications'
@@ -128,6 +129,14 @@ export function GeneralSettings() {
   const isUiZoomDraggingRef = useRef(false)
   const effortButtonRef = useRef<HTMLButtonElement>(null)
   const addToast = useUIStore((s) => s.addToast)
+  const openTargets = useOpenTargetStore((s) => s.targets)
+  const ensureOpenTargets = useOpenTargetStore((s) => s.ensureTargets)
+  const editorTargetId = useOpenTargetStore((s) => s.editorTargetId)
+  const setEditorTargetId = useOpenTargetStore((s) => s.setEditorTargetId)
+  const detectedEditors = useMemo(
+    () => openTargets.filter((target) => target.kind === 'ide'),
+    [openTargets],
+  )
   const webSearchDirty = JSON.stringify(webSearchDraft) !== JSON.stringify(webSearch)
   const uiZoomPercent = Math.round(uiZoomDraft * 100)
   const uiZoomRangeProgress = `${Math.round(((uiZoomDraft - UI_ZOOM_MIN) / (UI_ZOOM_MAX - UI_ZOOM_MIN)) * 1000) / 10}%`
@@ -146,6 +155,10 @@ export function GeneralSettings() {
   useEffect(() => {
     setWebSearchDraft(webSearch)
   }, [webSearch])
+
+  useEffect(() => {
+    void ensureOpenTargets()
+  }, [ensureOpenTargets])
 
   useEffect(() => {
     void fetchOutputStyles(outputStyleWorkDir)
@@ -926,6 +939,37 @@ export function GeneralSettings() {
           </div>
         </label>
       </div>
+
+      {/*
+        Only the editors we detect, never every installed application: the menu
+        offers one editor slot, and this chooses which. Hidden entirely when none
+        are installed — there is nothing to pick between.
+      */}
+      {detectedEditors.length > 0 && (
+        <SettingsSection
+          className="mt-8"
+          title={t('settings.general.defaultEditorTitle')}
+          description={t('settings.general.defaultEditorDescription')}
+        >
+          <div className="flex flex-wrap gap-2">
+            <SettingsPill
+              selected={editorTargetId === null}
+              onClick={() => setEditorTargetId(null)}
+            >
+              {t('settings.general.defaultEditorAuto')}
+            </SettingsPill>
+            {detectedEditors.map((target) => (
+              <SettingsPill
+                key={target.id}
+                selected={editorTargetId === target.id}
+                onClick={() => setEditorTargetId(target.id)}
+              >
+                {target.label}
+              </SettingsPill>
+            ))}
+          </div>
+        </SettingsSection>
+      )}
 
       <SettingsSection
         className="mt-8"

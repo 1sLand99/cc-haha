@@ -98,7 +98,7 @@ describe('AssistantMessage file references', () => {
     await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument())
     const labels = screen.getAllByRole('menuitem').map((el) => el.textContent)
     expect(labels).toContain('openWith.openInTarget:VS Code')
-    expect(labels).toContain('openWith.revealInTarget:Finder')
+    expect(labels).toContain('openWith.revealIn.darwin')
     expect(labels).toContain('openWith.copyPath')
     expect(labels).toContain('openWith.copyFileContent')
   })
