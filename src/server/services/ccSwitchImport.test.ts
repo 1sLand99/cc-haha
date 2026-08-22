@@ -117,23 +117,27 @@ async function writeFixtureDb(rows: DbRow[], dir = ccSwitchDir): Promise<void> {
         is_current, in_failover_queue
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
-    for (const row of rows) {
-      insert.run(
-        row.id,
-        row.appType ?? 'claude',
-        row.name ?? row.id,
-        row.settingsConfig ?? JSON.stringify({ env: row.env ?? {} }),
-        'https://example.com',
-        'third_party',
-        row.createdAt ?? null,
-        row.sortIndex ?? null,
-        row.notes ?? null,
-        null,
-        null,
-        row.meta ?? null,
-        row.isCurrent ? 1 : 0,
-        0,
-      )
+    try {
+      for (const row of rows) {
+        insert.run(
+          row.id,
+          row.appType ?? 'claude',
+          row.name ?? row.id,
+          row.settingsConfig ?? JSON.stringify({ env: row.env ?? {} }),
+          'https://example.com',
+          'third_party',
+          row.createdAt ?? null,
+          row.sortIndex ?? null,
+          row.notes ?? null,
+          null,
+          null,
+          row.meta ?? null,
+          row.isCurrent ? 1 : 0,
+          0,
+        )
+      }
+    } finally {
+      insert.finalize()
     }
   } finally {
     db.close()
@@ -370,6 +374,17 @@ describe('cc-switch store discovery', () => {
       'Delta',
       'Zeta',
     ])
+  })
+
+  test('releases the SQLite store after scanning', async () => {
+    await writeFixtureDb([
+      { id: 'releasable', name: 'Releasable', env: claudeEnv() },
+    ])
+
+    const result = await scanCcSwitchProviders()
+
+    expect(result.available).toBe(true)
+    await expect(fs.rm(ccSwitchDir, { recursive: true })).resolves.toBeUndefined()
   })
 
   test('reads claude-desktop rows alongside claude rows', async () => {
