@@ -281,7 +281,8 @@ describe('release desktop workflow', () => {
       'SIGNPATH_API_TOKEN',
       'SIGNPATH_ORGANIZATION_ID',
       'SIGNPATH_PROJECT_SLUG',
-      'SIGNPATH_SIGNING_POLICY_SLUG',
+      'SIGNPATH_TEST_SIGNING_POLICY_SLUG',
+      'SIGNPATH_RELEASE_SIGNING_POLICY_SLUG',
       'SIGNPATH_APPLICATION_ARTIFACT_CONFIGURATION_SLUG',
       'SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG',
     ]) {
@@ -298,6 +299,7 @@ describe('release desktop workflow', () => {
     expect(signingJob).toContain('windows_signed=false')
     expect(signingJob).toContain('windows_signed=true')
     expect(signingJob).toContain('Refusing to publish a non-draft desktop release without SignPath Windows signing.')
+    expect(signingJob).toContain("inputs.draft == true && vars.SIGNPATH_TEST_SIGNING_POLICY_SLUG || vars.SIGNPATH_RELEASE_SIGNING_POLICY_SLUG")
 
     const macRequiredBlock = signingJob?.match(
       /missing=\(\)[\s\S]*?# Drafts may remain unsigned/,
@@ -337,12 +339,14 @@ describe('release desktop workflow', () => {
     expect(stageApplicationStep).not.toContain('node-pty')
     expect(signApplicationStep).toContain('signpath/github-action-submit-signing-request@v2')
     expect(signApplicationStep).toContain('SIGNPATH_APPLICATION_ARTIFACT_CONFIGURATION_SLUG')
+    expect(signApplicationStep).toContain('signing-policy-slug: ${{ env.SIGNPATH_SIGNING_POLICY_SLUG }}')
     expect(signApplicationStep).toContain('github-artifact-id: ${{ steps.upload-unsigned-signpath-application.outputs.artifact-id }}')
     expect(restoreApplicationStep).toContain('Get-AuthenticodeSignature')
     expect(restoreApplicationStep).toContain('REQUIRE_TRUSTED_WINDOWS_SIGNATURE')
     expect(packageInstallerStep).toContain('--prepackaged "build-artifacts/electron/${{ matrix.unpacked_dir }}"')
     expect(signInstallerStep).toContain('signpath/github-action-submit-signing-request@v2')
     expect(signInstallerStep).toContain('SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG')
+    expect(signInstallerStep).toContain('signing-policy-slug: ${{ env.SIGNPATH_SIGNING_POLICY_SLUG }}')
     expect(restoreInstallerStep).toContain('Get-AuthenticodeSignature')
     expect(restoreInstallerStep).toContain('A trusted production signature is required')
     expect(refreshMetadataStep).toContain('scripts/refresh-windows-update-metadata.ts')
