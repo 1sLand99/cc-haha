@@ -179,6 +179,15 @@ export function ComputerUsePermissionModal({ sessionId, request }: Props) {
         </div>
       ) : (
         <div className="space-y-4">
+          {request.screenshotFiltering === 'none' ? (
+            <div
+              role="note"
+              className="rounded-[var(--radius-lg)] border border-[var(--color-warning)] bg-[var(--color-warning-container)] p-3 text-sm text-[var(--color-on-warning-container)]"
+            >
+              {t('computerUseApproval.unfilteredScreenshots')}
+            </div>
+          ) : null}
+
           {request.reason ? (
             <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-3">
               <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-tertiary)]">

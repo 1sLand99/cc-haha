@@ -2474,6 +2474,26 @@ async function handleType(
   //      and terminals ignore it; the model's intent (submit/execute) is lost.
   // CRLF (\r\n) is one grapheme cluster (UAX #29 GB3), so check for it too.
   const graphemes = segmentGraphemes(text);
+
+  // The Windows executor starts the packaged Python helper for every type()
+  // call. Iterating here would therefore spawn one process per grapheme (and
+  // made even a modest multi-line document take minutes). Keep the entire
+  // action in one helper process on Windows; win_helper.py preserves the
+  // Return/Tab semantics and paces the Unicode input internally so the
+  // foreground lease and interference monitor remain active for the whole
+  // operation.
+  if (adapter.executor.capabilities.platform === "win32") {
+    if (overrides.isAborted?.()) {
+      return errorResult(
+        `Typing aborted after 0 of ${graphemes.length} graphemes (user interrupt).`,
+      );
+    }
+    if (graphemes.length > 0) {
+      await adapter.executor.type(text, { viaClipboard: false });
+    }
+    return okText(`Typed ${graphemes.length} grapheme(s).`);
+  }
+
   for (const [i, g] of graphemes.entries()) {
     // Same abort check as handleComputerBatch. At 8ms/grapheme a 50-char
     // type() runs ~400ms; this is where an in-flight batch actually

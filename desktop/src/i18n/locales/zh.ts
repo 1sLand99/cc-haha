@@ -2014,6 +2014,7 @@ export const zh: Record<TranslationKey, string> = {
   'computerUseApproval.deny': '拒绝',
   'computerUseApproval.alreadyGranted': '本次会话已授权',
   'computerUseApproval.notInstalled': '应用未安装',
+  'computerUseApproval.unfilteredScreenshots': '在 Windows 上，截图会包含此显示器上的所有可见窗口，包括下方未列出的应用。输入操作仍只限于你允许的应用。',
   'computerUseApproval.sensitiveApp': '该应用属于高敏感类别，请额外确认后再授权。',
   'computerUseApproval.alsoRequested': '同时请求了',
   'computerUseApproval.hideWhileWorking': 'Claude 工作时会隐藏另外 {count} 个应用。',

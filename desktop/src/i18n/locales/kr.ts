@@ -2015,6 +2015,7 @@ export const kr: Record<TranslationKey, string> = {
   'computerUseApproval.deny': '거부',
   'computerUseApproval.alreadyGranted': '이 세션에서는 이미 허용됨',
   'computerUseApproval.notInstalled': '앱이 설치되지 않음',
+  'computerUseApproval.unfilteredScreenshots': 'Windows에서는 아래에 나열되지 않은 앱을 포함해 이 디스플레이에 보이는 모든 창이 스크린샷에 포함될 수 있습니다. 입력 동작은 허용한 앱으로만 제한됩니다.',
   'computerUseApproval.sensitiveApp': '이 앱은 민감한 것으로 처리되며 추가 검토가 필요합니다.',
   'computerUseApproval.alsoRequested': '함께 요청됨',
   'computerUseApproval.hideWhileWorking': 'Claude가 작업하는 동안 다른 {count}개의 앱이 숨겨집니다.',

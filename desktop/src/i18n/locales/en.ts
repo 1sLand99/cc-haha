@@ -2013,6 +2013,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'computerUseApproval.deny': 'Deny',
   'computerUseApproval.alreadyGranted': 'Already granted for this session',
   'computerUseApproval.notInstalled': 'App not installed',
+  'computerUseApproval.unfilteredScreenshots': 'On Windows, screenshots can include every visible window on this display, including apps not listed below. Input remains limited to the apps you allow.',
   'computerUseApproval.sensitiveApp': 'This app is treated as sensitive and deserves extra review.',
   'computerUseApproval.alsoRequested': 'Also requested',
   'computerUseApproval.hideWhileWorking': '{count} other apps will be hidden while Claude works.',

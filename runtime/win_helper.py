@@ -9,8 +9,8 @@ pyautogui to provide, on Windows, the JSON command protocol the native macOS
 One difference is not an implementation detail and shapes everything below:
 macOS delivers input with `CGEvent.postToPid`, straight into the target
 process, leaving the real cursor and the foreground app alone. Windows has no
-equivalent. `pyautogui` bottoms out in `SendInput`, which injects into the one
-system-wide input stream and warps the one real cursor. The agent therefore
+equivalent. `pyautogui` uses Windows' synthetic-input APIs, which inject into
+system-wide input stream and warp the one real cursor. The agent therefore
 shares the mouse and keyboard with the user, and cannot verify that anything
 it sent arrived.
 
@@ -32,6 +32,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from io import BytesIO
 from pathlib import Path
@@ -56,6 +57,8 @@ if hasattr(sys.stderr, "reconfigure"):
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
+
+DESKTOP_HOST_BUNDLE_ID = "com.claude-code-haha.desktop"
 
 # ---------------------------------------------------------------------------
 # Key mapping — Windows uses 'win' instead of 'command'
@@ -277,11 +280,7 @@ def list_windows() -> list[dict[str, Any]]:
 def _get_window_process_name(hwnd: int) -> str:
     """Get the exe name of the process owning a window handle."""
     try:
-        import win32process
-        import psutil
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        proc = psutil.Process(pid)
-        return proc.name()
+        return _window_process(hwnd).name()
     except Exception:
         return ""
 
@@ -298,8 +297,88 @@ def _get_exe_path_for_pid(pid: int) -> str | None:
         return None
 
 
+def _window_process(hwnd: int) -> Any:
+    """Resolve the application process represented by a top-level HWND.
+
+    Packaged/UWP apps are hosted by ApplicationFrameHost.exe: the visible
+    top-level window belongs to the host while a CoreWindow child belongs to
+    the real app (for example CalculatorApp.exe). Treating the host as the app
+    makes an already visible packaged app look uninstalled and also breaks the
+    foreground allowlist check.
+    """
+    import psutil
+    import win32gui
+    import win32process
+
+    _, host_pid = win32process.GetWindowThreadProcessId(hwnd)
+    host = psutil.Process(host_pid)
+    if host.name().casefold() != "applicationframehost.exe":
+        return host
+
+    candidates: list[tuple[int, Any]] = []
+
+    def _child_cb(child_hwnd: int, _: Any) -> None:
+        try:
+            _, child_pid = win32process.GetWindowThreadProcessId(child_hwnd)
+            if int(child_pid) == int(host_pid):
+                return
+            child = psutil.Process(child_pid)
+            child.exe()
+            priority = 0 if win32gui.GetClassName(child_hwnd) == "Windows.UI.Core.CoreWindow" else 1
+            candidates.append((priority, child))
+        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            return
+
+    win32gui.EnumChildWindows(hwnd, _child_cb, None)
+    if not candidates:
+        return host
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
+def _visible_gui_apps() -> list[dict[str, Any]]:
+    """Return processes that own a visible, titled top-level window.
+
+    The uninstall registry is not an application catalogue on modern Windows:
+    inbox/MSIX apps such as Notepad and Calculator usually have no entry there.
+    They still need to be requestable while they are running.  Enumerating
+    windows, rather than every process, also keeps services, credential tools,
+    terminals without a visible window, and other background processes out of
+    the Computer Use application picker.
+    """
+    import psutil
+    import win32gui
+
+    results: dict[str, dict[str, Any]] = {}
+
+    def _enum_cb(hwnd: int, _: Any) -> None:
+        if not win32gui.IsWindowVisible(hwnd):
+            return
+        if not win32gui.GetWindowText(hwnd).strip():
+            return
+        try:
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            if right - left <= 1 or bottom - top <= 1:
+                return
+            proc = _window_process(hwnd)
+            exe_path = proc.exe()
+            bundle_id = _windows_bundle_id(exe_path)
+            if not bundle_id:
+                return
+            results.setdefault(bundle_id.casefold(), {
+                "bundleId": bundle_id,
+                "displayName": proc.name(),
+                "path": exe_path,
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            return
+
+    win32gui.EnumWindows(_enum_cb, None)
+    return sorted(results.values(), key=lambda item: item["displayName"].lower())
+
+
 def installed_apps() -> list[dict[str, Any]]:
-    """List installed programs from Windows registry and Start Menu shortcuts."""
+    """List uninstall-registry apps plus currently visible GUI applications."""
     import winreg
 
     results: dict[str, dict[str, Any]] = {}
@@ -363,33 +442,22 @@ def installed_apps() -> list[dict[str, Any]]:
         finally:
             winreg.CloseKey(key)
 
+    existing_ids = {bundle_id.casefold() for bundle_id in results}
+    for app in _visible_gui_apps():
+        if app["bundleId"].casefold() in existing_ids:
+            continue
+        results[app["bundleId"]] = app
+        existing_ids.add(app["bundleId"].casefold())
+
     return sorted(results.values(), key=lambda item: item["displayName"].lower())
 
 
 def running_apps() -> list[dict[str, Any]]:
     """List running GUI applications."""
-    import psutil
-
-    apps: list[dict[str, Any]] = []
-    seen: set[str] = set()
-
-    for proc in psutil.process_iter(["pid", "name", "exe"]):
-        try:
-            name = proc.info["name"] or ""
-            exe_path = proc.info["exe"] or ""
-            if not name or name in seen:
-                continue
-            # Skip system/background processes (no window)
-            if not exe_path:
-                continue
-            seen.add(name)
-            # Use exe name (without .exe) as bundleId
-            bundle_id = Path(exe_path).stem if exe_path else name
-            apps.append({"bundleId": bundle_id, "displayName": name})
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-
-    return sorted(apps, key=lambda item: item["displayName"].lower())
+    return [
+        {"bundleId": app["bundleId"], "displayName": app["displayName"]}
+        for app in _visible_gui_apps()
+    ]
 
 
 def app_display_name(bundle_id: str) -> str | None:
@@ -405,21 +473,64 @@ def app_display_name(bundle_id: str) -> str | None:
     return None
 
 
+def _windows_bundle_id(exe_path: str) -> str:
+    """Stable identity for the packaged Electron host; stem for other apps."""
+    stem = Path(exe_path).stem
+    if stem.casefold() == "claude code haha":
+        return DESKTOP_HOST_BUNDLE_ID
+    return stem
+
+
+def _foreground_existing_app(bundle_id: str) -> bool:
+    """Bring the frontmost matching visible window forward if one exists."""
+    import psutil
+    import win32con
+    import win32gui
+
+    wanted = bundle_id.casefold()
+    matches: list[int] = []
+
+    def _enum_cb(hwnd: int, _: Any) -> None:
+        if not win32gui.IsWindowVisible(hwnd):
+            return
+        if not win32gui.GetWindowText(hwnd).strip():
+            return
+        try:
+            proc = _window_process(hwnd)
+            exe_path = proc.exe()
+            candidates = {
+                _windows_bundle_id(exe_path).casefold(),
+                Path(exe_path).stem.casefold(),
+                proc.name().casefold(),
+            }
+            if wanted in candidates:
+                matches.append(hwnd)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            return
+
+    win32gui.EnumWindows(_enum_cb, None)
+    if not matches:
+        return False
+
+    hwnd = matches[0]
+    if win32gui.IsIconic(hwnd):
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+    win32gui.SetForegroundWindow(hwnd)
+    return True
+
+
 def frontmost_app() -> dict[str, str] | None:
     """Get the currently focused (foreground) application."""
     import win32gui
-    import win32process
-    import psutil
 
     hwnd = win32gui.GetForegroundWindow()
     if not hwnd:
         return None
     try:
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        proc = psutil.Process(pid)
+        proc = _window_process(hwnd)
         exe_path = proc.exe()
         return {
-            "bundleId": Path(exe_path).stem,
+            "bundleId": _windows_bundle_id(exe_path),
             "displayName": proc.name(),
         }
     except Exception:
@@ -429,8 +540,6 @@ def frontmost_app() -> dict[str, str] | None:
 def app_under_point(x: int, y: int) -> dict[str, str] | None:
     """Find the app whose window is under the given screen coordinate."""
     import win32gui
-    import win32process
-    import psutil
 
     hwnd = win32gui.WindowFromPoint((x, y))
     if not hwnd:
@@ -440,11 +549,10 @@ def app_under_point(x: int, y: int) -> dict[str, str] | None:
     if root:
         hwnd = root
     try:
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        proc = psutil.Process(pid)
+        proc = _window_process(hwnd)
         exe_path = proc.exe()
         return {
-            "bundleId": Path(exe_path).stem,
+            "bundleId": _windows_bundle_id(exe_path),
             "displayName": proc.name(),
         }
     except Exception:
@@ -497,6 +605,9 @@ def find_window_displays(bundle_ids: list[str]) -> list[dict[str, Any]]:
 
 def open_app(bundle_id: str) -> None:
     """Open an application by its bundleId (exe path or program name)."""
+    if _foreground_existing_app(bundle_id):
+        return
+
     # Try to find the exe path from registry
     import winreg
     exe_path = None
@@ -580,7 +691,12 @@ def write_clipboard(text: str) -> None:
 
 
 def paste_clipboard() -> None:
-    pyautogui.hotkey("ctrl", "v", interval=0.02)
+    _send_inputs([
+        _named_key_input("ctrl"),
+        _named_key_input("v"),
+        _named_key_input("v", key_up=True),
+        _named_key_input("ctrl", key_up=True),
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -593,43 +709,517 @@ def paste_clipboard() -> None:
 # `CGEvent.postToPid`, so agent input and human input never share a channel:
 # the epoch monitor there is a safety net for an unlikely race.
 #
-# Windows has no such API. `pyautogui` bottoms out in `SendInput`, which
-# injects into the ONE system-wide input stream and warps the ONE real cursor.
+# Windows has no such API. `pyautogui` uses `SetCursorPos`, `mouse_event`, and
+# `keybd_event`, all of which feed the ONE system-wide input stream.
 # The agent and the user are therefore holding the same mouse. If the user
 # reaches for it mid-action the two streams interleave, and the resulting
 # click lands somewhere neither of them intended. Detection is not a nicety
 # here — it is the only thing standing between "the agent typed into the wrong
 # window" and an abort.
 #
-# `GetLastInputInfo` is the right signal for this: it reports the tick of the
-# last PHYSICAL input event, requires no privileges and no TCC-style grant,
-# and — measured, and asserted by test_helpers.py — is NOT advanced by
-# `SendInput` injection, so the agent cannot trip its own detector.
+# Neither GetLastInputInfo nor Raw Input identifies event origin: both advance
+# for synthetic input on real Windows machines. Low-level keyboard and mouse
+# hooks do. Windows sets LLKHF_INJECTED / LLMHF_INJECTED on synthetic events,
+# so the monitor below can count physical input without tripping on its own
+# actions. The hook callback does constant-time bookkeeping only; all policy
+# decisions stay on the command thread.
 
 import ctypes
 from ctypes import wintypes
 
 
-class _LASTINPUTINFO(ctypes.Structure):
-    _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+WH_KEYBOARD_LL = 13
+WH_MOUSE_LL = 14
+HC_ACTION = 0
+WM_QUIT = 0x0012
+WM_APP_INPUT_BARRIER = 0x8001
+PM_NOREMOVE = 0x0000
+LLKHF_LOWER_IL_INJECTED = 0x02
+LLKHF_INJECTED = 0x10
+LLMHF_INJECTED = 0x01
+LLMHF_LOWER_IL_INJECTED = 0x02
+INPUT_MOUSE = 0
+INPUT_KEYBOARD = 1
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_UNICODE = 0x0004
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_MIDDLEDOWN = 0x0020
+MOUSEEVENTF_MIDDLEUP = 0x0040
+MOUSEEVENTF_WHEEL = 0x0800
+MOUSEEVENTF_HWHEEL = 0x1000
+MOUSEEVENTF_MOVE_NOCOALESCE = 0x2000
+MOUSEEVENTF_VIRTUALDESK = 0x4000
+MOUSEEVENTF_ABSOLUTE = 0x8000
+WHEEL_DELTA = 120
+SM_XVIRTUALSCREEN = 76
+SM_YVIRTUALSCREEN = 77
+SM_CXVIRTUALSCREEN = 78
+SM_CYVIRTUALSCREEN = 79
+
+# Mouse low-level hooks preserve only the low 32 bits of dwExtraInfo on some
+# 64-bit Windows builds, while keyboard hooks preserve the full ULONG_PTR.
+# A random non-zero 32-bit tag therefore compares identically in both paths.
+_INPUT_TAG = int.from_bytes(os.urandom(4), "little") or 0x43434841
+
+_LRESULT = ctypes.c_ssize_t
+_HOOKPROC = ctypes.WINFUNCTYPE(
+    _LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+)
 
 
-def last_physical_input_tick() -> int:
-    """Tick count of the last physical keyboard/mouse event.
+class _KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("vkCode", wintypes.DWORD),
+        ("scanCode", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
 
-    Returns 0 when unavailable so callers fail OPEN on the read itself: a
-    helper that refused to act because it could not query an optional Win32
-    counter would be broken in a much more visible way than one that acted.
-    Interference is only ever reported on two SUCCESSFUL reads that differ.
-    """
-    try:
-        info = _LASTINPUTINFO()
-        info.cbSize = ctypes.sizeof(_LASTINPUTINFO)
-        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
-            return 0
-        return int(info.dwTime)
-    except Exception:
-        return 0
+
+class _MSLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("pt", wintypes.POINT),
+        ("mouseData", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+class _HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD),
+    ]
+
+
+class _INPUTUNION(ctypes.Union):
+    _fields_ = [
+        ("mi", _MOUSEINPUT),
+        ("ki", _KEYBDINPUT),
+        ("hi", _HARDWAREINPUT),
+    ]
+
+
+class _INPUT(ctypes.Structure):
+    _anonymous_ = ("data",)
+    _fields_ = [("type", wintypes.DWORD), ("data", _INPUTUNION)]
+
+
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+_user32.SetWindowsHookExW.argtypes = [
+    ctypes.c_int, _HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD,
+]
+_user32.SetWindowsHookExW.restype = wintypes.HANDLE
+_user32.CallNextHookEx.argtypes = [
+    wintypes.HANDLE, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM,
+]
+_user32.CallNextHookEx.restype = _LRESULT
+_user32.UnhookWindowsHookEx.argtypes = [wintypes.HANDLE]
+_user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+_user32.GetMessageW.argtypes = [
+    ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT,
+]
+_user32.GetMessageW.restype = ctypes.c_int
+_user32.PeekMessageW.argtypes = [
+    ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT,
+    wintypes.UINT,
+]
+_user32.PeekMessageW.restype = wintypes.BOOL
+_user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+_user32.TranslateMessage.restype = wintypes.BOOL
+_user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+_user32.DispatchMessageW.restype = _LRESULT
+_user32.PostThreadMessageW.argtypes = [
+    wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+]
+_user32.PostThreadMessageW.restype = wintypes.BOOL
+_user32.SendInput.argtypes = [
+    wintypes.UINT, ctypes.POINTER(_INPUT), ctypes.c_int,
+]
+_user32.SendInput.restype = wintypes.UINT
+_user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+_user32.GetSystemMetrics.restype = ctypes.c_int
+_user32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
+_user32.MapVirtualKeyW.restype = wintypes.UINT
+_user32.VkKeyScanW.argtypes = [wintypes.WCHAR]
+_user32.VkKeyScanW.restype = ctypes.c_short
+_user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+_user32.GetAsyncKeyState.restype = ctypes.c_short
+_kernel32.GetCurrentThreadId.argtypes = []
+_kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+
+
+class InputMonitorUnavailable(RuntimeError):
+    """Physical-input monitoring could not be made reliable."""
+
+    code = "input_monitor_unavailable"
+
+
+class InputInjectionFailed(RuntimeError):
+    """Windows did not accept the complete tagged SendInput batch."""
+
+    def __init__(self, message: str, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class PhysicalInputMonitor:
+    """Count every input event except this helper's tagged SendInput."""
+
+    def __init__(self) -> None:
+        self.interference_count = 0
+        self.agent_count = 0
+        self.expected_agent_count = 0
+        self._thread_id = 0
+        self._keyboard_hook: int | None = None
+        self._mouse_hook: int | None = None
+        self._ready = threading.Event()
+        self._barrier = threading.Event()
+        self._error: BaseException | None = None
+        self._thread: threading.Thread | None = None
+        # ctypes callbacks must be strongly referenced for the lifetime of the
+        # native hooks; otherwise a GC cycle can leave Windows calling freed
+        # Python memory.
+        self._keyboard_callback = _HOOKPROC(self._keyboard_proc)
+        self._mouse_callback = _HOOKPROC(self._mouse_proc)
+
+    def _record(
+        self, flags: int, injected_mask: int, extra_info: int
+    ) -> None:
+        if flags & injected_mask and extra_info == _INPUT_TAG:
+            self.agent_count += 1
+        else:
+            self.interference_count += 1
+
+    def _keyboard_proc(
+        self, code: int, wparam: int, lparam: int
+    ) -> int:
+        try:
+            if code == HC_ACTION:
+                data = ctypes.cast(
+                    lparam, ctypes.POINTER(_KBDLLHOOKSTRUCT)
+                ).contents
+                self._record(
+                    int(data.flags),
+                    LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED,
+                    int(data.dwExtraInfo),
+                )
+        except BaseException as exc:
+            self._error = exc
+        finally:
+            return int(_user32.CallNextHookEx(None, code, wparam, lparam))
+
+    def _mouse_proc(self, code: int, wparam: int, lparam: int) -> int:
+        try:
+            if code == HC_ACTION:
+                data = ctypes.cast(
+                    lparam, ctypes.POINTER(_MSLLHOOKSTRUCT)
+                ).contents
+                self._record(
+                    int(data.flags),
+                    LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED,
+                    int(data.dwExtraInfo),
+                )
+        except BaseException as exc:
+            self._error = exc
+        finally:
+            return int(_user32.CallNextHookEx(None, code, wparam, lparam))
+
+    def _run(self) -> None:
+        self._thread_id = int(_kernel32.GetCurrentThreadId())
+        try:
+            # PostThreadMessage fails until the destination thread owns a
+            # message queue. PeekMessage creates it before start() can return.
+            queue_message = wintypes.MSG()
+            _user32.PeekMessageW(
+                ctypes.byref(queue_message), None, 0, 0, PM_NOREMOVE
+            )
+            self._keyboard_hook = _user32.SetWindowsHookExW(
+                WH_KEYBOARD_LL, self._keyboard_callback, None, 0
+            )
+            if not self._keyboard_hook:
+                raise ctypes.WinError(ctypes.get_last_error())
+            self._mouse_hook = _user32.SetWindowsHookExW(
+                WH_MOUSE_LL, self._mouse_callback, None, 0
+            )
+            if not self._mouse_hook:
+                raise ctypes.WinError(ctypes.get_last_error())
+            self._ready.set()
+
+            message = wintypes.MSG()
+            while True:
+                status = _user32.GetMessageW(
+                    ctypes.byref(message), None, 0, 0
+                )
+                if status == -1:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if status == 0:
+                    break
+                if message.message == WM_APP_INPUT_BARRIER:
+                    self._barrier.set()
+                    continue
+                _user32.TranslateMessage(ctypes.byref(message))
+                _user32.DispatchMessageW(ctypes.byref(message))
+        except BaseException as exc:
+            self._error = exc
+            self._ready.set()
+            self._barrier.set()
+        finally:
+            if self._mouse_hook:
+                if not _user32.UnhookWindowsHookEx(self._mouse_hook):
+                    self._error = self._error or ctypes.WinError(
+                        ctypes.get_last_error()
+                    )
+                self._mouse_hook = None
+            if self._keyboard_hook:
+                if not _user32.UnhookWindowsHookEx(self._keyboard_hook):
+                    self._error = self._error or ctypes.WinError(
+                        ctypes.get_last_error()
+                    )
+                self._keyboard_hook = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(
+            target=self._run, name="computer-use-input-monitor", daemon=True
+        )
+        self._thread.start()
+        if not self._ready.wait(timeout=2.0) or self._error is not None:
+            self.stop()
+            detail = f": {self._error}" if self._error is not None else ""
+            raise InputMonitorUnavailable(
+                "Windows could not start physical-input monitoring, so the "
+                f"action was not sent{detail}"
+            )
+
+    def snapshot(self) -> int:
+        """Drain earlier hook callbacks and return the physical input count."""
+        if self._error is not None or not self._thread_id:
+            raise InputMonitorUnavailable(
+                "Windows physical-input monitoring stopped unexpectedly; "
+                "the action result cannot be trusted"
+            )
+        self._barrier.clear()
+        if not _user32.PostThreadMessageW(
+            self._thread_id, WM_APP_INPUT_BARRIER, 0, 0
+        ):
+            raise InputMonitorUnavailable(
+                "Windows could not synchronize physical-input monitoring; "
+                "the action result cannot be trusted"
+            )
+        if not self._barrier.wait(timeout=2.0) or self._error is not None:
+            raise InputMonitorUnavailable(
+                "Windows physical-input monitoring did not respond; the "
+                "action result cannot be trusted"
+            )
+        if self.agent_count < self.expected_agent_count:
+            raise InputMonitorUnavailable(
+                "Windows stopped reporting this helper's tagged input; the "
+                "action result cannot be trusted"
+            )
+        return self.interference_count
+
+    def expect_agent_events(self, count: int) -> None:
+        self.expected_agent_count += count
+
+    def stop(self) -> None:
+        thread = self._thread
+        if thread is None:
+            return
+        if thread.is_alive():
+            if not self._thread_id or not _user32.PostThreadMessageW(
+                self._thread_id, WM_QUIT, 0, 0
+            ):
+                raise InputMonitorUnavailable(
+                    "Windows could not stop physical-input monitoring"
+                )
+            thread.join(timeout=2.0)
+            if thread.is_alive():
+                raise InputMonitorUnavailable(
+                    "Windows physical-input monitoring did not stop"
+                )
+        self._thread = None
+        if self._error is not None:
+            raise InputMonitorUnavailable(
+                f"Windows physical-input monitoring failed: {self._error}"
+            )
+
+
+_active_input_monitor: PhysicalInputMonitor | None = None
+
+
+def _mouse_input(
+    flags: int, *, data: int = 0, dx: int = 0, dy: int = 0
+) -> _INPUT:
+    event = _INPUT()
+    event.type = INPUT_MOUSE
+    event.mi = _MOUSEINPUT(
+        dx,
+        dy,
+        ctypes.c_ulong(data).value,
+        flags,
+        0,
+        _INPUT_TAG,
+    )
+    return event
+
+
+def _key_input(vk: int, scan: int, flags: int) -> _INPUT:
+    event = _INPUT()
+    event.type = INPUT_KEYBOARD
+    event.ki = _KEYBDINPUT(vk, scan, flags, 0, _INPUT_TAG)
+    return event
+
+
+def _send_inputs(events: list[_INPUT]) -> None:
+    """Insert one atomic, tagged input batch and account for every event."""
+    if not events:
+        return
+    event_array = (_INPUT * len(events))(*events)
+    sent = int(_user32.SendInput(
+        len(events), event_array, ctypes.sizeof(_INPUT)
+    ))
+    if _active_input_monitor is not None and sent:
+        _active_input_monitor.expect_agent_events(sent)
+    if sent != len(events):
+        if sent:
+            raise InputInjectionFailed(
+                f"Windows accepted only {sent} of {len(events)} input events. "
+                "The result is UNKNOWN; inspect the screen before continuing.",
+                code="input_injection_result_unknown",
+            )
+        raise InputInjectionFailed(
+            "Windows refused the input batch. The target may be elevated or "
+            "on a secure desktop; nothing was reported as inserted.",
+            code="input_injection_failed",
+        )
+
+
+def _absolute_mouse_move(x: int, y: int) -> _INPUT:
+    left = _user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+    top = _user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+    width = _user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+    height = _user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+    if width <= 1 or height <= 1:
+        raise InputInjectionFailed(
+            "Windows did not report a usable virtual desktop.",
+            code="input_injection_failed",
+        )
+    dx = round((x - left) * 65535 / (width - 1))
+    dy = round((y - top) * 65535 / (height - 1))
+    return _mouse_input(
+        MOUSEEVENTF_MOVE
+        | MOUSEEVENTF_MOVE_NOCOALESCE
+        | MOUSEEVENTF_VIRTUALDESK
+        | MOUSEEVENTF_ABSOLUTE,
+        dx=dx,
+        dy=dy,
+    )
+
+
+_VIRTUAL_KEYS = {
+    "win": 0x5B,
+    "ctrl": 0x11,
+    "shift": 0x10,
+    "alt": 0x12,
+    "esc": 0x1B,
+    "enter": 0x0D,
+    "tab": 0x09,
+    "space": 0x20,
+    "backspace": 0x08,
+    "delete": 0x2E,
+    "up": 0x26,
+    "down": 0x28,
+    "left": 0x25,
+    "right": 0x27,
+    "home": 0x24,
+    "end": 0x23,
+    "pageup": 0x21,
+    "pagedown": 0x22,
+    "capslock": 0x14,
+    **{f"f{number}": 0x6F + number for number in range(1, 13)},
+}
+
+_HELD_INPUT_KEYS = {
+    0x01: "left mouse button",
+    0x02: "right mouse button",
+    0x04: "middle mouse button",
+    0x10: "Shift",
+    0x11: "Control",
+    0x12: "Alt",
+    0x5B: "left Windows key",
+    0x5C: "right Windows key",
+}
+
+
+def _virtual_key(name: str) -> int:
+    if name == "fn":
+        raise ValueError("The Fn key cannot be synthesized by Windows")
+    if name in _VIRTUAL_KEYS:
+        return _VIRTUAL_KEYS[name]
+    if len(name) != 1:
+        raise ValueError(f"Unsupported key: {name}")
+    mapped = int(_user32.VkKeyScanW(name))
+    if mapped == -1:
+        raise ValueError(f"The active keyboard layout cannot type key: {name}")
+    return mapped & 0xFF
+
+
+def _named_key_input(name: str, *, key_up: bool = False) -> _INPUT:
+    vk = _virtual_key(name)
+    scan = int(_user32.MapVirtualKeyW(vk, 0))
+    return _key_input(vk, scan, KEYEVENTF_KEYUP if key_up else 0)
+
+
+def _unicode_inputs(text: str) -> list[_INPUT]:
+    encoded = text.encode("utf-16-le")
+    events: list[_INPUT] = []
+    for index in range(0, len(encoded), 2):
+        code_unit = int.from_bytes(encoded[index:index + 2], "little")
+        events.append(_key_input(0, code_unit, KEYEVENTF_UNICODE))
+        events.append(
+            _key_input(0, code_unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)
+        )
+    return events
+
+
+def _held_inputs(command: str) -> list[str]:
+    held: list[str] = []
+    for vk, name in _HELD_INPUT_KEYS.items():
+        if command == "mouse_up" and vk == 0x01:
+            continue
+        if int(_user32.GetAsyncKeyState(vk)) & 0x8000:
+            held.append(name)
+    return held
 
 
 class UserInterference(RuntimeError):
@@ -656,9 +1246,9 @@ def _foreground_window_pid() -> int | None:
 class ForegroundLease:
     """Guards one mutating action against concurrent physical input.
 
-    Evidence is sampled in a fixed order — tick, foreground identity, tick —
-    both before and after the action, so a single observation cannot straddle
-    a change it fails to notice. Same shape as `ForegroundLease.swift`.
+    A low-level hook runs for the lease lifetime. Barrier snapshots drain hook
+    callbacks before policy is evaluated, so the command thread never mistakes
+    its own injected input for a human event.
 
     The asymmetry between the two failure modes is deliberate and is the whole
     point of the class:
@@ -671,28 +1261,48 @@ class ForegroundLease:
         error says so rather than guessing.
     """
 
-    def __init__(self) -> None:
-        self.tick: int = 0
+    def __init__(self, command: str) -> None:
+        self.command = command
+        self.monitor = PhysicalInputMonitor()
+        self.epoch = 0
         self.pid: int | None = None
+        self._closed = False
+        self._action_started = False
 
     def acquire(self) -> None:
-        before = last_physical_input_tick()
-        pid = _foreground_window_pid()
-        after = last_physical_input_tick()
-        if before and after and before != after:
+        global _active_input_monitor
+        self.monitor.start()
+        _active_input_monitor = self.monitor
+        before = self.monitor.snapshot()
+        held = _held_inputs(self.command)
+        self.pid = _foreground_window_pid()
+        after = self.monitor.snapshot()
+        if before != after or held:
+            self.close()
+            detail = f" Held input: {', '.join(held)}." if held else ""
             raise UserInterference(
                 "The user was typing or moving the mouse, so the action was "
                 "not sent. Nothing has changed; it is safe to try again."
+                + detail
             )
-        self.tick = after
-        self.pid = pid
+        self.epoch = after
+
+    def mark_started(self) -> None:
+        self._action_started = True
 
     def finalize(self) -> None:
-        before = last_physical_input_tick()
-        pid = _foreground_window_pid()
-        after = last_physical_input_tick()
+        try:
+            before = self.monitor.snapshot()
+            pid = _foreground_window_pid()
+            after = self.monitor.snapshot()
+        except InputMonitorUnavailable as exc:
+            raise UserInterference(
+                f"{exc}. Input was already sent, so the result is UNKNOWN; "
+                "take a screenshot before continuing.",
+                code="user_interference_result_unknown",
+            ) from exc
 
-        if before and after and before != after:
+        if before != after:
             raise UserInterference(
                 "The user used the mouse or keyboard while this action was "
                 "running. Because Windows shares one input stream between you "
@@ -702,7 +1312,7 @@ class ForegroundLease:
                 code="user_interference_result_unknown",
             )
 
-        if self.tick and after and self.tick != after:
+        if self.epoch != after:
             raise UserInterference(
                 "The user used the mouse or keyboard while this action was "
                 "running. The result is UNKNOWN — do not repeat the action; "
@@ -713,13 +1323,37 @@ class ForegroundLease:
         # A foreground change without any physical input is the target app (or
         # a background app) stealing activation, not the user. Worth reporting,
         # because everything typed after it went somewhere unintended.
-        if self.pid is not None and pid is not None and self.pid != pid:
+        if (
+            self.command in {"type", "paste_clipboard"}
+            and self.pid is not None
+            and pid is not None
+            and self.pid != pid
+        ):
             raise UserInterference(
                 "The foreground application changed while this action was "
                 "running, so input may have gone to the wrong window. The "
                 "result is UNKNOWN — take a screenshot before continuing.",
                 code="user_interference_result_unknown",
             )
+
+    def close(self) -> None:
+        global _active_input_monitor
+        if self._closed:
+            return
+        try:
+            self.monitor.stop()
+        except InputMonitorUnavailable as exc:
+            if self._action_started:
+                raise UserInterference(
+                    f"{exc}. Input was already sent, so the result is "
+                    "UNKNOWN; take a screenshot before continuing.",
+                    code="user_interference_result_unknown",
+                ) from exc
+            raise
+        finally:
+            if _active_input_monitor is self.monitor:
+                _active_input_monitor = None
+            self._closed = True
 
 
 # ---------------------------------------------------------------------------
@@ -827,7 +1461,6 @@ def _windows_for_bundle(bundle_id: str) -> list[int]:
     """
     try:
         import win32gui
-        import win32process
         import psutil
     except Exception:
         return []
@@ -857,8 +1490,8 @@ def _windows_for_bundle(bundle_id: str) -> list[int]:
 
     def _collect(hwnd: int, _: Any) -> None:
         try:
-            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-            if int(pid) in pids:
+            proc = _window_process(hwnd)
+            if int(proc.pid) in pids:
                 handles.append(int(hwnd))
         except Exception:
             return
@@ -906,55 +1539,87 @@ def ensure_target_window_reachable(bundle_id: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Input actions (pyautogui → SendInput)
+# Input actions (tagged, atomic SendInput batches)
 # ---------------------------------------------------------------------------
 
 def click(x: int, y: int, button: str, count: int, modifiers: list[str] | None) -> None:
-    pyautogui.moveTo(x, y)
-    if modifiers:
-        normalized = [normalize_key(m) for m in modifiers]
-        for key in normalized:
-            pyautogui.keyDown(key)
-        try:
-            pyautogui.click(x=x, y=y, button=button, clicks=count, interval=0.08)
-        finally:
-            for key in reversed(normalized):
-                pyautogui.keyUp(key)
-    else:
-        pyautogui.click(x=x, y=y, button=button, clicks=count, interval=0.08)
+    buttons = {
+        "left": (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
+        "right": (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
+        "middle": (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP),
+    }
+    if button not in buttons:
+        raise ValueError(f"Unsupported mouse button: {button}")
+    normalized = [normalize_key(m) for m in (modifiers or [])]
+    down_flag, up_flag = buttons[button]
+    events = [_absolute_mouse_move(x, y)]
+    events.extend(_named_key_input(key) for key in normalized)
+    for _ in range(max(1, count)):
+        events.append(_mouse_input(down_flag))
+        events.append(_mouse_input(up_flag))
+    events.extend(
+        _named_key_input(key, key_up=True) for key in reversed(normalized)
+    )
+    _send_inputs(events)
 
 
 def scroll(x: int, y: int, delta_x: int, delta_y: int) -> None:
-    pyautogui.moveTo(x, y)
+    events = [_absolute_mouse_move(x, y)]
     if delta_y:
-        pyautogui.scroll(int(delta_y), x=x, y=y)
+        events.append(_mouse_input(
+            MOUSEEVENTF_WHEEL, data=int(delta_y) * WHEEL_DELTA
+        ))
     if delta_x:
-        pyautogui.hscroll(int(delta_x), x=x, y=y)
+        events.append(_mouse_input(
+            MOUSEEVENTF_HWHEEL, data=int(delta_x) * WHEEL_DELTA
+        ))
+    _send_inputs(events)
 
 
 def key_action(sequence: str, repeat: int = 1) -> None:
     parts = [normalize_key(part) for part in sequence.split("+") if part.strip()]
     for _ in range(max(1, repeat)):
-        if len(parts) == 1:
-            pyautogui.press(parts[0])
-        else:
-            pyautogui.hotkey(*parts, interval=0.02)
+        events = [_named_key_input(key) for key in parts]
+        events.extend(
+            _named_key_input(key, key_up=True) for key in reversed(parts)
+        )
+        _send_inputs(events)
         time.sleep(0.01)
 
 
 def hold_keys(keys: list[str], duration_ms: int) -> None:
     normalized = [normalize_key(k) for k in keys]
-    for key in normalized:
-        pyautogui.keyDown(key)
+    _send_inputs([_named_key_input(key) for key in normalized])
     try:
         time.sleep(max(duration_ms, 0) / 1000)
     finally:
-        for key in reversed(normalized):
-            pyautogui.keyUp(key)
+        _send_inputs([
+            _named_key_input(key, key_up=True)
+            for key in reversed(normalized)
+        ])
 
 
 def type_text(text: str) -> None:
-    pyautogui.write(text, interval=0.008)
+    # The TypeScript MCP sends the complete Windows type action in one helper
+    # call. New Notepad's RichEdit control silently drops or reorders faster
+    # Unicode bursts, so pace delivery here while retaining one process, one
+    # foreground lease, and one interference monitor for the complete action.
+    # Return and Tab remain real key presses rather than Unicode insertion.
+    index = 0
+    while index < len(text):
+        character = text[index]
+        time.sleep(0.025)
+        if character in {"\r", "\n", "\t"}:
+            if character == "\r" and index + 1 < len(text) and text[index + 1] == "\n":
+                index += 1
+            key = normalize_key("tab" if character == "\t" else "return")
+            _send_inputs([
+                _named_key_input(key),
+                _named_key_input(key, key_up=True),
+            ])
+        else:
+            _send_inputs(_unicode_inputs(character))
+        index += 1
 
 
 # ---------------------------------------------------------------------------
@@ -1004,6 +1669,7 @@ def _finish(lease: "ForegroundLease | None", result: Any) -> int:
     """
     if lease is not None:
         lease.finalize()
+        lease.close()
     json_output({"ok": True, "result": result})
     return 0
 
@@ -1027,8 +1693,9 @@ def main() -> int:
             ensure_target_window_reachable(
                 payload.get("bundleId") or payload.get("app")
             )
-            lease = ForegroundLease()
+            lease = ForegroundLease(command)
             lease.acquire()
+            lease.mark_started()
         if command == "check_permissions":
             perms = check_permissions()
             json_output({"ok": True, "result": perms})
@@ -1090,21 +1757,39 @@ def main() -> int:
             return _finish(lease, True)
         if command == "drag":
             from_point = payload.get("from")
-            if from_point:
-                pyautogui.moveTo(int(from_point["x"]), int(from_point["y"]))
-            pyautogui.dragTo(int(payload["to"]["x"]), int(payload["to"]["y"]), duration=0.2, button="left")
+            if from_point is None:
+                current = pyautogui.position()
+                start_x, start_y = int(current.x), int(current.y)
+            else:
+                start_x = int(from_point["x"])
+                start_y = int(from_point["y"])
+            target_x = int(payload["to"]["x"])
+            target_y = int(payload["to"]["y"])
+            events = [
+                _absolute_mouse_move(start_x, start_y),
+                _mouse_input(MOUSEEVENTF_LEFTDOWN),
+            ]
+            for step in range(1, 13):
+                events.append(_absolute_mouse_move(
+                    round(start_x + (target_x - start_x) * step / 12),
+                    round(start_y + (target_y - start_y) * step / 12),
+                ))
+            events.append(_mouse_input(MOUSEEVENTF_LEFTUP))
+            _send_inputs(events)
             return _finish(lease, True)
         if command == "move_mouse":
-            pyautogui.moveTo(int(payload["x"]), int(payload["y"]))
+            _send_inputs([_absolute_mouse_move(
+                int(payload["x"]), int(payload["y"])
+            )])
             return _finish(lease, True)
         if command == "scroll":
             scroll(int(payload["x"]), int(payload["y"]), int(payload.get("deltaX") or 0), int(payload.get("deltaY") or 0))
             return _finish(lease, True)
         if command == "mouse_down":
-            pyautogui.mouseDown(button="left")
+            _send_inputs([_mouse_input(MOUSEEVENTF_LEFTDOWN)])
             return _finish(lease, True)
         if command == "mouse_up":
-            pyautogui.mouseUp(button="left")
+            _send_inputs([_mouse_input(MOUSEEVENTF_LEFTUP)])
             return _finish(lease, True)
         if command == "cursor_position":
             x, y = pyautogui.position()
@@ -1138,7 +1823,12 @@ def main() -> int:
             return _finish(lease, True)
         error_output(f"Unknown command: {command}", code="bad_command")
         return 2
-    except (UserInterference, DeliveryRefused) as exc:
+    except (
+        UserInterference,
+        DeliveryRefused,
+        InputMonitorUnavailable,
+        InputInjectionFailed,
+    ) as exc:
         # A deliberate refusal, not a crash. The code travels so the caller can
         # tell "did not run, safe to retry" apart from "ran, outcome unknown" —
         # collapsing both into a generic error is how a model ends up repeating
@@ -1148,6 +1838,16 @@ def main() -> int:
     except Exception as exc:
         error_output(str(exc))
         return 1
+    finally:
+        if lease is not None:
+            try:
+                lease.close()
+            except (UserInterference, InputMonitorUnavailable):
+                # Successful mutations close inside _finish before emitting
+                # JSON, so any cleanup failure there is already surfaced. If
+                # dispatch raised, preserve that first machine-readable error
+                # while still making a best-effort cleanup here.
+                pass
 
 
 if __name__ == "__main__":

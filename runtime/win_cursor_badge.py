@@ -50,7 +50,7 @@ WS_EX_NOACTIVATE = 0x08000000
 WS_POPUP = 0x80000000
 
 SW_SHOWNOACTIVATE = 4
-HWND_TOPMOST = -1
+HWND_TOPMOST = wintypes.HWND(-1)
 SWP_NOACTIVATE = 0x0010
 SWP_NOSIZE = 0x0001
 SWP_NOZORDER = 0x0004
@@ -59,9 +59,12 @@ LWA_COLORKEY = 0x00000001
 LWA_ALPHA = 0x00000002
 
 WM_DESTROY = 0x0002
+WM_CLOSE = 0x0010
 WM_PAINT = 0x000F
 
-BADGE_W = 132
+# Leave enough room for the default label at common Windows text scales. The
+# original 132px width clipped "Claude is controlling" on a 100%-scale display.
+BADGE_W = 168
 BADGE_H = 30
 CURSOR_OFFSET_X = 18
 CURSOR_OFFSET_Y = 18
@@ -95,12 +98,16 @@ class PAINTSTRUCT(ctypes.Structure):
     ]
 
 
+LRESULT = ctypes.c_ssize_t
+WNDPROC = ctypes.WINFUNCTYPE(
+    LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
+)
+
+
 class WNDCLASS(ctypes.Structure):
     _fields_ = [
         ("style", wintypes.UINT),
-        ("lpfnWndProc", ctypes.WINFUNCTYPE(
-            ctypes.c_long, wintypes.HWND, wintypes.UINT,
-            wintypes.WPARAM, wintypes.LPARAM)),
+        ("lpfnWndProc", WNDPROC),
         ("cbClsExtra", ctypes.c_int),
         ("cbWndExtra", ctypes.c_int),
         ("hInstance", wintypes.HINSTANCE),
@@ -112,9 +119,114 @@ class WNDCLASS(ctypes.Structure):
     ]
 
 
-WNDPROC = ctypes.WINFUNCTYPE(
-    ctypes.c_long, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM
-)
+def _configure_win32() -> None:
+    """Declare every Win32 signature that carries a pointer-sized value.
+
+    ctypes otherwise assumes ``c_int`` arguments and return values. That is
+    only 32 bits on 64-bit Windows, so HWND, WPARAM, LPARAM, and LRESULT values
+    are truncated before the badge's window procedure can use them.
+    """
+    kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+    kernel32.GetModuleHandleW.restype = wintypes.HINSTANCE
+
+    user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASS)]
+    user32.RegisterClassW.restype = wintypes.WORD
+    user32.CreateWindowExW.argtypes = [
+        wintypes.DWORD,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.HWND,
+        wintypes.HANDLE,
+        wintypes.HINSTANCE,
+        wintypes.LPVOID,
+    ]
+    user32.CreateWindowExW.restype = wintypes.HWND
+    user32.DefWindowProcW.argtypes = [
+        wintypes.HWND,
+        wintypes.UINT,
+        wintypes.WPARAM,
+        wintypes.LPARAM,
+    ]
+    user32.DefWindowProcW.restype = LRESULT
+    user32.DestroyWindow.argtypes = [wintypes.HWND]
+    user32.DestroyWindow.restype = wintypes.BOOL
+    user32.PostQuitMessage.argtypes = [ctypes.c_int]
+    user32.PostQuitMessage.restype = None
+    user32.PostMessageW.argtypes = [
+        wintypes.HWND,
+        wintypes.UINT,
+        wintypes.WPARAM,
+        wintypes.LPARAM,
+    ]
+    user32.PostMessageW.restype = wintypes.BOOL
+    user32.GetMessageW.argtypes = [
+        ctypes.POINTER(wintypes.MSG),
+        wintypes.HWND,
+        wintypes.UINT,
+        wintypes.UINT,
+    ]
+    user32.GetMessageW.restype = wintypes.BOOL
+    user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    user32.TranslateMessage.restype = wintypes.BOOL
+    user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    user32.DispatchMessageW.restype = LRESULT
+
+    user32.BeginPaint.argtypes = [wintypes.HWND, ctypes.POINTER(PAINTSTRUCT)]
+    user32.BeginPaint.restype = wintypes.HDC
+    user32.EndPaint.argtypes = [wintypes.HWND, ctypes.POINTER(PAINTSTRUCT)]
+    user32.EndPaint.restype = wintypes.BOOL
+    user32.FillRect.argtypes = [
+        wintypes.HDC,
+        ctypes.POINTER(RECT),
+        wintypes.HBRUSH,
+    ]
+    user32.FillRect.restype = ctypes.c_int
+    user32.DrawTextW.argtypes = [
+        wintypes.HDC,
+        wintypes.LPCWSTR,
+        ctypes.c_int,
+        ctypes.POINTER(RECT),
+        wintypes.UINT,
+    ]
+    user32.DrawTextW.restype = ctypes.c_int
+    user32.SetLayeredWindowAttributes.argtypes = [
+        wintypes.HWND,
+        wintypes.DWORD,
+        wintypes.BYTE,
+        wintypes.DWORD,
+    ]
+    user32.SetLayeredWindowAttributes.restype = wintypes.BOOL
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
+    user32.GetCursorPos.restype = wintypes.BOOL
+    user32.SetWindowPos.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    ]
+    user32.SetWindowPos.restype = wintypes.BOOL
+
+    gdi32.CreateSolidBrush.argtypes = [wintypes.DWORD]
+    gdi32.CreateSolidBrush.restype = wintypes.HBRUSH
+    gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
+    gdi32.DeleteObject.restype = wintypes.BOOL
+    gdi32.SetBkMode.argtypes = [wintypes.HDC, ctypes.c_int]
+    gdi32.SetBkMode.restype = ctypes.c_int
+    gdi32.SetTextColor.argtypes = [wintypes.HDC, wintypes.DWORD]
+    gdi32.SetTextColor.restype = wintypes.DWORD
+
+
+_configure_win32()
 
 
 class CursorBadge:
@@ -130,6 +242,9 @@ class CursorBadge:
     def _on_message(self, hwnd, msg, wparam, lparam):
         if msg == WM_PAINT:
             self._paint(hwnd)
+            return 0
+        if msg == WM_CLOSE:
+            user32.DestroyWindow(hwnd)
             return 0
         if msg == WM_DESTROY:
             user32.PostQuitMessage(0)
@@ -225,7 +340,7 @@ class CursorBadge:
     def stop(self) -> None:
         self._stop.set()
         if self.hwnd:
-            user32.PostMessageW(self.hwnd, WM_DESTROY, 0, 0)
+            user32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
 
     def run(self) -> int:
         self.create()

@@ -18,11 +18,15 @@ Usage:
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import subprocess
 import sys
+import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
+from types import SimpleNamespace
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -112,6 +116,90 @@ class TestJSONProtocol(unittest.TestCase):
         self.assertEqual(parsed["error"]["code"], "bad_command")
 
 
+@unittest.skipUnless(IS_WINDOWS, "requires Windows runtime deps")
+class TestWindowsApplicationDiscovery(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("win_helper_app_discovery", WIN_HELPER)
+        assert spec is not None and spec.loader is not None
+        cls.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.module)
+
+    def test_installed_apps_adds_a_visible_app_missing_from_uninstall_registry(self):
+        visible = [{
+            "bundleId": "Notepad",
+            "displayName": "Notepad.exe",
+            "path": r"C:\Windows\System32\notepad.exe",
+        }]
+        with patch.object(self.module, "_visible_gui_apps", return_value=visible):
+            apps = self.module.installed_apps()
+        self.assertEqual(
+            [app for app in apps if app["bundleId"] == "Notepad"],
+            visible,
+        )
+
+    def test_running_apps_uses_visible_window_inventory(self):
+        visible = [{
+            "bundleId": "CalculatorApp",
+            "displayName": "CalculatorApp.exe",
+            "path": r"C:\Program Files\WindowsApps\CalculatorApp.exe",
+        }]
+        with patch.object(self.module, "_visible_gui_apps", return_value=visible):
+            self.assertEqual(self.module.running_apps(), [{
+                "bundleId": "CalculatorApp",
+                "displayName": "CalculatorApp.exe",
+            }])
+
+    def test_open_app_foregrounds_a_running_app_instead_of_launching_another(self):
+        with (
+            patch.object(self.module, "_foreground_existing_app", return_value=True),
+            patch.object(self.module.subprocess, "Popen") as popen,
+        ):
+            self.module.open_app("Notepad")
+        popen.assert_not_called()
+
+    def test_type_text_paces_long_input_inside_one_helper_call(self):
+        with (
+            patch.object(self.module, "_send_inputs") as send_inputs,
+            patch.object(self.module.time, "sleep"),
+        ):
+            self.module.type_text("A" * 130 + "\r\nB\tC")
+
+        # One paced SendInput call per character plus Return and Tab. The
+        # complete string still stays inside this single Python invocation
+        # instead of spawning a helper process for every grapheme.
+        self.assertEqual(send_inputs.call_count, 134)
+        self.assertTrue(all(
+            len(call.args[0]) == 2
+            for call in send_inputs.call_args_list
+        ))
+
+    def test_application_frame_window_resolves_to_packaged_child_process(self):
+        host = SimpleNamespace(
+            name=lambda: "ApplicationFrameHost.exe",
+            exe=lambda: r"C:\Windows\System32\ApplicationFrameHost.exe",
+            pid=10,
+        )
+        calculator = SimpleNamespace(
+            name=lambda: "CalculatorApp.exe",
+            exe=lambda: r"C:\Program Files\WindowsApps\CalculatorApp.exe",
+            pid=20,
+        )
+
+        def enum_children(_hwnd, callback, context):
+            callback(200, context)
+
+        with (
+            patch("win32process.GetWindowThreadProcessId", side_effect=[(0, 10), (0, 20)]),
+            patch("win32gui.EnumChildWindows", side_effect=enum_children),
+            patch("win32gui.GetClassName", return_value="Windows.UI.Core.CoreWindow"),
+            patch("psutil.Process", side_effect=[host, calculator]),
+        ):
+            resolved = self.module._window_process(100)
+
+        self.assertEqual(resolved.name(), "CalculatorApp.exe")
+
+
 class TestMutatingCommandsAreGuarded(unittest.TestCase):
     """Every command that injects input must pass through the guards.
 
@@ -198,16 +286,14 @@ class TestMutatingCommandsAreGuarded(unittest.TestCase):
 
 
 class TestInterferenceDetection(unittest.TestCase):
-    def test_uses_getlastinputinfo_not_an_event_hook(self):
-        """The signal must stay permission-free.
-
-        A low-level input hook would read the same events, but installing one
-        is exactly the kind of thing that gets an app flagged, and it is not
-        needed: GetLastInputInfo answers the only question we ask.
-        """
+    def test_uses_injected_flags_to_separate_agent_and_physical_input(self):
+        """The detector must observe origin, not infer it from a timestamp."""
         source = _win_source()
-        self.assertIn("GetLastInputInfo", source)
-        self.assertNotIn("SetWindowsHookEx", source)
+        self.assertIn("SetWindowsHookExW", source)
+        self.assertIn("LLKHF_INJECTED", source)
+        self.assertIn("LLMHF_INJECTED", source)
+        self.assertIn("dwExtraInfo", source)
+        self.assertIn("SendInput", source)
 
     def test_distinguishes_did_not_run_from_outcome_unknown(self):
         """The two interference verdicts must stay distinct.
@@ -231,31 +317,69 @@ class TestInterferenceDetection(unittest.TestCase):
         self.assertIn("result_unknown", finalize_body,
                       "post-action interference leaves the outcome unknown")
 
-    def test_counter_read_failure_does_not_block_actions(self):
-        """An unreadable counter must fail open, not brick the feature.
-
-        Precedent from the macOS side: an earlier build required an Input
-        Monitoring grant that onboarding never asked for, so every mutating
-        action failed on a correctly set-up machine. A safety layer that turns
-        the product off is not safety.
-        """
+    def test_monitor_failure_refuses_before_injection(self):
+        """An unavailable safety monitor must fail closed before input."""
         source = _win_source()
-        fn_start = source.index("def last_physical_input_tick()")
-        body = source[fn_start:source.index("class UserInterference")]
-        self.assertIn("return 0", body)
-        # And the comparisons must treat 0 as "no reading", never as a tick
-        # value that happens to differ from the next one.
-        self.assertIn("if before and after and before != after:", source)
+        self.assertIn('code = "input_monitor_unavailable"', source)
+        self.assertIn("InputMonitorUnavailable,", source)
+        self.assertLess(
+            source.index("lease.acquire()"),
+            source.index('if command == "check_permissions"'),
+        )
 
-    def test_synthetic_input_must_not_trip_the_detector(self):
-        """Documented invariant: SendInput does not advance GetLastInputInfo.
+    @unittest.skipUnless(IS_WINDOWS, "requires Windows input injection")
+    def test_tagged_keyboard_and_mouse_input_do_not_trip_the_detector(self):
+        spec = importlib.util.spec_from_file_location("win_helper", WIN_HELPER)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
 
-        If this ever stopped holding, every agent action would abort itself and
-        the feature would look randomly broken. Pinning the claim in a test
-        keeps it from being quietly deleted as a stale comment.
-        """
-        source = _win_source()
-        self.assertIn("is NOT advanced by", source)
+        lease = module.ForegroundLease("key")
+        lease.acquire()
+        try:
+            module.key_action("shift")
+            module._send_inputs([
+                module._mouse_input(
+                    module.MOUSEEVENTF_MOVE
+                    | module.MOUSEEVENTF_MOVE_NOCOALESCE,
+                    dx=1,
+                ),
+                module._mouse_input(
+                    module.MOUSEEVENTF_MOVE
+                    | module.MOUSEEVENTF_MOVE_NOCOALESCE,
+                    dx=-1,
+                ),
+            ])
+            lease.finalize()
+            self.assertGreaterEqual(lease.monitor.agent_count, 4)
+            self.assertEqual(lease.monitor.interference_count, 0)
+        finally:
+            close = getattr(lease, "close", None)
+            if close is not None:
+                close()
+
+    @unittest.skipUnless(IS_WINDOWS, "requires Windows input injection")
+    def test_foreign_injected_input_is_interference(self):
+        spec = importlib.util.spec_from_file_location("win_helper", WIN_HELPER)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        monitor = module.PhysicalInputMonitor()
+        monitor.start()
+        try:
+            before = monitor.snapshot()
+            module.ctypes.windll.user32.mouse_event(
+                module.MOUSEEVENTF_MOVE, 1, 0, 0, 0
+            )
+            module.ctypes.windll.user32.mouse_event(
+                module.MOUSEEVENTF_MOVE, -1, 0, 0, 0
+            )
+            after = monitor.snapshot()
+            self.assertGreater(after, before)
+            self.assertEqual(monitor.agent_count, 0)
+        finally:
+            monitor.stop()
 
 
 class TestDeliveryGuards(unittest.TestCase):
@@ -359,6 +483,21 @@ class TestCursorBadge(unittest.TestCase):
         source = CURSOR_BADGE.read_text(encoding="utf-8")
         self.assertIn("annotation", source.lower())
 
+    def test_badge_fits_the_default_label(self):
+        tree = ast.parse(CURSOR_BADGE.read_text(encoding="utf-8"))
+        width_assignment = next(
+            node for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "BADGE_W"
+                    for target in node.targets)
+        )
+        self.assertIsInstance(width_assignment.value, ast.Constant)
+        self.assertGreaterEqual(
+            width_assignment.value.value,
+            160,
+            'the default "Claude is controlling" label must not be clipped',
+        )
+
     def test_badge_exits_with_its_parent(self):
         """An orphaned badge is worse than none.
 
@@ -369,6 +508,59 @@ class TestCursorBadge(unittest.TestCase):
         source = CURSOR_BADGE.read_text(encoding="utf-8")
         self.assertIn("stdin", source)
 
+    @unittest.skipUnless(IS_WINDOWS, "requires the Windows window manager")
+    def test_badge_declares_pointer_safe_win32_signatures(self):
+        spec = importlib.util.spec_from_file_location("win_cursor_badge", CURSOR_BADGE)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        self.assertIs(module.user32.CreateWindowExW.restype, module.wintypes.HWND)
+        self.assertIs(module.user32.CreateWindowExW.argtypes[3], module.wintypes.DWORD)
+        self.assertIs(module.user32.DefWindowProcW.restype, module.LRESULT)
+        for function in (
+            module.user32.DrawTextW,
+            module.user32.SetLayeredWindowAttributes,
+            module.user32.SetWindowPos,
+        ):
+            self.assertIsNotNone(function.argtypes)
+            self.assertIsNotNone(function.restype)
+
+    @unittest.skipUnless(IS_WINDOWS, "requires the Windows window manager")
+    def test_badge_message_loop_is_64_bit_safe(self):
+        """Creating and closing the real window must not overflow ctypes.
+
+        Default ctypes signatures treat Win32 handles and message parameters
+        as 32-bit integers. That can appear to work until a 64-bit WPARAM,
+        LPARAM, or HWND reaches the callback and is silently truncated.
+        """
+        process = subprocess.Popen(
+            [sys.executable, str(CURSOR_BADGE), "--label", "Test"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            time.sleep(0.5)
+            if process.poll() is not None:
+                assert process.stderr is not None
+                self.fail(f"badge exited during startup: {process.stderr.read()}")
+            assert process.stdin is not None
+            process.stdin.close()
+            returncode = process.wait(timeout=5)
+            assert process.stderr is not None
+            stderr = process.stderr.read()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
+        self.assertEqual(returncode, 0, stderr)
+        self.assertNotIn("Exception ignored on calling ctypes callback", stderr)
+        self.assertNotIn("OverflowError", stderr)
+
 
 class TestPermissions(unittest.TestCase):
     def test_check_permissions_always_granted(self):
@@ -378,6 +570,17 @@ class TestPermissions(unittest.TestCase):
         body = source[start:start + 400]
         self.assertIn('"accessibility": True', body)
         self.assertIn('"screenRecording": True', body)
+
+
+class TestDesktopHostIdentity(unittest.TestCase):
+    def test_packaged_exe_maps_to_the_host_identity_sent_by_desktop(self):
+        source = _win_source()
+        self.assertIn(
+            'DESKTOP_HOST_BUNDLE_ID = "com.claude-code-haha.desktop"',
+            source,
+        )
+        self.assertIn('stem.casefold() == "claude code haha"', source)
+        self.assertIn('"bundleId": _windows_bundle_id(exe_path)', source)
 
 
 class TestSourceIntegrity(unittest.TestCase):

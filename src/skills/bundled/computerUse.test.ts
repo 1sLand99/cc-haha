@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 
 import { getBundledSkills } from '../bundledSkills.js'
-import { registerComputerUseSkill } from './computerUse.js'
+import {
+  getComputerUsePrompt,
+  getComputerUseToolAllowlist,
+  registerComputerUseSkill,
+} from './computerUse.js'
 
 /**
  * Asserting on prose is unusual, but this prose is load-bearing twice over: it
@@ -11,11 +15,7 @@ import { registerComputerUseSkill } from './computerUse.js'
  * see what it was buying.
  */
 async function computerUsePrompt(): Promise<string> {
-  registerComputerUseSkill()
-  const skill = getBundledSkills().find(s => s.name === 'computer-use')
-  if (!skill) throw new Error('computer-use skill not registered')
-  const blocks = await skill.getPromptForCommand('', undefined as never)
-  return blocks.map(b => ('text' in b ? b.text : '')).join('\n')
+  return getComputerUsePrompt('darwin')
 }
 
 describe('computer-use skill content', () => {
@@ -80,19 +80,29 @@ describe('computer-use skill registration', () => {
 
     // Descriptions can be truncated hard when many skills are installed, so the
     // first words must carry what this is FOR.
-    expect(skill!.description.startsWith("Operate apps on the user's Mac")).toBe(true)
+    expect(
+      skill!.description.startsWith(
+        process.platform === 'win32'
+          ? "Operate apps on the user's Windows desktop"
+          : "Operate apps on the user's Mac",
+      ),
+    ).toBe(true)
 
     // Without a down-ranking clause this competes with the Chrome extension and
     // purpose-built MCP servers on web tasks, where they are faster.
     expect(skill!.description).toContain('Prefer a purpose-built MCP server')
   })
 
-  test('binds exactly the ten Computer Use tools', () => {
+  test('binds exactly the Computer Use tools advertised on this platform', () => {
     registerComputerUseSkill()
     const skill = getBundledSkills().find(s => s.name === 'computer-use')
-    expect(skill!.allowedTools).toHaveLength(10)
-    expect(skill!.allowedTools).toContain('mcp__computer-use__get_app_state')
-    expect(skill!.allowedTools).toContain('mcp__computer-use__click')
+    const platform = process.platform === 'win32' ? 'win32' : 'darwin'
+    expect(skill!.allowedTools).toEqual(getComputerUseToolAllowlist(platform))
+    expect(skill!.allowedTools).toContain(
+      process.platform === 'win32'
+        ? 'mcp__computer-use__request_access'
+        : 'mcp__computer-use__get_app_state',
+    )
     expect(
       skill!.allowedTools!.every(t => t.startsWith('mcp__computer-use__')),
     ).toBe(true)
@@ -102,5 +112,21 @@ describe('computer-use skill registration', () => {
     registerComputerUseSkill()
     const skill = getBundledSkills().find(s => s.name === 'computer-use')
     expect(skill!.whenToUse).toContain('BEFORE the first mcp__computer-use__')
+  })
+})
+
+describe('computer-use Windows guidance', () => {
+  test('matches the unfiltered, permission-gated pixel tool face', () => {
+    const prompt = getComputerUsePrompt('win32')
+    expect(prompt).toContain('request_access')
+    expect(prompt).toContain('screenshots are NOT filtered')
+    expect(prompt).toContain('most recent full screenshot')
+    expect(prompt).toContain('UNKNOWN result')
+
+    const tools = getComputerUseToolAllowlist('win32')
+    expect(tools).toContain('mcp__computer-use__screenshot')
+    expect(tools).toContain('mcp__computer-use__left_click')
+    expect(tools).toContain('mcp__computer-use__type')
+    expect(tools).not.toContain('mcp__computer-use__get_app_state')
   })
 })

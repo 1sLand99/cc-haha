@@ -393,8 +393,9 @@ describe('Computer Use platform routing', () => {
       expect(calls).toContain('listRunningApps')
       expect(calls).toContain('click:10,20,left,1')
       expect(calls).toContain('key:ctrl+a')
-      expect(calls).toContain('type:o')
-      expect(calls).toContain('type:k')
+      expect(calls).toContain('type:ok')
+      expect(calls).not.toContain('type:o')
+      expect(calls).not.toContain('type:k')
 
       const blockedKey = await connection.client.callTool({
         name: 'key',

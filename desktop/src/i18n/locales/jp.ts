@@ -2015,6 +2015,7 @@ export const jp: Record<TranslationKey, string> = {
   'computerUseApproval.deny': '拒否',
   'computerUseApproval.alreadyGranted': 'このセッションでは既に許可されています',
   'computerUseApproval.notInstalled': 'アプリがインストールされていません',
+  'computerUseApproval.unfilteredScreenshots': 'Windows では、このディスプレイに表示されているすべてのウィンドウ（下にないアプリを含む）がスクリーンショットに写る場合があります。入力操作は許可したアプリだけに制限されます。',
   'computerUseApproval.sensitiveApp': 'このアプリは機密として扱われ、追加の確認が必要です。',
   'computerUseApproval.alsoRequested': '同時に要求中',
   'computerUseApproval.hideWhileWorking': 'Claude の作業中、他の {count} 個のアプリが非表示になります。',

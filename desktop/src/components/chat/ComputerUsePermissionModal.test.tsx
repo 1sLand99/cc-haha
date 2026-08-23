@@ -178,4 +178,25 @@ describe('ComputerUsePermissionModal', () => {
 
     expect(openSettingsMock).toHaveBeenCalledWith('Privacy_Accessibility')
   })
+
+  it('discloses that Windows screenshots include ungranted visible apps', () => {
+    render(
+      <ComputerUsePermissionModal
+        sessionId="session-1"
+        request={{
+          requestId: 'cu-windows',
+          reason: 'Inspect Explorer',
+          apps: [],
+          requestedFlags: {},
+          screenshotFiltering: 'none',
+        }}
+      />,
+    )
+
+    const disclosure = screen.getByRole('note').textContent ?? ''
+    expect(disclosure).toContain(
+      'screenshots can include every visible window on this display',
+    )
+    expect(disclosure).toContain('Input remains limited to the apps you allow')
+  })
 })

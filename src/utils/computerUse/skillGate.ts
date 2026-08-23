@@ -50,9 +50,9 @@ export function invalidateComputerUseSkillGate(): void {
 }
 
 function computeEnabled(readConfigFile: (path: string) => string): boolean {
-  // The native engine is macOS-only; on other platforms the skill would
-  // describe tools that cannot run.
-  if (process.platform !== 'darwin') return false
+  // The native semantic engine runs on macOS; Windows uses the pixel-tool
+  // face backed by the packaged Python helper. Other platforms have neither.
+  if (process.platform !== 'darwin' && process.platform !== 'win32') return false
 
   // Respect the kill switch before reading anything the user set: when the
   // feature is force-disabled its tools are not registered either, so guidance
