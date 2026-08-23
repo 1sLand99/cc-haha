@@ -21,17 +21,26 @@ type Props = {
   isStreaming?: boolean
   branchAction?: MessageBranchAction
   sessionId?: string
-  timestamp?: number
   /** This turn's real changed files (absolute), used to anchor output chips onto
    *  files that were actually written instead of guessing from the prose. */
   turnChangedFiles?: string[]
+  /** Only one assistant message per turn owns fallback cards for unmentioned changed files. */
+  isTurnOutputOwner?: boolean
   /** Set only on the last reply of a finished turn: when it ended and how long it took. */
   turnCompletion?: TurnCompletion
 }
 
 const MAX_CARDS = 3
 
-export const AssistantMessage = memo(function AssistantMessage({ content, isStreaming, branchAction, sessionId, timestamp, turnChangedFiles, turnCompletion }: Props) {
+export const AssistantMessage = memo(function AssistantMessage({
+  content,
+  isStreaming,
+  branchAction,
+  sessionId,
+  turnChangedFiles,
+  isTurnOutputOwner = true,
+  turnCompletion,
+}: Props) {
   const t = useTranslation()
   const workDir = useWorkspacePanelStore((s) => (sessionId ? s.statusBySession[sessionId]?.workDir : undefined))
 
@@ -79,10 +88,14 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
       isStreaming || !sessionId
         ? []
         : // Image/video targets render inline (InlineImageGallery/InlineVideoGallery); never also as a card.
-          extractAssistantOutputTargets(content, { workDir, changedFiles: turnChangedFiles }).filter(
+          extractAssistantOutputTargets(content, {
+            workDir,
+            changedFiles: turnChangedFiles,
+            includeChangedFileFallback: isTurnOutputOwner,
+          }).filter(
             (target) => target.kind !== 'image' && target.kind !== 'video',
           ),
-    [content, isStreaming, sessionId, workDir, turnChangedFiles],
+    [content, isStreaming, isTurnOutputOwner, sessionId, workDir, turnChangedFiles],
   )
 
   if (!content.trim()) return null
@@ -91,21 +104,25 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
   const showTurnCompletion = !isStreaming && Boolean(turnCompletion)
 
   return (
-    <div className="mb-5 flex justify-start">
+    <div className="flex justify-start">
       <div
         data-message-shell="assistant"
         data-layout={documentLayout ? 'document' : 'bubble'}
-        className={`group flex min-w-0 flex-col items-start ${
-          documentLayout
-            ? 'w-full max-w-full'
-            : 'max-w-[88%] sm:max-w-[80%] lg:max-w-[720px]'
-        }`}
+        // Always the full column. A reply that hugs its text turns every short
+        // answer into a differently-shaped block, so a scrolled transcript reads
+        // as a ragged pile; one width makes the replies a single column the eye
+        // can run down. The user bubble stays hugged — that asymmetry is what
+        // says which side is speaking, so it does not need width to say it too.
+        className="group flex w-full min-w-0 max-w-full flex-col items-start"
       >
         <div
           onContextMenu={sessionId ? handleContextMenu : undefined}
-          className={`rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4 text-[14.5px] text-[var(--color-text-primary)] shadow-[var(--shadow-card)] ${
-            documentLayout ? 'w-full' : 'max-w-full'
-          }`}
+          // No card. Left-aligned, full-column prose against the page is already
+          // unmistakably the reply — the hugged, tinted bubble on the right is
+          // what says who is speaking (see the note above), so a border here
+          // repeats that at the cost of ~50px per reply and makes prose look
+          // like the tool rows it sits between. The turn rail groups it now.
+          className="w-full text-[14.5px] text-[var(--color-text-primary)]"
         >
           <MarkdownRenderer
             content={content}
@@ -156,17 +173,26 @@ export const AssistantMessage = memo(function AssistantMessage({ content, isStre
           />
         )}
 
-        {showTurnCompletion ? <TurnCompletionStamp completion={turnCompletion!} /> : null}
-
-        <MessageActionBar
-          copyText={isStreaming ? undefined : content}
-          copyLabel={t('chat.copyReply')}
-          branchAction={branchAction}
-          align="start"
-          // The stamp above already carries this turn's end time; a hover chip
-          // repeating it a line below reads as two different times.
-          timestamp={showTurnCompletion ? undefined : timestamp}
-        />
+        {/*
+          Only the reply that closes a turn gets this footer. A turn emits many
+          intermediate replies ("checking the lint spread now") and nobody copies
+          or forks from those — yet the bar reserved 36px on each one whether or
+          not it was hovered, which on a one-line reply outweighed the text.
+          The action buttons and completion metadata share one compact row so a
+          finished answer has one visual close instead of two stacked footers.
+          Being rare now, it stays visible instead of waiting for a hover.
+          Mid-turn text is still copyable by selecting it (SelectableChatMessage).
+        */}
+        {showTurnCompletion && (
+          <MessageActionBar
+            copyText={content}
+            copyLabel={t('chat.copyReply')}
+            branchAction={branchAction}
+            align="start"
+            alwaysVisible
+            metadata={<TurnCompletionStamp completion={turnCompletion!} />}
+          />
+        )}
       </div>
     </div>
   )

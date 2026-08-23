@@ -220,6 +220,7 @@ type SessionProcess = {
   initMessage: any | null
   usesOfficialOAuth: boolean
   officialOAuthToken: string | null
+  officialOAuthRefreshPromise?: Promise<void>
   pendingPermissionRequests: Map<
     string,
     {
@@ -1053,6 +1054,13 @@ export class ConversationService {
         const msg = JSON.parse(line)
         if (this.isReplayedSdkMessage(session, msg)) continue
         if (
+          msg?.type === 'system' &&
+          msg.subtype === 'api_retry' &&
+          Number(msg.error_status) === 401
+        ) {
+          this.recoverOfficialOAuthAfter401(sessionId, session)
+        }
+        if (
           msg?.type === 'control_request' &&
           msg.request?.subtype === 'can_use_tool' &&
           typeof msg.request_id === 'string' &&
@@ -1632,6 +1640,11 @@ export class ConversationService {
       // no completion (#766: "卡住" with slowly growing tokens). This independent
       // cap frees such a stream after a fixed duration regardless of trickle.
       CLAUDE_STREAM_MAX_DURATION_MS: cleanEnv.CLAUDE_STREAM_MAX_DURATION_MS || '600000',
+      // A local tool call should finish generating its JSON arguments quickly.
+      // Bound this separately from the full response so a truncated, continuously
+      // streaming Write payload cannot occupy the session for the full 10 minutes.
+      CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS:
+        cleanEnv.CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS || '120000',
       // Time-to-first-token budget: how long to wait for the FIRST streamed
       // chunk after response headers arrive. The idle timer above is the wrong
       // knob for slow prefill — it kills healthy local/3P models that take
@@ -1782,6 +1795,48 @@ export class ConversationService {
     this.sendSdkMessage(sessionId, {
       type: 'update_environment_variables',
       variables: { CLAUDE_CODE_OAUTH_TOKEN: token },
+    })
+  }
+
+  private recoverOfficialOAuthAfter401(
+    sessionId: string,
+    session: SessionProcess,
+  ): void {
+    if (!session.usesOfficialOAuth || !session.officialOAuthToken) return
+    if (session.officialOAuthRefreshPromise) return
+
+    const rejectedToken = session.officialOAuthToken
+    const recovery = (async () => {
+      try {
+        const { hahaOAuthService } = await import('./hahaOAuthService.js')
+        const tokens = await hahaOAuthService.recoverFromUnauthorized(rejectedToken)
+        if (
+          !tokens?.accessToken ||
+          tokens.accessToken === rejectedToken ||
+          this.sessions.get(sessionId) !== session ||
+          session.officialOAuthToken !== rejectedToken
+        ) {
+          return
+        }
+
+        session.officialOAuthToken = tokens.accessToken
+        this.sendSdkMessage(sessionId, {
+          type: 'update_environment_variables',
+          variables: { CLAUDE_CODE_OAUTH_TOKEN: tokens.accessToken },
+        })
+      } catch (err) {
+        console.error(
+          '[conversationService] recover official OAuth token after 401 failed:',
+          err instanceof Error ? err.message : err,
+        )
+      }
+    })()
+
+    session.officialOAuthRefreshPromise = recovery
+    void recovery.finally(() => {
+      if (session.officialOAuthRefreshPromise === recovery) {
+        session.officialOAuthRefreshPromise = undefined
+      }
     })
   }
 

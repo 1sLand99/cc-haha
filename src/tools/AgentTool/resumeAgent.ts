@@ -25,6 +25,7 @@ import { getQuerySourceForAgent } from '../../utils/promptCategory.js'
 import {
   getAgentTranscript,
   readAgentMetadata,
+  type AgentMetadata,
 } from '../../utils/sessionStorage.js'
 import { buildEffectiveSystemPrompt } from '../../utils/systemPrompt.js'
 import type { SystemPrompt } from '../../utils/systemPromptType.js'
@@ -36,7 +37,7 @@ import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import { FORK_AGENT, isForkSubagentEnabled } from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 import { isBuiltInAgent } from './loadAgentsDir.js'
-import { runAgent } from './runAgent.js'
+import { resolvePersistedAgentType, runAgent } from './runAgent.js'
 
 export type ResumeAgentResult = {
   agentId: string
@@ -48,6 +49,17 @@ export function resolveResumedAgentModelOverride(
   model: unknown,
 ): ModelAlias | undefined {
   return typeof model === 'string' && isModelAlias(model) ? model : undefined
+}
+
+/** Resolve the original lifecycle owner before a resume re-registers the task.
+ * The current nested caller wins; a root SendMessage continuation falls back
+ * to the in-memory task and then to the persisted sidecar after cold restore. */
+export function resolveResumedAgentOwnerAgentId(
+  currentAgentId: string | undefined,
+  existingOwnerAgentId: string | undefined,
+  metadata: Pick<AgentMetadata, 'ownerAgentId'> | null,
+): string | undefined {
+  return currentAgentId ?? existingOwnerAgentId ?? metadata?.ownerAgentId
 }
 
 export async function resumeAgentBackground({
@@ -87,6 +99,15 @@ export async function resumeAgentBackground({
     toolUseContext.contentReplacementState,
     resumedMessages,
     transcript.contentReplacements,
+  )
+  const existingTask = appState.tasks[agentId]
+  const existingOwnerAgentId = existingTask && 'ownerAgentId' in existingTask
+    ? existingTask.ownerAgentId
+    : undefined
+  const ownerAgentId = resolveResumedAgentOwnerAgentId(
+    toolUseContext.agentId,
+    existingOwnerAgentId,
+    meta,
   )
   // Best-effort: if the original worktree was removed externally, fall back
   // to parent cwd rather than crashing on chdir later.
@@ -183,6 +204,10 @@ export async function resumeAgentBackground({
   const workerTools = isResumedFork
     ? toolUseContext.options.tools
     : assembleToolPool(workerPermissionContext, appState.mcp.tools)
+  const resumedAgentType = resolvePersistedAgentType(
+    meta?.agentType,
+    selectedAgent.agentType,
+  )
 
   const runAgentParams: Parameters<typeof runAgent>[0] = {
     agentDefinition: selectedAgent,
@@ -215,6 +240,10 @@ export async function resumeAgentBackground({
     worktreePath: resumedWorktreePath,
     description: meta?.description,
     spawningToolUseId,
+    ownerAgentId,
+    streamTargetAgentId: agentId,
+    persistedAgentType: resumedAgentType,
+    alreadyPersistedMessageCount: resumedMessages.length,
     contentReplacementState: resumedReplacementState,
   }
 
@@ -226,6 +255,7 @@ export async function resumeAgentBackground({
     selectedAgent,
     setAppState: rootSetAppState,
     toolUseId: spawningToolUseId,
+    ownerAgentId,
   })
 
   const metadata = {
@@ -233,7 +263,7 @@ export async function resumeAgentBackground({
     resolvedAgentModel,
     isBuiltInAgent: isBuiltInAgent(selectedAgent),
     startTime,
-    agentType: selectedAgent.agentType,
+    agentType: resumedAgentType,
     isAsync: true,
   }
 
@@ -241,7 +271,7 @@ export async function resumeAgentBackground({
     agentId,
     parentSessionId: getParentSessionId(),
     agentType: 'subagent' as const,
-    subagentName: selectedAgent.agentType,
+    subagentName: resumedAgentType,
     isBuiltIn: isBuiltInAgent(selectedAgent),
     invokingRequestId,
     invocationKind: 'resume' as const,
@@ -278,6 +308,7 @@ export async function resumeAgentBackground({
           getSdkAgentProgressSummariesEnabled(),
         getWorktreeResult: async () =>
           resumedWorktreePath ? { worktreePath: resumedWorktreePath } : {},
+        ownerAgentId,
       }),
     ),
   )

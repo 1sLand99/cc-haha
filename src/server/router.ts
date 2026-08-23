@@ -29,6 +29,7 @@ import { handleOpenTargetsApi } from './api/open-targets.js'
 import { handleMemoryApi } from './api/memory.js'
 import { handleDesktopUiApi } from './api/desktop-ui.js'
 import { handleTracesApi } from './api/traces.js'
+import { handleWorkflowsApi } from './api/workflows.js'
 
 export async function handleApiRequest(req: Request, url: URL): Promise<Response> {
   const path = url.pathname
@@ -75,6 +76,9 @@ export async function handleApiRequest(req: Request, url: URL): Promise<Response
 
     case 'teams':
       return handleTeamsApi(req, url, segments)
+
+    case 'workflows':
+      return handleWorkflowsApi(req, url, segments)
 
     case 'providers':
       return handleProvidersApi(req, url, segments)

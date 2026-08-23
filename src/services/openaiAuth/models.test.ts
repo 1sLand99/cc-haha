@@ -22,6 +22,7 @@ describe('openai auth model resolution', () => {
   test('accepts gpt and o-series models', () => {
     expect(isOpenAIResponsesModel('gpt-5.4')).toBe(true)
     expect(isOpenAIResponsesModel('o3-mini')).toBe(true)
+    expect(isOpenAIResponsesModel('openai/gpt-5.6-sol[1m]')).toBe(true)
   })
 
   test('maps frontier Claude aliases to the OpenAI default model', () => {
@@ -48,6 +49,14 @@ describe('openai auth model resolution', () => {
     expect(getOpenAICodexContextWindowForModel('gpt-5.3-codex-spark')).toBe(
       OPENAI_CODEX_SPARK_EFFECTIVE_CONTEXT_WINDOW,
     )
+  })
+
+  test('keeps bundled catalog windows aligned with runtime resolution', () => {
+    for (const model of OPENAI_CODEX_MODEL_CATALOG) {
+      expect(getOpenAICodexContextWindowForModel(model.value)).toBe(
+        model.contextWindow,
+      )
+    }
   })
 
   test('exposes GPT-5.6 family metadata and model-native reasoning defaults', () => {

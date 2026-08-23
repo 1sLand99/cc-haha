@@ -654,10 +654,10 @@ describe('ProviderService', () => {
           apiFormat: 'openai_chat',
           runtimeKind: 'grok_oauth',
           models: {
-            main: 'grok-4.5',
-            haiku: 'grok-4.5',
-            sonnet: 'grok-4.5',
-            opus: 'grok-4.5',
+            main: 'grok-4.6',
+            haiku: 'grok-4.6',
+            sonnet: 'grok-4.6',
+            opus: 'grok-4.6',
           },
         })
 
@@ -671,10 +671,10 @@ describe('ProviderService', () => {
         expect(env.GROK_OAUTH_FILE).toBe(
           path.join(tmpDir, 'cc-haha', 'grok-oauth.json'),
         )
-        expect(env.ANTHROPIC_MODEL).toBe('grok-4.5')
-        expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('grok-4.5')
-        expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('grok-4.5')
-        expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('grok-4.5')
+        expect(env.ANTHROPIC_MODEL).toBe('grok-4.6')
+        expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('grok-4.6')
+        expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('grok-4.6')
+        expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('grok-4.6')
         expect(env.CC_HAHA_OPENAI_OAUTH_PROVIDER).toBeUndefined()
         expect(env.OPENAI_CODEX_OAUTH_FILE).toBeUndefined()
       })
@@ -1080,7 +1080,8 @@ describe('ProviderService', () => {
       expect(env.ANTHROPIC_BASE_URL).toBe('https://second-api.example.com')
       expect(env.ANTHROPIC_AUTH_TOKEN).toBe('sk-second-key')
       expect(env.ANTHROPIC_API_KEY).toBe('')
-      expect(env.ENABLE_TOOL_SEARCH).toBe('true')
+      expect(second.toolSearchEnabled).toBe(false)
+      expect(env.ENABLE_TOOL_SEARCH).toBe('false')
       expect(env.ANTHROPIC_MODEL).toBe('model-main')
       expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('model-haiku')
       expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('model-sonnet')
@@ -1089,20 +1090,20 @@ describe('ProviderService', () => {
       expect(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined()
     })
 
-    test('should persist disabled tool search for native Anthropic providers', async () => {
+    test('should persist explicitly enabled tool search for native Anthropic providers', async () => {
       const svc = new ProviderService()
       const provider = await svc.addProvider(sampleInput({
-        toolSearchEnabled: false,
+        toolSearchEnabled: true,
       }))
 
       await svc.activateProvider(provider.id)
 
       const settings = await readSettings()
       const env = settings.env as Record<string, string>
-      expect(env.ENABLE_TOOL_SEARCH).toBe('false')
+      expect(env.ENABLE_TOOL_SEARCH).toBe('true')
 
       const runtimeEnv = await svc.getProviderRuntimeEnv(provider.id)
-      expect(runtimeEnv.ENABLE_TOOL_SEARCH).toBe('false')
+      expect(runtimeEnv.ENABLE_TOOL_SEARCH).toBe('true')
     })
 
     test('should persist disabled experimental betas on activation and runtime env', async () => {

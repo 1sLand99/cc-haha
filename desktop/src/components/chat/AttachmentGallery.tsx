@@ -78,6 +78,15 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
       }),
     [attachments, unloadableImageSources],
   )
+  // Keep the layout decision tied to the authored attachment set, not to
+  // transient load failures. Otherwise a two-image thumbnail row jumps to a
+  // large single-image layout when one source errors and falls back to a card.
+  const previewableImageCount = useMemo(
+    () => attachments.filter((attachment) => (
+      attachment.type === 'image' && Boolean(attachmentImageSource(attachment))
+    )).length,
+    [attachments],
+  )
 
   const markImageUnloadable = (src: string) => {
     setUnloadableImageSources((previous) => {
@@ -120,10 +129,10 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
     const triggerEl = event.currentTarget
     const anchor = triggerEl.getBoundingClientRect()
     void (async () => {
-      await useOpenTargetStore.getState().ensureTargets()
+      const targets = await useOpenTargetStore.getState().getTargetsForPath(attachment.path!)
       const items = buildOpenWithItems(
         { kind: 'file', absolutePath: attachment.path! },
-        useOpenTargetStore.getState().targets,
+        targets,
         {
           openInAppBrowser: () => {},
           openSystem: (path) => {
@@ -204,7 +213,7 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
           })}
         </div>
       ) : (
-      <div className={isComposer ? 'flex flex-wrap items-center gap-2' : 'flex flex-wrap justify-end gap-2'}>
+      <div className={isComposer ? 'flex flex-wrap items-center gap-2' : 'flex max-w-full flex-wrap justify-end gap-2'}>
         {attachments.map((attachment, index) => {
           const imageSrc = attachment.type === 'image' ? attachmentImageSource(attachment) : undefined
 
@@ -234,7 +243,9 @@ export function AttachmentGallery({ attachments, variant = 'message', onRemove }
                     className={
                       isComposer
                         ? 'h-16 w-16 object-cover'
-                        : 'max-h-[340px] w-full max-w-[360px] object-cover'
+                        : previewableImageCount === 1
+                          ? 'max-h-[340px] w-full max-w-[360px] object-cover'
+                          : 'h-28 w-28 object-cover'
                     }
                   />
                 </button>

@@ -5,15 +5,17 @@ import type { SessionTurnCheckpoint } from '../../api/sessions'
 import { useTranslation, type TranslationKey } from '../../i18n'
 import { Button } from '@/components/ui/Button'
 import { OpenWithMenu } from '@/components/composite/OpenWithMenu'
-import { buildOpenWithItems, describeFileType, isPreviewableChangedFile, type OpenWithItem } from '../../lib/openWithItems'
+import { describeFileType, isPreviewableChangedFile, type OpenWithItem } from '../../lib/openWithItems'
+import { buildOpenWithMenuItems } from '../../lib/openWithMenuItems'
 import { openWithContextForWorkspaceFile } from '../../lib/openWithContextForHref'
 import { isAbsoluteLocalPath, localFileUrl } from '../../lib/handlePreviewLink'
 import { shouldOfferStaticHtmlPreview } from '../../lib/htmlPreviewPolicy'
 import { getServerBaseUrl } from '../../lib/desktopRuntime'
-import { getDesktopHost } from '../../lib/desktopHost'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { useBrowserPanelStore } from '../../stores/browserPanelStore'
 import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
+import { isWorkspacePreviewableFile } from '../../lib/fileCapabilities'
+import { openLocalFileWithSystem, reportOpenFailure } from '../../lib/systemFileOpen'
 
 type CurrentTurnChangeCardProps = {
   sessionId: string
@@ -60,12 +62,21 @@ export function CurrentTurnChangeCard({
     ? files.slice(0, COLLAPSED_COUNT)
     : files
   const restoreAvailable = checkpoint.restoreAvailable !== false
+  // Undo restores every file listed above, but a turn that also ran a writing
+  // shell command may have touched files no checkpoint captured. Say so instead
+  // of withholding the undo — the listed files are still exactly reversible.
+  const unverifiedChangeSources = checkpoint.unverifiedChangeSources ?? []
+  const hasUnverifiedChanges = restoreAvailable && unverifiedChangeSources.length > 0
 
   const openChangedFile = useCallback((event: ReactMouseEvent<HTMLButtonElement>, fileEntry: ChangedFileEntry) => {
     const renderItem = event.currentTarget.closest<HTMLElement>('[data-chat-render-item-key]')
     const origin = {
       sourceTurnKey: renderItem?.dataset.chatRenderItemKey ?? checkpoint.target.targetUserMessageId,
       sourceElementId: event.currentTarget.id,
+    }
+    if (!isWorkspacePreviewableFile(fileEntry.displayPath)) {
+      void openLocalFileWithSystem(fileEntry.apiPath).catch(() => reportOpenFailure(fileEntry.apiPath))
+      return
     }
     // A changed file outside the workdir (absolute displayPath — e.g. another
     // drive) has no checkpoint baseline, so a diff is meaningless. Render html in
@@ -97,18 +108,17 @@ export function CurrentTurnChangeCard({
     const triggerEl = event.currentTarget
     const rect = triggerEl.getBoundingClientRect()
     void (async () => {
-      await useOpenTargetStore.getState().ensureTargets()
-      const targets = useOpenTargetStore.getState().targets
+      const targets = await useOpenTargetStore.getState().getTargetsForPath(fileEntry.apiPath)
       const ctx = openWithContextForWorkspaceFile(fileEntry.displayPath, fileEntry.apiPath, {
         sessionId,
         serverBaseUrl: getServerBaseUrl(),
         siblingFiles: files.map((entry) => entry.displayPath),
       })
-      const items = buildOpenWithItems(ctx, targets, {
-        openInAppBrowser: (url) => useBrowserPanelStore.getState().open(sessionId, url),
-        openSystem: (p) => { void getDesktopHost().shell.openPath(p).catch(() => {}) },
-        openWorkspacePreview: (rel) => { void useWorkspacePanelStore.getState().openPreview(sessionId, rel, 'file') },
-        openTarget: (id, abs) => { void useOpenTargetStore.getState().openTarget(id, abs) },
+      // The shared dependency factory, not a fourth hand-copied set: this call
+      // site was the one that never adopted it, which is why the changed-file
+      // menu was missing the copy entries every other surface has.
+      const items = buildOpenWithMenuItems(ctx, targets, {
+        sessionId,
         t: (k, v) => t(k as TranslationKey, v),
       })
       setOpenWith({ items, anchor: rect, triggerEl })
@@ -119,10 +129,14 @@ export function CurrentTurnChangeCard({
     ? t('chat.turnChangesLatestCardLabel')
     : t('chat.turnChangesHistoricalCardLabel')
   const subtitle = !restoreAvailable
-    ? t('chat.turnChangesPreviewOnlySubtitle')
-    : isLatest
-      ? t('chat.turnChangesLatestSubtitle')
-      : t('chat.turnChangesCurrentWorkspaceDiff')
+    ? t('chat.turnChangesConversationOnlySubtitle')
+    : hasUnverifiedChanges
+      ? t('chat.turnChangesPartialCoverageSubtitle', {
+          sources: unverifiedChangeSources.join(', '),
+        })
+      : isLatest
+        ? t('chat.turnChangesLatestSubtitle')
+        : t('chat.turnChangesCurrentWorkspaceDiff')
   const undoLabel = isLatest
     ? t('chat.turnChangesLatestUndo')
     : t('chat.turnChangesHistoricalUndo')
@@ -132,7 +146,10 @@ export function CurrentTurnChangeCard({
 
   return (
     <section
-      className="mx-auto mb-5 w-full max-w-[900px] overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)]"
+      // Follows the message it belongs to inside the same rail box, so it takes a
+      // top margin and no width of its own — `max-w-[900px]` here would have
+      // overflowed the column once the rail indented it.
+      className="mt-2 w-full overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-card)]"
       aria-label={cardLabel}
     >
       <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3">
@@ -148,27 +165,29 @@ export function CurrentTurnChangeCard({
               -{checkpoint.code.deletions}
             </span>
           </div>
-          <div className="mt-0.5 text-xs text-[var(--color-text-tertiary)]">
+          <div
+            className={`mt-0.5 text-xs ${
+              hasUnverifiedChanges
+                ? 'text-[var(--color-warning)]'
+                : 'text-[var(--color-text-tertiary)]'
+            }`}
+          >
             {subtitle}
           </div>
         </div>
 
+        {/* Never disabled: rolling the conversation back is always possible, even
+            when the files are not restorable. The dialog picks what to touch. */}
         <Button
           variant="secondary"
           size="base"
           loading={isUndoing}
-          disabled={!restoreAvailable}
           onClick={onUndo}
-          aria-label={restoreAvailable ? undoAria : t('chat.turnChangesRestoreUnavailable')}
-          title={restoreAvailable ? undefined : t('chat.turnChangesRestoreUnavailable')}
+          aria-label={undoAria}
           className="shrink-0"
           icon={<span className="material-symbols-outlined text-[15px]" aria-hidden="true">undo</span>}
         >
-          {isUndoing
-            ? t('chat.turnChangesUndoing')
-            : restoreAvailable
-              ? undoLabel
-              : t('chat.turnChangesRestoreUnavailable')}
+          {isUndoing ? t('chat.turnChangesUndoing') : undoLabel}
         </Button>
       </div>
 
@@ -176,7 +195,7 @@ export function CurrentTurnChangeCard({
         {visibleFiles.map((fileEntry) => {
           const fileName = fileEntry.displayPath.split('/').pop() || fileEntry.displayPath
           const typeInfo = describeFileType(fileEntry.displayPath)
-          const previewable = isPreviewableChangedFile(fileEntry.displayPath)
+          const workspacePreviewable = isWorkspacePreviewableFile(fileEntry.displayPath)
           return (
             <div key={fileEntry.apiPath} className="flex items-center gap-2">
               <button
@@ -184,7 +203,12 @@ export function CurrentTurnChangeCard({
                 id={`turn-change-opener-${checkpoint.target.targetUserMessageId}-${encodeURIComponent(fileEntry.apiPath)}`}
                 data-source-turn-key={checkpoint.target.targetUserMessageId}
                 onClick={(event) => openChangedFile(event, fileEntry)}
-                aria-label={t('chat.turnChangesOpenInWorkspaceAria', { path: fileEntry.displayPath })}
+                aria-label={t(
+                  workspacePreviewable
+                    ? 'chat.turnChangesOpenInWorkspaceAria'
+                    : 'chat.turnChangesOpenFileAria',
+                  { path: fileEntry.displayPath },
+                )}
                 title={fileEntry.displayPath}
                 className="flex min-h-[52px] min-w-0 flex-1 items-center gap-3 rounded-[var(--radius-md)] px-4 text-left transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)]"
               >
@@ -195,19 +219,17 @@ export function CurrentTurnChangeCard({
                 </span>
                 <ChevronRight size={17} strokeWidth={1.9} aria-hidden="true" className="shrink-0 text-[var(--color-text-tertiary)]" />
               </button>
-              {previewable && (
-                <Button
-                  variant="secondary"
-                  size="base"
-                  aria-label={t('openWith.title')}
-                  onClick={(event) => handleOpenWith(event, fileEntry)}
-                  className="mr-2 shrink-0"
-                  icon={<ChevronDown size={14} strokeWidth={1.9} aria-hidden="true" />}
-                  iconPosition="end"
-                >
-                  {t('openWith.title')}
-                </Button>
-              )}
+              <Button
+                variant="secondary"
+                size="base"
+                aria-label={t('openWith.title')}
+                onClick={(event) => handleOpenWith(event, fileEntry)}
+                className="mr-2 shrink-0"
+                icon={<ChevronDown size={14} strokeWidth={1.9} aria-hidden="true" />}
+                iconPosition="end"
+              >
+                {t('openWith.title')}
+              </Button>
             </div>
           )
         })}

@@ -34,9 +34,11 @@ import {
   isGrokOfficialProviderId,
 } from '../services/grokOfficialProvider.js'
 import { hahaGrokOAuthService } from '../services/hahaGrokOAuthService.js'
+import { resolveClaudeOfficialRuntimeModel } from '../services/claudeOfficialRuntime.js'
 import { getPresetDefaultEnv } from '../services/providerRuntimeEnv.js'
 import {
   getModelReasoningCapabilityOverride,
+  MODEL_REASONING_EFFORTS,
   resolveModelReasoningProfile,
   type ModelReasoningApiFormat,
 } from '../../shared/modelReasoning.js'
@@ -74,7 +76,7 @@ const DEFAULT_MODELS = [
   },
 ] as const
 
-const EFFORT_LEVELS = ['low', 'medium', 'high', 'max'] as const
+const EFFORT_LEVELS = MODEL_REASONING_EFFORTS
 
 const DEFAULT_MODEL = 'claude-opus-4-8'
 const DEFAULT_EFFORT = 'max'
@@ -316,6 +318,9 @@ async function handleModelsList(): Promise<Response> {
       provider: { id: activeProvider.id, name: activeProvider.name },
     })
   }
+  if (await resolveClaudeOfficialRuntimeModel()) {
+    return Response.json({ models: DEFAULT_MODELS, provider: null })
+  }
   return Response.json({ models: await getStandaloneModelList(), provider: null })
 }
 
@@ -336,6 +341,11 @@ async function handleCurrentModel(req: Request): Promise<Response> {
     const settingsEnvModel = typeof env.ANTHROPIC_MODEL === 'string'
       ? env.ANTHROPIC_MODEL.trim()
       : ''
+    const claudeOfficialModel = activeId === null
+      ? await resolveClaudeOfficialRuntimeModel(
+          explicitModel || runtimeEnvModel || settingsEnvModel,
+        )
+      : null
 
     let currentModelId: string
     let currentModelName: string
@@ -358,6 +368,9 @@ async function handleCurrentModel(req: Request): Promise<Response> {
         currentModelId = explicitModel || providerEnvModel || activeProvider.models.main
         currentModelName = currentModelId
       }
+    } else if (claudeOfficialModel) {
+      currentModelId = claudeOfficialModel
+      currentModelName = claudeOfficialModel
     } else {
       // No provider — use settings model with context tier
       currentModelId = explicitModel || runtimeEnvModel || settingsEnvModel || DEFAULT_MODEL
@@ -377,7 +390,9 @@ async function handleCurrentModel(req: Request): Promise<Response> {
               activeProvider.apiFormat,
               getPresetDefaultEnv(activeProvider.presetId),
             )
-          : await getStandaloneModelList()
+          : claudeOfficialModel
+            ? [...DEFAULT_MODELS]
+            : await getStandaloneModelList()
 
     const modelEntry = availableModels.find((m) => m.id === lookupId)
       || availableModels.find((m) => m.id === currentModelId)

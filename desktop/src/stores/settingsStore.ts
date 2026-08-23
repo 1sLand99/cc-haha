@@ -21,6 +21,7 @@ import {
   type ThemeMode,
   type UpdateProxyMode,
   type UpdateProxySettings,
+  type UserSettings,
   type WebSearchSettings,
 } from '../types/settings'
 import type { TraceCaptureSettings } from '../types/trace'
@@ -54,6 +55,7 @@ type SettingsStore = {
   currentModel: ModelInfo | null
   effortLevel: EffortLevel
   thinkingEnabled: boolean
+  workflowKeywordTriggerEnabled: boolean
   autoDreamEnabled: boolean
   autoModeOptInAccepted: boolean
   availableModels: ModelInfo[]
@@ -84,6 +86,7 @@ type SettingsStore = {
   uiZoom: number
   isLoading: boolean
   error: string | null
+  proxyManagedSettingsWarning: boolean
 
   appMode: AppModeConfig
   appModeRequiresRestart: boolean
@@ -94,6 +97,7 @@ type SettingsStore = {
   setModel: (modelId: string) => Promise<void>
   setEffort: (level: EffortLevel) => Promise<void>
   setThinkingEnabled: (enabled: boolean) => Promise<void>
+  setWorkflowKeywordTriggerEnabled: (enabled: boolean) => Promise<void>
   setAutoDreamEnabled: (enabled: boolean) => Promise<void>
   acceptAutoModeOptIn: () => Promise<void>
   setLocale: (locale: Locale) => void
@@ -181,6 +185,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   currentModel: null,
   effortLevel: 'max',
   thinkingEnabled: true,
+  workflowKeywordTriggerEnabled: true,
   autoDreamEnabled: false,
   autoModeOptInAccepted: false,
   availableModels: [],
@@ -207,6 +212,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   uiZoom: readStoredAppZoomLevel(),
   isLoading: false,
   error: null,
+  proxyManagedSettingsWarning: false,
 
   appMode: {
     mode: 'default',
@@ -255,6 +261,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         currentModel: model,
         effortLevel: level,
         thinkingEnabled: userSettings.alwaysThinkingEnabled !== false,
+        workflowKeywordTriggerEnabled: userSettings.workflowKeywordTriggerEnabled !== false,
         autoDreamEnabled: userSettings.autoDreamEnabled === true,
         autoModeOptInAccepted: userSettings.skipAutoPermissionPrompt === true,
         chatSendBehavior: normalizeChatSendBehavior(userSettings.chatSendBehavior),
@@ -270,6 +277,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         h5AccessDiagnostics: h5AccessResult.diagnostics,
         h5AccessError: h5AccessResult.error,
         responseLanguage: typeof userSettings.language === 'string' ? userSettings.language : '',
+        proxyManagedSettingsWarning: hasProxyManagedOnlyUserSettings(userSettings),
         isLoading: false,
         error: null,
       })
@@ -323,6 +331,17 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       await settingsApi.updateUser({ alwaysThinkingEnabled: enabled })
     } catch {
       set({ thinkingEnabled: prev })
+    }
+  },
+
+  setWorkflowKeywordTriggerEnabled: async (enabled) => {
+    const prev = get().workflowKeywordTriggerEnabled
+    set({ workflowKeywordTriggerEnabled: enabled })
+    try {
+      await settingsApi.updateUser({ workflowKeywordTriggerEnabled: enabled })
+    } catch (error) {
+      set({ workflowKeywordTriggerEnabled: prev })
+      throw error
     }
   },
 
@@ -631,6 +650,18 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     }
   },
 }))
+
+export function hasProxyManagedOnlyUserSettings(settings: UserSettings): boolean {
+  const keys = Object.keys(settings)
+  if (keys.length !== 1 || keys[0] !== 'env') return false
+
+  const env = settings.env
+  if (typeof env !== 'object' || env === null || Array.isArray(env)) return false
+
+  const values = env as Record<string, unknown>
+  return values.ANTHROPIC_API_KEY === 'PROXY_MANAGED'
+    || values.ANTHROPIC_AUTH_TOKEN === 'PROXY_MANAGED'
+}
 
 subscribeLocaleChanges((locale) => {
   useSettingsStore.setState({ locale })

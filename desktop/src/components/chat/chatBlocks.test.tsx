@@ -20,7 +20,11 @@ describe('chat blocks', () => {
     const { container } = render(<ThinkingBlock content="this is a long internal reasoning trace" isActive />)
 
     expect(screen.getByText(/Thinking/)).toBeTruthy()
-    expect(container.textContent).not.toContain('this is a long internal reasoning trace')
+    // The row previews the reasoning; what stays shut is the full block. A
+    // label with nothing beside it was the old standalone form, and it made the
+    // opening thought of a turn — usually the substantial one — the least
+    // informative thing on screen.
+    expect(container.querySelector('[data-thinking-content="expanded"]')).toBeNull()
     expect(container.querySelector('.thinking-cursor')).toBeNull()
   })
 
@@ -136,6 +140,51 @@ describe('chat blocks', () => {
 
     expect(screen.getAllByTestId('image-generation-slot')).toHaveLength(1)
     expect(screen.queryByRole('button', { name: /ToolSearch \(1\), ImageEdit \(1\)/ })).toBeNull()
+  })
+
+  it('keeps post-image thinking visible and live after the image result arrives', () => {
+    const imageCall: Extract<UIMessage, { type: 'tool_use' }> = {
+      id: 'image-use',
+      type: 'tool_use',
+      toolName: 'ImageGen',
+      toolUseId: 'image-1',
+      input: { prompt: 'A quiet mountain study' },
+      timestamp: 1,
+    }
+    const thinking: Extract<UIMessage, { type: 'thinking' }> = {
+      id: 'thinking-after-image',
+      type: 'thinking',
+      content: 'Check whether the generated image matches the requested composition.',
+      timestamp: 3,
+    }
+
+    render(
+      <ToolCallGroup
+        toolCalls={[imageCall]}
+        steps={[
+          { kind: 'tool', toolCall: imageCall },
+          { kind: 'thinking', message: thinking },
+        ]}
+        resultMap={new Map([[
+          'image-1',
+          {
+            id: 'image-result',
+            type: 'tool_result' as const,
+            toolUseId: 'image-1',
+            content: JSON.stringify({ type: 'image_generation_result', images: [] }),
+            isError: false,
+            timestamp: 2,
+          },
+        ]])}
+        childToolCallsByParent={new Map()}
+        agentTaskNotifications={{}}
+        activeThinkingId="thinking-after-image"
+      />,
+    )
+
+    const thinkingRow = screen.getByRole('button', { name: /Thinking/ })
+    expect(thinkingRow).toBeTruthy()
+    expect(thinkingRow.querySelector('.thinking-dots')).not.toBeNull()
   })
 
   it('replaces every image placeholder with the saved tool result', () => {
@@ -262,9 +311,11 @@ describe('chat blocks', () => {
   it('renders thinking content as markdown only after expanding', () => {
     const { container } = render(<ThinkingBlock content={'**important**\n\n- item one'} />)
 
-    expect(container.textContent).not.toContain('important')
+    // The preview is plain text with the markdown stripped — never rendered
+    // markup, which on one line would show as literal `**` / `-` noise.
     expect(container.querySelector('strong')).toBeNull()
     expect(container.querySelector('li')).toBeNull()
+    expect(container.textContent).not.toContain('item one')
 
     fireEvent.click(screen.getByRole('button', { name: /Thought/ }))
 
@@ -276,8 +327,10 @@ describe('chat blocks', () => {
     const content = Array.from({ length: 12 }, (_, index) => `line-${index + 1}`).join('\n')
     const { container } = render(<ThinkingBlock content={content} />)
 
-    expect(container.textContent).not.toContain('line-1')
+    // Collapsed shows the opening line only; the body stays shut.
+    expect(container.textContent).toContain('line-1')
     expect(container.textContent).not.toContain('line-11')
+    expect(container.querySelector('[data-thinking-content="expanded"]')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /Thought/ }))
 
@@ -302,6 +355,35 @@ describe('chat blocks', () => {
 
     expect(container.textContent).toContain('Tool Input')
     expect(container.textContent).not.toContain('const answer = 42')
+  })
+
+  it('keeps expanded row input and output inline instead of nesting detail cards', () => {
+    const { container } = render(
+      <ToolCallBlock
+        chrome="row"
+        toolName="TaskCreate"
+        input={{ subject: 'Inspect activity UI', description: 'Find the nested card treatment' }}
+        result={{ content: 'Task #1 created successfully', isError: false }}
+      />,
+    )
+
+    const row = container.querySelector('[data-tool-call-chrome="row"]')
+    const disclosure = row?.querySelector<HTMLButtonElement>('[data-chat-disclosure="true"]')
+    expect(disclosure).toBeTruthy()
+    fireEvent.click(disclosure!)
+
+    const details = container.querySelector('[data-tool-call-details="inline"]')
+    expect(details).toBeTruthy()
+    expect(details?.className).not.toContain('rounded-')
+
+    const viewers = [...container.querySelectorAll('[data-code-viewer-chrome]')]
+    expect(viewers).toHaveLength(2)
+    expect(viewers.every((viewer) => viewer.getAttribute('data-code-viewer-chrome') === 'embedded')).toBe(true)
+    // Each section owns one compact header and one copy action. The previous
+    // nested Tool Output -> PLAINTEXT and Tool Input -> JSON cards doubled both.
+    expect(screen.getAllByRole('button', { name: 'Copy' })).toHaveLength(2)
+    expect((details?.textContent?.match(/Tool Output/g) ?? [])).toHaveLength(1)
+    expect((details?.textContent?.match(/Tool Input/g) ?? [])).toHaveLength(1)
   })
 
   // #1149: bash stdout used to be dropped entirely — the card showed the command
@@ -362,8 +444,16 @@ describe('chat blocks', () => {
 
     fireEvent.click(screen.getByRole('button'))
 
-    expect((container.textContent?.match(/detail line 1\b/g) ?? []).length).toBe(1)
-    expect(container.textContent).toContain('detail line 25')
+    // Scoped to the output block, not the whole card: the header also carries a
+    // one-line summary of the failure, which is not a duplicated body. Counting
+    // over `container.textContent` only ever passed by accident — the old
+    // material glyph rendered the literal text "error" straight after the
+    // summary, and that killed the `\b` the regex depends on.
+    const errorBodies = [...container.querySelectorAll('pre')].filter(
+      (block) => block.textContent?.includes('detail line 1'),
+    )
+    expect(errorBodies).toHaveLength(1)
+    expect(errorBodies[0]?.textContent).toContain('detail line 25')
     expect(screen.queryByRole('button', { name: /more lines/ })).toBeNull()
   })
 
@@ -483,12 +573,15 @@ describe('chat blocks', () => {
       />,
     )
 
-    // Collapsed header must name the command, same as Bash — a real-machine
-    // walkthrough caught PowerShell falling through to a bare tool name.
-    expect(container.textContent).toContain('Get-ChildItem')
+    // Collapsed header must say what the command is for, same as Bash — a
+    // real-machine walkthrough caught PowerShell falling through to a bare tool
+    // name, and the row still has to carry more than that.
+    expect(container.textContent).toContain('List files')
 
     fireEvent.click(screen.getByRole('button'))
 
+    // The command itself is not lost, it moves to the terminal where it ran.
+    expect(container.textContent).toContain('Get-ChildItem')
     expect(container.textContent).toContain('Mode  Name')
     expect(container.textContent).not.toContain('Tool Input')
   })

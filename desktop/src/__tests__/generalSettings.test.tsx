@@ -10,6 +10,7 @@ import type { ProviderModelsResult, SavedProvider } from '../types/provider'
 import type { ProviderPreset } from '../types/providerPreset'
 import type { AppMode, ChatSendBehavior, PermissionMode, ThemeMode, UpdateProxySettings } from '../types/settings'
 import { browserHost } from '../lib/desktopHost/browserHost'
+import { settingsApi } from '../api/settings'
 
 const MOCK_DELETE_PROVIDER = vi.fn()
 const MOCK_GET_SETTINGS = vi.fn()
@@ -236,14 +237,25 @@ describe('Settings > General tab', () => {
     useSettingsStore.setState({
       locale: 'en',
       permissionMode: 'default',
+      currentModel: {
+        id: 'claude-opus-4-8',
+        name: 'Opus 4.8',
+        description: 'Highest capability for long-running tasks',
+        context: '1m',
+        defaultReasoningEffort: 'high',
+        supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      },
+      effortLevel: 'max',
       autoModeOptInAccepted: false,
       thinkingEnabled: true,
+      workflowKeywordTriggerEnabled: true,
       autoDreamEnabled: false,
       skipWebFetchPreflight: true,
       desktopNotificationsEnabled: true,
       traceCapture: { enabled: true, storageDir: '/Users/test/.claude/cc-haha/traces' },
       chatSendBehavior: 'enter',
       responseLanguage: '',
+      proxyManagedSettingsWarning: false,
       uiZoom: 1,
       webSearch: { mode: 'auto', tavilyApiKey: '', braveApiKey: '' },
       network: {
@@ -280,6 +292,9 @@ describe('Settings > General tab', () => {
       }),
       setThinkingEnabled: vi.fn().mockImplementation(async (enabled: boolean) => {
         useSettingsStore.setState({ thinkingEnabled: enabled })
+      }),
+      setEffort: vi.fn().mockImplementation(async (effortLevel) => {
+        useSettingsStore.setState({ effortLevel })
       }),
       setAutoDreamEnabled: vi.fn().mockImplementation(async (enabled: boolean) => {
         useSettingsStore.setState({ autoDreamEnabled: enabled })
@@ -895,6 +910,68 @@ describe('Settings > General tab', () => {
     fireEvent.click(toggle)
 
     expect(useSettingsStore.getState().setThinkingEnabled).toHaveBeenCalledWith(false)
+  })
+
+  it('sets the new-session effort through the current model capability profile', async () => {
+    useSettingsStore.setState({
+      currentModel: {
+        id: 'claude-sonnet-4-6',
+        name: 'Sonnet 4.6',
+        description: 'Balanced Claude model',
+        context: '1m',
+        defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: ['low', 'medium', 'high'],
+      },
+      // A default from another provider must not create a stop that this
+      // model cannot actually use. The visible value falls back to the
+      // model default until the user selects a supported level.
+      effortLevel: 'max',
+    })
+
+    render(<Settings />)
+    fireEvent.click(screen.getByText('General'))
+
+    const trigger = screen.getByRole('button', { name: 'Default reasoning effort: Medium' })
+    fireEvent.click(trigger)
+
+    const slider = screen.getByRole('slider', { name: 'Default reasoning effort' })
+    expect(slider).toHaveAttribute('aria-valuemax', '2')
+    expect(slider).toHaveAttribute('aria-valuenow', '1')
+    expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(3)
+
+    fireEvent.keyDown(slider, { key: 'ArrowRight' })
+
+    await waitFor(() => {
+      expect(useSettingsStore.getState().setEffort).toHaveBeenCalledWith('high')
+    })
+    expect(useSettingsStore.getState().effortLevel).toBe('high')
+  })
+
+  it('lets the user disable and restore the Ultracode keyword trigger', async () => {
+    const updateUser = vi.spyOn(settingsApi, 'updateUser').mockResolvedValue({ ok: true })
+
+    try {
+      render(<Settings />)
+
+      fireEvent.click(screen.getByText('General'))
+
+      const toggle = screen.getByRole('switch', { name: 'Enable Ultracode keyword trigger' })
+      expect(toggle).toBeChecked()
+
+      await act(async () => {
+        fireEvent.click(toggle)
+      })
+      expect(toggle).not.toBeChecked()
+      expect(updateUser).toHaveBeenLastCalledWith({ workflowKeywordTriggerEnabled: false })
+
+      await act(async () => {
+        fireEvent.click(toggle)
+      })
+      expect(toggle).toBeChecked()
+      expect(updateUser).toHaveBeenLastCalledWith({ workflowKeywordTriggerEnabled: true })
+    } finally {
+      updateUser.mockRestore()
+    }
   })
 
   it('lets the user choose a default permission mode for new sessions', async () => {
@@ -1681,6 +1758,17 @@ describe('Settings > General tab', () => {
     expect(screen.getByText('MCP')).toBeInTheDocument()
     expect(screen.getByText('Plugins')).toBeInTheDocument()
   })
+
+  it('warns when the user settings contain only a proxy-managed placeholder', async () => {
+    useSettingsStore.setState({ proxyManagedSettingsWarning: true })
+
+    render(<Settings />)
+    fireEvent.click(screen.getByRole('button', { name: 'General' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Your user settings contain only a PROXY_MANAGED proxy placeholder',
+    )
+  })
 })
 
 describe('Settings > Providers tab', () => {
@@ -2226,7 +2314,7 @@ describe('Settings > Providers tab', () => {
     })
   })
 
-  it('defaults Tool Search on and persists an explicit disable from the provider form', async () => {
+  it('defaults Tool Search off and requires confirmation before persisting an explicit enable', async () => {
     MOCK_GET_SETTINGS.mockResolvedValue({ env: { EXISTING_ENV: '1' } })
     providerStoreState.createProvider = vi.fn().mockResolvedValue({
       id: 'provider-new',
@@ -2235,7 +2323,7 @@ describe('Settings > Providers tab', () => {
       apiKey: 'sk-test',
       baseUrl: 'https://api.example.com/anthropic',
       apiFormat: 'anthropic',
-      toolSearchEnabled: false,
+      toolSearchEnabled: true,
       models: {
         main: 'custom-main',
         haiku: 'custom-main',
@@ -2266,18 +2354,25 @@ describe('Settings > Providers tab', () => {
     const dialog = screen.getByRole('dialog')
     const toolSearchCheckbox = within(dialog).getByRole('checkbox', { name: 'Enable Tool Search' })
 
-    expect(toolSearchCheckbox).toBeChecked()
+    expect(toolSearchCheckbox).not.toBeChecked()
     await waitFor(() => {
       expect(within(dialog).getByDisplayValue((value) => (
-        typeof value === 'string' && value.includes('"ENABLE_TOOL_SEARCH": "true"')
+        typeof value === 'string' && value.includes('"ENABLE_TOOL_SEARCH": "false"')
       ))).toBeInTheDocument()
     })
 
     fireEvent.click(toolSearchCheckbox)
     expect(toolSearchCheckbox).not.toBeChecked()
+
+    const confirmDialog = screen.getByRole('dialog', { name: 'Enable Tool Search?' })
+    expect(within(confirmDialog).getByText(/final LLM upstream or gateway explicitly supports/)).toBeInTheDocument()
+    expect(within(confirmDialog).getByText(/may return HTTP 400/)).toBeInTheDocument()
+    fireEvent.click(within(confirmDialog).getByRole('button', { name: 'Enable anyway' }))
+
+    expect(toolSearchCheckbox).toBeChecked()
     await waitFor(() => {
       expect(within(dialog).getByDisplayValue((value) => (
-        typeof value === 'string' && value.includes('"ENABLE_TOOL_SEARCH": "false"')
+        typeof value === 'string' && value.includes('"ENABLE_TOOL_SEARCH": "true"')
       ))).toBeInTheDocument()
     })
 
@@ -2286,13 +2381,13 @@ describe('Settings > Providers tab', () => {
 
     await waitFor(() => {
       expect(providerStoreState.createProvider).toHaveBeenCalledWith(expect.objectContaining({
-        toolSearchEnabled: false,
+        toolSearchEnabled: true,
       }))
     })
     expect(MOCK_UPDATE_SETTINGS).toHaveBeenCalledWith(expect.objectContaining({
       env: expect.objectContaining({
         EXISTING_ENV: '1',
-        ENABLE_TOOL_SEARCH: 'false',
+        ENABLE_TOOL_SEARCH: 'true',
       }),
     }))
   })
@@ -2336,6 +2431,9 @@ describe('Settings > Providers tab', () => {
     fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }))
     const dialog = screen.getByRole('dialog')
     const disableBetasCheckbox = within(dialog).getByRole('checkbox', { name: 'Disable experimental beta headers' })
+    expect(within(dialog).getByText(
+      /GPT and o-series models still receive the reasoning effort selected for the Session/i,
+    )).toBeInTheDocument()
     const settingsTextarea = await waitFor(() => {
       const textarea = dialog.querySelector('textarea')
       expect(textarea?.value).toContain('"ANTHROPIC_MODEL"')

@@ -32,13 +32,14 @@ import {
   resolveCuHelperBinary,
 } from '../../utils/computerUse/cuHelperBridge.js'
 import { ensureInstalledHelper } from '../../utils/computerUse/cuHelperInstall.js'
-// Embed helper scripts at compile time so they're available in bundled mode
-// @ts-ignore — Bun text import
-import MAC_HELPER_CONTENT from '../../../runtime/mac_helper.py' with { type: 'text' }
+// Embed the runtime scripts at compile time so bundled mode has them without
+// shipping loose files. Windows only: macOS drives Computer Use through the
+// signed native `cu-helper` daemon, and `helperBridge` refuses to fall back to
+// Python there, so a macOS helper script would be dead weight in the binary.
 // @ts-ignore — Bun text import
 import WIN_HELPER_CONTENT from '../../../runtime/win_helper.py' with { type: 'text' }
 // @ts-ignore — Bun text import
-import REQUIREMENTS_DARWIN from '../../../runtime/requirements.txt' with { type: 'text' }
+import WIN_CURSOR_BADGE_CONTENT from '../../../runtime/win_cursor_badge.py' with { type: 'text' }
 // @ts-ignore — Bun text import
 import REQUIREMENTS_WIN32 from '../../../runtime/requirements-win.txt' with { type: 'text' }
 
@@ -56,7 +57,7 @@ const MIN_PYTHON_MAJOR = 3
 const MIN_PYTHON_MINOR = 9
 
 const isWindows = process.platform === 'win32'
-const REQUIREMENTS_CONTENT = isWindows ? REQUIREMENTS_WIN32 : REQUIREMENTS_DARWIN
+const REQUIREMENTS_CONTENT = REQUIREMENTS_WIN32
 
 function getPythonCommandEnv(): Record<string, string> | undefined {
   if (!isWindows) return undefined
@@ -73,7 +74,12 @@ function getRequirementsPath(): string {
 }
 
 function getHelperFileName(): string {
-  return isWindows ? 'win_helper.py' : 'mac_helper.py'
+  return 'win_helper.py'
+}
+
+/** The agent-activity badge runs as its own process, so it ships separately. */
+function getCursorBadgePath(): string {
+  return join(runtimeStateRoot, 'win_cursor_badge.py')
 }
 
 function getHelperPath(): string {
@@ -151,21 +157,23 @@ export async function runPipInstallWithFallback(
 }
 
 /**
- * Ensure runtime source files (requirements.txt, mac_helper.py) exist in
- * ~/.claude/.runtime/. In dev mode they are copied from the project's
- * runtime/ directory; in bundled mode requirements.txt is written from the
- * embedded constant and mac_helper.py is copied from the project dir (if
- * available) or skipped (it will already have been extracted on a prior run).
+ * Ensure the Windows runtime files exist in ~/.claude/.runtime/.
+ *
+ * All three are written from constants embedded at compile time, so dev and
+ * bundled mode behave identically and a stale copy from an earlier version is
+ * always overwritten rather than left in place.
+ *
+ * Windows only, in the same sense as the imports above: macOS never reaches
+ * the Python path.
  */
 async function ensureRuntimeFiles(): Promise<void> {
   await mkdir(runtimeStateRoot, { recursive: true })
 
-  // requirements.txt — always write from embedded constant (authoritative)
   await writeFile(getRequirementsPath(), REQUIREMENTS_CONTENT, 'utf8')
-
-  // helper script — write the platform-appropriate version
-  const helperContent = isWindows ? WIN_HELPER_CONTENT : MAC_HELPER_CONTENT
-  await writeFile(getHelperPath(), helperContent, 'utf8')
+  await writeFile(getHelperPath(), WIN_HELPER_CONTENT, 'utf8')
+  // Ships alongside the helper because the helper is a stateless one-shot CLI
+  // and cannot own a window across actions; the badge needs its own process.
+  await writeFile(getCursorBadgePath(), WIN_CURSOR_BADGE_CONTENT, 'utf8')
 }
 
 type EnvStatus = {

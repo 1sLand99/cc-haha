@@ -40,7 +40,7 @@ import { isInProcessTeammate } from '../../utils/teammateContext.js';
 import { teleportToRemote } from '../../utils/teleport.js';
 import { getAssistantMessageContentLength } from '../../utils/tokens.js';
 import { createAgentId } from '../../utils/uuid.js';
-import { createAgentWorktree, hasWorktreeChanges, removeAgentWorktree } from '../../utils/worktree.js';
+import { createAgentWorktreeIfSupported, hasWorktreeChanges, removeAgentWorktree } from '../../utils/worktree.js';
 import { BASH_TOOL_NAME } from '../BashTool/toolName.js';
 import { BackgroundHint } from '../BashTool/UI.js';
 import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js';
@@ -589,9 +589,17 @@ export const AgentTool = buildTool({
       gitRoot?: string;
       hookBased?: boolean;
     } | null = null;
+    // Isolation degrades instead of failing: a workspace with no git repo and
+    // no WorktreeCreate hook has no worktree to hand out, and refusing to
+    // spawn the agent over that leaves the caller with nothing at all. The
+    // agent runs in the workspace directory; the reason travels back in the
+    // result so the caller never reports an isolation that didn't happen.
+    let worktreeIsolationSkipped: string | undefined;
     if (effectiveIsolation === 'worktree') {
       const slug = `agent-${earlyAgentId.slice(0, 8)}`;
-      worktreeInfo = await createAgentWorktree(slug);
+      const attempt = await createAgentWorktreeIfSupported(slug);
+      worktreeInfo = attempt.worktree ?? null;
+      worktreeIsolationSkipped = attempt.unavailableReason;
     }
 
     // Fork + worktree: inject a notice telling the child to translate paths
@@ -635,7 +643,8 @@ export const AgentTool = buildTool({
       }),
       worktreePath: worktreeInfo?.worktreePath,
       description,
-      spawningToolUseId: toolUseContext.toolUseId
+      spawningToolUseId: toolUseContext.toolUseId,
+      ownerAgentId: toolUseContext.agentId
     };
 
     // Helper to wrap execution with a cwd override: explicit cwd arg (KAIROS)
@@ -679,6 +688,9 @@ export const AgentTool = buildTool({
             description,
             ...(toolUseContext.toolUseId && {
               toolUseId: toolUseContext.toolUseId
+            }),
+            ...(toolUseContext.agentId && {
+              ownerAgentId: toolUseContext.agentId
             })
           }).catch(_err => logForDebugging(`Failed to clear worktree metadata: ${_err}`));
           return {};
@@ -701,7 +713,8 @@ export const AgentTool = buildTool({
         // Don't link to parent's abort controller -- background agents should
         // survive when the user presses ESC to cancel the main thread.
         // They are killed explicitly via chat:killAgents.
-        toolUseId: toolUseContext.toolUseId
+        toolUseId: toolUseContext.toolUseId,
+        ownerAgentId: toolUseContext.agentId
       });
 
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
@@ -757,7 +770,8 @@ export const AgentTool = buildTool({
         rootSetAppState,
         agentIdForCleanup: asyncAgentId,
         enableSummarization: isCoordinator || isForkSubagentEnabled() || getSdkAgentProgressSummariesEnabled(),
-        getWorktreeResult: cleanupWorktreeIfNeeded
+        getWorktreeResult: cleanupWorktreeIfNeeded,
+        ownerAgentId: toolUseContext.agentId
       })));
       const canReadOutputFile = toolUseContext.options.tools.some(t => toolMatchesName(t, FILE_READ_TOOL_NAME) || toolMatchesName(t, BASH_TOOL_NAME));
       return {
@@ -768,7 +782,10 @@ export const AgentTool = buildTool({
           description: description,
           prompt: prompt,
           outputFile: getTaskOutputPath(agentBackgroundTask.agentId),
-          canReadOutputFile
+          canReadOutputFile,
+          ...(worktreeIsolationSkipped ? {
+            worktreeIsolationSkipped
+          } : {})
         }
       };
     } else {
@@ -832,7 +849,8 @@ export const AgentTool = buildTool({
             selectedAgent,
             setAppState: rootSetAppState,
             toolUseId: toolUseContext.toolUseId,
-            autoBackgroundMs: getAutoBackgroundMs() || undefined
+            autoBackgroundMs: getAutoBackgroundMs() || undefined,
+            ownerAgentId: toolUseContext.agentId
           });
           foregroundTaskId = registration.taskId;
           backgroundPromise = registration.backgroundSignal.then(() => ({
@@ -952,10 +970,15 @@ export const AgentTool = buildTool({
                       // Track progress for backgrounded agents
                       updateProgressFromMessage(tracker, msg, resolveActivity2, toolUseContext.options.tools);
                       updateAsyncAgentProgress(backgroundedTaskId, getProgressUpdate(tracker), rootSetAppState);
-                      emitAgentToolActivitiesForMessage(msg, backgroundedTaskId, toolUseContext.toolUseId);
+                      emitAgentToolActivitiesForMessage(
+                        msg,
+                        backgroundedTaskId,
+                        toolUseContext.toolUseId,
+                        toolUseContext.agentId,
+                      );
                       const lastToolName = getLastToolUseName(msg);
                       if (lastToolName) {
-                        emitTaskProgress(tracker, backgroundedTaskId, toolUseContext.toolUseId, description, startTime, lastToolName);
+                        emitTaskProgress(tracker, backgroundedTaskId, toolUseContext.toolUseId, description, startTime, lastToolName, toolUseContext.agentId);
                       }
                     }
                     const agentResult = finalizeAgentTool(agentMessages, backgroundedTaskId, metadata);
@@ -1052,7 +1075,10 @@ export const AgentTool = buildTool({
                     description: description,
                     prompt: prompt,
                     outputFile: getTaskOutputPath(backgroundedTaskId),
-                    canReadOutputFile
+                    canReadOutputFile,
+                    ...(worktreeIsolationSkipped ? {
+                      worktreeIsolationSkipped
+                    } : {})
                   }
                 };
               }
@@ -1075,7 +1101,7 @@ export const AgentTool = buildTool({
             if (foregroundTaskId) {
               const lastToolName = getLastToolUseName(message);
               if (lastToolName) {
-                emitTaskProgress(syncTracker, foregroundTaskId, toolUseContext.toolUseId, description, agentStartTime, lastToolName);
+                emitTaskProgress(syncTracker, foregroundTaskId, toolUseContext.toolUseId, description, agentStartTime, lastToolName, toolUseContext.agentId);
                 // Keep AppState task.progress in sync when SDK summaries are
                 // enabled, so updateAgentSummary reads correct token/tool counts
                 // instead of zeros.
@@ -1184,7 +1210,8 @@ export const AgentTool = buildTool({
                   total_tokens: progress.tokenCount,
                   tool_uses: progress.toolUseCount,
                   duration_ms: Date.now() - agentStartTime
-                }
+                },
+                ...(toolUseContext.agentId ? { owner_agent_id: toolUseContext.agentId } : {})
               });
             }
           }
@@ -1261,7 +1288,10 @@ export const AgentTool = buildTool({
             status: 'completed' as const,
             prompt,
             ...agentResult,
-            ...worktreeResult
+            ...worktreeResult,
+            ...(worktreeIsolationSkipped ? {
+              worktreeIsolationSkipped
+            } : {})
           }
         };
       }));
@@ -1334,7 +1364,9 @@ The agent is now running and will receive instructions via mailbox.`
       const prefix = `Async agent launched successfully.\nagentId: ${data.agentId} (internal ID - do not mention to user. Use SendMessage with to: '${data.agentId}' to continue this agent.)\nThe agent is working in the background. You will be notified automatically when it completes.`;
       const stopGuidance = `Do not stop this agent just because you have enough partial output. Stop it only if the user asks to cancel it, or if it is clearly runaway, harmful, duplicative, or no longer useful.`;
       const instructions = data.canReadOutputFile ? `Do not duplicate this agent's work — avoid working with the same files or topics it is using. Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.\n${stopGuidance}\noutput_file: ${data.outputFile}\nIf asked, you can check progress before completion by using ${FILE_READ_TOOL_NAME} or ${BASH_TOOL_NAME} tail on the output file.` : `Briefly tell the user what you launched and end your response. Do not generate any other text — agent results will arrive in a subsequent message.\n${stopGuidance}`;
-      const text = `${prefix}\n${instructions}`;
+      const skipped = (data as Record<string, unknown>).worktreeIsolationSkipped;
+      const isolationNote = skipped ? `\nworktree isolation was skipped (${skipped}); the agent runs in the workspace directory.` : '';
+      const text = `${prefix}${isolationNote}\n${instructions}`;
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
@@ -1346,7 +1378,10 @@ The agent is now running and will receive instructions via mailbox.`
     }
     if (data.status === 'completed') {
       const worktreeData = data as Record<string, unknown>;
-      const worktreeInfoText = worktreeData.worktreePath ? `\nworktreePath: ${worktreeData.worktreePath}\nworktreeBranch: ${worktreeData.worktreeBranch}` : '';
+      // Requested isolation that couldn't be provisioned counts as worktree
+      // info: it keeps the trailer alive for one-shot built-ins below, and
+      // stops the caller from reporting changes as isolated when they aren't.
+      const worktreeInfoText = worktreeData.worktreePath ? `\nworktreePath: ${worktreeData.worktreePath}\nworktreeBranch: ${worktreeData.worktreeBranch}` : worktreeData.worktreeIsolationSkipped ? `\nworktree isolation was skipped (${worktreeData.worktreeIsolationSkipped}); the agent ran in the workspace directory.` : '';
       // If the subagent completes with no content, the tool_result is just the
       // agentId/usage trailer below — a metadata-only block at the prompt tail.
       // Some models read that as "nothing to act on" and end their turn

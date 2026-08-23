@@ -1,12 +1,53 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'bun:test'
 import {
+  __markActiveTurnForTests,
+  __resetWebSocketHandlerStateForTests,
   createCurrentTurnLocalCommandForwarder,
   shouldFallbackToPermissionRestart,
   translateCliMessage,
 } from '../ws/handler.js'
 import { parseSlashCommand } from '../../utils/slashCommandParsing.js'
 
+afterEach(() => {
+  __resetWebSocketHandlerStateForTests()
+})
+
 describe('WebSocket memory events', () => {
+  it('forwards nested task ownership without marking the main turn as tool executing', () => {
+    const sessionId = 'nested-task-owner-session'
+    __markActiveTurnForTests(sessionId)
+    const rootMessages = translateCliMessage({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 'root-agent',
+      task_type: 'local_agent',
+      description: 'Root work',
+    }, sessionId)
+    const messages = translateCliMessage({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 'nested-agent',
+      task_type: 'local_agent',
+      owner_agent_id: 'parent-agent',
+      description: 'Nested work',
+    }, sessionId)
+
+    expect(rootMessages).toContainEqual({
+      type: 'status',
+      state: 'tool_executing',
+      verb: 'Root work',
+    })
+    expect(messages).toEqual([{
+      type: 'system_notification',
+      subtype: 'task_started',
+      message: 'Nested work',
+      data: expect.objectContaining({
+        task_id: 'nested-agent',
+        owner_agent_id: 'parent-agent',
+      }),
+    }])
+  })
+
   it('forwards assistant business error codes to the desktop client', () => {
     expect(translateCliMessage({
       type: 'assistant',
@@ -63,6 +104,25 @@ describe('WebSocket memory events', () => {
         type: 'error',
         message: 'API Error: Stream max duration exceeded - no completion received after 600s (last event: text_delta)',
         code: 'STREAM_MAX_DURATION',
+      },
+    ])
+
+    expect(translateCliMessage({
+      type: 'assistant',
+      error: 'server_error',
+      isApiErrorMessage: true,
+      message: {
+        role: 'assistant',
+        content: [{
+          type: 'text',
+          text: 'API Error: Tool input generation exceeded 120s - aborting incomplete tool call (last event: input_json_delta)',
+        }],
+      },
+    }, 'session-1')).toEqual([
+      {
+        type: 'error',
+        message: 'API Error: Tool input generation exceeded 120s - aborting incomplete tool call (last event: input_json_delta)',
+        code: 'STREAM_TOOL_INPUT_DURATION',
       },
     ])
   })

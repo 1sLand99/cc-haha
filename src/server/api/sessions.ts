@@ -8,6 +8,7 @@
  *   GET    /api/sessions/:id        — 获取会话详情
  *   GET    /api/sessions/:id/messages — 获取会话消息
  *   GET    /api/sessions/:id/subagents/by-tool/:toolUseId — 获取 SubAgent 运行详情
+ *   POST   /api/sessions/:id/subagents/by-tool/:toolUseId/messages — 继续与 SubAgent 对话
  *   GET    /api/sessions/:id/trace — 获取会话级模型调用 trace（body preview 裁剪后的列表视图）
  *   GET    /api/sessions/:id/trace/calls/:callId — 获取单次调用的完整 trace 记录
  *   GET    /api/sessions/:id/turn-checkpoints — 获取按轮次保留的 checkpoint 预览
@@ -22,10 +23,15 @@ import * as path from 'node:path'
 import { sessionService } from '../services/sessionService.js'
 import { conversationService } from '../services/conversationService.js'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
-import { closeSessionConnection, getSlashCommands } from '../ws/handler.js'
+import {
+  closeSessionConnection,
+  ensureCliSessionStartedForControl,
+  getSlashCommands,
+} from '../ws/handler.js'
 import { listSkillSlashCommands, type SkillSlashCommand } from './skills.js'
 import { WorkspaceService } from '../services/workspaceService.js'
 import {
+  createRepositoryBranch,
   getRepositoryContext,
   type CreateSessionRepositoryOptions,
 } from '../services/repositoryLaunchService.js'
@@ -33,6 +39,7 @@ import {
   executeSessionRewind,
   getSessionTurnCheckpointDiff,
   listSessionTurnCheckpoints,
+  parseSessionRewindMode,
   previewSessionRewind,
   type RewindTargetSelector,
 } from '../services/sessionRewindService.js'
@@ -44,7 +51,7 @@ import {
 import { registerChangedFileAccessRoot, registerFilesystemAccessRoot } from '../services/filesystemAccessRoots.js'
 import { findGitRoot } from '../../utils/git.js'
 import { traceCaptureService, trimTraceCallPreviews } from '../services/traceCaptureService.js'
-import { getSubagentRunByTool } from '../services/subagentRunService.js'
+import { getSubagentRunByAgentId, getSubagentRunByTool } from '../services/subagentRunService.js'
 import { isValidPermissionMode } from '../services/settingsService.js'
 import { handleWorkspaceSearchRoute } from './workspaceSearch.js'
 import { localIndexCoordinator } from '../services/localIndex/coordinator.js'
@@ -111,6 +118,17 @@ export async function handleSessionsApi(
       return await getSessionRepositoryContext(url)
     }
 
+    // Special collection route: /api/sessions/repository-branch
+    if (sessionId === 'repository-branch') {
+      if (req.method !== 'POST') {
+        return Response.json(
+          { error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed` },
+          { status: 405 }
+        )
+      }
+      return await createSessionRepositoryBranch(req)
+    }
+
     // -----------------------------------------------------------------------
     // Sub-resource routes: /api/sessions/:id/messages
     // -----------------------------------------------------------------------
@@ -175,7 +193,7 @@ export async function handleSessionsApi(
       }
       return segments[4] === 'diff'
         ? await getTurnCheckpointDiff(sessionId, url)
-        : await getTurnCheckpoints(sessionId)
+        : await getTurnCheckpoints(req, sessionId)
     }
 
     if (subResource === 'slash-commands') {
@@ -209,13 +227,46 @@ export async function handleSessionsApi(
     }
 
     if (subResource === 'subagents') {
-      if (req.method !== 'GET') {
-        return Response.json(
-          { error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed` },
-          { status: 405 }
-        )
+      // Workflow agents have no parent `Agent` tool call to key off, so they
+      // are addressed by agent id instead. Same response shape, same page.
+      if (segments[4] === 'by-agent' && segments[5] && segments.length === 6) {
+        if (req.method !== 'GET') {
+          return Response.json(
+            { error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed` },
+            { status: 405 },
+          )
+        }
+        let agentId: string
+        try {
+          agentId = decodeURIComponent(segments[5])
+        } catch {
+          return Response.json(
+            { error: 'NOT_FOUND', message: 'SubAgent route not found' },
+            { status: 404 },
+          )
+        }
+        const byAgent = await getSubagentRunByAgentId(sessionId, agentId)
+        if (!byAgent) {
+          throw ApiError.notFound(`SubAgent run not found: ${agentId}`)
+        }
+        return Response.json(byAgent)
       }
-      if (segments[4] !== 'by-tool' || !segments[5] || segments.length !== 6) {
+
+      const isRunRoute = segments[4] === 'by-tool' && Boolean(segments[5])
+      const isRunRead = isRunRoute && segments.length === 6 && req.method === 'GET'
+      const isRunMessage = isRunRoute && segments.length === 7 &&
+        segments[6] === 'messages' && req.method === 'POST'
+      if (!isRunRead && !isRunMessage) {
+        const isKnownRunResource = isRunRoute && (
+          segments.length === 6 ||
+          (segments.length === 7 && segments[6] === 'messages')
+        )
+        if (isKnownRunResource) {
+          return Response.json(
+            { error: 'METHOD_NOT_ALLOWED', message: `Method ${req.method} not allowed` },
+            { status: 405 },
+          )
+        }
         return Response.json(
           { error: 'NOT_FOUND', message: 'SubAgent route not found' },
           { status: 404 }
@@ -238,6 +289,26 @@ export async function handleSessionsApi(
       )
       if (!result) {
         throw ApiError.notFound(`SubAgent run not found: ${toolUseId}`)
+      }
+      if (isRunMessage) {
+        let body: { content?: unknown }
+        try {
+          body = await req.json() as { content?: unknown }
+        } catch {
+          throw ApiError.badRequest('Invalid JSON body')
+        }
+        const content = typeof body.content === 'string' ? body.content.trim() : ''
+        if (!content) throw ApiError.badRequest('content (string) is required in request body')
+        if (!result.agentId) {
+          throw ApiError.conflict(`SubAgent run has no resumable agent id: ${toolUseId}`)
+        }
+        await ensureCliSessionStartedForControl(sessionId, url)
+        const response = await conversationService.requestControl(sessionId, {
+          subtype: 'send_agent_message',
+          agent_id: result.agentId,
+          content,
+        })
+        return Response.json({ ok: true, ...response })
       }
       return Response.json(result)
     }
@@ -461,6 +532,34 @@ async function getSessionRepositoryContext(url: URL): Promise<Response> {
   registerFilesystemAccessRoot(context.workDir)
   registerFilesystemAccessRoot(context.repoRoot)
   return Response.json(context)
+}
+
+async function createSessionRepositoryBranch(req: Request): Promise<Response> {
+  let body: { workDir?: unknown; name?: unknown; from?: unknown }
+  try {
+    body = (await req.json()) as { workDir?: unknown; name?: unknown; from?: unknown }
+  } catch {
+    throw ApiError.badRequest('Invalid JSON body')
+  }
+
+  if (typeof body.workDir !== 'string' || !body.workDir) {
+    throw ApiError.badRequest('workDir is required')
+  }
+  if (typeof body.name !== 'string') {
+    throw ApiError.badRequest('name must be a string')
+  }
+  if (body.from !== undefined && body.from !== null && typeof body.from !== 'string') {
+    throw ApiError.badRequest('from must be a string')
+  }
+
+  // `createRepositoryBranch` goes through `getRepositoryContext`, which registers
+  // the requested path, its resolved form and the repo root itself — repeating
+  // them here would imply a guarantee this handler does not add.
+  const result = await createRepositoryBranch(body.workDir, {
+    name: body.name,
+    from: body.from ?? null,
+  })
+  return Response.json(result, { status: 201 })
 }
 
 async function requireSessionWorkspace(sessionId: string): Promise<string> {
@@ -898,11 +997,15 @@ async function getGitInfo(sessionId: string): Promise<Response> {
   // CLI originalBranch is the source checkout before creating the worktree, which
   // can differ from the selected base ref.
   const sessionBranch = repository?.branch || worktreeSession?.originalBranch || null
+  const plannedWorktreePath = worktreeSession?.worktreePath || repository?.worktreePath || null
+  const activeWorktreePath = worktreeSession?.worktreePath || (
+    sameResolvedPath(workDir, plannedWorktreePath) ? workDir : null
+  )
   const worktree = repository?.worktree || worktreeSession
     ? {
         enabled: true,
-        path: worktreeSession?.worktreePath || workDir,
-        plannedPath: worktreeSession?.worktreePath || repository?.worktreePath || null,
+        path: activeWorktreePath,
+        plannedPath: plannedWorktreePath,
         sourceWorkDir: worktreeSession?.originalCwd || repository?.requestedWorkDir || repository?.repoRoot || null,
         slug: worktreeSession?.worktreeName || repository?.worktreeSlug || null,
         branch: worktreeSession?.worktreeBranch || repository?.worktreeBranch || null,
@@ -965,9 +1068,9 @@ async function getGitInfo(sessionId: string): Promise<Response> {
 }
 
 async function rewindSession(req: Request, sessionId: string): Promise<Response> {
-  let body: RewindTargetSelector & { dryRun?: boolean }
+  let body: RewindTargetSelector & { dryRun?: boolean; mode?: unknown }
   try {
-    body = (await req.json()) as RewindTargetSelector & { dryRun?: boolean }
+    body = (await req.json()) as RewindTargetSelector & { dryRun?: boolean; mode?: unknown }
   } catch {
     throw ApiError.badRequest('Invalid JSON body')
   }
@@ -979,9 +1082,10 @@ async function rewindSession(req: Request, sessionId: string): Promise<Response>
     throw ApiError.badRequest('targetUserMessageId (string) or userMessageIndex (integer) is required')
   }
 
+  const mode = parseSessionRewindMode(body.mode)
   const result = body.dryRun
     ? await previewSessionRewind(sessionId, body)
-    : await executeSessionRewind(sessionId, body)
+    : await executeSessionRewind(sessionId, body, mode)
 
   return Response.json(result)
 }
@@ -1038,8 +1142,8 @@ async function branchSession(req: Request, sessionId: string): Promise<Response>
   }
 }
 
-async function getTurnCheckpoints(sessionId: string): Promise<Response> {
-  const checkpoints = await listSessionTurnCheckpoints(sessionId)
+async function getTurnCheckpoints(req: Request, sessionId: string): Promise<Response> {
+  const checkpoints = await listSessionTurnCheckpoints(sessionId, req.signal)
   // Make this turn's real changed files previewable even when they live outside
   // the session workdir (e.g. the user told the model to write to an absolute
   // path on another drive). Writing them was authorized, so previewing is too.

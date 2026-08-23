@@ -363,6 +363,38 @@ describe('ModelSelector', () => {
     expect(onChange).toHaveBeenCalledWith('beta')
   })
 
+  it('uses caller-supplied models in the reusable field appearance', async () => {
+    const onChange = vi.fn()
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: MODELS,
+      currentModel: MODELS[0],
+    })
+    const agentModels: ModelInfo[] = [
+      { id: 'inherit', name: 'Inherit from parent', description: 'Use the parent model', context: '' },
+      { id: 'provider-model', name: 'Provider Model', description: 'Configured model', context: '200k' },
+    ]
+
+    render(
+      <ModelSelector
+        value="inherit"
+        onChange={onChange}
+        models={agentModels}
+        ariaLabel="Model"
+        appearance="field"
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Model' })
+    expect(trigger.parentElement).toHaveClass('h-10', 'border-[var(--color-border)]')
+    fireEvent.click(trigger)
+    const dropdown = screen.getByTestId('model-selector-dropdown')
+    expect(within(dropdown).queryByRole('button', { name: /Alpha/ })).not.toBeInTheDocument()
+    fireEvent.click(within(dropdown).getByRole('button', { name: /Provider Model/ }))
+
+    expect(onChange).toHaveBeenCalledWith('provider-model')
+  })
+
   it('routes uncontrolled model changes through settings actions', async () => {
     const setModel = vi.fn(async () => {})
     useSettingsStore.setState({
@@ -769,6 +801,88 @@ describe('ModelSelector', () => {
     expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(5)
   })
 
+  it('keeps effort editable for a GPT relay even when beta headers are disabled', async () => {
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: [],
+      currentModel: null,
+      activeProviderName: 'Direct GPT Gateway',
+      effortLevel: 'high',
+    })
+    useProviderStore.setState({
+      providers: [{
+        id: 'direct-gpt-provider',
+        presetId: 'custom',
+        name: 'Direct GPT Gateway',
+        apiKey: '***',
+        baseUrl: 'https://api.example.com',
+        apiFormat: 'anthropic',
+        disableExperimentalBetas: true,
+        models: {
+          main: 'gpt-5.6-sol',
+          haiku: 'gpt-5.6-sol',
+          sonnet: 'gpt-5.6-sol',
+          opus: 'gpt-5.6-sol',
+        },
+      }],
+      activeId: 'direct-gpt-provider',
+      hasLoadedProviders: true,
+      isLoading: false,
+    })
+    useSessionRuntimeStore.getState().setSelection('session-direct-disabled-effort', {
+      providerId: 'direct-gpt-provider',
+      modelId: 'gpt-5.6-sol',
+      effortLevel: 'xhigh',
+    })
+
+    render(<ModelSelector runtimeKey="session-direct-disabled-effort" />)
+
+    expect(screen.getByRole('button', { name: 'gpt-5.6-sol, Direct GPT Gateway' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Effort: X-High' })).toBeInTheDocument()
+    await clickByRole('Effort: X-High')
+    expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(5)
+  })
+
+  it('does not offer an effort control that a non-GPT direct provider has explicitly disabled', () => {
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: [],
+      currentModel: null,
+      activeProviderName: 'Direct Claude Gateway',
+      effortLevel: 'high',
+    })
+    useProviderStore.setState({
+      providers: [{
+        id: 'direct-claude-provider',
+        presetId: 'custom',
+        name: 'Direct Claude Gateway',
+        apiKey: '***',
+        baseUrl: 'https://api.example.com',
+        apiFormat: 'anthropic',
+        disableExperimentalBetas: true,
+        models: {
+          main: 'claude-opus-4-8',
+          haiku: 'claude-opus-4-8',
+          sonnet: 'claude-opus-4-8',
+          opus: 'claude-opus-4-8',
+        },
+      }],
+      activeId: 'direct-claude-provider',
+      hasLoadedProviders: true,
+      isLoading: false,
+    })
+    useSessionRuntimeStore.getState().setSelection('session-direct-disabled-claude-effort', {
+      providerId: 'direct-claude-provider',
+      modelId: 'claude-opus-4-8',
+      effortLevel: 'high',
+    })
+
+    render(<ModelSelector runtimeKey="session-direct-disabled-claude-effort" />)
+
+    expect(screen.getByRole('button', { name: 'claude-opus-4-8, Direct Claude Gateway' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Effort:/ })).not.toBeInTheDocument()
+  })
+
   it('uses the ChatGPT Official catalog when that built-in provider is active', async () => {
     const openAIModels: ModelInfo[] = [
       {
@@ -1013,12 +1127,12 @@ describe('ModelSelector', () => {
 
   it('replaces a stale Grok runtime model with the current official default', async () => {
     const grokModels: ModelInfo[] = [{
-      id: 'grok-4.5',
-      name: 'Grok 4.5',
-      description: 'Grok frontier text model',
+      id: 'grok-4.6',
+      name: 'Grok 4.6',
+      description: "SpaceXAI's latest frontier model",
       context: '500000',
       defaultReasoningEffort: 'high',
-      supportedReasoningEfforts: ['low', 'medium', 'high'],
+      supportedReasoningEfforts: ['xhigh', 'high', 'medium', 'low'],
     }]
     useHahaGrokOAuthStore.setState({
       status: { loggedIn: true, expiresAt: null, email: 'grok@example.com' },
@@ -1045,11 +1159,11 @@ describe('ModelSelector', () => {
     render(<ModelSelector runtimeKey="session-stale-grok" />)
 
     expect(screen.queryByText('grok-build')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Grok 4.5, Grok Official' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Grok 4.6, Grok Official' })).toBeInTheDocument()
     await waitFor(() => {
       expect(useSessionRuntimeStore.getState().selections['session-stale-grok']).toEqual({
         providerId: 'grok-official',
-        modelId: 'grok-4.5',
+        modelId: 'grok-4.6',
         effortLevel: 'high',
       })
     })

@@ -4,6 +4,7 @@ import { access, lstat, mkdir, open, readFile, realpath, unlink, type FileHandle
 import { basename, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { createTwoFilesPatch, diffLines } from 'diff'
 import { ApiError } from '../middleware/errorHandler.js'
+import { recordedCommandIsReadOnly } from '../../tools/BashTool/readOnlyValidation.js'
 import {
   type FileHistorySnapshot,
   readBackupFileSafely,
@@ -58,12 +59,36 @@ type SnapshotTurnCodePreview = {
 type TranscriptTurnFileEvidence = {
   confirmedChanges: TranscriptFileChange[]
   uncertainChanges: TranscriptFileChange[]
-  complete: boolean
+  /**
+   * Tools in this turn whose file effects the transcript cannot describe — a
+   * writing shell command, a tool we have no extractor for, a call whose input
+   * did not survive. Their changes are only undoable where the file-history
+   * snapshot happens to cover them, so this downgrades restore coverage to
+   * partial instead of blocking the undo (see mergeTurnCodePreviews).
+   */
+  unverifiedChangeSources: string[]
 }
 
 type MergedTurnCodePreview = {
   preview: RewindCodePreview
   restoreAvailable: boolean
+  unverifiedChangeSources: string[]
+}
+
+/**
+ * What a rewind is allowed to touch.
+ *
+ * `both` needs a restorable checkpoint and fails loudly without one.
+ * `conversation` only trims the transcript, so it stays available for a turn
+ * whose files cannot be restored — losing the ability to undo the code should
+ * not also cost the user the ability to back out of the prompt.
+ */
+export type SessionRewindMode = 'both' | 'conversation'
+
+export function parseSessionRewindMode(value: unknown): SessionRewindMode {
+  if (value === undefined || value === null) return 'both'
+  if (value === 'both' || value === 'conversation') return value
+  throw ApiError.badRequest(`Invalid rewind mode: expected 'both' or 'conversation'.`)
 }
 
 export type RewindTargetSelector = {
@@ -83,12 +108,20 @@ export type SessionRewindPreview = {
   }
   code: RewindCodePreview
   restoreAvailable: boolean
+  /**
+   * Tool names that may have changed files this checkpoint cannot restore.
+   * Empty means the listed files are the whole story; non-empty means undo
+   * still works but only covers the files it reports.
+   */
+  unverifiedChangeSources: string[]
 }
 
 export type SessionRewindExecuteResult = SessionRewindPreview & {
   conversation: SessionRewindPreview['conversation'] & {
     removedMessageIds: string[]
   }
+  /** What this rewind actually touched, so the client never overstates it. */
+  mode: SessionRewindMode
 }
 
 export type SessionTurnCheckpointPreview = SessionRewindPreview & {
@@ -347,6 +380,7 @@ function buildTurnPreview(
   preview: RewindCodePreview,
   workDir: string,
   restoreAvailable = true,
+  unverifiedChangeSources: string[] = [],
 ): SessionTurnCheckpointPreview {
   return {
     target: {
@@ -360,7 +394,14 @@ function buildTurnPreview(
     code: preview,
     workDir,
     restoreAvailable,
+    unverifiedChangeSources,
   }
+}
+
+const MAX_UNVERIFIED_CHANGE_SOURCES = 8
+
+function normalizeUnverifiedChangeSources(sources: Iterable<string>): string[] {
+  return [...new Set(sources)].sort().slice(0, MAX_UNVERIFIED_CHANGE_SOURCES)
 }
 
 async function readFileOrNull(filePath: string): Promise<string | null> {
@@ -434,20 +475,6 @@ function getTurnMessageRange(
     (message, index) => index > start && message.type === 'user',
   )
   return { start, end: nextUserIndex >= 0 ? nextUserIndex : activeMessages.length }
-}
-
-function hasCompletedTurn(
-  activeMessages: Awaited<ReturnType<typeof sessionService.getSessionMessages>>,
-  targetUserMessageId: string,
-): boolean {
-  const range = getTurnMessageRange(activeMessages, targetUserMessageId)
-  if (!range) return false
-  return activeMessages.slice(range.start + 1, range.end).some((message) =>
-    message.type === 'assistant' ||
-    message.type === 'tool_use' ||
-    message.type === 'tool_result' ||
-    message.type === 'error',
-  )
 }
 
 function getNextUserMessageId(
@@ -697,6 +724,15 @@ function isKnownFileMutationTool(toolName: string): boolean {
     .includes(toolName.toLowerCase())
 }
 
+/**
+ * Tools that cannot change workspace files, so their presence in a turn says
+ * nothing about restore coverage.
+ *
+ * Deliberately absent: TaskCreate and TaskStop. TaskCreate spawns background
+ * shell commands and agents that write files outside this transcript, so it has
+ * to keep counting as an unverified source even though the call itself only
+ * records metadata.
+ */
 function isKnownNonFileTool(toolName: string): boolean {
   return [
     'agent',
@@ -707,12 +743,31 @@ function isKnownNonFileTool(toolName: string): boolean {
     'grep',
     'read',
     'skill',
+    'sleep',
     'task',
+    'taskget',
+    'tasklist',
+    'taskupdate',
     'todowrite',
     'toolsearch',
     'webfetch',
     'websearch',
   ].includes(toolName.toLowerCase())
+}
+
+/**
+ * A shell call whose command the allowlist proves cannot write. Anything the
+ * allowlist does not recognize stays unverified, so `bun test` or `npm install`
+ * still downgrades coverage while `git status` no longer does.
+ */
+function isReadOnlyShellCall(toolName: string, input: unknown): boolean {
+  if (toolName.toLowerCase() !== 'bash') return false
+  const command = (input as { command?: unknown } | null | undefined)?.command
+  return typeof command === 'string' && recordedCommandIsReadOnly(command)
+}
+
+function isNonMutatingToolCall(toolName: string, input: unknown): boolean {
+  return isKnownNonFileTool(toolName) || isReadOnlyShellCall(toolName, input)
 }
 
 function getToolUseIds(messages: MessageEntry[]): Set<string> {
@@ -730,6 +785,62 @@ function getToolUseIds(messages: MessageEntry[]): Set<string> {
   return ids
 }
 
+type IndexedTranscriptMessage = {
+  index: number
+  message: MessageEntry
+}
+
+type TranscriptTurnContext = {
+  activeMessageIndex: number
+  completed: boolean
+  messages: MessageEntry[]
+  userMessage: MessageEntry
+  userMessageIndex: number
+}
+
+function buildChildMessagesByParentToolUseId(
+  activeMessages: MessageEntry[],
+): Map<string, IndexedTranscriptMessage[]> {
+  // SubAgent entries sit outside the root turn slice. Index their ownership once
+  // so listing every turn does not rescan the complete transcript for each one.
+  const childMessagesByParentToolUseId = new Map<string, IndexedTranscriptMessage[]>()
+  for (const [index, message] of activeMessages.entries()) {
+    if (!message.parentToolUseId) continue
+    const existing = childMessagesByParentToolUseId.get(message.parentToolUseId)
+    const indexedMessage = { index, message }
+    if (existing) existing.push(indexedMessage)
+    else childMessagesByParentToolUseId.set(message.parentToolUseId, [indexedMessage])
+  }
+  return childMessagesByParentToolUseId
+}
+
+function collectReachableTranscriptMessages(
+  parentTurnMessages: MessageEntry[],
+  childMessagesByParentToolUseId: Map<string, IndexedTranscriptMessage[]>,
+): MessageEntry[] {
+  const pendingToolUseIds = [...getToolUseIds(parentTurnMessages)]
+  if (pendingToolUseIds.length === 0) return parentTurnMessages
+
+  const expandedToolUseIds = new Set<string>()
+  const includedMessageIds = new Set(parentTurnMessages.map((message) => message.id))
+  const childMessages: IndexedTranscriptMessage[] = []
+  for (let cursor = 0; cursor < pendingToolUseIds.length; cursor += 1) {
+    const toolUseId = pendingToolUseIds[cursor]!
+    if (expandedToolUseIds.has(toolUseId)) continue
+    expandedToolUseIds.add(toolUseId)
+
+    for (const indexedMessage of childMessagesByParentToolUseId.get(toolUseId) ?? []) {
+      if (includedMessageIds.has(indexedMessage.message.id)) continue
+      includedMessageIds.add(indexedMessage.message.id)
+      childMessages.push(indexedMessage)
+      pendingToolUseIds.push(...getToolUseIds([indexedMessage.message]))
+    }
+  }
+
+  childMessages.sort((left, right) => left.index - right.index)
+  return [...parentTurnMessages, ...childMessages.map(({ message }) => message)]
+}
+
 function getTranscriptTurnMessages(
   activeMessages: MessageEntry[],
   targetUserMessageId: string,
@@ -739,43 +850,47 @@ function getTranscriptTurnMessages(
 
   const rawTurnMessages = activeMessages.slice(range.start + 1, range.end)
   const parentTurnMessages = rawTurnMessages.filter((message) => !message.parentToolUseId)
-  const reachableToolUseIds = getToolUseIds(parentTurnMessages)
-  if (reachableToolUseIds.size === 0) return parentTurnMessages
-
-  const turnMessages = [...parentTurnMessages]
-  const includedIds = new Set(parentTurnMessages.map((message) => message.id))
-  let foundChildMessage = true
-  while (foundChildMessage) {
-    foundChildMessage = false
-    for (const message of activeMessages) {
-      if (
-        includedIds.has(message.id) ||
-        !message.parentToolUseId ||
-        !reachableToolUseIds.has(message.parentToolUseId)
-      ) {
-        continue
-      }
-
-      turnMessages.push(message)
-      includedIds.add(message.id)
-      for (const toolUseId of getToolUseIds([message])) {
-        reachableToolUseIds.add(toolUseId)
-      }
-      foundChildMessage = true
-    }
-  }
-
-  return turnMessages
+  return collectReachableTranscriptMessages(
+    parentTurnMessages,
+    buildChildMessagesByParentToolUseId(activeMessages),
+  )
 }
 
-function collectTranscriptTurnFileChanges(
+function buildTranscriptTurnContexts(
   activeMessages: MessageEntry[],
-  targetUserMessageId: string,
+): TranscriptTurnContext[] {
+  const userMessages = activeMessages.flatMap((message, activeMessageIndex) =>
+    message.type === 'user' ? [{ activeMessageIndex, message }] : [])
+  const childMessagesByParentToolUseId = buildChildMessagesByParentToolUseId(activeMessages)
+
+  return userMessages.map(({ activeMessageIndex, message: userMessage }, userMessageIndex) => {
+    const end = userMessages[userMessageIndex + 1]?.activeMessageIndex ?? activeMessages.length
+    const rawTurnMessages = activeMessages.slice(activeMessageIndex + 1, end)
+    const parentTurnMessages = rawTurnMessages.filter((message) => !message.parentToolUseId)
+    return {
+      activeMessageIndex,
+      completed: rawTurnMessages.some((message) =>
+        message.type === 'assistant' ||
+        message.type === 'tool_use' ||
+        message.type === 'tool_result' ||
+        message.type === 'error'
+      ),
+      messages: collectReachableTranscriptMessages(
+        parentTurnMessages,
+        childMessagesByParentToolUseId,
+      ),
+      userMessage,
+      userMessageIndex,
+    }
+  })
+}
+
+function collectTranscriptFileChanges(
+  turnMessages: MessageEntry[],
   baseDir: string,
 ): TranscriptTurnFileEvidence {
-  const turnMessages = getTranscriptTurnMessages(activeMessages, targetUserMessageId)
   if (turnMessages.length === 0) {
-    return { confirmedChanges: [], uncertainChanges: [], complete: true }
+    return { confirmedChanges: [], uncertainChanges: [], unverifiedChangeSources: [] }
   }
 
   const confirmedChanges = new Map<string, TranscriptFileChange>()
@@ -783,7 +898,7 @@ function collectTranscriptTurnFileChanges(
   const successfulToolUseIds = collectSuccessfulToolUseIds(turnMessages)
   const erroredToolUseIds = collectErroredToolUseIds(turnMessages)
   const seenToolUseIds = new Set<string>()
-  let complete = true
+  const unverifiedChangeSources = new Set<string>()
   for (const message of turnMessages) {
     if (message.type !== 'tool_use' || !Array.isArray(message.content)) continue
 
@@ -795,24 +910,20 @@ function collectTranscriptTurnFileChanges(
         continue
       }
       seenToolUseIds.add(record.id)
-      if (erroredToolUseIds.has(record.id)) {
-        if (!isKnownNonFileTool(record.name)) complete = false
-        continue
-      }
       const input = record.input
-      if (!input || typeof input !== 'object') {
-        if (!isKnownNonFileTool(record.name)) complete = false
+      // A failed call can still have written before it failed, and a call whose
+      // input did not survive tells us nothing about what it touched.
+      if (erroredToolUseIds.has(record.id) || !input || typeof input !== 'object') {
+        if (!isNonMutatingToolCall(record.name, input)) {
+          unverifiedChangeSources.add(record.name)
+        }
         continue
       }
-
-      if (
-        !isKnownFileMutationTool(record.name) &&
-        !isKnownNonFileTool(record.name)
-      ) {
-        complete = false
+      if (isNonMutatingToolCall(record.name, input)) continue
+      if (!isKnownFileMutationTool(record.name)) {
+        unverifiedChangeSources.add(record.name)
         continue
       }
-      if (isKnownNonFileTool(record.name)) continue
 
       const changes = successfulToolUseIds.has(record.id)
         ? confirmedChanges
@@ -822,7 +933,7 @@ function collectTranscriptTurnFileChanges(
         input as Record<string, unknown>,
         message.cwd ?? baseDir,
       )
-      if (extractedChanges.length === 0) complete = false
+      if (extractedChanges.length === 0) unverifiedChangeSources.add(record.name)
 
       for (const change of extractedChanges) {
         const existing = changes.get(change.identityPath)
@@ -846,8 +957,19 @@ function collectTranscriptTurnFileChanges(
   return {
     confirmedChanges: sortChanges(confirmedChanges),
     uncertainChanges: sortChanges(uncertainChanges),
-    complete,
+    unverifiedChangeSources: normalizeUnverifiedChangeSources(unverifiedChangeSources),
   }
+}
+
+function collectTranscriptTurnFileChanges(
+  activeMessages: MessageEntry[],
+  targetUserMessageId: string,
+  baseDir: string,
+): TranscriptTurnFileEvidence {
+  return collectTranscriptFileChanges(
+    getTranscriptTurnMessages(activeMessages, targetUserMessageId),
+    baseDir,
+  )
 }
 
 function buildTranscriptTurnCodePreview(
@@ -878,9 +1000,27 @@ function buildTranscriptTurnCodePreview(
   })
 }
 
+/**
+ * Combines what the file-history snapshot captured with what the transcript
+ * says the turn did.
+ *
+ * `restoreAvailable` answers a deliberately narrow question: can the files this
+ * checkpoint reports be put back? It is not a claim that the checkpoint saw
+ * every file the turn touched — snapshots only cover the structured file tools,
+ * so a shell command that writes off-checkpoint is invisible to them. Blocking
+ * undo on that (as this did before) removes the feature from any turn that ran
+ * a command, and still leaves the user with no way to reverse the edits that
+ * *were* captured. Such turns now restore what is covered and report the tools
+ * whose effects were not, so the reported file list stays truthful.
+ *
+ * `transcriptIntact` is different in kind: a truncated transcript or an
+ * unreadable subagent log means the turn cannot be enumerated at all, so even
+ * the file list may be wrong. That still blocks.
+ */
 function mergeTurnCodePreviews(
   snapshotPreview: SnapshotTurnCodePreview | null,
   transcriptEvidence: TranscriptTurnFileEvidence,
+  transcriptIntact: boolean,
 ): MergedTurnCodePreview {
   const transcriptChanges = transcriptEvidence.confirmedChanges
   const transcriptPreview = buildTranscriptTurnCodePreview(transcriptChanges)
@@ -888,10 +1028,12 @@ function mergeTurnCodePreviews(
   const hasUncoveredUncertainChange = transcriptEvidence.uncertainChanges.some((change) =>
     !snapshotPreview?.coveredPathIdentities.has(change.identityPath)
   )
-  const evidenceIncomplete = !transcriptEvidence.complete
+  const unverifiedChangeSources = transcriptEvidence.unverifiedChangeSources
+  const evidenceIncomplete = !transcriptIntact
   if (!checkpointPreview?.available) {
     return {
       preview: transcriptPreview,
+      unverifiedChangeSources,
       restoreAvailable: !transcriptPreview.available &&
         !hasUncoveredUncertainChange &&
         !evidenceIncomplete,
@@ -900,6 +1042,7 @@ function mergeTurnCodePreviews(
   if (!transcriptPreview.available) {
     return {
       preview: checkpointPreview,
+      unverifiedChangeSources,
       restoreAvailable: (snapshotPreview?.restoreAvailable ?? false) &&
         !hasUncoveredUncertainChange &&
         !evidenceIncomplete,
@@ -912,6 +1055,7 @@ function mergeTurnCodePreviews(
   if (missingTranscriptChanges.length === 0) {
     return {
       preview: checkpointPreview,
+      unverifiedChangeSources,
       restoreAvailable: (snapshotPreview?.restoreAvailable ?? false) &&
         !hasUncoveredUncertainChange &&
         !evidenceIncomplete,
@@ -942,6 +1086,7 @@ function mergeTurnCodePreviews(
       ),
       fileStats: mergedFileStats,
     }),
+    unverifiedChangeSources,
     restoreAvailable: (snapshotPreview?.restoreAvailable ?? false) &&
       missingTranscriptChanges.every((change) =>
         snapshotPreview?.restorablePathIdentities.has(change.identityPath)
@@ -1024,6 +1169,7 @@ async function buildTurnCodePreview(
   checkpointBaseDir: string,
   targetSnapshot: FileHistorySnapshot,
   nextSnapshot: FileHistorySnapshot | null,
+  signal?: AbortSignal,
 ): Promise<SnapshotTurnCodePreview> {
   const trackedPaths = Object.keys(targetSnapshot.trackedFileBackups)
   const coveredPathIdentities = new Set<string>()
@@ -1037,6 +1183,7 @@ async function buildTurnCodePreview(
   let restoreAvailable = true
 
   for (const trackingPath of trackedPaths) {
+    signal?.throwIfAborted()
     const identityPath = toFileIdentityPath(
       expandTrackingPath(checkpointBaseDir, trackingPath),
     )
@@ -1070,6 +1217,7 @@ async function buildTurnCodePreview(
         nextSnapshot,
       )
     const safeTrackedPath = await isSafeTrackedPath(checkpointBaseDir, trackingPath)
+    signal?.throwIfAborted()
     if (restorePointAvailable && safeTrackedPath) {
       restorablePathIdentities.add(identityPath)
     }
@@ -1462,18 +1610,46 @@ async function buildTurnCheckpointState(
   const nextSnapshot = nextUserMessageId && snapshots
     ? findTargetSnapshot(snapshots, nextUserMessageId)
     : null
+  return await buildTurnCheckpointStateFromContext(
+    sessionId,
+    transcriptEvidenceComplete,
+    target,
+    checkpointBaseDir,
+    targetSnapshot,
+    nextSnapshot,
+    getTranscriptTurnMessages(activeMessages, target.targetUserMessageId),
+  )
+}
+
+async function buildTurnCheckpointStateFromContext(
+  sessionId: string,
+  transcriptEvidenceComplete: boolean,
+  target: RewindTarget,
+  checkpointBaseDir: string,
+  targetSnapshot: FileHistorySnapshot | null,
+  nextSnapshot: FileHistorySnapshot | null,
+  turnMessages: MessageEntry[],
+  signal?: AbortSignal,
+): Promise<SessionTurnCheckpointPreview> {
+  signal?.throwIfAborted()
   const snapshotPreview = targetSnapshot
-    ? await buildTurnCodePreview(sessionId, checkpointBaseDir, targetSnapshot, nextSnapshot)
+    ? await buildTurnCodePreview(
+      sessionId,
+      checkpointBaseDir,
+      targetSnapshot,
+      nextSnapshot,
+      signal,
+    )
     : null
-  const transcriptEvidence = collectTranscriptTurnFileChanges(
-    activeMessages,
-    target.targetUserMessageId,
+  signal?.throwIfAborted()
+  const transcriptEvidence = collectTranscriptFileChanges(
+    turnMessages,
     checkpointBaseDir,
   )
-  transcriptEvidence.complete = transcriptEvidence.complete && transcriptEvidenceComplete
-  const { preview, restoreAvailable } = mergeTurnCodePreviews(
+  const { preview, restoreAvailable, unverifiedChangeSources } = mergeTurnCodePreviews(
     snapshotPreview,
     transcriptEvidence,
+    transcriptEvidenceComplete,
   )
 
   return buildTurnPreview(
@@ -1481,6 +1657,7 @@ async function buildTurnCheckpointState(
     preview,
     checkpointBaseDir,
     restoreAvailable,
+    unverifiedChangeSources,
   )
 }
 
@@ -1533,6 +1710,9 @@ async function buildRewindTurnCheckpointState(
       firstCheckpoint.code,
     ),
     restoreAvailable: checkpoints.every((checkpoint) => checkpoint.restoreAvailable),
+    unverifiedChangeSources: normalizeUnverifiedChangeSources(
+      checkpoints.flatMap((checkpoint) => checkpoint.unverifiedChangeSources),
+    ),
   }
 }
 
@@ -1608,45 +1788,55 @@ export async function previewSessionRewind(
     },
     code: mergeRewindCodePreview(codePreview.preview, turnCheckpoint.code),
     restoreAvailable: codePreview.restoreAvailable && turnCheckpoint.restoreAvailable,
+    unverifiedChangeSources: turnCheckpoint.unverifiedChangeSources,
   }
 }
 
 export async function listSessionTurnCheckpoints(
   sessionId: string,
+  signal?: AbortSignal,
 ): Promise<SessionTurnCheckpointPreview[]> {
   const {
     messages: activeMessages,
     transcriptEvidenceComplete,
   } = await sessionService.getSessionMessagesWithEvidence(sessionId)
-  const userMessages = activeMessages.filter((message) => message.type === 'user')
-  if (userMessages.length === 0) {
+  signal?.throwIfAborted()
+  const turns = buildTranscriptTurnContexts(activeMessages)
+  if (turns.length === 0) {
     return []
   }
 
   const workDir = await resolveSessionWorkDir(sessionId)
   const snapshots = await loadFileHistorySnapshots(sessionId)
+  signal?.throwIfAborted()
+  const snapshotByMessageId = new Map<string, FileHistorySnapshot>()
+  for (const snapshot of snapshots ?? []) {
+    snapshotByMessageId.set(snapshot.messageId, snapshot)
+  }
   const checkpoints: SessionTurnCheckpointPreview[] = []
 
-  for (const [userMessageIndex, userMessage] of userMessages.entries()) {
-    const activeMessageIndex = activeMessages.findIndex(
-      (message) => message.id === userMessage.id,
-    )
-    if (activeMessageIndex < 0) continue
-    if (!hasCompletedTurn(activeMessages, userMessage.id)) continue
+  for (const turn of turns) {
+    signal?.throwIfAborted()
+    if (!turn.completed) continue
 
     const target: RewindTarget = {
-      targetUserMessageId: userMessage.id,
-      userMessageIndex,
-      userMessageCount: userMessages.length,
-      messagesRemoved: activeMessages.length - activeMessageIndex,
+      targetUserMessageId: turn.userMessage.id,
+      userMessageIndex: turn.userMessageIndex,
+      userMessageCount: turns.length,
+      messagesRemoved: activeMessages.length - turn.activeMessageIndex,
     }
-    const checkpoint = await buildTurnCheckpointState(
+    const nextUserMessageId = turns[turn.userMessageIndex + 1]?.userMessage.id
+    // `getSessionMessagesWithEvidence` already preserved this entry's cwd. Using
+    // it here avoids reading and parsing the complete JSONL again for every turn.
+    const checkpoint = await buildTurnCheckpointStateFromContext(
       sessionId,
-      activeMessages,
       transcriptEvidenceComplete,
-      snapshots,
-      workDir,
       target,
+      turn.userMessage.cwd ?? workDir,
+      snapshotByMessageId.get(turn.userMessage.id) ?? null,
+      nextUserMessageId ? snapshotByMessageId.get(nextUserMessageId) ?? null : null,
+      turn.messages,
+      signal,
     )
 
     if (!checkpoint.code.available) continue
@@ -1782,7 +1972,9 @@ export async function getSessionTurnCheckpointDiff(
 export async function executeSessionRewind(
   sessionId: string,
   selector: RewindTargetSelector,
+  mode: SessionRewindMode = 'both',
 ): Promise<SessionRewindExecuteResult> {
+  const restoreFiles = mode === 'both'
   const selectedTarget = await resolveRewindTarget(sessionId, selector)
 
   // Stop and drain the runtime before the final completeness check. Otherwise
@@ -1807,7 +1999,7 @@ export async function executeSessionRewind(
     workDir,
     target,
   )
-  if (!turnCheckpoint.restoreAvailable) {
+  if (restoreFiles && !turnCheckpoint.restoreAvailable) {
     throw ApiError.badRequest(
       'This turn includes file changes without a complete restorable checkpoint. No messages or files were changed.',
     )
@@ -1822,7 +2014,7 @@ export async function executeSessionRewind(
     checkpointBaseDir,
     target.targetUserMessageId,
   )
-  if (!codePreview.restoreAvailable) {
+  if (restoreFiles && !codePreview.restoreAvailable) {
     throw ApiError.badRequest(
       'One or more tracked files cannot be safely restored from this checkpoint. No messages or files were changed.',
     )
@@ -1830,7 +2022,7 @@ export async function executeSessionRewind(
   const preview = mergeRewindCodePreview(codePreview.preview, turnCheckpoint.code)
 
   let appliedRestorePlan: RestorePlanEntry[] = []
-  if (preview.available && snapshots) {
+  if (restoreFiles && preview.available && snapshots) {
     const targetSnapshot = findTargetSnapshot(snapshots, target.targetUserMessageId)
     if (!targetSnapshot) {
       throw ApiError.badRequest('No file checkpoint is available for the selected message.')
@@ -1882,6 +2074,11 @@ export async function executeSessionRewind(
       removedMessageIds: trimResult.removedMessageIds,
     },
     code: preview,
-    restoreAvailable: true,
+    // For `both` this is necessarily true — we threw above otherwise. For
+    // `conversation` it reports whether the files *could* have been restored,
+    // so the caller can tell "user chose not to" from "we could not".
+    restoreAvailable: turnCheckpoint.restoreAvailable && codePreview.restoreAvailable,
+    unverifiedChangeSources: turnCheckpoint.unverifiedChangeSources,
+    mode,
   }
 }

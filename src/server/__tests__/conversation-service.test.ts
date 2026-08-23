@@ -241,7 +241,9 @@ describe('ConversationService', () => {
 
   test('buildChildEnv injects stream watchdog + overall max-duration so a trickling provider stream cannot hang the desktop forever (#766)', async () => {
     const prev = process.env.CLAUDE_STREAM_MAX_DURATION_MS
+    const previousToolInputDuration = process.env.CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS
     delete process.env.CLAUDE_STREAM_MAX_DURATION_MS
+    delete process.env.CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS
     try {
       const service = new ConversationService() as any
       const env = (await service.buildChildEnv('/tmp')) as Record<string, string>
@@ -254,11 +256,20 @@ describe('ConversationService', () => {
       // 240s apart keeps it alive forever. The overall-duration cap is NOT reset
       // by chunks and is what actually frees that case (#766).
       expect(env.CLAUDE_STREAM_MAX_DURATION_MS).toBe('600000')
+      // Tool JSON is not user-visible and should normally finish in seconds.
+      // Bound it separately so a model cannot spend the full response budget
+      // streaming a truncated Write payload (#1237).
+      expect(env.CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS).toBe('120000')
       // Non-streaming fallback stays off — its retry loop also hangs the UI (#766).
       expect(env.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK).toBe('1')
     } finally {
       if (prev === undefined) delete process.env.CLAUDE_STREAM_MAX_DURATION_MS
       else process.env.CLAUDE_STREAM_MAX_DURATION_MS = prev
+      if (previousToolInputDuration === undefined) {
+        delete process.env.CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS
+      } else {
+        process.env.CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS = previousToolInputDuration
+      }
     }
   })
 
@@ -544,6 +555,95 @@ describe('ConversationService', () => {
     expect(JSON.parse(sent[0]!).type).toBe('update_environment_variables')
     expect(JSON.parse(sent[0]!).variables.CLAUDE_CODE_OAUTH_TOKEN).toBe('fresh-after-wake-token')
     expect(JSON.parse(sent[1]!).type).toBe('user')
+  })
+
+  test('recovers a running official OAuth CLI token after the provider rejects it with 401', async () => {
+    const { hahaOAuthService } = await import('../services/hahaOAuthService.js')
+    await hahaOAuthService.saveTokens({
+      accessToken: 'rejected-running-token',
+      refreshToken: 'refresh-running-token',
+      expiresAt: Date.now() + 30 * 60_000,
+      scopes: ['user:inference'],
+      subscriptionType: 'pro',
+    })
+    hahaOAuthService.setRefreshFn(async () => ({
+      accessToken: 'recovered-running-token',
+      refreshToken: 'refresh-running-next',
+      expiresAt: Date.now() + 60 * 60_000,
+      scopes: ['user:inference'],
+      subscriptionType: 'pro',
+      rateLimitTier: null,
+    }))
+
+    const service = new ConversationService() as any
+    const sent: string[] = []
+    const session: any = {
+      outputCallbacks: [],
+      sdkMessages: [],
+      sdkMessageBytes: 0,
+      seenSdkMessageUuids: new Set<string>(),
+      sdkSocket: { send: (line: string) => sent.push(line) },
+      pendingOutbound: [],
+      initMessage: null,
+      pendingPermissionRequests: new Map(),
+      pendingControlRequests: new Map(),
+      usesOfficialOAuth: true,
+      officialOAuthToken: 'rejected-running-token',
+    }
+    service.sessions.set('official-401-session', session)
+
+    service.handleSdkPayload('official-401-session', JSON.stringify({
+      type: 'system',
+      subtype: 'api_retry',
+      error_status: 401,
+      retry_attempt: 1,
+      max_retries: 10,
+    }))
+    await session.officialOAuthRefreshPromise
+
+    expect(session.officialOAuthToken).toBe('recovered-running-token')
+    expect(sent).toHaveLength(1)
+    expect(JSON.parse(sent[0]!)).toEqual({
+      type: 'update_environment_variables',
+      variables: { CLAUDE_CODE_OAUTH_TOKEN: 'recovered-running-token' },
+    })
+  })
+
+  test('does not run Claude OAuth recovery for a third-party provider 401', async () => {
+    const { hahaOAuthService } = await import('../services/hahaOAuthService.js')
+    let refreshCalls = 0
+    hahaOAuthService.setRefreshFn(async () => {
+      refreshCalls += 1
+      throw new Error('Claude refresh must stay isolated')
+    })
+
+    const service = new ConversationService() as any
+    const sent: string[] = []
+    const session: any = {
+      outputCallbacks: [],
+      sdkMessages: [],
+      sdkMessageBytes: 0,
+      seenSdkMessageUuids: new Set<string>(),
+      sdkSocket: { send: (line: string) => sent.push(line) },
+      pendingOutbound: [],
+      initMessage: null,
+      pendingPermissionRequests: new Map(),
+      pendingControlRequests: new Map(),
+      usesOfficialOAuth: false,
+      officialOAuthToken: null,
+    }
+    service.sessions.set('custom-provider-401-session', session)
+
+    service.handleSdkPayload('custom-provider-401-session', JSON.stringify({
+      type: 'system',
+      subtype: 'api_retry',
+      error_status: 401,
+    }))
+    await Promise.resolve()
+
+    expect(session.officialOAuthRefreshPromise).toBeUndefined()
+    expect(refreshCalls).toBe(0)
+    expect(sent).toEqual([])
   })
 
   test('sendMessage does not enqueue a user turn after its owner is cancelled', async () => {
@@ -1180,10 +1280,12 @@ describe('ConversationService', () => {
     const previous = {
       watchdog: process.env.CLAUDE_ENABLE_STREAM_WATCHDOG,
       idle: process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS,
+      toolInput: process.env.CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS,
       fallback: process.env.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK,
     }
     process.env.CLAUDE_ENABLE_STREAM_WATCHDOG = '0'
     process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS = '90000'
+    process.env.CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS = '45000'
     process.env.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK = '0'
     try {
       const env = (await service.buildChildEnv(
@@ -1193,11 +1295,13 @@ describe('ConversationService', () => {
 
       expect(env.CLAUDE_ENABLE_STREAM_WATCHDOG).toBe('0')
       expect(env.CLAUDE_STREAM_IDLE_TIMEOUT_MS).toBe('90000')
+      expect(env.CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS).toBe('45000')
       expect(env.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK).toBe('0')
     } finally {
       for (const [key, value] of [
         ['CLAUDE_ENABLE_STREAM_WATCHDOG', previous.watchdog],
         ['CLAUDE_STREAM_IDLE_TIMEOUT_MS', previous.idle],
+        ['CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS', previous.toolInput],
         ['CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK', previous.fallback],
       ] as const) {
         if (value === undefined) delete process.env[key]
