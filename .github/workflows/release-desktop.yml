@@ -416,13 +416,25 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: node ./node_modules/electron-builder/out/cli/cli.js ${{ matrix.builder_args }} --publish never
 
-      - name: Build unsigned Windows application directory for SignPath
+      # A real NSIS target is intentional here. electron-builder writes
+      # resources/app-update.yml only while packaging an updater-capable target;
+      # `--win dir` and the later `--prepackaged` pass both skip that hook.
+      - name: Build unsigned Windows bootstrap installer for SignPath
         if: matrix.smoke_platform == 'windows' && needs.signing-preflight.outputs.windows_signed == 'true'
         working-directory: desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: node ./node_modules/electron-builder/out/cli/cli.js --win dir ${{ matrix.builder_arch_arg }} --publish never
+        run: node ./node_modules/electron-builder/out/cli/cli.js --win nsis ${{ matrix.builder_arch_arg }} --publish never
+
+      - name: Verify Windows updater config before SignPath
+        if: matrix.smoke_platform == 'windows' && needs.signing-preflight.outputs.windows_signed == 'true'
+        shell: pwsh
+        run: |
+          $updaterConfig = Join-Path $PWD "desktop/build-artifacts/electron/${{ matrix.unpacked_dir }}/resources/app-update.yml"
+          if (-not (Test-Path -LiteralPath $updaterConfig -PathType Leaf)) {
+            throw "electron-builder did not create the Windows updater config: $updaterConfig"
+          }
 
       - name: Stage project-owned Windows application executables
         if: matrix.smoke_platform == 'windows' && needs.signing-preflight.outputs.windows_signed == 'true'

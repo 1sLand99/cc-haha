@@ -317,7 +317,8 @@ describe('release desktop workflow', () => {
     const workflow = readReleaseWorkflow()
     const applicationConfiguration = readFileSync('.github/signpath/windows-application.xml', 'utf8')
     const installerConfiguration = readFileSync('.github/signpath/windows-installer.xml', 'utf8')
-    const applicationBuildStep = extractStep(workflow, 'Build unsigned Windows application directory for SignPath')
+    const applicationBuildStep = extractStep(workflow, 'Build unsigned Windows bootstrap installer for SignPath')
+    const verifyUpdaterConfigStep = extractStep(workflow, 'Verify Windows updater config before SignPath')
     const stageApplicationStep = extractStep(workflow, 'Stage project-owned Windows application executables')
     const signApplicationStep = extractStep(workflow, 'Sign Windows application executables with SignPath')
     const restoreApplicationStep = extractStep(workflow, 'Restore and verify signed Windows application executables')
@@ -331,8 +332,16 @@ describe('release desktop workflow', () => {
     expect(workflow).toContain('builder_arch_arg: --arm64')
     expect(workflow).toContain('unpacked_dir: win-unpacked')
     expect(workflow).toContain('unpacked_dir: win-arm64-unpacked')
-    expect(applicationBuildStep).toContain('--win dir ${{ matrix.builder_arch_arg }}')
+    expect(applicationBuildStep).toContain('--win nsis ${{ matrix.builder_arch_arg }}')
     expect(applicationBuildStep).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
+    expect(verifyUpdaterConfigStep).toContain('${{ matrix.unpacked_dir }}/resources/app-update.yml')
+    expect(verifyUpdaterConfigStep).toContain('Test-Path -LiteralPath')
+    expect(workflow.indexOf('Build unsigned Windows bootstrap installer for SignPath')).toBeLessThan(
+      workflow.indexOf('Verify Windows updater config before SignPath'),
+    )
+    expect(workflow.indexOf('Verify Windows updater config before SignPath')).toBeLessThan(
+      workflow.indexOf('Stage project-owned Windows application executables'),
+    )
     expect(stageApplicationStep).toContain('Claude Code Haha.exe')
     expect(stageApplicationStep).toContain('claude-sidecar-${{ matrix.target_triple }}.exe')
     expect(stageApplicationStep).not.toContain('rg.exe')
