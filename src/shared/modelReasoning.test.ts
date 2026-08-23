@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   getClaudeCodeModelCapabilities,
   getModelReasoningCapabilityOverride,
+  isOpenAIReasoningModel,
   normalizeModelReasoningEffort,
   resolveModelReasoningProfile,
 } from './modelReasoning.js'
@@ -41,6 +42,13 @@ describe('model reasoning capability pass-through', () => {
     expect(getClaudeCodeModelCapabilities('gpt-5.6-sol', 'openai_responses')).toBe(
       'thinking,effort,adaptive_thinking,xhigh_effort,max_effort',
     )
+  })
+
+  test('recognizes GPT and o-series reasoning models behind provider namespaces', () => {
+    expect(isOpenAIReasoningModel('gpt-5.6-sol[1m]')).toBe(true)
+    expect(isOpenAIReasoningModel('openai/gpt-5.6-sol')).toBe(true)
+    expect(isOpenAIReasoningModel('openrouter/o3-mini')).toBe(true)
+    expect(isOpenAIReasoningModel('claude-opus-4-8')).toBe(false)
   })
 
   test('applies explicit slot capabilities before model profiles', () => {

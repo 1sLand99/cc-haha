@@ -786,7 +786,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'settings.providers.toolSearchConfirmRisk': 'Unsupported providers, including many local and third-party compatible endpoints, may return HTTP 400 and leave the current session unable to continue.',
   'settings.providers.toolSearchConfirmEnable': 'Enable anyway',
   'settings.providers.disableExperimentalBetas': 'Disable experimental beta headers',
-  'settings.providers.disableExperimentalBetasDesc': 'Sets CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 to avoid beta API shapes that third-party gateways may reject. For direct Anthropic-compatible providers, this also disables reasoning effort forwarding, so selected levels fall back to the gateway default.',
+  'settings.providers.disableExperimentalBetasDesc': 'Sets CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 to avoid beta API shapes that third-party gateways may reject. GPT and o-series models still receive the reasoning effort selected for the Session; other direct Anthropic-compatible models may fall back to the gateway default.',
   'settings.providers.imageGenerationEnabled': 'Enable image generation',
   'settings.providers.imageGenerationEnabledDesc': 'Let chat generate images through an OpenAI-compatible Images API. Credentials stay in provider settings, not in the skill.',
   'settings.providers.imageGenerationModel': 'Image model',

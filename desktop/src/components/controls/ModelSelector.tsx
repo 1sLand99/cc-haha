@@ -35,6 +35,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
 import {
   getModelReasoningCapabilityOverride,
+  isOpenAIReasoningModel,
   isModelReasoningEffort,
   normalizeModelReasoningEffort,
   resolveModelReasoningProfile,
@@ -462,7 +463,8 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
     : null
   const runtimeEffortSuppressedByProvider =
     selectedRuntimeProvider?.disableExperimentalBetas === true &&
-    (selectedRuntimeProvider.apiFormat ?? 'anthropic') === 'anthropic'
+    (selectedRuntimeProvider.apiFormat ?? 'anthropic') === 'anthropic' &&
+    !isOpenAIReasoningModel(selectedRuntimeModel?.id ?? '')
 
   const needsProviderConfiguration = isRuntimeScoped && providerChoices.length === 0
   const buttonModelLabel = isRuntimeScoped

@@ -801,7 +801,7 @@ describe('ModelSelector', () => {
     expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(5)
   })
 
-  it('does not offer an effort control that a direct provider has explicitly disabled', () => {
+  it('keeps effort editable for a GPT relay even when beta headers are disabled', async () => {
     useSettingsStore.setState({
       locale: 'en',
       availableModels: [],
@@ -838,6 +838,48 @@ describe('ModelSelector', () => {
     render(<ModelSelector runtimeKey="session-direct-disabled-effort" />)
 
     expect(screen.getByRole('button', { name: 'gpt-5.6-sol, Direct GPT Gateway' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Effort: X-High' })).toBeInTheDocument()
+    await clickByRole('Effort: X-High')
+    expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(5)
+  })
+
+  it('does not offer an effort control that a non-GPT direct provider has explicitly disabled', () => {
+    useSettingsStore.setState({
+      locale: 'en',
+      availableModels: [],
+      currentModel: null,
+      activeProviderName: 'Direct Claude Gateway',
+      effortLevel: 'high',
+    })
+    useProviderStore.setState({
+      providers: [{
+        id: 'direct-claude-provider',
+        presetId: 'custom',
+        name: 'Direct Claude Gateway',
+        apiKey: '***',
+        baseUrl: 'https://api.example.com',
+        apiFormat: 'anthropic',
+        disableExperimentalBetas: true,
+        models: {
+          main: 'claude-opus-4-8',
+          haiku: 'claude-opus-4-8',
+          sonnet: 'claude-opus-4-8',
+          opus: 'claude-opus-4-8',
+        },
+      }],
+      activeId: 'direct-claude-provider',
+      hasLoadedProviders: true,
+      isLoading: false,
+    })
+    useSessionRuntimeStore.getState().setSelection('session-direct-disabled-claude-effort', {
+      providerId: 'direct-claude-provider',
+      modelId: 'claude-opus-4-8',
+      effortLevel: 'high',
+    })
+
+    render(<ModelSelector runtimeKey="session-direct-disabled-claude-effort" />)
+
+    expect(screen.getByRole('button', { name: 'claude-opus-4-8, Direct Claude Gateway' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Effort:/ })).not.toBeInTheDocument()
   })
 
