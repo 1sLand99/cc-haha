@@ -352,6 +352,9 @@ export class ElectronServerRuntime {
       ['wechat', '--wechat'],
       ['dingtalk', '--dingtalk'],
       ['whatsapp', '--whatsapp'],
+      ['wecom', '--wecom'],
+      ['qq', '--qq'],
+      ['slack', '--slack'],
     ] as const) {
       if (!isCurrentGeneration()) break
       try {

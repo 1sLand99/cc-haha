@@ -8,6 +8,7 @@ import path, { join as joinPath } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 import {
+  ADAPTER_FLAGS,
   reserveLocalPort,
   resolveHostTriple,
   resolveSidecarExecutable,
@@ -687,4 +688,66 @@ describe('build-sidecars cu-helper macOS gating', () => {
     const buildCuHelperBody = source.slice(source.indexOf('async function buildCuHelper()'))
     expect(buildCuHelperBody).not.toContain('adHocSignMacBinary')
   })
+})
+
+/**
+ * The adapters mode is the one launcher path no unit test can reach: nothing
+ * imports `claude-sidecar.ts`, and its module body runs `runAdapters` before
+ * the rest of the file is evaluated. A `const` declared below that call sits in
+ * its temporal dead zone, which crashed every adapter sidecar in the packaged
+ * app while every other check stayed green — so this exercises the real binary.
+ */
+describe.skipIf(!compiledSidecarSmokeEnabled)('compiled sidecar adapters mode', () => {
+  async function runAdaptersMode(args: string[]): Promise<{ code: number | null; output: string }> {
+    const desktopRoot = path.resolve(import.meta.dirname, '..')
+    const repoRoot = path.resolve(import.meta.dirname, '../..')
+    const executable = resolveSidecarExecutable(desktopRoot, resolveHostTriple())
+    await stat(executable)
+
+    // An isolated HOME/CLAUDE_CONFIG_DIR: the launcher reads adapters.json, and
+    // this must never see the developer's real credentials.
+    const rootDir = await mkdtemp(joinPath(tmpdir(), 'cc-haha-adapters-smoke-'))
+    try {
+      const child = spawn(executable, ['adapters', '--app-root', repoRoot, ...args], {
+        env: {
+          ...process.env,
+          HOME: rootDir,
+          USERPROFILE: rootDir,
+          CLAUDE_CONFIG_DIR: joinPath(rootDir, '.claude'),
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }) as ChildProcessWithoutNullStreams
+
+      let output = ''
+      child.stdout.on('data', (chunk) => { output += String(chunk) })
+      child.stderr.on('data', (chunk) => { output += String(chunk) })
+
+      const code = await new Promise<number | null>((resolve) => {
+        child.on('exit', (exitCode) => resolve(exitCode))
+      })
+      return { code, output }
+    } finally {
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  }
+
+  it('recognises every adapter flag and skips the ones without credentials', async () => {
+    const { code, output } = await runAdaptersMode([...ADAPTER_FLAGS])
+
+    // Each flag must be reported by name: one the launcher does not know would
+    // fall through to the "ignoring unknown arg" branch instead.
+    for (const flag of ADAPTER_FLAGS) {
+      expect(output).toContain(`${flag} requested but`)
+    }
+    expect(output).not.toContain('ignoring unknown arg')
+    expect(output).toContain('no adapter could be started')
+    expect(code).toBe(1)
+  }, 60_000)
+
+  it('rejects an invocation with no adapter flag at all', async () => {
+    const { code, output } = await runAdaptersMode([])
+
+    expect(output).toContain('must enable at least one of')
+    expect(code).toBe(2)
+  }, 60_000)
 })
