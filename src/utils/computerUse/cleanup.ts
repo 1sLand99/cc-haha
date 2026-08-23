@@ -22,9 +22,9 @@ const UNHIDE_TIMEOUT_MS = 5000
 const OVERLAY_HIDE_TIMEOUT_MS = 2000
 
 /**
- * Turn-end cleanup for the chicago MCP surface: hide the native overlay (macOS
- * cu-helper daemon), auto-unhide apps that `prepareForAction` hid, then release
- * the file-based lock.
+ * Turn-end cleanup for the chicago MCP surface: drop the activity indicator
+ * (macOS cu-helper overlay, or the Windows cursor badge), auto-unhide apps
+ * that `prepareForAction` hid, then release the file-based lock.
  *
  * Called from three sites: natural turn end (`stopHooks.ts`), abort during
  * streaming (`query.ts` aborted_streaming), abort during tool execution
@@ -49,8 +49,22 @@ export async function cleanupComputerUseAfterTurn(
     ToolUseContext,
     'getAppState' | 'setAppState' | 'sendOSNotification'
   >,
-  deps: { overlayHide?: () => Promise<void> } = {},
+  deps: {
+    overlayHide?: () => Promise<void>
+    hideCursorBadge?: () => void
+  } = {},
 ): Promise<void> {
+  // Windows counterpart to the macOS overlay. Synchronous, no-throw, and a
+  // no-op off-Windows, so it goes first and unconditionally: an orphaned badge
+  // would sit on screen claiming the agent is holding the mouse after the turn
+  // has ended, which is a worse lie than showing nothing at all.
+  const hideBadge =
+    deps.hideCursorBadge ??
+    (() => {
+      void import('./winCursorBadge.js').then(m => m.hideCursorBadge()).catch(() => {})
+    })
+  hideBadge()
+
   // Drop the daemon overlay FIRST — before the hidden-apps block and before the
   // isLockHeldLocally early-return below — so the cursor drops promptly even on a
   // turn that hid no apps and whose lock-release short-circuits. overlayHide

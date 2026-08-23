@@ -99,3 +99,37 @@ describe('cleanupComputerUseAfterTurn — turn-end overlay hide', () => {
     expect(hidden).toBe(1)
   })
 })
+
+describe('cleanupComputerUseAfterTurn — turn-end cursor badge', () => {
+  test('drops the Windows badge on a turn that hid nothing', async () => {
+    // The badge is a standing claim that the agent is holding the mouse. If it
+    // outlives the turn it is simply false, and the user has no way to tell
+    // that from a turn still in progress.
+    let hidden = 0
+    await cleanupComputerUseAfterTurn(makeCtx(), {
+      overlayHide: async () => {},
+      hideCursorBadge: () => { hidden += 1 },
+    })
+    expect(hidden).toBe(1)
+  })
+
+  test('drops the badge even when overlayHide hangs past its timeout', async () => {
+    // Abort paths are exactly when a stuck indicator is most likely and most
+    // confusing. The badge teardown must not sit behind the daemon's.
+    let hidden = 0
+    await cleanupComputerUseAfterTurn(makeCtx(), {
+      overlayHide: () => new Promise<void>(() => {}),
+      hideCursorBadge: () => { hidden += 1 },
+    })
+    expect(hidden).toBe(1)
+  })
+
+  test('drops the badge even when overlayHide rejects', async () => {
+    let hidden = 0
+    await cleanupComputerUseAfterTurn(makeCtx(), {
+      overlayHide: async () => { throw new Error('daemon gone') },
+      hideCursorBadge: () => { hidden += 1 },
+    })
+    expect(hidden).toBe(1)
+  })
+})

@@ -1,8 +1,28 @@
 #!/usr/bin/env python3
-"""Windows Computer Use helper — same JSON protocol as mac_helper.py.
+"""Windows Computer Use helper.
 
-Uses win32gui / win32api / win32process / psutil / pyperclip / screeninfo
-to replicate macOS-specific Quartz/AppKit functionality on Windows.
+Uses win32gui / win32api / win32process / psutil / pyperclip / screeninfo /
+pyautogui to provide, on Windows, the JSON command protocol the native macOS
+`cu-helper` daemon speaks. macOS is native-only — there is no Python path there
+— so this is the sole implementation of that protocol in Python.
+
+One difference is not an implementation detail and shapes everything below:
+macOS delivers input with `CGEvent.postToPid`, straight into the target
+process, leaving the real cursor and the foreground app alone. Windows has no
+equivalent. `pyautogui` bottoms out in `SendInput`, which injects into the one
+system-wide input stream and warps the one real cursor. The agent therefore
+shares the mouse and keyboard with the user, and cannot verify that anything
+it sent arrived.
+
+Hence the two mechanisms that have no macOS counterpart:
+
+  * `ForegroundLease` aborts when physical input overlaps an action, because
+    interleaved streams produce clicks neither party intended.
+  * `ensure_point_on_screen` / `ensure_target_window_reachable` refuse to send
+    at all when delivery is already known to be impossible.
+
+Both exist because `SendInput` reports success unconditionally, and "Action
+completed" for input that went nowhere is worse than an error.
 """
 from __future__ import annotations
 
@@ -176,7 +196,7 @@ def choose_display(display_id: int | None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Screen capture (mss — cross-platform, identical to mac_helper)
+# Screen capture (mss)
 # ---------------------------------------------------------------------------
 
 def capture_display(display_id: int | None, resize: tuple[int, int] | None = None) -> dict[str, Any]:
@@ -564,6 +584,145 @@ def paste_clipboard() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Physical input interference detection
+# ---------------------------------------------------------------------------
+#
+# Why this exists at all, and why it is stricter than the macOS version.
+#
+# On macOS the helper posts events straight into the target process with
+# `CGEvent.postToPid`, so agent input and human input never share a channel:
+# the epoch monitor there is a safety net for an unlikely race.
+#
+# Windows has no such API. `pyautogui` bottoms out in `SendInput`, which
+# injects into the ONE system-wide input stream and warps the ONE real cursor.
+# The agent and the user are therefore holding the same mouse. If the user
+# reaches for it mid-action the two streams interleave, and the resulting
+# click lands somewhere neither of them intended. Detection is not a nicety
+# here — it is the only thing standing between "the agent typed into the wrong
+# window" and an abort.
+#
+# `GetLastInputInfo` is the right signal for this: it reports the tick of the
+# last PHYSICAL input event, requires no privileges and no TCC-style grant,
+# and — measured, and asserted by test_helpers.py — is NOT advanced by
+# `SendInput` injection, so the agent cannot trip its own detector.
+
+import ctypes
+from ctypes import wintypes
+
+
+class _LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+
+def last_physical_input_tick() -> int:
+    """Tick count of the last physical keyboard/mouse event.
+
+    Returns 0 when unavailable so callers fail OPEN on the read itself: a
+    helper that refused to act because it could not query an optional Win32
+    counter would be broken in a much more visible way than one that acted.
+    Interference is only ever reported on two SUCCESSFUL reads that differ.
+    """
+    try:
+        info = _LASTINPUTINFO()
+        info.cbSize = ctypes.sizeof(_LASTINPUTINFO)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+            return 0
+        return int(info.dwTime)
+    except Exception:
+        return 0
+
+
+class UserInterference(RuntimeError):
+    """The user touched the physical mouse or keyboard during an action."""
+
+    def __init__(self, message: str, code: str = "user_interference") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _foreground_window_pid() -> int | None:
+    try:
+        import win32gui
+        import win32process
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            return None
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        return int(pid)
+    except Exception:
+        return None
+
+
+class ForegroundLease:
+    """Guards one mutating action against concurrent physical input.
+
+    Evidence is sampled in a fixed order — tick, foreground identity, tick —
+    both before and after the action, so a single observation cannot straddle
+    a change it fails to notice. Same shape as `ForegroundLease.swift`.
+
+    The asymmetry between the two failure modes is deliberate and is the whole
+    point of the class:
+
+      * interference BEFORE the action  -> `user_interference`. Nothing ran.
+        The caller may safely retry.
+      * interference DURING the action  -> `user_interference_result_unknown`.
+        Injection already went into the shared input stream and we cannot know
+        how much of it landed, or where. Retrying could double-apply it. The
+        error says so rather than guessing.
+    """
+
+    def __init__(self) -> None:
+        self.tick: int = 0
+        self.pid: int | None = None
+
+    def acquire(self) -> None:
+        before = last_physical_input_tick()
+        pid = _foreground_window_pid()
+        after = last_physical_input_tick()
+        if before and after and before != after:
+            raise UserInterference(
+                "The user was typing or moving the mouse, so the action was "
+                "not sent. Nothing has changed; it is safe to try again."
+            )
+        self.tick = after
+        self.pid = pid
+
+    def finalize(self) -> None:
+        before = last_physical_input_tick()
+        pid = _foreground_window_pid()
+        after = last_physical_input_tick()
+
+        if before and after and before != after:
+            raise UserInterference(
+                "The user used the mouse or keyboard while this action was "
+                "running. Because Windows shares one input stream between you "
+                "and the user, the two may have interleaved and the result is "
+                "UNKNOWN. Do not repeat the action — take a screenshot and "
+                "read the current state before deciding anything.",
+                code="user_interference_result_unknown",
+            )
+
+        if self.tick and after and self.tick != after:
+            raise UserInterference(
+                "The user used the mouse or keyboard while this action was "
+                "running. The result is UNKNOWN — do not repeat the action; "
+                "take a screenshot and read the current state first.",
+                code="user_interference_result_unknown",
+            )
+
+        # A foreground change without any physical input is the target app (or
+        # a background app) stealing activation, not the user. Worth reporting,
+        # because everything typed after it went somewhere unintended.
+        if self.pid is not None and pid is not None and self.pid != pid:
+            raise UserInterference(
+                "The foreground application changed while this action was "
+                "running, so input may have gone to the wrong window. The "
+                "result is UNKNOWN — take a screenshot before continuing.",
+                code="user_interference_result_unknown",
+            )
+
+
+# ---------------------------------------------------------------------------
 # Permissions — Windows doesn't have macOS-style TCC
 # ---------------------------------------------------------------------------
 
@@ -577,7 +736,177 @@ def check_permissions() -> dict[str, bool | None]:
 
 
 # ---------------------------------------------------------------------------
-# Input actions (pyautogui — identical to mac_helper)
+# Delivery preconditions — refuse rather than report a lie
+# ---------------------------------------------------------------------------
+#
+# `SendInput` always "succeeds": it returns the number of events inserted into
+# the input stream, never whether anything acted on them. Click a point behind
+# another window and the click lands on THAT window; click a point off-screen
+# and it lands nowhere. Either way pyautogui returns cleanly and the helper
+# would answer "Action completed".
+#
+# That specific lie has burned us before on macOS — a session typed into a
+# minimized window for a full turn because every action reported success. The
+# fix there was to refuse instead of guessing, and the same rule applies here.
+
+class DeliveryRefused(RuntimeError):
+    def __init__(self, message: str, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _virtual_screen_rect() -> tuple[int, int, int, int] | None:
+    """(left, top, right, bottom) across all monitors, or None if unavailable."""
+    try:
+        user32 = ctypes.windll.user32
+        SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
+        SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
+        left = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+        top = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+        width = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+        height = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+        if width <= 0 or height <= 0:
+            return None
+        return (left, top, left + width, top + height)
+    except Exception:
+        return None
+
+
+def ensure_point_on_screen(x: int, y: int) -> None:
+    """Refuse coordinates outside every monitor.
+
+    Fails OPEN when the metrics are unreadable: an unreadable metric is our
+    problem, not the caller's, and blocking every action on it would be worse
+    than the miss it prevents.
+    """
+    rect = _virtual_screen_rect()
+    if rect is None:
+        return
+    left, top, right, bottom = rect
+    if left <= x < right and top <= y < bottom:
+        return
+    raise DeliveryRefused(
+        f"The point ({x}, {y}) is outside every display "
+        f"(virtual screen is {left},{top} to {right},{bottom}), so the action "
+        "was not sent. Take a screenshot to get current coordinates.",
+        code="point_outside_display",
+    )
+
+
+def _window_is_interactable(hwnd: int) -> tuple[bool, str]:
+    """(ok, reason) — whether synthetic input can reach this window at all."""
+    try:
+        import win32gui
+        if not win32gui.IsWindow(hwnd):
+            return False, "the window no longer exists"
+        if not win32gui.IsWindowVisible(hwnd):
+            return False, "the window is hidden"
+        try:
+            import win32con
+            placement = win32gui.GetWindowPlacement(hwnd)
+            if placement and placement[1] == win32con.SW_SHOWMINIMIZED:
+                return False, "the window is minimized"
+        except Exception:
+            pass
+        rect = win32gui.GetWindowRect(hwnd)
+        if rect[2] - rect[0] <= 0 or rect[3] - rect[1] <= 0:
+            return False, "the window has no on-screen area"
+        return True, ""
+    except Exception:
+        # Unreadable window state fails open, same reasoning as above.
+        return True, ""
+
+
+def _windows_for_bundle(bundle_id: str) -> list[int]:
+    """Every top-level HWND owned by a process whose exe stem matches.
+
+    Enumerates directly rather than reusing `list_windows()`, which filters out
+    invisible and zero-area windows — precisely the states this guard needs to
+    SEE in order to refuse. Reusing it would make the guard match nothing and
+    silently pass, which is the failure mode it was written to prevent.
+    """
+    try:
+        import win32gui
+        import win32process
+        import psutil
+    except Exception:
+        return []
+
+    wanted = bundle_id.strip().lower()
+    if not wanted:
+        return []
+
+    pids: set[int] = set()
+    try:
+        for proc in psutil.process_iter(["pid", "name", "exe"]):
+            try:
+                exe_path = proc.info.get("exe") or ""
+                name = proc.info.get("name") or ""
+                stem = Path(exe_path).stem if exe_path else Path(name).stem
+                if stem and stem.lower() == wanted:
+                    pids.add(int(proc.info["pid"]))
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:
+        return []
+
+    if not pids:
+        return []
+
+    handles: list[int] = []
+
+    def _collect(hwnd: int, _: Any) -> None:
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            if int(pid) in pids:
+                handles.append(int(hwnd))
+        except Exception:
+            return
+
+    try:
+        win32gui.EnumWindows(_collect, None)
+    except Exception:
+        return []
+    return handles
+
+
+def ensure_target_window_reachable(bundle_id: str | None) -> None:
+    """Refuse when the named app has no window that input could reach.
+
+    A minimized window is the case that matters: on Windows it has no client
+    area to hit-test against, so a coordinate click is guaranteed to land on
+    whatever is underneath it. Reporting success there is exactly the lie this
+    guard exists to prevent.
+
+    Fails OPEN when the app owns no top-level windows at all — that is a
+    different failure (wrong app name, app not running) which the caller's own
+    resolution step reports with a better message than this one could.
+    """
+    if not bundle_id:
+        return
+
+    handles = _windows_for_bundle(bundle_id)
+    if not handles:
+        return
+
+    reasons: list[str] = []
+    for hwnd in handles:
+        ok, reason = _window_is_interactable(hwnd)
+        if ok:
+            return
+        if reason:
+            reasons.append(reason)
+
+    detail = reasons[0] if reasons else "it has no on-screen window"
+    raise DeliveryRefused(
+        f"The target app has no window that input can reach — {detail}. "
+        "The action was NOT sent. Restore the window and try again.",
+        code="target_window_offscreen",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Input actions (pyautogui → SendInput)
 # ---------------------------------------------------------------------------
 
 def click(x: int, y: int, button: str, count: int, modifiers: list[str] | None) -> None:
@@ -629,8 +958,55 @@ def type_text(text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Main dispatcher — exact same command protocol as mac_helper.py
+# Main dispatcher — the command protocol the native macOS daemon also speaks
 # ---------------------------------------------------------------------------
+
+# Commands that inject into the shared Windows input stream. Kept as one set
+# rather than as a guard call inside each branch, because the branches are the
+# easy place to forget one — and a forgotten branch is silently unguarded, the
+# exact class of bug this whole pass exists to remove.
+#
+# Mirrors `CommandForegroundPolicy.leasedCommands` on the macOS side.
+MUTATING_COMMANDS = frozenset({
+    "click", "drag", "move_mouse", "scroll",
+    "mouse_down", "mouse_up",
+    "key", "hold_key", "type",
+    "paste_clipboard",
+})
+
+# The subset that targets a screen coordinate, and so needs the point itself to
+# be reachable. `key`/`type` go to whatever holds focus and have no coordinate
+# to check.
+COORDINATE_COMMANDS = frozenset({"click", "drag", "move_mouse", "scroll"})
+
+
+def _coordinate_of(command: str, payload: dict[str, Any]) -> tuple[int, int] | None:
+    if command not in COORDINATE_COMMANDS:
+        return None
+    if command == "drag":
+        target = payload.get("to") or {}
+        if "x" in target and "y" in target:
+            return int(target["x"]), int(target["y"])
+        return None
+    if "x" in payload and "y" in payload:
+        return int(payload["x"]), int(payload["y"])
+    return None
+
+
+def _finish(lease: "ForegroundLease | None", result: Any) -> int:
+    """Emit the success response for a mutating command, after the lease agrees.
+
+    The check runs BEFORE the response is written, and that ordering is the
+    whole point: once `{"ok": true}` reaches the caller the action is reported
+    as done, and no later discovery can take that back. A helper that injected
+    input, then noticed the user had been typing throughout, and still answered
+    "Action completed" would be lying with a straight face.
+    """
+    if lease is not None:
+        lease.finalize()
+    json_output({"ok": True, "result": result})
+    return 0
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -639,8 +1015,20 @@ def main() -> int:
     args = parser.parse_args()
     payload = json.loads(args.payload)
 
+    lease: ForegroundLease | None = None
+
     try:
         command = args.command
+
+        if command in MUTATING_COMMANDS:
+            point = _coordinate_of(command, payload)
+            if point is not None:
+                ensure_point_on_screen(point[0], point[1])
+            ensure_target_window_reachable(
+                payload.get("bundleId") or payload.get("app")
+            )
+            lease = ForegroundLease()
+            lease.acquire()
         if command == "check_permissions":
             perms = check_permissions()
             json_output({"ok": True, "result": perms})
@@ -690,43 +1078,34 @@ def main() -> int:
             return 0
         if command == "key":
             key_action(str(payload["keySequence"]), int(payload.get("repeat") or 1))
-            json_output({"ok": True, "result": True})
-            return 0
+            return _finish(lease, True)
         if command == "hold_key":
             hold_keys(list(payload.get("keyNames") or []), int(payload.get("durationMs") or 0))
-            json_output({"ok": True, "result": True})
-            return 0
+            return _finish(lease, True)
         if command == "type":
             type_text(str(payload.get("text") or ""))
-            json_output({"ok": True, "result": True})
-            return 0
+            return _finish(lease, True)
         if command == "click":
             click(int(payload["x"]), int(payload["y"]), str(payload.get("button") or "left"), int(payload.get("count") or 1), payload.get("modifiers"))
-            json_output({"ok": True, "result": True})
-            return 0
+            return _finish(lease, True)
         if command == "drag":
             from_point = payload.get("from")
             if from_point:
                 pyautogui.moveTo(int(from_point["x"]), int(from_point["y"]))
             pyautogui.dragTo(int(payload["to"]["x"]), int(payload["to"]["y"]), duration=0.2, button="left")
-            json_output({"ok": True, "result": True})
-            return 0
+            return _finish(lease, True)
         if command == "move_mouse":
             pyautogui.moveTo(int(payload["x"]), int(payload["y"]))
-            json_output({"ok": True, "result": True})
-            return 0
+            return _finish(lease, True)
         if command == "scroll":
             scroll(int(payload["x"]), int(payload["y"]), int(payload.get("deltaX") or 0), int(payload.get("deltaY") or 0))
-            json_output({"ok": True, "result": True})
-            return 0
+            return _finish(lease, True)
         if command == "mouse_down":
             pyautogui.mouseDown(button="left")
-            json_output({"ok": True, "result": True})
-            return 0
+            return _finish(lease, True)
         if command == "mouse_up":
             pyautogui.mouseUp(button="left")
-            json_output({"ok": True, "result": True})
-            return 0
+            return _finish(lease, True)
         if command == "cursor_position":
             x, y = pyautogui.position()
             json_output({"ok": True, "result": {"x": int(x), "y": int(y)}})
@@ -756,10 +1135,16 @@ def main() -> int:
             return 0
         if command == "paste_clipboard":
             paste_clipboard()
-            json_output({"ok": True, "result": True})
-            return 0
+            return _finish(lease, True)
         error_output(f"Unknown command: {command}", code="bad_command")
         return 2
+    except (UserInterference, DeliveryRefused) as exc:
+        # A deliberate refusal, not a crash. The code travels so the caller can
+        # tell "did not run, safe to retry" apart from "ran, outcome unknown" —
+        # collapsing both into a generic error is how a model ends up repeating
+        # a toggle it already flipped.
+        error_output(str(exc), code=exc.code)
+        return 1
     except Exception as exc:
         error_output(str(exc))
         return 1

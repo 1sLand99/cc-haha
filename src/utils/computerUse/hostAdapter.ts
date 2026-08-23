@@ -9,7 +9,7 @@ import { createCliExecutor } from './executor.js'
 import { getChicagoEnabled, getChicagoSubGates } from './gates.js'
 import { normalizeOsPermissions } from './permissions.js'
 // Platform-routed helper: macOS → native cu-helper, Windows → Python helper.
-import { callHelper as callPythonHelper } from './helperBridge.js'
+import { callHelper } from './helperBridge.js'
 import { maybeShowNativePermissionCard } from './nativePermissionCard.js'
 
 class DebugLogger implements Logger {
@@ -42,7 +42,7 @@ export function getComputerUseHostAdapter(): ComputerUseHostAdapter {
       getHideBeforeActionEnabled: () => getChicagoSubGates().hideBeforeAction,
     }),
     ensureOsPermissions: async () => {
-      const rawPerms = await callPythonHelper<{ accessibility: boolean; screenRecording: boolean | null }>('check_permissions', {})
+      const rawPerms = await callHelper<{ accessibility: boolean; screenRecording: boolean | null }>('check_permissions', {})
       const perms = normalizeOsPermissions(rawPerms)
       if (perms.granted) return { granted: true as const }
       // Missing a TCC grant → pop the native, guided permission card (macOS).

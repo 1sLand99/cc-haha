@@ -1,9 +1,11 @@
 /**
- * CLI `ComputerExecutor` implementation — Python bridge variant.
+ * CLI `ComputerExecutor` implementation — platform-routed helper variant.
  *
- * Replaces the native Swift/Rust modules with a Python subprocess bridge
- * (pyautogui + mss + platform helpers). See `pythonBridge.ts` and
- * `runtime/{mac,win}_helper.py`.
+ * Every command goes through `helperBridge.callHelper`, which routes by
+ * platform: macOS reaches the signed native `cu-helper` daemon, Windows
+ * reaches the Python helper (`runtime/win_helper.py`, pyautogui + mss).
+ * This module is deliberately platform-agnostic — the routing decision, and
+ * the very different guarantees each side offers, live in `helperBridge.ts`.
  */
 
 import type {
@@ -29,8 +31,8 @@ import {
   isComputerUseSupportedPlatform,
 } from './common.js'
 // Platform-routed helper: macOS → native cu-helper (no cursor steal),
-// Windows → Python helper. Aliased so the 20+ call sites below stay unchanged.
-import { callHelper as callPythonHelper } from './helperBridge.js'
+// Windows → Python helper (pyautogui, which does move the real cursor).
+import { callHelper } from './helperBridge.js'
 
 const SCREENSHOT_JPEG_QUALITY = 0.75
 const MOVE_SETTLE_MS = 50
@@ -62,16 +64,16 @@ function normalizeDisplayGeometry(display: PythonDisplayGeometry): DisplayGeomet
 }
 
 async function readClipboardViaPbpaste(): Promise<string> {
-  return callPythonHelper<string>('read_clipboard', {})
+  return callHelper<string>('read_clipboard', {})
 }
 
 async function writeClipboardViaPbcopy(text: string): Promise<void> {
-  await callPythonHelper('write_clipboard', { text })
+  await callHelper('write_clipboard', { text })
 }
 
 async function readClipboard(): Promise<string> {
   if (process.platform === 'win32') {
-    return callPythonHelper<string>('read_clipboard', {})
+    return callHelper<string>('read_clipboard', {})
   }
 
   return readClipboardViaPbpaste()
@@ -79,7 +81,7 @@ async function readClipboard(): Promise<string> {
 
 async function writeClipboard(text: string): Promise<void> {
   if (process.platform === 'win32') {
-    await callPythonHelper('write_clipboard', { text })
+    await callHelper('write_clipboard', { text })
     return
   }
 
@@ -155,21 +157,21 @@ function formatAppList(apps: readonly DaemonAppRef[]): string {
 export function createCodexEngine(): CodexComputerEngine {
   return {
     async listApps(): Promise<string> {
-      const apps = await callPythonHelper<DaemonAppRef[]>('list_apps', {})
+      const apps = await callHelper<DaemonAppRef[]>('list_apps', {})
       return formatAppList(apps)
     },
 
     async resolveTarget(target: AppTarget): Promise<ResolvedAppTarget> {
       // Sent as-is: the daemon owns the selector→process mapping, and it must
       // never launch anything to satisfy a match.
-      return callPythonHelper<ResolvedAppTarget>('resolve_app_target', target)
+      return callHelper<ResolvedAppTarget>('resolve_app_target', target)
     },
 
     async getAppState(
       target: AppTarget,
       opts?: { disableDiff?: boolean },
     ): Promise<AppStateResult> {
-      return callPythonHelper<AppStateResult>('get_app_state', {
+      return callHelper<AppStateResult>('get_app_state', {
         ...appTargetPayload(target),
         ...(opts?.disableDiff === undefined ? {} : { disableDiff: opts.disableDiff }),
       })
@@ -183,7 +185,7 @@ export function createCodexEngine(): CodexComputerEngine {
       clickCount?: number
       button?: CodexMouseButton
     }): Promise<void> {
-      await callPythonHelper('click', {
+      await callHelper('click', {
         ...appTargetPayload(args.target),
         index: args.index,
         x: args.x,
@@ -198,7 +200,7 @@ export function createCodexEngine(): CodexComputerEngine {
       index: string
       value: string
     }): Promise<SetValueResult> {
-      return callPythonHelper<SetValueResult>('set_value', {
+      return callHelper<SetValueResult>('set_value', {
         ...appTargetPayload(args.target),
         index: args.index,
         value: args.value,
@@ -213,7 +215,7 @@ export function createCodexEngine(): CodexComputerEngine {
       suffix?: string
       selection?: 'text' | 'cursor_before' | 'cursor_after'
     }): Promise<void> {
-      await callPythonHelper('select_text', {
+      await callHelper('select_text', {
         ...appTargetPayload(args.target),
         index: args.index,
         text: args.text,
@@ -228,7 +230,7 @@ export function createCodexEngine(): CodexComputerEngine {
       index: string
       action: string
     }): Promise<void> {
-      await callPythonHelper('perform_secondary_action', {
+      await callHelper('perform_secondary_action', {
         ...appTargetPayload(args.target),
         index: args.index,
         action: args.action,
@@ -243,7 +245,7 @@ export function createCodexEngine(): CodexComputerEngine {
       direction: 'up' | 'down' | 'left' | 'right'
       pages?: number
     }): Promise<void> {
-      await callPythonHelper('scroll', {
+      await callHelper('scroll', {
         ...appTargetPayload(args.target),
         index: args.index,
         x: args.x,
@@ -259,7 +261,7 @@ export function createCodexEngine(): CodexComputerEngine {
       to: { x: number; y: number }
       button?: CodexMouseButton
     }): Promise<void> {
-      await callPythonHelper('drag', {
+      await callHelper('drag', {
         ...appTargetPayload(args.target),
         from: args.from,
         to: args.to,
@@ -272,7 +274,7 @@ export function createCodexEngine(): CodexComputerEngine {
       key: string
       systemKeyCombos: boolean
     }): Promise<void> {
-      await callPythonHelper('press_key', {
+      await callHelper('press_key', {
         ...appTargetPayload(args.target),
         key: args.key,
         systemKeyCombos: args.systemKeyCombos,
@@ -280,7 +282,7 @@ export function createCodexEngine(): CodexComputerEngine {
     },
 
     async typeText(args: { target: AppTarget; text: string }): Promise<void> {
-      await callPythonHelper('type_text', {
+      await callHelper('type_text', {
         ...appTargetPayload(args.target),
         text: args.text,
       })
@@ -300,10 +302,10 @@ async function typeViaClipboard(text: string): Promise<void> {
       // Give NSPasteboard a beat before paste, then keep the new contents
       // resident long enough for Electron/WebView fields to consume them.
       await sleep(40)
-      await callPythonHelper('paste_clipboard', {})
+      await callHelper('paste_clipboard', {})
       await sleep(180)
     } else {
-      await callPythonHelper('key', {
+      await callHelper('key', {
         keySequence: 'ctrl+v',
         repeat: 1,
       })
@@ -341,30 +343,30 @@ export function createCliExecutor(_opts: {
     engine: process.platform === 'darwin' ? createCodexEngine() : undefined,
 
     async prepareForAction(_allowlistBundleIds, _displayId): Promise<string[]> {
-      return callPythonHelper('prepare_for_action', {})
+      return callHelper('prepare_for_action', {})
     },
 
     async previewHideSet(_allowlistBundleIds, _displayId) {
-      return callPythonHelper('preview_hide_set', {})
+      return callHelper('preview_hide_set', {})
     },
 
     async getDisplaySize(displayId?: number): Promise<DisplayGeometry> {
-      return normalizeDisplayGeometry(await callPythonHelper('get_display_size', { displayId }))
+      return normalizeDisplayGeometry(await callHelper('get_display_size', { displayId }))
     },
 
     async listDisplays(): Promise<DisplayGeometry[]> {
-      const displays = await callPythonHelper<PythonDisplayGeometry[]>('list_displays', {})
+      const displays = await callHelper<PythonDisplayGeometry[]>('list_displays', {})
       return displays.map(display => normalizeDisplayGeometry(display))
     },
 
     async findWindowDisplays(bundleIds: string[]) {
-      return callPythonHelper('find_window_displays', { bundleIds })
+      return callHelper('find_window_displays', { bundleIds })
     },
 
     async resolvePrepareCapture(opts): Promise<ResolvePrepareCaptureResult> {
       const display = await this.getDisplaySize(opts.preferredDisplayId)
       const [targetW, targetH] = computeTargetDims(display.width, display.height, display.scaleFactor)
-      const result = await callPythonHelper<PythonResolvePrepareCaptureResult>('resolve_prepare_capture', {
+      const result = await callHelper<PythonResolvePrepareCaptureResult>('resolve_prepare_capture', {
         preferredDisplayId: opts.preferredDisplayId,
         targetWidth: targetW,
         targetHeight: targetH,
@@ -380,7 +382,7 @@ export function createCliExecutor(_opts: {
     async screenshot(opts): Promise<ScreenshotResult> {
       const display = await this.getDisplaySize(opts.displayId)
       const [targetW, targetH] = computeTargetDims(display.width, display.height, display.scaleFactor)
-      const result = await callPythonHelper<ScreenshotResult>('screenshot', {
+      const result = await callHelper<ScreenshotResult>('screenshot', {
         displayId: opts.displayId,
         targetWidth: targetW,
         targetHeight: targetH,
@@ -392,7 +394,7 @@ export function createCliExecutor(_opts: {
     async zoom(regionLogical, _allowedBundleIds, displayId) {
       const display = await this.getDisplaySize(displayId)
       const [outW, outH] = computeTargetDims(regionLogical.w, regionLogical.h, display.scaleFactor)
-      return callPythonHelper('zoom', {
+      return callHelper('zoom', {
         x: regionLogical.x,
         y: regionLogical.y,
         width: regionLogical.w,
@@ -403,11 +405,11 @@ export function createCliExecutor(_opts: {
     },
 
     async key(keySequence: string, repeat?: number): Promise<void> {
-      await callPythonHelper('key', { keySequence, repeat: repeat ?? 1 })
+      await callHelper('key', { keySequence, repeat: repeat ?? 1 })
     },
 
     async holdKey(keyNames: string[], durationMs: number): Promise<void> {
-      await callPythonHelper('hold_key', { keyNames, durationMs })
+      await callHelper('hold_key', { keyNames, durationMs })
     },
 
     async type(text: string, opts2: { viaClipboard: boolean }): Promise<void> {
@@ -415,61 +417,61 @@ export function createCliExecutor(_opts: {
         await typeViaClipboard(text)
         return
       }
-      await callPythonHelper('type', { text })
+      await callHelper('type', { text })
     },
 
     readClipboard,
     writeClipboard,
 
     async click(x, y, button, count, modifiers): Promise<void> {
-      await callPythonHelper('click', { x, y, button, count, modifiers })
+      await callHelper('click', { x, y, button, count, modifiers })
       await sleep(MOVE_SETTLE_MS)
     },
 
     async mouseDown(): Promise<void> {
-      await callPythonHelper('mouse_down', {})
+      await callHelper('mouse_down', {})
     },
 
     async mouseUp(): Promise<void> {
-      await callPythonHelper('mouse_up', {})
+      await callHelper('mouse_up', {})
     },
 
     async getCursorPosition(): Promise<{ x: number; y: number }> {
-      return callPythonHelper('cursor_position', {})
+      return callHelper('cursor_position', {})
     },
 
     async drag(from, to): Promise<void> {
-      await callPythonHelper('drag', { from, to })
+      await callHelper('drag', { from, to })
       await sleep(MOVE_SETTLE_MS)
     },
 
     async moveMouse(x, y): Promise<void> {
-      await callPythonHelper('move_mouse', { x, y })
+      await callHelper('move_mouse', { x, y })
       await sleep(MOVE_SETTLE_MS)
     },
 
     async scroll(x, y, dx, dy): Promise<void> {
-      await callPythonHelper('scroll', { x, y, deltaX: dx, deltaY: dy })
+      await callHelper('scroll', { x, y, deltaX: dx, deltaY: dy })
     },
 
     async getFrontmostApp(): Promise<FrontmostApp | null> {
-      return callPythonHelper('frontmost_app', {})
+      return callHelper('frontmost_app', {})
     },
 
     async appUnderPoint(x, y) {
-      return callPythonHelper('app_under_point', { x, y })
+      return callHelper('app_under_point', { x, y })
     },
 
     async listInstalledApps(): Promise<InstalledApp[]> {
-      return callPythonHelper('list_installed_apps', {})
+      return callHelper('list_installed_apps', {})
     },
 
     async listRunningApps(): Promise<RunningApp[]> {
-      return callPythonHelper('list_running_apps', {})
+      return callHelper('list_running_apps', {})
     },
 
     async openApp(bundleId: string): Promise<void> {
-      await callPythonHelper('open_app', { bundleId })
+      await callHelper('open_app', { bundleId })
     },
   }
 }

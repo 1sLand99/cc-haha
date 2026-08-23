@@ -8,6 +8,7 @@ import {
   overlayShow,
   shutdownDaemon,
 } from './cuHelperDaemon.js'
+import { showCursorBadge } from './winCursorBadge.js'
 
 // Latches true after we restart the daemon once in response to an Accessibility
 // `not_trusted` error, so we don't thrash-restart while the helper is genuinely
@@ -97,6 +98,14 @@ function overlayTargetPayload(
  *   - Windows → the Python helper (`win_helper.py`); the native engine is
  *              macOS-only.
  *
+ * The two platforms do NOT offer the same guarantee, and callers should not
+ * assume they do. macOS delivers input per-process and never touches the real
+ * pointer. Windows has no such API: input goes through `SendInput`, so the
+ * agent shares one cursor and one input stream with the user. The Windows
+ * side therefore gets a badge that marks agent activity rather than a virtual
+ * cursor that replaces it, and `win_helper.py` refuses actions it can already
+ * tell will not land.
+ *
  * `deps` is injectable for unit tests only.
  */
 export async function callHelper<T>(
@@ -109,6 +118,7 @@ export async function callHelper<T>(
     callPy?: HelperFn
     overlayShow?: (payload: Record<string, unknown>) => void
     isOverlayShown?: () => boolean
+    showCursorBadge?: () => void
     callFrontmost?: () => Promise<{ bundleId?: string } | null>
     shutdownDaemon?: () => void
   } = {},
@@ -119,6 +129,7 @@ export async function callHelper<T>(
   const viaPython = deps.callPy ?? (callPythonHelper as HelperFn)
   const showOverlay = deps.overlayShow ?? overlayShow
   const overlayIsShown = deps.isOverlayShown ?? isOverlayShown
+  const showBadge = deps.showCursorBadge ?? (() => showCursorBadge())
   const restartDaemon = deps.shutdownDaemon ?? (() => void shutdownDaemon())
 
   if (platform === 'darwin') {
@@ -156,6 +167,12 @@ export async function callHelper<T>(
     }
   }
 
+  if (INJECTION_COMMANDS.has(command)) {
+    // Same trigger set as the macOS overlay, so both platforms mark activity
+    // at the same moments. Fire-and-forget: the badge is advisory and must
+    // never sit on the mutation hot path.
+    showBadge()
+  }
   return viaPython<T>(command, payload)
 }
 

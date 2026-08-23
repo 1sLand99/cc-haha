@@ -355,8 +355,63 @@ describe('callHelper platform routing', () => {
       callDaemon: async () => { used = 'daemon'; return 0 as never },
       callPy: async () => { used = 'py'; return 0 as never },
       overlayShow: () => {},
+      showCursorBadge: () => {},
     })
     expect(used).toBe('py')
+  })
+
+  test('Windows marks agent activity on an injecting command', async () => {
+    // Windows drives through SendInput, so the user's real cursor moves. The
+    // badge is the only thing telling them the movement is not theirs, which
+    // matters because grabbing the mouse mid-action is what makes the two
+    // input streams interleave.
+    let badges = 0
+    await callHelper('click', { x: 1, y: 2 }, {
+      platform: 'win32',
+      callPy: ok,
+      showCursorBadge: () => { badges += 1 },
+    })
+    expect(badges).toBe(1)
+  })
+
+  test('Windows leaves the badge alone for read-only commands', async () => {
+    // A badge on `screenshot` would claim the agent is holding the mouse
+    // during a turn that never touches it.
+    let badges = 0
+    for (const command of ['screenshot', 'list_displays', 'read_clipboard']) {
+      await callHelper(command, {}, {
+        platform: 'win32',
+        callPy: ok,
+        showCursorBadge: () => { badges += 1 },
+      })
+    }
+    expect(badges).toBe(0)
+  })
+
+  test('Windows never reaches the macOS overlay', async () => {
+    // The two indicators are not interchangeable: overlay_show is a daemon
+    // command and there is no daemon on Windows, so a stray call would be a
+    // hard failure on the mutation path.
+    let overlays = 0
+    await callHelper('click', { x: 1, y: 2 }, {
+      platform: 'win32',
+      callPy: ok,
+      overlayShow: () => { overlays += 1 },
+      showCursorBadge: () => {},
+    })
+    expect(overlays).toBe(0)
+  })
+
+  test('macOS never spawns the Windows badge', async () => {
+    let badges = 0
+    await callHelper('click', { x: 1, y: 2 }, {
+      platform: 'darwin',
+      cuHelperAvailable: () => true,
+      callDaemon: ok,
+      overlayShow: () => {},
+      showCursorBadge: () => { badges += 1 },
+    })
+    expect(badges).toBe(0)
   })
 
   test('forwards command + payload to the daemon unchanged', async () => {
