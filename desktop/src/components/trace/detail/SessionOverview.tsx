@@ -1,8 +1,104 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from '../../../i18n'
 import type { TraceSpan, TraceViewModel } from '../../../lib/traceViewModel'
 import { formatDurationMs, formatTokenCount } from '../../../lib/trace/formatters'
+import { fetchTraceCallDetail } from '../../../lib/trace/callCache'
+import { parseTraceRequestBody } from '../../../lib/trace/requestParse'
 import { StatusGlyph, TypeIcon, spanDisplayTitle } from '../TraceBadges'
+import { Section } from './Section'
+
+/**
+ * The model-visible request header as the session opened, read from the first
+ * model call so it does not have to be hunted down inside an individual one.
+ * Only that call is fetched, because session-level snapshots truncate request
+ * bodies.
+ *
+ * It is the opening header, not a session-wide invariant: late tool
+ * registration and a mid-session model change both rewrite the system prompt
+ * and tool catalog for later requests. A specific request's own header stays on
+ * that request's detail.
+ */
+function SessionRequestHeader({
+  viewModel,
+  sessionId,
+  revisionKey,
+}: {
+  viewModel: TraceViewModel
+  sessionId?: string
+  revisionKey?: string
+}) {
+  const t = useTranslation()
+  const [header, setHeader] = useState<{
+    system?: string
+    tools: Array<{ name: string; description?: string }>
+  } | null>(null)
+
+  const firstCallId = useMemo(() => {
+    for (const candidate of viewModel.spans) {
+      if (candidate.kind === 'llm' && candidate.call?.id) return candidate.call.id
+    }
+    return null
+  }, [viewModel])
+
+  useEffect(() => {
+    // Clear first: without this, switching sessions keeps showing the previous
+    // session's system prompt until the new fetch resolves.
+    setHeader(null)
+    if (!sessionId || !firstCallId) return
+    let cancelled = false
+    void fetchTraceCallDetail(sessionId, firstCallId, revisionKey).then((call) => {
+      if (cancelled) return
+      const preview = call?.request.body.preview
+      if (!preview || !call) return
+      const parsed = parseTraceRequestBody(preview, call.source)
+      if (!parsed) return
+      setHeader({
+        ...(parsed.system !== undefined ? { system: parsed.system } : {}),
+        tools: parsed.tools.map((tool) => ({
+          name: tool.name,
+          ...(tool.description ? { description: tool.description } : {}),
+        })),
+      })
+    })
+    return () => { cancelled = true }
+  }, [sessionId, firstCallId, revisionKey])
+
+  if (!header) return null
+  const hasSystem = Boolean(header.system)
+  if (!hasSystem && header.tools.length === 0) return null
+
+  return (
+    <div className="mt-5 flex flex-col gap-1">
+      {header.system ? (
+        <Section
+          sectionKey="overview.systemPrompt"
+          title={t('trace.section.systemPrompt')}
+          badge={t('trace.detail.chars', { count: header.system.length })}
+        >
+          <pre className="max-h-[360px] overflow-y-auto whitespace-pre-wrap break-words text-[12.5px] leading-[1.7] text-[var(--color-text-secondary)]">
+            {header.system}
+          </pre>
+        </Section>
+      ) : null}
+      {header.tools.length > 0 ? (
+        <Section sectionKey="overview.tools" title={t('trace.section.tools')} badge={header.tools.length}>
+          <div className="flex flex-col gap-1">
+            {header.tools.map((tool) => (
+              <div key={tool.name} className="flex min-w-0 items-baseline gap-2">
+                <span className="shrink-0 font-mono text-[12px] text-[var(--color-text-primary)]">{tool.name}</span>
+                {tool.description ? (
+                  <span className="min-w-0 truncate text-[12px] text-[var(--color-text-tertiary)]">
+                    {tool.description}
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
+    </div>
+  )
+}
 
 type OverviewStats = {
   llmCalls: number
@@ -20,10 +116,14 @@ export function SessionOverview({
   span,
   viewModel,
   onSelect,
+  sessionId,
+  revisionKey,
 }: {
   span: TraceSpan
   viewModel: TraceViewModel
   onSelect: (spanId: string) => void
+  sessionId?: string
+  revisionKey?: string
 }) {
   const t = useTranslation()
   const stats = useMemo(() => computeStats(span, viewModel), [span, viewModel])
@@ -46,6 +146,8 @@ export function SessionOverview({
         />
         <Stat label={t('trace.models')} value={stats.models.length > 0 ? stats.models.join(', ') : '--'} />
       </div>
+
+      <SessionRequestHeader viewModel={viewModel} sessionId={sessionId} revisionKey={revisionKey} />
 
       {children.length > 0 ? (
         <div className="mt-6">

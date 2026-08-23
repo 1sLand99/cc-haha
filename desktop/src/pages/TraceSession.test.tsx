@@ -156,6 +156,9 @@ const baseMessages: MessageEntry[] = [
 async function renderReady(pollIntervalMs = 60_000) {
   render(<TraceSession sessionId={SESSION_ID} pollIntervalMs={pollIntervalMs} />)
   await screen.findByTestId('trace-split-layout')
+  // The overview lazily fetches the opening request header. Let that settle so
+  // its state update lands inside act() rather than warning after the test.
+  await waitFor(() => expect(screen.getByTestId('trace-detail')).toBeInTheDocument())
 }
 
 describe('TraceSession', () => {
@@ -734,5 +737,87 @@ describe('TraceSession', () => {
     expect(screen.queryByRole('button', { name: 'Back to list' })).not.toBeInTheDocument()
     // The standalone window also drops "open in window" — it is already one.
     expect(screen.queryByRole('button', { name: 'Open in separate window' })).not.toBeInTheDocument()
+  })
+
+  it('answers what the system prompt is from the session overview, without opening a call', async () => {
+    await renderReady()
+
+    const overview = await screen.findByTestId('trace-overview')
+    expect(await within(overview).findByText('System prompt')).toBeInTheDocument()
+
+    // The catalog names every tool the request carried, called or not.
+    fireEvent.click(within(overview).getByText('Tools'))
+    expect(await within(overview).findByText('Bash')).toBeInTheDocument()
+  })
+
+  it('says what an assistant turn did when the provider withheld its reasoning', async () => {
+    vi.mocked(sessionsApi.getMessages).mockResolvedValue({
+      messages: [
+        baseMessages[0]!,
+        {
+          id: 'msg-reasoned',
+          type: 'assistant',
+          // OpenAI reasoning the harness stores encoded: no readable text, so
+          // the row would otherwise render as a bare "Assistant message".
+          content: [{ type: 'redacted_thinking', data: 'cc-haha:openai-reasoning:v1:{}' }],
+          timestamp: '2026-06-09T10:00:04.000Z',
+          model: 'gpt-5.6-sol',
+        },
+      ],
+    })
+
+    await renderReady()
+
+    const tree = await screen.findByTestId('trace-tree')
+    expect(await within(tree).findByText('Reasoning withheld by provider')).toBeInTheDocument()
+  })
+
+  it('separates harness-injected context from the message the person typed', async () => {
+    const injectedPreview = JSON.stringify({
+      model: 'claude-sonnet-4-5',
+      system: 'You are helpful.',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: '<available-deferred-tools> WebFetch </available-deferred-tools>' }] },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '<system-reminder>\n# Companion\nA watcher sits beside the input box.\n</system-reminder>' },
+            { type: 'text', text: 'Hello world' },
+          ],
+        },
+      ],
+      tools: [{ name: 'Bash', description: 'Run shell commands', input_schema: { type: 'object' } }],
+      max_tokens: 4096,
+    })
+    vi.mocked(sessionsApi.getTraceCall).mockResolvedValue({
+      call: makeCall({
+        request: {
+          method: 'POST',
+          url: 'https://api.anthropic.com/v1/messages',
+          headers: { 'content-type': 'application/json' },
+          body: {
+            contentType: 'json',
+            bytes: injectedPreview.length,
+            sha256: 'c'.repeat(64),
+            preview: injectedPreview,
+            truncated: false,
+          },
+        },
+      }),
+    })
+
+    await renderReady()
+    fireEvent.click(await screen.findByRole('treeitem', { name: /claude-sonnet-4-5/ }))
+
+    const detail = await screen.findByTestId('trace-llm-detail')
+    expect(await within(detail).findByText('Injected context')).toBeInTheDocument()
+    // Each injection is named by its own content rather than its wrapper tag:
+    // the reminder is labelled by its heading, the roster by its first line.
+    expect(within(detail).getByText('Companion')).toBeInTheDocument()
+    expect(within(detail).getByText('WebFetch')).toBeInTheDocument()
+    // The kind chip is separate from that derived label.
+    expect(within(detail).getByText('Deferred tools')).toBeInTheDocument()
+    // What the person actually typed stays in the conversation.
+    expect(within(detail).getByText('Hello world')).toBeInTheDocument()
   })
 })
