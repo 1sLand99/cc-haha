@@ -402,6 +402,19 @@ describe('release desktop workflow', () => {
     expect(buildJob).not.toContain('Load release notes')
   })
 
+  test('manual draft validation cannot overwrite an existing published release', () => {
+    const workflow = readReleaseWorkflow()
+    const publishJob = extractJob(workflow, 'publish-release')
+
+    expect(workflow).toContain('publish_draft_release:')
+    expect(workflow).toContain("description: 'Publish manual draft artifacts to GitHub Releases'")
+    expect(publishJob).toContain("if: github.event_name == 'push' || inputs.draft == false || inputs.publish_draft_release == true")
+    expect(publishJob).toContain('Refuse to overwrite an existing published release')
+    expect(publishJob).toContain("if: github.event_name == 'workflow_dispatch' && inputs.draft == true")
+    expect(publishJob).toContain('Refusing to overwrite published release v${{ steps.version.outputs.value }} with manual draft artifacts')
+    expect(publishJob.indexOf('Refuse to overwrite an existing published release')).toBeLessThan(publishJob.indexOf('Publish complete GitHub release'))
+  })
+
   test('release workflow publishes all release assets only after all matrix builds pass', () => {
     const workflow = readReleaseWorkflow()
     const publishJob = extractJob(workflow, 'publish-release')
