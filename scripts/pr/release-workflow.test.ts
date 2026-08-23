@@ -241,7 +241,7 @@ describe('release desktop workflow', () => {
     expect(signedBuildStep).toContain('retrying after 120 seconds')
     expect(signedBuildStep).toContain('node ./node_modules/electron-builder/out/cli/cli.js "${builder_args[@]}"')
 
-    expect(unsignedBuildStep).toContain("if: matrix.smoke_platform != 'macos' || needs.signing-preflight.outputs.macos_signed != 'true'")
+    expect(unsignedBuildStep).toContain("if: matrix.smoke_platform == 'linux' || (matrix.smoke_platform == 'macos' && needs.signing-preflight.outputs.macos_signed != 'true') || (matrix.smoke_platform == 'windows' && needs.signing-preflight.outputs.windows_signed != 'true')")
     expect(unsignedBuildStep).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
     for (const envName of [
       'CSC_LINK:',
@@ -257,7 +257,7 @@ describe('release desktop workflow', () => {
     expect(workflow.indexOf('Build unsigned Electron release artifacts')).toBeLessThan(workflow.indexOf('Verify packaged app structure'))
   })
 
-  test('release workflow records macOS signing state and warns for unsigned builds', () => {
+  test('release workflow records macOS and SignPath signing state and blocks unsigned releases', () => {
     const workflow = readReleaseWorkflow()
     const signingJob = workflow.match(
       /signing-preflight:[\s\S]*?(?:\n {2}[a-zA-Z0-9_-]+:|$)/,
@@ -267,6 +267,7 @@ describe('release desktop workflow', () => {
     expect(signingJob).toContain('Validate release signing and notarization secrets')
     expect(signingJob).toContain('outputs:')
     expect(signingJob).toContain('macos_signed: ${{ steps.validate.outputs.macos_signed }}')
+    expect(signingJob).toContain('windows_signed: ${{ steps.validate.outputs.windows_signed }}')
     for (const secret of [
       'MACOS_CERTIFICATE',
       'MACOS_CERTIFICATE_PASSWORD',
@@ -276,11 +277,15 @@ describe('release desktop workflow', () => {
     ]) {
       expect(signingJob).toContain(secret)
     }
-    for (const secret of [
-      'WINDOWS_CERTIFICATE',
-      'WINDOWS_CERTIFICATE_PASSWORD',
+    for (const setting of [
+      'SIGNPATH_API_TOKEN',
+      'SIGNPATH_ORGANIZATION_ID',
+      'SIGNPATH_PROJECT_SLUG',
+      'SIGNPATH_SIGNING_POLICY_SLUG',
+      'SIGNPATH_APPLICATION_ARTIFACT_CONFIGURATION_SLUG',
+      'SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG',
     ]) {
-      expect(signingJob).toContain(secret)
+      expect(signingJob).toContain(setting)
     }
     expect(signingJob).toContain('Missing macOS signing/notarization secrets')
     expect(signingJob).toContain('macOS artifacts will be unsigned')
@@ -289,22 +294,68 @@ describe('release desktop workflow', () => {
     expect(signingJob).toContain('Refusing to publish a non-draft desktop release without macOS signing/notarization secrets.')
     expect(signingJob).toContain('macos_signed=false')
     expect(signingJob).toContain('macos_signed=true')
-    expect(signingJob).toContain('Windows signing secrets missing')
-    expect(signingJob).toContain('::warning::Windows signing secrets missing')
+    expect(signingJob).toContain('SignPath configuration missing')
+    expect(signingJob).toContain('windows_signed=false')
+    expect(signingJob).toContain('windows_signed=true')
+    expect(signingJob).toContain('Refusing to publish a non-draft desktop release without SignPath Windows signing.')
 
     const macRequiredBlock = signingJob?.match(
-      /missing=\(\)[\s\S]*?# Windows signing is optional:/,
-    )?.[0]
-    const windowsOptionalBlock = signingJob?.match(
-      /win_missing=\(\)[\s\S]*?fi\n/,
+      /missing=\(\)[\s\S]*?# Drafts may remain unsigned/,
     )?.[0]
     expect(macRequiredBlock).toContain('if [ "$RELEASE_DRAFT" != "true" ]; then')
     expect(macRequiredBlock).toContain('exit 1')
-    expect(windowsOptionalBlock).toContain('::warning::')
-    expect(windowsOptionalBlock).not.toContain('exit 1')
+    expect(signingJob).toContain('if [ "$RELEASE_DRAFT" != "true" ]; then')
+    expect(signingJob).toContain('exit 1')
     expect(buildJob).toContain('- signing-preflight')
     expect(workflow.indexOf('signing-preflight:')).toBeLessThan(workflow.indexOf('build:'))
     expect(workflow.indexOf('signing-preflight:')).toBeLessThan(workflow.indexOf('Upload release artifacts for final publish'))
+  })
+
+  test('release workflow signs project-owned Windows binaries before packaging and repairs updater metadata', () => {
+    const workflow = readReleaseWorkflow()
+    const applicationConfiguration = readFileSync('.github/signpath/windows-application.xml', 'utf8')
+    const installerConfiguration = readFileSync('.github/signpath/windows-installer.xml', 'utf8')
+    const applicationBuildStep = extractStep(workflow, 'Build unsigned Windows application directory for SignPath')
+    const stageApplicationStep = extractStep(workflow, 'Stage project-owned Windows application executables')
+    const signApplicationStep = extractStep(workflow, 'Sign Windows application executables with SignPath')
+    const restoreApplicationStep = extractStep(workflow, 'Restore and verify signed Windows application executables')
+    const packageInstallerStep = extractStep(workflow, 'Package NSIS installer from signed Windows application')
+    const signInstallerStep = extractStep(workflow, 'Sign Windows installer with SignPath')
+    const restoreInstallerStep = extractStep(workflow, 'Restore and verify signed Windows installer')
+    const refreshMetadataStep = extractStep(workflow, 'Refresh signed Windows blockmap and update metadata')
+
+    expect(workflow).toContain('actions: read')
+    expect(workflow).toContain('builder_arch_arg: --x64')
+    expect(workflow).toContain('builder_arch_arg: --arm64')
+    expect(workflow).toContain('unpacked_dir: win-unpacked')
+    expect(workflow).toContain('unpacked_dir: win-arm64-unpacked')
+    expect(applicationBuildStep).toContain('--win dir ${{ matrix.builder_arch_arg }}')
+    expect(applicationBuildStep).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
+    expect(stageApplicationStep).toContain('Claude Code Haha.exe')
+    expect(stageApplicationStep).toContain('claude-sidecar-${{ matrix.target_triple }}.exe')
+    expect(stageApplicationStep).not.toContain('rg.exe')
+    expect(stageApplicationStep).not.toContain('node-pty')
+    expect(signApplicationStep).toContain('signpath/github-action-submit-signing-request@v2')
+    expect(signApplicationStep).toContain('SIGNPATH_APPLICATION_ARTIFACT_CONFIGURATION_SLUG')
+    expect(signApplicationStep).toContain('github-artifact-id: ${{ steps.upload-unsigned-signpath-application.outputs.artifact-id }}')
+    expect(restoreApplicationStep).toContain('Get-AuthenticodeSignature')
+    expect(restoreApplicationStep).toContain('REQUIRE_TRUSTED_WINDOWS_SIGNATURE')
+    expect(packageInstallerStep).toContain('--prepackaged "build-artifacts/electron/${{ matrix.unpacked_dir }}"')
+    expect(signInstallerStep).toContain('signpath/github-action-submit-signing-request@v2')
+    expect(signInstallerStep).toContain('SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG')
+    expect(restoreInstallerStep).toContain('Get-AuthenticodeSignature')
+    expect(restoreInstallerStep).toContain('A trusted production signature is required')
+    expect(refreshMetadataStep).toContain('scripts/refresh-windows-update-metadata.ts')
+    expect(refreshMetadataStep).toContain('desktop/build-artifacts/electron/latest.yml')
+    expect(applicationConfiguration).toContain('<pe-file path="Claude Code Haha.exe">')
+    expect(applicationConfiguration).toContain('<pe-file path="claude-sidecar-*.exe">')
+    expect(applicationConfiguration).not.toContain('rg.exe')
+    expect(installerConfiguration).toContain('<pe-file path="Claude-Code-Haha-*-win-*.exe">')
+    expect(workflow).not.toContain('WINDOWS_CERTIFICATE')
+    expect(workflow).not.toContain('WINDOWS_CERTIFICATE_PASSWORD')
+    expect(workflow.indexOf('Restore and verify signed Windows application executables')).toBeLessThan(workflow.indexOf('Package NSIS installer from signed Windows application'))
+    expect(workflow.indexOf('Restore and verify signed Windows installer')).toBeLessThan(workflow.indexOf('Refresh signed Windows blockmap and update metadata'))
+    expect(workflow.indexOf('Refresh signed Windows blockmap and update metadata')).toBeLessThan(workflow.indexOf('Verify Windows installer execution'))
   })
 
   test('release workflow avoids same-name updater metadata uploads from matrix builds', () => {
@@ -567,6 +618,7 @@ describe('release desktop workflow', () => {
 
     const installerHook = readFileSync('desktop/build/installer.nsh', 'utf8')
     const recoveryHelper = readFileSync('desktop/build/recover-legacy-install-data.ps1', 'utf8')
+    const normalizedRecoveryHelper = recoveryHelper.replace(/\r\n/g, '\n')
     expect(installerHook).toContain('!macro customInit')
     expect(installerHook).toContain('!macro customCheckAppRunning')
     expect(installerHook).toContain('!macro customPageAfterChangeDir')
@@ -608,7 +660,7 @@ describe('release desktop workflow', () => {
     expect(recoveryHelper).toContain('Active CLAUDE_CONFIG_DIR is managed outside Claude Code Haha')
     expect(recoveryHelper).toContain('Test-LexicalPathAtOrBelow')
     expect(recoveryHelper).toContain('-SharedInstallDirs @($PerMachineInstallDir)')
-    expect(recoveryHelper).toContain("function Invoke-LegacyRecovery {\n  param(\n    [Parameter(Mandatory = $true)][AllowEmptyCollection()][AllowEmptyString()][string[]]$InstallDirs")
+    expect(normalizedRecoveryHelper).toContain("function Invoke-LegacyRecovery {\n  param(\n    [Parameter(Mandatory = $true)][AllowEmptyCollection()][AllowEmptyString()][string[]]$InstallDirs")
     expect(recoveryHelper).toContain('$installDirInputs.Count -eq 0')
     expect(recoveryHelper).toContain('$sharedInstallDirInputs.Count -gt 0')
     expect(recoveryHelper).toContain('per-user default-mode reinstall scanned the packaged application tree')
