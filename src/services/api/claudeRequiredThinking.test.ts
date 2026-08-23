@@ -183,7 +183,7 @@ async function captureQueryRequest({
   model: string
   pinnedModel?: string
   capabilities?: string
-  effortValue?: 'low'
+  effortValue?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   configureCapabilityOverrides?: boolean
   responseFactory?: (model: string) => Response
   env?: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>>
@@ -321,6 +321,22 @@ test('sends effort through the final request when a pinned model adds a 1M marke
   expect(requests[0]?.output_config).toEqual({ effort: 'low' })
   expect(requests[0]?.thinking).toEqual({ type: 'disabled' })
   expect(requestHeaders[0]?.get('anthropic-beta')).toContain('effort-2025-11-24')
+}, 10_000)
+
+test('keeps explicit GPT effort in the final direct-relay request when beta headers are disabled', async () => {
+  const { requests, requestHeaders } = await captureQueryRequest({
+    model: 'gpt-5.6-sol[1m]',
+    configureCapabilityOverrides: false,
+    effortValue: 'xhigh',
+    env: {
+      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
+    },
+  })
+
+  expect(requests).toHaveLength(1)
+  expect(requests[0]?.model).toBe('gpt-5.6-sol')
+  expect(requests[0]?.output_config).toEqual({ effort: 'xhigh' })
+  expect(requestHeaders[0]?.get('anthropic-beta')).toBeNull()
 }, 10_000)
 
 test('normalizes a disabled parent thinking mode to adaptive for Fable', async () => {

@@ -479,11 +479,14 @@ export function configureEffortParams(
     BetaOutputConfig,
     'effort'
   > & { effort?: EffortLevel | null }
+  const suppressExperimentalEffort = shouldSuppressEffortOutputConfig()
+  const hasExplicitOpenAIEffort =
+    typeof effortValue === 'string' && isOpenAIResponsesModel(model)
 
   if (
     !modelSupportsEffort(model) ||
     'effort' in effortOutputConfig ||
-    shouldSuppressEffortOutputConfig()
+    (suppressExperimentalEffort && !hasExplicitOpenAIEffort)
   ) {
     return
   }
@@ -499,9 +502,14 @@ export function configureEffortParams(
     effortOutputConfig.effort = 'high'
     betas.push(EFFORT_BETA_HEADER)
   } else if (typeof effortValue === 'string') {
-    // Send string effort level as is
+    // A session-scoped OpenAI effort is a user-selected runtime control, not
+    // an optional beta experiment. Preserve it in the Anthropic envelope even
+    // when a direct relay disables beta headers; OpenAI-compatible adapters
+    // translate this field to reasoning_effort / reasoning.effort downstream.
     effortOutputConfig.effort = effortValue
-    betas.push(EFFORT_BETA_HEADER)
+    if (!suppressExperimentalEffort) {
+      betas.push(EFFORT_BETA_HEADER)
+    }
   } else if (process.env.USER_TYPE === 'ant') {
     // Numeric effort override - ant-only (uses anthropic_internal)
     const existingInternal =

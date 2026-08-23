@@ -142,6 +142,11 @@ function normalizeReasoningModelId(modelId: string): string {
     : normalized
 }
 
+export function isOpenAIReasoningModel(modelId: string): boolean {
+  const normalizedModelId = normalizeReasoningModelId(modelId)
+  return normalizedModelId.startsWith('gpt-') || /^o\d/.test(normalizedModelId)
+}
+
 export function getModelReasoningCapabilityOverride(
   modelId: string,
   models: Partial<Record<(typeof MODEL_REASONING_CAPABILITY_TIERS)[number]['slot'], string>>,
