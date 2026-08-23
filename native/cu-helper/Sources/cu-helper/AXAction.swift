@@ -438,60 +438,51 @@ public enum AXAction {
         )
     }
 
-    /// Synthetic pointer click at a GLOBAL (Quartz, top-left) point, posted to the
-    /// owning process via `postToPid` (never the HID tap). `clickCount` repeats the
-    /// down/up pair with the matching click-state so double/triple clicks register.
-    /// Seconds to let a foreground change settle before clicking into it.
-    /// Measured: 0.25s and the click is swallowed as the activation click;
-    /// 0.8s and it lands. Mirrors `Injection.focusSettleMs`.
-    private static let focusSettleSeconds: TimeInterval = 0.8
-
     /// Let the target's run loop process a synthetic focus notification. Short
-    /// because nothing came to the foreground — but not zero, since the target
+    /// because nothing comes to the foreground — but not zero, since the target
     /// has to actually dequeue the event before the burst arrives.
     private static let syntheticFocusSettleSeconds: TimeInterval = 0.12
 
     /// Put the target in a state where it will act on synthesized input, and
     /// wait long enough for that to be true.
     ///
-    /// The order here was measured, twice, in opposite directions.
+    /// This posts a CPS focus notification and nothing else. The target is NOT
+    /// brought to the foreground: driving an app while the user works in a
+    /// different one is the entire feature, and a click that costs them their
+    /// foreground has not delivered it.
     ///
-    /// A CPS foreground grant plus an 800ms settle makes actions land; that was
-    /// established when background actuation first started working. Replacing it
-    /// with a synthetic `.appKitDefined` focus notification — Codex's mechanism,
-    /// which does not disturb the user — regressed it completely: across one
-    /// session, 24 mutating actions produced exactly 1 effect, and that one was
-    /// issued in the single window where something else had briefly made the app
-    /// genuinely frontmost. The window's own traffic lights were grey in every
-    /// capture of the dead six minutes: the app was not active, whatever we had
-    /// told it.
+    /// WHY THE FOREGROUND GRANT THAT USED TO LIVE HERE IS GONE
+    /// -------------------------------------------------------
+    /// It was added after the notification alone appeared to fail: in one
+    /// session 24 mutating actions produced 1 effect, and in another nine
+    /// window-bound clicks were discarded while the target's traffic lights
+    /// stayed fully coloured.
     ///
-    /// So the notification is kept — it is free, it is what Codex does, and it
-    /// may well be doing something — but it is no longer trusted to do the job
-    /// alone. Foreground is taken when the target does not already have it.
-    /// Costing the user their foreground is bad; costing them a feature that
-    /// silently does nothing is worse.
-    /// Same, for the keyboard paths, which have no coordinate to resolve from.
+    /// That second session is what voids the conclusion. The app was active and
+    /// its window was key — precisely the state a foreground grant exists to
+    /// produce — and the clicks were dropped anyway. Focus was not the variable.
+    ///
+    /// What was actually broken has since been fixed. Every click those sessions
+    /// sent carried a leading move claiming `clickState 1`, and a press and a
+    /// release stamped with two different event numbers, so AppKit had no reason
+    /// to read the pair as one click (see `MouseClickStateTests`). Single clicks
+    /// landed as hover; double clicks worked, because the second pair got
+    /// through. A foreground grant plus an 800ms settle made a malformed click
+    /// likelier to survive, which is why it read as the cure.
+    ///
+    /// If background actuation does regress, `WindowKeyFocus.grantIfNeeded` is
+    /// still there to be called from here and from `Injection.focusForClick` —
+    /// but measure it with a SINGLE click on a control that needs a complete
+    /// one. A text field focuses on the press alone and cannot tell the two
+    /// implementations apart.
     private static func ensureTargetAcceptsInput(pid: pid_t) {
-        guard let window = WindowGeometry.frontmostWindow(pid: pid) else {
-            // No on-screen window: the notification is all we can send, and the
-            // caller's own guards report the real problem.
-            SyntheticWindowFocus.enforceActiveState(pid: pid)
-            return
-        }
-        ensureTargetAcceptsInput(pid: pid, windowID: window.id)
+        SyntheticWindowFocus.enforceActiveState(pid: pid)
+        Thread.sleep(forTimeInterval: syntheticFocusSettleSeconds)
     }
 
-    private static func ensureTargetAcceptsInput(pid: pid_t, windowID: CGWindowID) {
-        SyntheticWindowFocus.enforceActiveState(pid: pid)
-        if WindowKeyFocus.grantIfNeeded(pid: pid, windowID: windowID) {
-            // A real foreground change swallows the click that follows it too
-            // closely — 250ms was measured as too soon, 800ms as enough.
-            Thread.sleep(forTimeInterval: focusSettleSeconds)
-        } else {
-            Thread.sleep(forTimeInterval: syntheticFocusSettleSeconds)
-        }
-    }
+    /// Synthetic pointer click at a GLOBAL (Quartz, top-left) point, posted to the
+    /// owning process via `postToPid` (never the HID tap). `clickCount` repeats the
+    /// down/up pair with the matching click-state so double/triple clicks register.
 
     public static func clickPoint(
         pid: pid_t,
@@ -511,7 +502,7 @@ public enum AXAction {
         // burst can no longer half-succeed against a window that moved.
         let window = try requireBindableWindow(at: point, pid: pid)
 
-        ensureTargetAcceptsInput(pid: pid, windowID: window.id)
+        ensureTargetAcceptsInput(pid: pid)
 
         // Allocate the complete move + click sequence before posting its first
         // event, so allocation failure can never strand a down stroke.
@@ -1170,17 +1161,29 @@ public enum AXAction {
         return hit
     }
 
-    /// ⑤ Window activation-only: AXRaise, then make it main + focused. Any one
-    /// succeeding counts (some windows expose only a subset).
-    /// Pull a buried window back out so its app resumes drawing it.
+    /// Pull a buried window back into view so its app resumes drawing it.
+    /// Returns whether the window is actually visible afterwards.
     ///
-    /// Two rungs, least intrusive first. `AXRaise` reorders the window without
-    /// making its app active, which is enough whenever the thing on top belongs
-    /// to the same app. When the window is still covered afterwards — the usual
-    /// case, something else entirely is on top — only activation gets above
-    /// another application's windows, and we take that: a target that cannot
-    /// repaint produces a frozen screenshot, and a frozen screenshot is how a
-    /// session ends up reporting a song playing that the picture shows paused.
+    /// WINDOW ONLY — this never activates the application
+    /// ---------------------------------------------------
+    /// `AXRaise` reorders the window without making its application active, so
+    /// the user keeps their menu bar and keeps typing wherever they were. That
+    /// distinction is the whole point: the target repaints because it is
+    /// visible, not because it is focused.
+    ///
+    /// Deliberately only `AXRaise` — not the `AXMain`/`AXFocused` pair that
+    /// `activateWindow` also sets for an explicit activate request. Making a
+    /// window main and focused is a plausible route to pulling its app forward,
+    /// and un-burying does not need it.
+    ///
+    /// There used to be a second rung here — `NSRunningApplication.activate`
+    /// when the raise was not enough — on the reasoning that a window which
+    /// cannot repaint cannot be driven, so one steal was worth a live
+    /// screenshot. It is gone. Driving an app while the user works in another
+    /// one is the feature; an implementation that yanks their foreground to
+    /// take a picture has traded away the thing being bought. When the raise is
+    /// not enough the router now fails the mutating action with
+    /// `window_occluded` instead of taking the screen.
     ///
     /// Called at most once per app per session (see the caller), because doing
     /// it every time the user covers the window is arguing with them about
@@ -1192,16 +1195,15 @@ public enum AXAction {
         if AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
            let windows = value as? [AXUIElement] {
             for window in windows where windowNumber(of: window) == windowID {
-                _ = activateWindow(window)
+                if actionNames(window).contains(axRaise) {
+                    _ = AXUIElementPerformAction(window, axRaise as CFString)
+                }
                 break
             }
         }
-
-        if !WindowGeometry.isFullyCovered(windowID: windowID) { return true }
-
-        // Still buried: the window on top belongs to someone else.
-        guard let running = NSRunningApplication(processIdentifier: pid) else { return false }
-        return running.activate(options: [])
+        // The raise is best-effort, so the answer is what the screen shows, not
+        // what the AX calls returned.
+        return !WindowGeometry.isFullyCovered(windowID: windowID)
     }
 
     /// The CGWindowID behind an AX window element, via the private-but-stable

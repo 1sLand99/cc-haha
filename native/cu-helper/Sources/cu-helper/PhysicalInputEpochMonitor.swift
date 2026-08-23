@@ -62,14 +62,18 @@ struct PhysicalInputEpochSnapshot: Equatable, Sendable {
 final class PhysicalInputEpochMonitor: @unchecked Sendable {
     typealias CounterReader = @Sendable (CGEventType) -> UInt32
 
-    /// Event types that count as physical input. Mirrors the old tap mask:
-    /// every mouse press/release/motion/drag, key transitions, modifier
-    /// changes, and scroll.
+    /// Event types that count as physical input.
+    ///
+    /// Mirrors the old tap mask for presses, drags, key transitions, modifier
+    /// changes, and scroll, but deliberately omits `.mouseMoved`. Moving the
+    /// cursor across the screen is not an interaction with any app — the user
+    /// can be working in another window while automation runs in the background
+    /// — and counting it made every cursor glide abort the action. Dragging is
+    /// kept because a drag is an intentional press-and-motion gesture.
     static let physicalEventTypes: [CGEventType] = [
         .leftMouseDown, .leftMouseUp,
         .rightMouseDown, .rightMouseUp,
         .otherMouseDown, .otherMouseUp,
-        .mouseMoved,
         .leftMouseDragged, .rightMouseDragged, .otherMouseDragged,
         .keyDown, .keyUp, .flagsChanged,
         .scrollWheel,

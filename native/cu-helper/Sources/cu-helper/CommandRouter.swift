@@ -578,8 +578,13 @@ public final class CommandRouter {
             return TargetVisibilityPolicy.coveredAgainNotice
         case .raiseAndNotify:
             Self.recoveredTargets.insert(pid)
-            AXAction.raiseWindow(pid: pid, windowID: window.id)
-            return TargetVisibilityPolicy.raisedNotice
+            // A raise cannot get above another application's windows. Report
+            // which of the two happened rather than claiming the recovery
+            // worked — the notice is what the model uses to decide whether the
+            // screenshot can be trusted.
+            return AXAction.raiseWindow(pid: pid, windowID: window.id)
+                ? TargetVisibilityPolicy.raisedNotice
+                : TargetVisibilityPolicy.couldNotUncoverNotice
         }
     }
 
@@ -1410,6 +1415,10 @@ public final class CommandRouter {
                 "The screen is locked, so the action was not run. Unlock the Mac and try again."
             )
         }
+        // A fully covered Chromium/CEF window stops drawing and synthetic input
+        // cannot be verified. Failing closed is cheaper than reporting success
+        // for an action that may have gone nowhere.
+        try TargetVisibilityPolicy.ensureRenderableForMutation(pid: target.pid)
         let lease = try ForegroundLease.acquire(
             target: target,
             runtime: foregroundRuntime

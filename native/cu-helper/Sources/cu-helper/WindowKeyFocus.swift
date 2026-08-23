@@ -4,12 +4,25 @@ import Foundation
 
 /// Grants keyboard focus to a specific window of an already-resolved target.
 ///
-/// WHY IT IS NEEDED
-/// ----------------
-/// Window-targeted events (see WindowTargetedEvent) reach a Chromium/CEF app
-/// only while that app holds key focus. Measured on a real CEF target: with the
-/// app in the background the click was accepted and dropped; after this call it
+/// NOTHING CALLS THIS. Read before you wire it back in.
+/// -----------------------------------------------------
+/// It was written because window-targeted events appeared to reach a Chromium/
+/// CEF app only while that app held key focus: with the target in the
+/// background the click was accepted and dropped, and after this call it
 /// focused the field and typing landed.
+///
+/// That reading did not survive. A later session captured the target active
+/// with its window key — the state this call exists to produce — and nine
+/// window-bound clicks were discarded anyway. The actual defect was in the
+/// events: the leading move claimed `clickState 1` and the press and release
+/// carried different event numbers, so AppKit had no reason to read them as one
+/// click. Fixed since; see `AXAction.ensureTargetAcceptsInput` for the full
+/// account and `MouseClickStateTests` for the cover.
+///
+/// Kept, rather than deleted, because it is the fallback if background
+/// actuation regresses on a real machine — and because what it does with a
+/// private SPI is worth not having to rediscover. `SyntheticWindowFocus` is
+/// what the input paths use now.
 ///
 /// THIS DOES BRING THE TARGET FORWARD — do not describe it otherwise
 /// -----------------------------------------------------------------

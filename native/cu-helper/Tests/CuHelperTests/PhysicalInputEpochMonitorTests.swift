@@ -59,15 +59,17 @@ final class PhysicalInputEpochMonitorTests: XCTestCase {
         }
     }
 
-    /// The physical set covers every input class the old tap mask watched:
-    /// presses, releases, motion, drags, keys, modifiers, scroll.
+    /// The physical set covers every input class the old tap mask watched
+    /// except plain motion: presses, releases, drags, keys, modifiers, and
+    /// scroll. `.mouseMoved` is deliberately excluded because moving the cursor
+    /// is not an interaction with any app, and counting it aborted background
+    /// automation whenever the user moved their mouse.
     func testPhysicalSetCoversAllInputClasses() {
         let set = Set(PhysicalInputEpochMonitor.physicalEventTypes.map(\.rawValue))
         let required: [CGEventType] = [
             .leftMouseDown, .leftMouseUp,
             .rightMouseDown, .rightMouseUp,
             .otherMouseDown, .otherMouseUp,
-            .mouseMoved,
             .leftMouseDragged, .rightMouseDragged, .otherMouseDragged,
             .keyDown, .keyUp, .flagsChanged,
             .scrollWheel,
@@ -78,6 +80,10 @@ final class PhysicalInputEpochMonitorTests: XCTestCase {
         // And nothing extra: a type outside this set would break the
         // "equal epochs ⇔ no physical input" equivalence the lease relies on.
         XCTAssertEqual(set.count, required.count)
+        XCTAssertFalse(
+            set.contains(CGEventType.mouseMoved.rawValue),
+            "plain mouse movement must not count as interference"
+        )
     }
 
     /// Counter reads cannot fail, so availability is constant and continuity
@@ -89,7 +95,7 @@ final class PhysicalInputEpochMonitorTests: XCTestCase {
         XCTAssertEqual(snapshot.continuityGeneration, 0)
     }
 
-    /// Extreme counters must not trap: 14 × UInt32.max fits comfortably in
+    /// Extreme counters must not trap: 13 × UInt32.max fits comfortably in
     /// UInt64, so the sum is exact — no overflow, no saturation.
     func testMaximumCountersDoNotOverflow() {
         let monitor = PhysicalInputEpochMonitor(counterReader: { _ in .max })

@@ -37,12 +37,40 @@ final class SyntheticWindowFocusTests: XCTestCase {
         XCTAssertEqual(SyntheticWindowFocus.Notification.keyFocusReturned.rawValue, 0x8000)
     }
 
-    func testTheEventIsAppKitDefinedWithTheRightSubtype() throws {
-        // The subtype only means a CPS notification on an AppKit-defined event;
-        // on any other type it is a different field entirely.
+    /// The carrier event type is not the same for every notification, and this
+    /// test used to assert that it was.
+    ///
+    /// Everything here posted on `.appKitDefined` (13), which is right for the
+    /// activation pair and wrong for the key-focus family — Codex's
+    /// `enforceActiveState` loads type 21 from the same lazily-initialized
+    /// global that holds the 0x8000 subtype, and hardcodes 13 only for
+    /// `appActivated`. On the wrong carrier the subtype names nothing the
+    /// target handles: accepted, ignored, no error, and background input simply
+    /// never lands.
+    func testEachNotificationTravelsOnItsOwnCarrierType() {
+        XCTAssertEqual(SyntheticWindowFocus.Notification.appActivated.carrierEventType, .appKitDefined)
+        XCTAssertEqual(SyntheticWindowFocus.Notification.appDeactivated.carrierEventType, .appKitDefined)
+        for keyFocus: SyntheticWindowFocus.Notification in [.keyFocusReturned, .keyFocusTaken, .lostKeyFocus] {
+            XCTAssertEqual(
+                keyFocus.carrierEventType?.rawValue,
+                21,
+                "the key-focus family does not travel on .appKitDefined"
+            )
+        }
+    }
+
+    func testTheKeyFocusCarrierIsAcceptedByAppKit() throws {
+        // 21 has no name in the public NSEventType, so the thing worth pinning
+        // is that AppKit still builds and converts it. If an OS update ever
+        // rejects it, this fails here rather than silently degrading into
+        // clicks that go nowhere.
+        let carrier = try XCTUnwrap(
+            SyntheticWindowFocus.Notification.keyFocusReturned.carrierEventType,
+            "NSEvent.EventType no longer accepts the key-focus carrier"
+        )
         let event = try XCTUnwrap(
             NSEvent.otherEvent(
-                with: .appKitDefined,
+                with: carrier,
                 location: .zero,
                 modifierFlags: [],
                 timestamp: 0,
@@ -53,11 +81,40 @@ final class SyntheticWindowFocusTests: XCTestCase {
                 data2: 0
             )
         )
-        XCTAssertEqual(event.type, .appKitDefined)
+        XCTAssertEqual(event.type.rawValue, 21)
         XCTAssertEqual(event.subtype.rawValue, Int16(bitPattern: 0x8000))
-        // Focus is a per-process notification here, not a per-window one.
+        // Focus is a per-process notification here, not a per-window one — the
+        // reference passes windowNumber 0 on both sends.
         XCTAssertEqual(event.windowNumber, 0)
         XCTAssertNotNil(event.cgEvent, "must survive conversion or it cannot be posted")
+    }
+
+    /// Establishing focus takes two notifications, and sending one was half the
+    /// reason background actuation never worked.
+    func testEnforcingActiveStateSendsBothBeliefs() throws {
+        let source = try String(
+            contentsOfFile: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/cu-helper/SyntheticWindowFocus.swift")
+                .path,
+            encoding: .utf8
+        )
+        let body = try XCTUnwrap(
+            source.range(of: "static func enforceActiveState").map {
+                String(source[$0.lowerBound...].prefix(600))
+            }
+        )
+        XCTAssertTrue(
+            body.contains("post(.keyFocusReturned"),
+            "the target must be told its window has focus"
+        )
+        XCTAssertTrue(
+            body.contains("post(.appActivated"),
+            "the target must also be told its application is active — "
+                + "focus alone leaves input routing where it was"
+        )
     }
 
     func testAnInvalidPidIsRefusedRatherThanBroadcast() {
@@ -84,22 +141,37 @@ final class SyntheticWindowFocusTests: XCTestCase {
     }
 }
 
-/// This file used to assert that a coordinate click never takes the
-/// foreground. It was written when `WindowKeyFocus` was removed in favour of
-/// the synthetic notification, and it did its job: it went red the moment that
-/// change was reverted.
+/// Driving an app must not cost the user their foreground.
 ///
-/// The revert is the right answer. Measured across two sessions on the build
-/// that shipped the synthetic path alone: 24 mutating actions produced 1
-/// effect, and in the other session the target's traffic lights stayed fully
-/// coloured — app active, window key — while nine window-bound clicks were
-/// discarded regardless. A feature that never disturbs the user and never works
-/// is not the feature.
+/// This assertion has been made, reverted, and now made again, so the reasoning
+/// is worth keeping in full.
 ///
-/// So what is protected here is now narrower and honest: every input path must
-/// go through one place that makes the target accept input, that place must ask
-/// before taking the foreground, and the synthetic notification must not be
-/// broadcast at an app that already has focus.
+/// It was first written when `WindowKeyFocus` was replaced by the synthetic
+/// notification, and it went red when that change was reverted. The revert had
+/// evidence: across two sessions on the notification-only build, 24 mutating
+/// actions produced 1 effect, and nine window-bound clicks were discarded in
+/// another.
+///
+/// That second session is what eventually voided the evidence. Its capture
+/// showed the target's traffic lights fully coloured — the app was active and
+/// its window was key, which is the entire state a foreground grant exists to
+/// produce — and the clicks were dropped anyway. Focus could not have been the
+/// variable.
+///
+/// The real defect was in the events themselves, and it was present in every
+/// one of those sessions: the leading move of a click claimed `clickState 1`,
+/// and the press and release carried different event numbers, so AppKit had no
+/// reason to read them as one click (`MouseClickStateTests`). Single clicks
+/// registered as hover. Double clicks worked, because the second press/release
+/// pair got through — which is why the failure looked intermittent rather than
+/// total. A foreground grant plus an 800ms settle raised the odds a malformed
+/// click survived, and so read as the cure.
+///
+/// With the events fixed, the grant is not paying for the foreground it costs.
+/// What is protected here: every input path goes through one place that makes
+/// the target accept input, that place takes the foreground from nobody, and
+/// the synthetic notification is not broadcast at an app that already has
+/// focus.
 final class InputAcceptanceContractTests: XCTestCase {
     private func source(_ name: String) throws -> String {
         let root = URL(fileURLWithPath: #filePath)
@@ -130,21 +202,51 @@ final class InputAcceptanceContractTests: XCTestCase {
         }
     }
 
-    func testForegroundIsTakenOnlyWhenTheTargetDoesNotHaveIt() throws {
-        // `grantIfNeeded` no-ops when the target is already frontmost. Calling
-        // `grant` directly here would re-take the foreground on every single
-        // click of a task, which is the behaviour that made the feature
-        // unusable alongside the user.
-        let axAction = try source("AXAction.swift")
-        let ensure = try XCTUnwrap(
-            axAction.range(of: "private static func ensureTargetAcceptsInput(pid: pid_t, windowID").map {
-                String(axAction[$0.lowerBound...].prefix(900))
-            }
+    func testNoInputPathTakesTheUsersForeground() throws {
+        // A source guard because the effect is not observable from a unit test:
+        // `WindowKeyFocus` calls a private CPS symbol, and whether the
+        // foreground moved is a property of the running window server. What can
+        // be pinned is that no input path asks for it.
+        //
+        // Deliberately covers `grantIfNeeded` as well as `grant`. Gating the
+        // grant on "only when the target is not already frontmost" sounds
+        // considerate and is not: the case it fires in — the target is in the
+        // background — is exactly the case the feature exists for.
+        for file in ["AXAction.swift", "Injection.swift"] {
+            // Comments are excluded on purpose. Both files explain at length
+            // why the grant is gone and name it while doing so; a guard that
+            // cannot tell prose from a call site would forbid documenting its
+            // own reasoning, and the obvious way out of that is to weaken the
+            // guard. A real call never sits on a line that opens with `//`.
+            let body = try source(file)
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+                .joined(separator: "\n")
+            XCTAssertFalse(
+                body.contains("WindowKeyFocus.grant"),
+                "\(file) must not pull the target to the foreground to deliver input. "
+                    + "If a real-machine regression genuinely needs this back, measure it "
+                    + "with a SINGLE click on a control that needs a complete click — a "
+                    + "text field focuses on the press alone and cannot tell the two apart."
+            )
+        }
+    }
+
+    /// `focusForClick` used to consist of nothing but the foreground grant: it
+    /// never sent the notification the AX path relies on. Removing the grant
+    /// without adding one would have left the decomposed mouse commands doing
+    /// no focus work at all — silently, since nothing here reports delivery.
+    func testTheDecomposedMousePathStillPreparesItsTarget() throws {
+        let injection = try source("Injection.swift")
+        let focus = try XCTUnwrap(
+            injection.range(of: "private static func focusForClick").map {
+                String(injection[$0.lowerBound...].prefix(400))
+            },
+            "focusForClick is missing"
         )
-        XCTAssertTrue(ensure.contains("WindowKeyFocus.grantIfNeeded"))
-        XCTAssertFalse(
-            ensure.contains("WindowKeyFocus.grant(") ,
-            "must go through grantIfNeeded so an already-focused target is left alone"
+        XCTAssertTrue(
+            focus.contains("SyntheticWindowFocus.enforceActiveState"),
+            "the decomposed mouse path must tell its target it has focus"
         )
     }
 

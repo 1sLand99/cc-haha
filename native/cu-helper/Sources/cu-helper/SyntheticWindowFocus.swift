@@ -35,7 +35,7 @@ import Foundation
 /// So this needs no private symbol at all — `NSEvent.otherEvent`, `.cgEvent`
 /// and `CGEventPostToPid` are public. Only the subtype values are undocumented.
 enum SyntheticWindowFocus {
-    /// CPS notifications, carried as the subtype of an `.appKitDefined` event.
+    /// CPS notifications, carried as the subtype of a synthesized event.
     ///
     /// Values recovered from the once-initializers in Codex's service. Stored
     /// as `Int32` because `keyFocusReturned` does not fit `Int16` unsigned —
@@ -55,6 +55,35 @@ enum SyntheticWindowFocus {
         /// subtype 0 — a different, meaningless notification that the target
         /// accepts and ignores, with no error anywhere.
         var subtype: Int16 { Int16(truncatingIfNeeded: rawValue) }
+
+        /// The event type that carries this notification. NOT the same for all
+        /// of them, which is the detail this file originally got wrong.
+        ///
+        /// Every notification used to be posted on `.appKitDefined` (13). The
+        /// activation pair does belong there — Codex hardcodes type 13 with
+        /// subtype 1 — but the key-focus family travels on type 21, read out of
+        /// the lazily-initialized global its `enforceActiveState` loads the type
+        /// from (`mov w9, #0x15`, stored beside the 0x8000 subtype).
+        ///
+        /// 21 has no name in the public `NSEventType`, yet it is a valid case:
+        /// `NSEvent.otherEvent` builds it and `.cgEvent` converts it. On type 13
+        /// the same subtype is a notification the target has no handler for —
+        /// accepted, ignored, no error, and the only symptom is that background
+        /// input never lands. That is what a whole build measured as "24
+        /// mutating actions, 1 effect".
+        var carrierEventType: NSEvent.EventType? {
+            switch self {
+            case .appActivated, .appDeactivated:
+                return .appKitDefined
+            case .lostKeyFocus, .keyFocusTaken, .keyFocusReturned:
+                return NSEvent.EventType(rawValue: Self.keyFocusCarrierRawValue)
+            }
+        }
+
+        /// Undocumented, so it is read back rather than assumed: a future SDK
+        /// that stops accepting it makes `carrierEventType` nil and `post`
+        /// return false, instead of trapping on a force-unwrap.
+        static let keyFocusCarrierRawValue: UInt = 21
     }
 
     /// Post a CPS focus notification to `pid`.
@@ -64,8 +93,9 @@ enum SyntheticWindowFocus {
     @discardableResult
     static func post(_ notification: Notification, to pid: pid_t) -> Bool {
         guard pid > 0,
+              let carrier = notification.carrierEventType,
               let event = NSEvent.otherEvent(
-                  with: .appKitDefined,
+                  with: carrier,
                   location: .zero,
                   modifierFlags: [],
                   timestamp: 0,
@@ -98,10 +128,22 @@ enum SyntheticWindowFocus {
     /// where the target's traffic lights stayed fully coloured — the app was
     /// active and its window was key throughout — and every one of nine
     /// window-bound clicks was discarded anyway.
+    /// Both halves are required, and sending one was the other half of the bug.
+    ///
+    /// Codex's enforcer tracks two separate beliefs — `applicationBelievesItIsActive`
+    /// and `applicationBelievesItHasFocus` — and its `enforceActiveState` posts
+    /// two notifications to establish them: the key-focus one, then
+    /// `appActivated` (hardcoded type 13, subtype 1). This only ever sent the
+    /// first. Telling a window that focus returned, to an application that does
+    /// not believe it is active, leaves the input routing exactly where it was.
+    ///
+    /// Order matches the reference: focus, then activation.
     @discardableResult
     static func enforceActiveState(pid: pid_t) -> Bool {
         guard !isActiveApplication(pid) else { return false }
-        let posted = post(.keyFocusReturned, to: pid)
+        let focused = post(.keyFocusReturned, to: pid)
+        let activated = post(.appActivated, to: pid)
+        let posted = focused || activated
         if posted { enforced.withLock { $0.insert(pid) } }
         return posted
     }
