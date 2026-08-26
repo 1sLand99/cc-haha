@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
 import { ComputerUseSettings } from './ComputerUseSettings'
@@ -316,6 +316,54 @@ describe('ComputerUseSettings', () => {
       },
     }
 
+    it('does not flash the compatibility toggle before rendering the native header toggle', async () => {
+      const statusRequest = deferred<typeof nativeStatus>()
+      computerUseApiMock.getStatus.mockReturnValue(statusRequest.promise)
+
+      render(<ComputerUseSettings />)
+
+      expect(screen.getByRole('status')).toHaveTextContent('Loading...')
+      expect(screen.queryByLabelText('Enabled')).not.toBeInTheDocument()
+
+      await act(async () => {
+        statusRequest.resolve(nativeStatus)
+        await statusRequest.promise
+      })
+
+      const heading = await screen.findByRole('heading', { name: 'Computer Control' })
+      expect(within(heading.parentElement!.parentElement!).getByRole('switch', { name: 'Enabled' })).toBeChecked()
+      expect(screen.queryByRole('switch', { name: 'Any App' })).not.toBeInTheDocument()
+    })
+
+    it('does not render the compatibility page when the capability probe fails', async () => {
+      computerUseApiMock.getStatus.mockRejectedValue(new Error('offline'))
+
+      render(<ComputerUseSettings />)
+
+      expect(await screen.findByText('Failed to check status.')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Enabled')).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Computer Control' })).not.toBeInTheDocument()
+    })
+
+    it('waits for persisted config before showing the native toggle state', async () => {
+      const configRequest = deferred<typeof enabledConfig>()
+      computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
+      computerUseApiMock.getAuthorizedApps.mockReturnValue(configRequest.promise)
+
+      render(<ComputerUseSettings />)
+
+      await waitFor(() => expect(computerUseApiMock.getStatus).toHaveBeenCalled())
+      expect(screen.getByRole('status')).toHaveTextContent('Loading...')
+      expect(screen.queryByLabelText('Enabled')).not.toBeInTheDocument()
+
+      await act(async () => {
+        configRequest.resolve({ ...enabledConfig, enabled: false })
+        await configRequest.promise
+      })
+
+      expect(await screen.findByRole('switch', { name: 'Enabled' })).not.toBeChecked()
+    })
+
     /**
      * Rows show the application's own icon, served per bundle id. The letter
      * tile is the fallback for bundles that ship no icon, so it must appear on
@@ -382,7 +430,7 @@ describe('ComputerUseSettings', () => {
       })
     })
 
-    it('pops the native permission card when enabling Any App with missing permissions', async () => {
+    it('pops the native permission card when enabling Computer Use with missing permissions', async () => {
       computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
       computerUseApiMock.getAuthorizedApps.mockResolvedValue({
         ...enabledConfig,
@@ -391,7 +439,7 @@ describe('ComputerUseSettings', () => {
 
       render(<ComputerUseSettings />)
 
-      const toggle = await screen.findByLabelText('Any App')
+      const toggle = await screen.findByLabelText('Enabled')
       await waitFor(() => expect(toggle).not.toBeChecked())
 
       await act(async () => {
@@ -415,7 +463,7 @@ describe('ComputerUseSettings', () => {
 
       render(<ComputerUseSettings />)
 
-      const toggle = await screen.findByLabelText('Any App')
+      const toggle = await screen.findByLabelText('Enabled')
       await waitFor(() => expect(toggle).not.toBeChecked())
 
       await act(async () => {

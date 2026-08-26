@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { Modal } from '@/components/ui/Modal'
+import { Switch } from '@/components/ui/Switch'
 import { getDesktopHost } from '../lib/desktopHost'
 
 type CheckState = 'loading' | 'ready' | 'error'
@@ -53,6 +54,7 @@ export function ComputerUseSettings() {
   const t = useTranslation()
   const [status, setStatus] = useState<ComputerUseStatus | null>(null)
   const [checkState, setCheckState] = useState<CheckState>('loading')
+  const [configSettled, setConfigSettled] = useState(false)
   const [setupRunning, setSetupRunning] = useState(false)
   const [setupResult, setSetupResult] = useState<SetupResult | null>(null)
 
@@ -107,6 +109,8 @@ export function ComputerUseSettings() {
       applyConfig(await computerUseApi.getAuthorizedApps(), requestSeq)
     } catch {
       // API not ready
+    } finally {
+      setConfigSettled(true)
     }
   }, [applyConfig])
 
@@ -224,7 +228,7 @@ export function ComputerUseSettings() {
     }
   }, [t, fetchStatus])
 
-  // Master "任意应用" toggle on the native path. Mirrors toggleComputerUseEnabled
+  // Master Computer Use toggle on the native path. Mirrors toggleComputerUseEnabled
   // for persistence, but additionally pops the native OS-permission card when
   // turning ON while macOS permissions are still missing (the headline flow).
   const toggleAnyApp = (value: boolean) => {
@@ -370,6 +374,38 @@ export function ComputerUseSettings() {
       .sort((a, b) => a.displayName.localeCompare(b.displayName))
   }, [filteredApps, authorizedBundleIds])
 
+  // The renderer cannot choose between the native macOS page and the
+  // compatibility page until the capability probe finishes. Rendering the
+  // compatibility page here used to flash its header toggle before the native
+  // page replaced the entire tree.
+  if (status === null) {
+    return (
+      <div className="max-w-2xl">
+        {checkState === 'error' ? (
+          <ErrorState
+            size="lg"
+            title="Failed to check status."
+            retryLabel={t('common.retry')}
+            onRetry={fetchStatus}
+          />
+        ) : (
+          <LoadingState size="md" label={t('common.loading')} />
+        )}
+      </div>
+    )
+  }
+
+  // Status chooses the page implementation, while config supplies the switch
+  // value. Waiting for both prevents a native disabled setting from briefly
+  // rendering as enabled when the capability probe wins the race.
+  if (!configSettled) {
+    return (
+      <div className="max-w-2xl">
+        <LoadingState size="md" label={t('common.loading')} />
+      </div>
+    )
+  }
+
   if (native && status) {
     return (
       <NativeComputerUse
@@ -404,15 +440,12 @@ export function ComputerUseSettings() {
           <h2 className="text-[24px] font-semibold leading-tight text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>
             {t('settings.computerUse.title')}
           </h2>
-          <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={computerUseEnabled}
-              onChange={e => toggleComputerUseEnabled(e.target.checked)}
-              className="rounded border-[var(--color-border)] accent-[var(--color-brand)]"
-            />
-            {t('settings.computerUse.enabledToggle')}
-          </label>
+          <Switch
+            checked={computerUseEnabled}
+            onChange={toggleComputerUseEnabled}
+            label={t('settings.computerUse.enabledToggle')}
+            size="sm"
+          />
         </div>
         <p className="mt-1.5 text-[13.5px] leading-6 text-[var(--color-text-secondary)]">
           {t('settings.computerUse.description')}
@@ -880,13 +913,21 @@ function NativeComputerUse({
   return (
     <div className="max-w-2xl space-y-10">
       {/* Title */}
-      <div>
-        <h2 className="text-lg font-semibold tracking-tight text-[var(--color-text-primary)]">
-          {t('settings.computerUse.controlTitle')}
-        </h2>
-        <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-text-secondary)]">
-          {t('settings.computerUse.controlSubtitle')}
-        </p>
+      <div className="flex items-start justify-between gap-6">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold tracking-tight text-[var(--color-text-primary)]">
+            {t('settings.computerUse.controlTitle')}
+          </h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+            {t('settings.computerUse.controlSubtitle')}
+          </p>
+        </div>
+        <Switch
+          checked={enabled}
+          onChange={onToggleEnabled}
+          label={t('settings.computerUse.enabledToggle')}
+          size="sm"
+        />
       </div>
 
       {/* ─── 控制 (Control) ─── */}
@@ -895,35 +936,11 @@ function NativeComputerUse({
           {t('settings.computerUse.sectionControl')}
         </h3>
 
-        {/* One elevated surface; toggle + permissions split by a hairline rule
-            instead of two separately-nested filled cards. */}
+        {/* One elevated surface for the OS permissions required by the master
+            toggle in the page header. */}
         <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-container-low)] shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          {/* Master "任意应用" toggle */}
-          <div className="flex items-center gap-4 px-4 py-4">
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-                {t('settings.computerUse.anyApp')}
-              </div>
-              <div className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-                {t('settings.computerUse.anyAppDesc')}
-              </div>
-            </div>
-            <label className="relative inline-flex flex-shrink-0 cursor-pointer items-center">
-              <input
-                type="checkbox"
-                role="switch"
-                aria-label={t('settings.computerUse.anyApp')}
-                checked={enabled}
-                onChange={e => onToggleEnabled(e.target.checked)}
-                className="peer sr-only"
-              />
-              <span className="h-[26px] w-[46px] rounded-full bg-[var(--color-surface-container-high)] ring-1 ring-inset ring-[var(--color-border)] transition-colors duration-200 peer-checked:bg-[var(--color-brand)] peer-checked:ring-[var(--color-brand)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-brand)] peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-[var(--color-surface-container-low)]" />
-              <span className="absolute left-[3px] top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.25)] transition-transform duration-200 ease-out peer-checked:translate-x-5" />
-            </label>
-          </div>
-
           {/* OS-permission group */}
-          <div className="border-t border-[var(--color-border)] px-4 py-4">
+          <div className="px-4 py-4">
             <div className="text-sm font-semibold text-[var(--color-text-primary)]">
               {t('settings.computerUse.osPermTitle')}
             </div>

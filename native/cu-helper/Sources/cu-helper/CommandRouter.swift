@@ -99,7 +99,6 @@ public final class CommandRouter {
         resetHeldSessionState()
         AXTree.resetSessionSnapshots()
         Self.lastShotTransform.removeAll()
-        Self.recoveredTargets.removeAll()
         Self.lastCaptureDigest.removeAll()
         // Apps we told they were focused must be told they are not, or the
         // belief outlives the session that needed it.
@@ -547,51 +546,6 @@ public final class CommandRouter {
         }
     }
 
-    /// Resolve the target app, build its key-window AX tree, and attach a
-    /// locked window screenshot (scale 0.5) when ScreenCaptureKit is available.
-    /// The screenshot is wrapped in `try?`: a capture failure (or SCK wedge)
-    /// must NEVER block the AX text — the text alone is a valid response.
-    /// Keep the target in a state where its own screenshot means something.
-    ///
-    /// Chromium stops producing frames for a fully covered window, so the
-    /// capture returns the last thing it painted — indefinitely, and without any
-    /// error. Recovered once per session per app: the user asked for this app to
-    /// be driven, and a window that cannot render cannot be driven. Burying it
-    /// again is them wanting their screen back, and we stop taking it.
-    ///
-    /// Returns the sentence to append to the state, or nil when all is well.
-    private func ensureTargetIsRenderable(pid: pid_t) -> String? {
-        guard let window = WindowGeometry.frontmostWindow(pid: pid) else {
-            // No on-screen window at all is a different problem, already
-            // reported by OffScreenTargetAdvice with its own advice.
-            return nil
-        }
-        guard WindowGeometry.isFullyCovered(windowID: window.id) else { return nil }
-
-        switch TargetVisibilityPolicy.decide(
-            isFullyCovered: true,
-            hasRecoveredBefore: Self.recoveredTargets.contains(pid)
-        ) {
-        case .proceed:
-            return nil
-        case .warnOnly:
-            return TargetVisibilityPolicy.coveredAgainNotice
-        case .raiseAndNotify:
-            Self.recoveredTargets.insert(pid)
-            // A raise cannot get above another application's windows. Report
-            // which of the two happened rather than claiming the recovery
-            // worked — the notice is what the model uses to decide whether the
-            // screenshot can be trusted.
-            return AXAction.raiseWindow(pid: pid, windowID: window.id)
-                ? TargetVisibilityPolicy.raisedNotice
-                : TargetVisibilityPolicy.couldNotUncoverNotice
-        }
-    }
-
-    /// Apps already pulled out from under other windows this session. Reset with
-    /// the rest of the session state so a new task starts willing to help again.
-    private static var recoveredTargets = Set<pid_t>()
-
     /// Hash of the last capture per app, to notice when a new one is the same
     /// image. Hashes rather than the images themselves — these are megabytes.
     private static var lastCaptureDigest: [pid_t: Int] = [:]
@@ -608,6 +562,14 @@ public final class CommandRouter {
         return TargetVisibilityPolicy.identicalCaptureNotice(
             windowIsCovered: WindowGeometry.isFullyCovered(windowID: windowID)
         )
+    }
+
+    private static func appendAXNotice(
+        _ notice: String,
+        to object: inout [String: JSONValue]
+    ) {
+        let existing = object["axText"]?.asString ?? ""
+        object["axText"] = .string(existing + "\n\n" + notice)
     }
 
     private func handleGetAppState(_ payload: JSONValue) async throws -> JSONValue {
@@ -658,18 +620,8 @@ public final class CommandRouter {
         // target), not whatever happens to be frontmost.
         setResolvedTarget(target)
 
-        // Before photographing it: a window buried under everything else stops
-        // repainting, so the capture would freeze at whatever it last drew
-        // while every action still reported success. Recover it if we can, and
-        // in either case make sure the model is told.
-        let visibilityNotice = ensureTargetIsRenderable(pid: pid)
-
         let result = try await AXTree.appState(pid: pid, disableDiff: disableDiff)
         var object = try encode(result).asObject ?? [:]
-        if let visibilityNotice {
-            let existing = object["axText"]?.asString ?? ""
-            object["axText"] = .string(existing + "\n\n" + visibilityNotice)
-        }
         guard let snapshotEvidence = AXTree.snapshotEvidence(pid: pid) else {
             throw CUError("stale_snapshot", "get_app_state did not publish target identity")
         }
@@ -679,6 +631,12 @@ public final class CommandRouter {
         )
         if let windowID = snapshotEvidence.keyWindowID {
             object["windowID"] = .int(Int(windowID))
+            if WindowGeometry.isFullyCovered(windowID: windowID) {
+                Self.appendAXNotice(
+                    TargetVisibilityPolicy.coveredCaptureNotice,
+                    to: &object
+                )
+            }
         }
 
         // A failed or mismatched fresh capture must not leave coordinates from
@@ -710,8 +668,7 @@ public final class CommandRouter {
                     base64: shot.base64,
                     windowID: shot.windowID
                 ) {
-                    let existing = object["axText"]?.asString ?? ""
-                    object["axText"] = .string(existing + "\n\n" + notice)
+                    Self.appendAXNotice(notice, to: &object)
                 }
                 object["screenshot"] = .object([
                     "base64": .string(shot.base64),
@@ -1415,10 +1372,6 @@ public final class CommandRouter {
                 "The screen is locked, so the action was not run. Unlock the Mac and try again."
             )
         }
-        // A fully covered Chromium/CEF window stops drawing and synthetic input
-        // cannot be verified. Failing closed is cheaper than reporting success
-        // for an action that may have gone nowhere.
-        try TargetVisibilityPolicy.ensureRenderableForMutation(pid: target.pid)
         let lease = try ForegroundLease.acquire(
             target: target,
             runtime: foregroundRuntime

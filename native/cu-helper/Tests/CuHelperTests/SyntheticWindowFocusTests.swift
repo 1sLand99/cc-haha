@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import os
 import XCTest
 
 @testable import cc_haha_computer_use
@@ -13,6 +14,20 @@ import XCTest
 /// real app. What is worth pinning is the one value that is undocumented, has
 /// no error path, and silently means nothing if it is wrong.
 final class SyntheticWindowFocusTests: XCTestCase {
+    private let processA = AXTreeProcessIdentity(
+        bundleID: "com.example.target",
+        executablePath: "/Applications/Target.app/Contents/MacOS/Target",
+        launchTime: 1
+    )
+
+    private func beliefTarget(
+        processIdentity: AXTreeProcessIdentity? = nil
+    ) -> SyntheticWindowFocus.BeliefTarget {
+        SyntheticWindowFocus.BeliefTarget(
+            processIdentity: processIdentity ?? processA
+        )
+    }
+
     func testKeyFocusReturnedSurvivesTheSignedSubtypeField() {
         // `NSEvent.subtype` is Int16. 0x8000 does not fit, and the obvious
         // conversions either trap or clamp to 0x7FFF; truncating to the same
@@ -89,9 +104,180 @@ final class SyntheticWindowFocusTests: XCTestCase {
         XCTAssertNotNil(event.cgEvent, "must survive conversion or it cannot be posted")
     }
 
-    /// Establishing focus takes two notifications, and sending one was half the
-    /// reason background actuation never worked.
-    func testEnforcingActiveStateSendsBothBeliefs() throws {
+    func testAnInvalidPidIsRefusedRatherThanBroadcast() {
+        // CGEventPostToPid with a nonsense pid is not obviously harmless, and a
+        // focus notification aimed at nothing is never something we meant.
+        XCTAssertFalse(SyntheticWindowFocus.post(.keyFocusReturned, to: 0))
+        XCTAssertFalse(SyntheticWindowFocus.post(.keyFocusReturned, to: -1))
+    }
+
+    func testEnforcementPostsOneCompletePairForTheSameTarget() {
+        var state = SyntheticWindowFocus.BeliefState()
+        let target = beliefTarget()
+        let sent = OSAllocatedUnfairLock(
+            initialState: [SyntheticWindowFocus.Notification]()
+        )
+        let runtime = SyntheticWindowFocus.EnforcementRuntime(
+            applicationIsActive: false,
+            target: target,
+            post: { notification, _ in
+                sent.withLock { $0.append(notification) }
+                return true
+            }
+        )
+
+        XCTAssertTrue(SyntheticWindowFocus.enforceActiveState(
+            pid: 42,
+            state: &state,
+            runtime: runtime
+        ))
+        XCTAssertEqual(sent.withLock { $0 }, [.keyFocusReturned, .appActivated])
+
+        // click -> type_text is one focus transaction. Re-establishing focus
+        // between those actions can reset the CEF control the click selected.
+        XCTAssertFalse(SyntheticWindowFocus.enforceActiveState(
+            pid: 42,
+            state: &state,
+            runtime: runtime
+        ))
+        XCTAssertEqual(sent.withLock { $0 }, [.keyFocusReturned, .appActivated])
+        XCTAssertEqual(state.syntheticallyActive, [42: target])
+    }
+
+    func testPartialEnforcementIsWithdrawnAndCanRetry() {
+        struct PostingState: Sendable {
+            var sent: [SyntheticWindowFocus.Notification] = []
+            var failActivation = true
+        }
+
+        var state = SyntheticWindowFocus.BeliefState()
+        let target = beliefTarget()
+        let posting = OSAllocatedUnfairLock(initialState: PostingState())
+        let runtime = SyntheticWindowFocus.EnforcementRuntime(
+            applicationIsActive: false,
+            target: target,
+            post: { notification, _ in
+                posting.withLock { state in
+                    state.sent.append(notification)
+                    if notification == .appActivated, state.failActivation {
+                        state.failActivation = false
+                        return false
+                    }
+                    return true
+                }
+            }
+        )
+
+        XCTAssertFalse(SyntheticWindowFocus.enforceActiveState(
+            pid: 42,
+            state: &state,
+            runtime: runtime
+        ))
+        XCTAssertEqual(
+            posting.withLock { $0.sent },
+            [.keyFocusReturned, .appActivated, .lostKeyFocus, .appDeactivated]
+        )
+        XCTAssertTrue(state.syntheticallyActive.isEmpty)
+
+        posting.withLock { $0.sent.removeAll() }
+        XCTAssertTrue(SyntheticWindowFocus.enforceActiveState(
+            pid: 42,
+            state: &state,
+            runtime: runtime
+        ))
+        XCTAssertEqual(
+            posting.withLock { $0.sent },
+            [.keyFocusReturned, .appActivated]
+        )
+        XCTAssertEqual(state.syntheticallyActive, [42: target])
+    }
+
+    /// A click followed by type_text is one focus transaction, not two.
+    /// Re-sending keyFocusReturned to window 0 between them can clear the CEF
+    /// field the click just focused.
+    func testSyntheticBeliefIsEstablishedOnlyOnceUntilReleased() {
+        var state = SyntheticWindowFocus.BeliefState()
+        let target = beliefTarget()
+
+        XCTAssertTrue(state.beginEnforcement(
+            pid: 42,
+            applicationIsActive: false,
+            target: target
+        ))
+        XCTAssertFalse(state.beginEnforcement(
+            pid: 42,
+            applicationIsActive: false,
+            target: target
+        ))
+        XCTAssertEqual(state.syntheticallyActive, [42: target])
+
+        XCTAssertEqual(state.drain(), [42: target])
+        XCTAssertTrue(state.syntheticallyActive.isEmpty)
+        XCTAssertTrue(state.beginEnforcement(
+            pid: 42,
+            applicationIsActive: false,
+            target: target
+        ))
+    }
+
+    func testRealActivationSupersedesSyntheticBelief() {
+        var state = SyntheticWindowFocus.BeliefState()
+        let target = beliefTarget()
+
+        XCTAssertTrue(state.beginEnforcement(
+            pid: 42,
+            applicationIsActive: false,
+            target: target
+        ))
+        state.observeRealActivation(pid: 42)
+        XCTAssertTrue(state.syntheticallyActive.isEmpty)
+
+        // Once the app is background again, it needs a fresh pair.
+        XCTAssertTrue(state.beginEnforcement(
+            pid: 42,
+            applicationIsActive: false,
+            target: target
+        ))
+        XCTAssertFalse(state.beginEnforcement(
+            pid: 42,
+            applicationIsActive: true,
+            target: target
+        ))
+        state.cancelEnforcement(pid: 42)
+        XCTAssertTrue(state.syntheticallyActive.isEmpty)
+    }
+
+    func testOnlyAProcessLifetimeChangeRequiresFreshBelief() {
+        var state = SyntheticWindowFocus.BeliefState()
+        let originalProcess = beliefTarget()
+        let relaunchedProcess = AXTreeProcessIdentity(
+            bundleID: processA.bundleID,
+            executablePath: processA.executablePath,
+            launchTime: 2
+        )
+        let relaunched = beliefTarget(
+            processIdentity: relaunchedProcess
+        )
+
+        XCTAssertTrue(state.beginEnforcement(
+            pid: 42,
+            applicationIsActive: false,
+            target: originalProcess
+        ))
+        XCTAssertFalse(state.beginEnforcement(
+            pid: 42,
+            applicationIsActive: false,
+            target: originalProcess
+        ))
+        XCTAssertTrue(state.beginEnforcement(
+            pid: 42,
+            applicationIsActive: false,
+            target: relaunched
+        ))
+        XCTAssertEqual(state.syntheticallyActive[42], relaunched)
+    }
+
+    func testTeardownWithdrawsFocusBeforeActivationBelief() throws {
         let source = try String(
             contentsOfFile: URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent()
@@ -102,26 +288,13 @@ final class SyntheticWindowFocusTests: XCTestCase {
             encoding: .utf8
         )
         let body = try XCTUnwrap(
-            source.range(of: "static func enforceActiveState").map {
-                String(source[$0.lowerBound...].prefix(600))
+            source.range(of: "static func relinquishAll").map {
+                String(source[$0.lowerBound...].prefix(1_000))
             }
         )
-        XCTAssertTrue(
-            body.contains("post(.keyFocusReturned"),
-            "the target must be told its window has focus"
-        )
-        XCTAssertTrue(
-            body.contains("post(.appActivated"),
-            "the target must also be told its application is active — "
-                + "focus alone leaves input routing where it was"
-        )
-    }
-
-    func testAnInvalidPidIsRefusedRatherThanBroadcast() {
-        // CGEventPostToPid with a nonsense pid is not obviously harmless, and a
-        // focus notification aimed at nothing is never something we meant.
-        XCTAssertFalse(SyntheticWindowFocus.post(.keyFocusReturned, to: 0))
-        XCTAssertFalse(SyntheticWindowFocus.post(.keyFocusReturned, to: -1))
+        let lostFocus = try XCTUnwrap(body.range(of: "post(.lostKeyFocus"))
+        let deactivated = try XCTUnwrap(body.range(of: "post(.appDeactivated"))
+        XCTAssertLessThan(lostFocus.lowerBound, deactivated.lowerBound)
     }
 
     func testItNeedsNoPrivateSymbols() throws {
@@ -256,15 +429,45 @@ final class InputAcceptanceContractTests: XCTestCase {
         // documented that gate and shipped without it — sending "key focus
         // returned to window 0" to an app that already owned a key window, on
         // every click.
-        let focus = try source("SyntheticWindowFocus.swift")
-        let enforce = try XCTUnwrap(
-            focus.range(of: "static func enforceActiveState").map {
-                String(focus[$0.lowerBound...].prefix(400))
+        var state = SyntheticWindowFocus.BeliefState()
+        let sent = OSAllocatedUnfairLock(
+            initialState: [SyntheticWindowFocus.Notification]()
+        )
+        let activeRuntime = SyntheticWindowFocus.EnforcementRuntime(
+            applicationIsActive: true,
+            target: SyntheticWindowFocus.BeliefTarget(processIdentity: nil),
+            post: { notification, _ in
+                sent.withLock { $0.append(notification) }
+                return true
             }
         )
-        XCTAssertTrue(
-            enforce.contains("isActiveApplication"),
-            "must not tell an already-active app that focus returned"
+
+        XCTAssertFalse(SyntheticWindowFocus.enforceActiveState(
+            pid: 42,
+            state: &state,
+            runtime: activeRuntime
+        ))
+        XCTAssertTrue(sent.withLock { $0 }.isEmpty)
+        XCTAssertTrue(state.syntheticallyActive.isEmpty)
+
+        let backgroundRuntime = SyntheticWindowFocus.EnforcementRuntime(
+            applicationIsActive: false,
+            target: activeRuntime.target,
+            post: activeRuntime.post
+        )
+        XCTAssertTrue(SyntheticWindowFocus.enforceActiveState(
+            pid: 42,
+            state: &state,
+            runtime: backgroundRuntime
+        ))
+        XCTAssertFalse(SyntheticWindowFocus.enforceActiveState(
+            pid: 42,
+            state: &state,
+            runtime: backgroundRuntime
+        ))
+        XCTAssertEqual(
+            sent.withLock { $0 },
+            [.keyFocusReturned, .appActivated]
         )
     }
 }

@@ -1182,12 +1182,12 @@ public enum AXAction {
     /// screenshot. It is gone. Driving an app while the user works in another
     /// one is the feature; an implementation that yanks their foreground to
     /// take a picture has traded away the thing being bought. When the raise is
-    /// not enough the router now fails the mutating action with
-    /// `window_occluded` instead of taking the screen.
+    /// not enough the router leaves the target covered. ScreenCaptureKit can
+    /// still capture that window independently, and PID/window-targeted input
+    /// remains valid; ordinary occlusion is not an input failure.
     ///
-    /// Called at most once per app per session (see the caller), because doing
-    /// it every time the user covers the window is arguing with them about
-    /// their own screen.
+    /// This is now only an explicit semantic action. State reads never call it
+    /// merely because another application covers the target.
     @discardableResult
     public static func raiseWindow(pid: pid_t, windowID: CGWindowID) -> Bool {
         let app = AXUIElementCreateApplication(pid)

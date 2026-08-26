@@ -64,143 +64,68 @@ final class WindowCoverageTests: XCTestCase {
 }
 
 final class TargetVisibilityPolicyTests: XCTestCase {
-    func testAVisibleTargetIsLeftAlone() {
-        XCTAssertEqual(
-            TargetVisibilityPolicy.decide(isFullyCovered: false, hasRecoveredBefore: false),
-            .proceed
-        )
-        // Even after a recovery, visible means silent: a notice on every
-        // subsequent turn would be noise the model learns to skip.
-        XCTAssertEqual(
-            TargetVisibilityPolicy.decide(isFullyCovered: false, hasRecoveredBefore: true),
-            .proceed
-        )
+    private func source(_ name: String) throws -> String {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/cu-helper")
+        return try String(contentsOf: root.appendingPathComponent(name), encoding: .utf8)
     }
 
-    func testTheFirstBurialIsRecovered() {
-        // A window that cannot render cannot be driven, and the user asked for
-        // it to be driven. Raising it once is honouring the request.
-        XCTAssertEqual(
-            TargetVisibilityPolicy.decide(isFullyCovered: true, hasRecoveredBefore: false),
-            .raiseAndNotify
-        )
-    }
-
-    func testTheSecondBurialIsNotFought() {
-        // The whole judgement of this file: covering it again is the user
-        // saying they want their screen. Taking it back would be the automation
-        // arguing with them, once per turn, for as long as the task runs.
-        XCTAssertEqual(
-            TargetVisibilityPolicy.decide(isFullyCovered: true, hasRecoveredBefore: true),
-            .warnOnly
-        )
-    }
-
-    func testTheWarningRemovesTheScreenshotsAuthorityRatherThanJustDescribingIt() {
-        // "The window is covered" alone leaves the model free to keep reading
-        // the picture — which is what produced a confident report of a song
-        // playing that the capture showed paused. The notice has to say the
-        // image cannot settle the question, and that mutating actions are refused.
-        //
-        // Both covered outcomes carry it. `couldNotUncoverNotice` is the newer
-        // one and the easier to get wrong: it reads as "we tried and it is
-        // fine", when the screenshot behind it is exactly as untrustworthy.
-        for notice in [
-            TargetVisibilityPolicy.coveredAgainNotice,
-            TargetVisibilityPolicy.couldNotUncoverNotice,
-        ] {
-            XCTAssertTrue(notice.contains("STALE"))
-            XCTAssertTrue(
-                notice.contains("Mutating actions are refused"),
-                "a covered window must not invite the model to act blindly"
-            )
-            XCTAssertTrue(
-                notice.contains("cannot reliably reach"),
-                "the reason for refusal must be stated"
-            )
-        }
-    }
-
-    /// A covered window must not end the task by asking the user to manage it.
+    /// Regression for session ba87fe5e-a2dc-4d93-932f-4c868df4c05e.
     ///
-    /// The first version of these notices closed with "ask the user to leave it
-    /// visible", and the model obeyed: it stopped after one action of a
-    /// three-step instruction and handed the job back. Stopping to consult the
-    /// user about window management is the automation failing, and it is a very
-    /// easy sentence to reintroduce while tightening the honesty language —
-    /// which is the half of this that keeps pulling the other way.
-    ///
-    /// The current contract is different: the engine fails closed, so the
-    /// notice explains *why* actions are refused and tells the user to uncover
-    /// the window. It must not ask the model to ask the user.
-    func testACoveredWindowDoesNotTurnIntoAQuestionForTheUser() {
-        for notice in [
-            TargetVisibilityPolicy.coveredAgainNotice,
-            TargetVisibilityPolicy.couldNotUncoverNotice,
-        ] {
-            XCTAssertTrue(
-                notice.contains("Uncover the window to continue"),
-                "the user needs a concrete next step, not a stalled turn"
-            )
-            // The exact shape of the sentence that caused it: an instruction to
-            // put the question to the user. Kept as a literal because the
-            // failure was literal.
-            XCTAssertFalse(
-                notice.lowercased().contains("ask the user to"),
-                "handing window management back to the user abandons the task"
-            )
-        }
+    /// `withForegroundLease` used to reject every mutation when another app
+    /// covered the target. That put the guard in front of PID/window-targeted
+    /// input and even in front of the AX `Raise` action the model tried as a
+    /// recovery, so the task had no possible next move.
+    func testOcclusionIsNotAMutationGate() throws {
+        let router = try source("CommandRouter.swift")
+        let body = try XCTUnwrap(
+            router.range(of: "private func withForegroundLease").map {
+                String(router[$0.lowerBound...])
+            },
+            "withForegroundLease is missing"
+        )
+        XCTAssertFalse(body.contains("ensureRenderableForMutation"))
+        XCTAssertFalse(body.contains("window_occluded"))
+
+        // Coverage is still measured for capture diagnostics elsewhere in the
+        // router. Pin the absence of the old *gate* across the whole file so a
+        // longer function cannot silently outrun a prefix-based source test.
+        XCTAssertFalse(router.contains("ensureRenderableForMutation"))
+        XCTAssertFalse(router.contains("window_occluded"))
     }
 
-    /// Honesty now means: the picture is stale and mutating actions are refused.
-    ///
-    /// The old notice claimed input did not depend on visibility; measured
-    /// behavior under occlusion showed it does for Chromium/CEF windows. The
-    /// replacement must not revive that claim.
-    func testTheModelIsToldActionsAreRefusedWhileCovered() {
-        for notice in [
-            TargetVisibilityPolicy.coveredAgainNotice,
-            TargetVisibilityPolicy.couldNotUncoverNotice,
-        ] {
-            XCTAssertTrue(notice.contains("Mutating actions are refused"))
-            XCTAssertFalse(
-                notice.contains("Input does not depend on visibility"),
-                "old claim contradicted by measured occlusion behavior"
-            )
-            XCTAssertFalse(
-                notice.contains("Carry on with the task"),
-                "the engine now fails closed, so the model must not be told to proceed"
-            )
-        }
+    /// Reading state must not reorder or activate a target just because the
+    /// user covered it. Window-independent capture and app-targeted input are
+    /// what make this background automation rather than foreground automation.
+    func testGetAppStateDoesNotRaiseAnOccludedTarget() throws {
+        let router = try source("CommandRouter.swift")
+        let body = try XCTUnwrap(
+            router.range(of: "private func handleGetAppState").flatMap { start in
+                router.range(of: "struct ShotTransform", range: start.upperBound..<router.endIndex)
+                    .map { end in String(router[start.lowerBound..<end.lowerBound]) }
+            },
+            "handleGetAppState is missing"
+        )
+        XCTAssertFalse(body.contains("ensureTargetIsRenderable"))
+        XCTAssertFalse(body.contains("raiseWindow"))
+        XCTAssertTrue(body.contains("coveredCaptureNotice"))
     }
 
-    func testTheRaisedNoticeIsTheOnlyOneThatClaimsALiveScreenshot() {
-        // Telling the model the picture is live when the window is still buried
-        // is the failure this whole file exists to prevent, and the three
-        // notices are one careless copy-paste apart.
-        XCTAssertTrue(TargetVisibilityPolicy.raisedNotice.contains("live"))
-        XCTAssertFalse(TargetVisibilityPolicy.couldNotUncoverNotice.contains("state you are shown is live"))
-        XCTAssertFalse(TargetVisibilityPolicy.coveredAgainNotice.contains("state you are shown is live"))
+    func testFirstCoveredCaptureWarnsWithoutBlockingInput() {
+        let notice = TargetVisibilityPolicy.coveredCaptureNotice
+        XCTAssertTrue(notice.contains("may be stale"))
+        XCTAssertTrue(notice.contains("does not block"))
+        XCTAssertTrue(notice.contains("continue the task"))
+        XCTAssertFalse(notice.contains("refused"))
+        XCTAssertFalse(notice.contains("Uncover the window"))
     }
 
-    /// Source guard: recovering visibility must never cost the user their
-    /// foreground.
-    ///
-    /// `raiseWindow` used to fall back to `NSRunningApplication.activate` when
-    /// the raise was not enough, reasoning that a window which cannot repaint
-    /// cannot be driven. It is a genuinely tempting trade — it buys a live
-    /// screenshot for one steal — and it is the trade that makes background
-    /// automation not background. The stalled turn is the intended cost.
+    /// An explicit AX Raise remains available, but it must not activate the app.
     func testUncoveringNeverActivatesTheApplication() throws {
-        let source = try String(
-            contentsOfFile: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/cu-helper/AXAction.swift")
-                .path,
-            encoding: .utf8
-        )
+        let source = try source("AXAction.swift")
         let body = try XCTUnwrap(
             source.range(of: "public static func raiseWindow").map {
                 String(source[$0.lowerBound...].prefix(900))
@@ -218,14 +143,13 @@ final class TargetVisibilityPolicyTests: XCTestCase {
     }
 
     func testTheIdenticalCaptureNoticeNamesTheToggleTrap() {
-        // Repeating a click on a stale picture is normally harmless; on a
-        // play/pause control it undoes the previous press. One session pressed
-        // play four times and finished paused.
         for covered in [true, false] {
             let notice = TargetVisibilityPolicy.identicalCaptureNotice(windowIsCovered: covered)
             XCTAssertTrue(notice.contains("byte-for-byte identical"))
             XCTAssertTrue(notice.contains("toggle"))
-            XCTAssertTrue(notice.contains("undoes the first"))
+            XCTAssertTrue(notice.contains("undo the first"))
+            XCTAssertFalse(notice.contains("refused"))
+            XCTAssertFalse(notice.contains("Uncover the window"))
         }
     }
 
@@ -236,57 +160,14 @@ final class TargetVisibilityPolicyTests: XCTestCase {
         // handed it. Coverage is something we compute, so it must not be
         // presented to the model as an open question.
         let visible = TargetVisibilityPolicy.identicalCaptureNotice(windowIsCovered: false)
-        XCTAssertTrue(visible.contains("genuinely changed nothing"))
-        XCTAssertFalse(visible.contains("stopped repainting"))
+        XCTAssertTrue(visible.contains("no visible pixel change"))
+        XCTAssertTrue(visible.contains("not fully covered"))
+        XCTAssertFalse(visible.contains("repainting"))
+        XCTAssertFalse(visible.contains("paused its renderer"))
 
         let covered = TargetVisibilityPolicy.identicalCaptureNotice(windowIsCovered: true)
-        XCTAssertTrue(covered.contains("stopped repainting"))
-        XCTAssertFalse(covered.contains("genuinely changed nothing"))
-    }
-
-    /// Mutating actions must fail closed when the target is fully covered.
-    func testEnsureRenderableForMutationThrowsWhenCovered() throws {
-        let window = WindowGeometry.Window(
-            id: 123,
-            bounds: CGRect(x: 0, y: 0, width: 100, height: 100),
-            ownerPid: 42
-        )
-        XCTAssertThrowsError(
-            try TargetVisibilityPolicy.ensureRenderableForMutation(
-                pid: 42,
-                frontmostWindow: { _ in window },
-                isFullyCovered: { _ in true }
-            )
-        ) { error in
-            let cuError = error as? CUError
-            XCTAssertEqual(cuError?.code, "window_occluded")
-        }
-    }
-
-    func testEnsureRenderableForMutationPassesWhenVisible() {
-        let window = WindowGeometry.Window(
-            id: 123,
-            bounds: CGRect(x: 0, y: 0, width: 100, height: 100),
-            ownerPid: 42
-        )
-        XCTAssertNoThrow(
-            try TargetVisibilityPolicy.ensureRenderableForMutation(
-                pid: 42,
-                frontmostWindow: { _ in window },
-                isFullyCovered: { _ in false }
-            )
-        )
-    }
-
-    func testEnsureRenderableForMutationPassesWhenNoWindow() {
-        // No on-screen window is a different failure path (e.g. minimized); the
-        // occlusion guard only fires when we can prove the window is covered.
-        XCTAssertNoThrow(
-            try TargetVisibilityPolicy.ensureRenderableForMutation(
-                pid: 42,
-                frontmostWindow: { _ in nil },
-                isFullyCovered: { _ in true }
-            )
-        )
+        XCTAssertTrue(covered.contains("paused its renderer"))
+        XCTAssertTrue(covered.contains("does not block"))
+        XCTAssertFalse(covered.contains("no visible pixel change"))
     }
 }

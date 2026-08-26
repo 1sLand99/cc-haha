@@ -35,12 +35,72 @@ import Foundation
 /// So this needs no private symbol at all — `NSEvent.otherEvent`, `.cgEvent`
 /// and `CGEventPostToPid` are public. Only the subtype values are undocumented.
 enum SyntheticWindowFocus {
+    struct BeliefTarget: Equatable, Sendable {
+        let processIdentity: AXTreeProcessIdentity?
+    }
+
+    /// Session-scoped belief about process lifetimes that have already
+    /// received the synthetic focus + activation pair.
+    ///
+    /// Keeping this state is load-bearing for Chromium/CEF text entry. A click
+    /// establishes in-app focus on a field; blindly posting another
+    /// `keyFocusReturned` to window 0 before `type_text` can reset that field
+    /// focus. Codex keeps the same distinction between real application state
+    /// and what the target has already been told.
+    struct BeliefState {
+        private(set) var syntheticallyActive: [pid_t: BeliefTarget] = [:]
+
+        /// Reserve the one establishment send for `pid`.
+        ///
+        /// Seeing the process genuinely active clears the synthetic belief so
+        /// a later background transition can establish it again.
+        mutating func beginEnforcement(
+            pid: pid_t,
+            applicationIsActive: Bool,
+            target: BeliefTarget
+        ) -> Bool {
+            if applicationIsActive {
+                observeRealActivation(pid: pid)
+                return false
+            }
+            guard syntheticallyActive[pid] != target else { return false }
+            syntheticallyActive[pid] = target
+            return true
+        }
+
+        mutating func observeRealActivation(pid: pid_t) {
+            syntheticallyActive.removeValue(forKey: pid)
+        }
+
+        mutating func cancelEnforcement(
+            pid: pid_t,
+            expectedTarget: BeliefTarget? = nil
+        ) {
+            if let expectedTarget,
+               syntheticallyActive[pid] != expectedTarget {
+                return
+            }
+            syntheticallyActive.removeValue(forKey: pid)
+        }
+
+        mutating func drain() -> [pid_t: BeliefTarget] {
+            defer { syntheticallyActive.removeAll() }
+            return syntheticallyActive
+        }
+    }
+
+    struct EnforcementRuntime: Sendable {
+        let applicationIsActive: Bool
+        let target: BeliefTarget
+        let post: @Sendable (Notification, pid_t) -> Bool
+    }
+
     /// CPS notifications, carried as the subtype of a synthesized event.
     ///
     /// Values recovered from the once-initializers in Codex's service. Stored
     /// as `Int32` because `keyFocusReturned` does not fit `Int16` unsigned —
     /// see `subtype`.
-    enum Notification: Int32 {
+    enum Notification: Int32, Sendable {
         case appActivated = 1
         // Also the value CPS uses for "new front process"; the meaning comes
         // from which notification the sender is making, not from the number.
@@ -140,18 +200,131 @@ enum SyntheticWindowFocus {
     /// Order matches the reference: focus, then activation.
     @discardableResult
     static func enforceActiveState(pid: pid_t) -> Bool {
-        guard !isActiveApplication(pid) else { return false }
-        let focused = post(.keyFocusReturned, to: pid)
-        let activated = post(.appActivated, to: pid)
-        let posted = focused || activated
-        if posted { enforced.withLock { $0.insert(pid) } }
-        return posted
+        // Register before reserving belief so a real activation that happens
+        // later is observed even when no CU request runs while the app is
+        // actually frontmost.
+        _ = applicationLifecycleObserver
+        let runtime = EnforcementRuntime(
+            applicationIsActive: isActiveApplication(pid),
+            target: BeliefTarget(
+                processIdentity: currentProcessIdentity(pid: pid)
+            ),
+            post: { notification, targetPid in
+                post(notification, to: targetPid)
+            }
+        )
+        let reserved = beliefs.withLock { state in
+            state.beginEnforcement(
+                pid: pid,
+                applicationIsActive: runtime.applicationIsActive,
+                target: runtime.target
+            )
+        }
+        guard reserved else { return false }
+        guard postEnforcementPair(pid: pid, runtime: runtime) else {
+            beliefs.withLock {
+                $0.cancelEnforcement(
+                    pid: pid,
+                    expectedTarget: runtime.target
+                )
+            }
+            return false
+        }
+        return true
+    }
+
+    /// Testable transition used by the live wrapper above. Keeping the
+    /// notification sink beside the belief mutation lets tests drive the same
+    /// success, deduplication and rollback path production uses.
+    @discardableResult
+    static func enforceActiveState(
+        pid: pid_t,
+        state: inout BeliefState,
+        runtime: EnforcementRuntime
+    ) -> Bool {
+        guard state.beginEnforcement(
+            pid: pid,
+            applicationIsActive: runtime.applicationIsActive,
+            target: runtime.target
+        ) else { return false }
+
+        guard postEnforcementPair(pid: pid, runtime: runtime) else {
+            state.cancelEnforcement(pid: pid, expectedTarget: runtime.target)
+            return false
+        }
+        return true
+    }
+
+    /// Post outside the belief lock. AppKit event construction and delivery
+    /// are external calls; keeping an unfair lock held across them risks
+    /// re-entrancy and makes every other focus transition wait unnecessarily.
+    private static func postEnforcementPair(
+        pid: pid_t,
+        runtime: EnforcementRuntime
+    ) -> Bool {
+        let focused = runtime.post(.keyFocusReturned, pid)
+        let activated = runtime.post(.appActivated, pid)
+        guard focused && activated else {
+            if focused || activated {
+                // Do not leave a half-established belief behind when AppKit
+                // could construct only one side of the pair.
+                if focused { _ = runtime.post(.lostKeyFocus, pid) }
+                _ = runtime.post(.appDeactivated, pid)
+            }
+            return false
+        }
+        return true
     }
 
     /// Reality, as opposed to what the target has been told.
     private static func isActiveApplication(_ pid: pid_t) -> Bool {
         NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
     }
+
+    private static func currentProcessIdentity(pid: pid_t) -> AXTreeProcessIdentity? {
+        guard let application = NSRunningApplication(processIdentifier: pid) else {
+            return nil
+        }
+        return AXTreeProcessIdentity(
+            bundleID: application.bundleIdentifier,
+            executablePath: application.executableURL?.path,
+            launchTime: application.launchDate?.timeIntervalSinceReferenceDate
+        )
+    }
+
+    private static func observeRealActivation(pid: pid_t) {
+        beliefs.withLock { $0.observeRealActivation(pid: pid) }
+    }
+
+    /// NSWorkspace is the observable edge the old PID-only cache lacked. If a
+    /// user brings a synthetic target to the real foreground and then leaves
+    /// it, the real deactivate invalidates what the app was told. Clearing the
+    /// belief on activation makes the next background request establish a new
+    /// pair instead of trusting stale session state.
+    private final class ApplicationLifecycleObserver: @unchecked Sendable {
+        private let activationToken: NSObjectProtocol
+
+        init() {
+            activationToken = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { notification in
+                let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                    as? NSRunningApplication
+                guard let pid = application?.processIdentifier,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+                else { return }
+                SyntheticWindowFocus.observeRealActivation(pid: pid)
+            }
+        }
+
+        deinit {
+            NSWorkspace.shared.notificationCenter.removeObserver(activationToken)
+        }
+    }
+
+    private static let applicationLifecycleObserver = ApplicationLifecycleObserver()
 
     /// Tell every app we lied to that it is no longer active.
     ///
@@ -165,14 +338,20 @@ enum SyntheticWindowFocus {
     /// an app the user is not in, and the next real click there arrives at a
     /// window that never learned it had lost focus.
     static func relinquishAll() {
-        let pids = enforced.withLock { pids -> Set<pid_t> in
-            defer { pids.removeAll() }
-            return pids
+        let targets = beliefs.withLock { $0.drain() }
+        for (pid, target) in targets {
+            // Do not aim teardown at a recycled PID, or tell an app the user is
+            // genuinely using that it lost focus.
+            guard !isActiveApplication(pid),
+                  currentProcessIdentity(pid: pid) == target.processIdentity
+            else { continue }
+            post(.lostKeyFocus, to: pid)
+            post(.appDeactivated, to: pid)
         }
-        for pid in pids { post(.appDeactivated, to: pid) }
     }
 
-    /// Targets currently told they are focused. Written from the daemon's
-    /// request queue and read on teardown, so it needs the lock.
-    private static let enforced = OSAllocatedUnfairLock(initialState: Set<pid_t>())
+    /// Written from the daemon's request queue and read on teardown. The lock
+    /// also makes the reserve-before-send transition atomic if a future caller
+    /// reaches it off the main actor.
+    private static let beliefs = OSAllocatedUnfairLock(initialState: BeliefState())
 }
