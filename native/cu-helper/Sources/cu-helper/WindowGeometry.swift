@@ -11,10 +11,31 @@ import Foundation
 /// Window *names* would require Screen Recording; these three do not, so this
 /// works before any capture grant exists.
 enum WindowGeometry {
-    struct Window: Equatable {
+    struct Window: Equatable, Sendable {
         let id: CGWindowID
         let bounds: CGRect
         let ownerPid: pid_t
+    }
+
+    /// Revalidate the original window after an async focus/pacing boundary;
+    /// never replace it with whichever window is currently above the pointer.
+    static func window(
+        id: CGWindowID, pid: pid_t,
+        windowList: () -> [[CFString: Any]]? = systemWindowList
+    ) -> Window? {
+        guard let list = windowList(),
+              let info = list.first(where: {
+                ($0[kCGWindowNumber] as? Int) == Int(id)
+                    && ($0[kCGWindowOwnerPID] as? pid_t) == pid
+                    && ($0[kCGWindowLayer] as? Int) == 0
+              }),
+              let raw = info[kCGWindowBounds] as? [String: CGFloat],
+              let x = raw["X"], let y = raw["Y"],
+              let width = raw["Width"], let height = raw["Height"],
+              x.isFinite, y.isFinite, width.isFinite, height.isFinite,
+              width > 0, height > 0 else { return nil }
+        let bounds = CGRect(x: x, y: y, width: width, height: height)
+        return Window(id: id, bounds: bounds, ownerPid: pid)
     }
 
     /// Front-most ordinary window containing `point`.

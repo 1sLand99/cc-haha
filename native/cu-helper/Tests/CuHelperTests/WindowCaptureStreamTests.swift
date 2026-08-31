@@ -6,6 +6,100 @@ import XCTest
 
 @MainActor
 final class WindowCaptureStreamTests: XCTestCase {
+    func testDiagnosticsObserveTheRealSnapshotLifecycleWithoutReadingPixelsOrStartingStreams() async throws {
+        let target = makeTarget(windowID: 90)
+        let factory = FakeWindowCaptureStreamFactory { _, _ in }
+        var captures = 0
+        let manager = WindowCaptureStreamManager(factory: factory, takeSnapshot: { target, _ in
+            captures += 1
+            return self.makeSnapshot(target, pixels: "snapshot")
+        })
+
+        let idle = manager.diagnostic(now: 12)
+        XCTAssertEqual(idle.generation, 0)
+        XCTAssertNil(idle.activeKey)
+        XCTAssertNil(idle.hasFailed)
+        XCTAssertNil(idle.sampleCount)
+        XCTAssertTrue(factory.sources.isEmpty)
+
+        _ = await manager.captureSnapshot(for: target, scale: 0.5)
+        let source = try XCTUnwrap(factory.sources.first)
+        let started = manager.diagnostic(now: 12)
+        XCTAssertEqual(started.activeKey, target.key)
+        XCTAssertNil(started.startingKey)
+        XCTAssertEqual(started.hasFailed, false)
+        XCTAssertEqual(started.sampleCount, 0)
+        XCTAssertNil(started.latestFrameSequence, "Successful start is not proof of a generated frame")
+        XCTAssertNil(started.latestFrameAgeSeconds)
+
+        source.publish(makeFrame(for: target.key, sequence: 1, uptime: 10, byte: 7))
+        source.publishStatus(.idle, uptime: 11)
+        let idleFrame = manager.diagnostic(now: 12)
+        XCTAssertEqual(idleFrame.generation, started.generation)
+        XCTAssertEqual(idleFrame.latestFrameSequence, 1)
+        XCTAssertEqual(idleFrame.latestFrameAgeSeconds, 2)
+        XCTAssertEqual(idleFrame.sampleCount, 2)
+        XCTAssertEqual(idleFrame.latestSampleStatus, SCFrameStatus.idle.rawValue)
+        XCTAssertEqual(idleFrame.latestSampleAgeSeconds, 1)
+
+        source.publish(makeFrame(for: target.key, sequence: 2, uptime: 13, byte: 7))
+        let refreshed = manager.diagnostic(now: 14)
+        XCTAssertEqual(refreshed.latestFrameSequence, 2, "Identical pixels can still be a new frame")
+        XCTAssertEqual(refreshed.latestFrameAgeSeconds, 1)
+        XCTAssertEqual(refreshed.sampleCount, 3)
+        XCTAssertEqual(refreshed.latestSampleStatus, SCFrameStatus.complete.rawValue)
+        XCTAssertEqual(source.latestReadCount, 0)
+        XCTAssertEqual(source.startCount, 1)
+        XCTAssertEqual(source.retireCount, 0)
+        XCTAssertEqual(captures, 1, "Inspecting metadata must not take screenshots")
+    }
+
+    func testDiagnosticFailureAndInvalidationDoNotRebuildOrExposeRetiredFrames() async throws {
+        let target = makeTarget(windowID: 91)
+        let factory = FakeWindowCaptureStreamFactory { source, _ in
+            source.startFrame = makeFrame(for: source.targetKey, sequence: 1, uptime: 10, byte: 1)
+        }
+        let manager = WindowCaptureStreamManager(factory: factory, takeSnapshot: { target, _ in
+            self.makeSnapshot(target, pixels: "snapshot")
+        })
+        _ = await manager.captureSnapshot(for: target, scale: 0.5)
+        let source = try XCTUnwrap(factory.sources.first)
+        let activeGeneration = manager.diagnostic(now: 12).generation
+        source.failed = true
+        XCTAssertEqual(manager.diagnostic(now: 12).hasFailed, true)
+        XCTAssertEqual(factory.sources.count, 1)
+        XCTAssertEqual(source.retireCount, 0)
+
+        manager.invalidate()
+        source.publish(makeFrame(for: target.key, sequence: 2, uptime: 13, byte: 2))
+        let retired = manager.diagnostic(now: 14)
+        XCTAssertGreaterThan(retired.generation, activeGeneration)
+        XCTAssertNil(retired.activeKey)
+        XCTAssertNil(retired.startingKey)
+        XCTAssertNil(retired.hasFailed)
+        XCTAssertNil(retired.latestFrameSequence)
+        XCTAssertNil(retired.latestFrameAgeSeconds)
+        XCTAssertNil(retired.latestSampleStatus)
+        XCTAssertEqual(source.latestReadCount, 0)
+        XCTAssertEqual(source.retireCount, 1)
+    }
+
+    func testMailboxDiagnosticRecordsNonPixelStatusesWithoutAdvancingFrameAndIgnoresRetiredCallbacks() {
+        let mailbox = WindowCaptureStreamMailbox()
+        mailbox.recordSampleStatus(.started, receivedUptime: 10)
+        mailbox.recordSampleStatus(.suspended, receivedUptime: 11)
+        let suspended = mailbox.sampleDiagnostic()
+        XCTAssertEqual(suspended.sampleCount, 2)
+        XCTAssertEqual(suspended.latestSampleStatus, SCFrameStatus.suspended.rawValue)
+        XCTAssertEqual(suspended.latestSampleReceivedUptime, 11)
+        XCTAssertNil(suspended.latestFrameSequence)
+        XCTAssertFalse(suspended.hasFailed)
+
+        mailbox.invalidate()
+        mailbox.recordSampleStatus(.complete, receivedUptime: 12)
+        XCTAssertEqual(mailbox.sampleDiagnostic(), suspended)
+    }
+
     func testOnDemandScreenshotUsesOnlyTheTargetWindowBounds() {
         let config = Capture.makeWindowShotConfiguration(width: 1061, height: 752)
         XCTAssertEqual(config.width, 1061)
@@ -546,6 +640,9 @@ private final class FakeWindowCaptureStreamSource: WindowCaptureStreamSource {
     private(set) var retireCount = 0
     private(set) var latestReadCount = 0
     private var latest: WindowCaptureStreamFrame?
+    private var sampleCount: UInt64 = 0
+    private var latestSampleStatus: Int?
+    private var latestSampleReceivedUptime: TimeInterval?
 
     init(targetKey: WindowCaptureStreamKey) {
         self.targetKey = targetKey
@@ -553,10 +650,21 @@ private final class FakeWindowCaptureStreamSource: WindowCaptureStreamSource {
 
     var hasFailed: Bool { failed }
 
+    func sampleDiagnostic() -> WindowCaptureStreamSourceDiagnostic {
+        WindowCaptureStreamSourceDiagnostic(
+            hasFailed: failed,
+            latestFrameSequence: latest?.sequence,
+            latestFrameReceivedUptime: latest?.receivedUptime,
+            sampleCount: sampleCount,
+            latestSampleStatus: latestSampleStatus,
+            latestSampleReceivedUptime: latestSampleReceivedUptime
+        )
+    }
+
     func start() async throws {
         startCount += 1
         if let startError { throw startError }
-        latest = startFrame
+        if let startFrame { publish(startFrame) }
     }
 
     func latestFrame() -> WindowCaptureStreamFrame? {
@@ -571,6 +679,13 @@ private final class FakeWindowCaptureStreamSource: WindowCaptureStreamSource {
 
     func publish(_ frame: WindowCaptureStreamFrame) {
         latest = frame
+        publishStatus(.complete, uptime: frame.receivedUptime)
+    }
+
+    func publishStatus(_ status: SCFrameStatus, uptime: TimeInterval) {
+        sampleCount += 1
+        latestSampleStatus = status.rawValue
+        latestSampleReceivedUptime = uptime
     }
 }
 

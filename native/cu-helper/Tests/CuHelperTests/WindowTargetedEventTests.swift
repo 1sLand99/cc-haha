@@ -204,6 +204,81 @@ final class WindowGeometryTests: XCTestCase {
     func testUnreadableWindowListYieldsNoWindow() {
         XCTAssertNil(WindowGeometry.window(at: .zero) { nil })
     }
+
+    func testExactWindowIdentityRevalidationKeepsOriginalWindowAfterMoveAndReorder() throws {
+        var list = [info(layer: 0, x: -500, y: -600, w: 800, h: 600, number: 3, pid: 7)]
+        let original = try XCTUnwrap(WindowGeometry.window(
+            at: CGPoint(x: -100, y: -200), pid: 7, windowList: { list }
+        ))
+
+        // During an async action another window takes the old position while
+        // the original moves. Revalidation must not switch to that new window.
+        list = [
+            info(layer: 0, x: -500, y: -600, w: 800, h: 600, number: 4, pid: 7),
+            info(layer: 0, x: 100, y: 200, w: 900, h: 700, number: 3, pid: 7),
+        ]
+        let current = try XCTUnwrap(WindowGeometry.window(
+            id: original.id, pid: original.ownerPid, windowList: { list }
+        ))
+
+        XCTAssertEqual(current.id, original.id)
+        XCTAssertEqual(current.ownerPid, original.ownerPid)
+        XCTAssertEqual(current.bounds, CGRect(x: 100, y: 200, width: 900, height: 700))
+        XCTAssertNotEqual(current.bounds, original.bounds)
+    }
+
+    func testExactWindowIdentityRequiresMatchingNumberOwnerAndOrdinaryLayer() {
+        let candidates = [
+            info(layer: 0, x: 0, y: 0, w: 100, h: 100, number: 4, pid: 7),
+            info(layer: 0, x: 0, y: 0, w: 100, h: 100, number: 3, pid: 8),
+            info(layer: 25, x: 0, y: 0, w: 100, h: 100, number: 3, pid: 7),
+        ]
+        for candidate in candidates {
+            XCTAssertNil(WindowGeometry.window(id: 3, pid: 7, windowList: { [candidate] }))
+        }
+
+        let valid = info(layer: 0, x: -10, y: -20, w: 100, h: 200, number: 3, pid: 7)
+        XCTAssertEqual(
+            WindowGeometry.window(id: 3, pid: 7, windowList: { candidates + [valid] }),
+            WindowGeometry.Window(id: 3, bounds: CGRect(x: -10, y: -20, width: 100, height: 200), ownerPid: 7)
+        )
+    }
+
+    func testExactWindowIdentityRejectsMissingEmptyAndNonfiniteBounds() {
+        let validBounds: [String: CGFloat] = ["X": 10, "Y": 20, "Width": 100, "Height": 200]
+        var cases: [(String, [String: CGFloat]?)] = [("missing bounds", nil)]
+        for field in ["X", "Y", "Width", "Height"] {
+            var missing = validBounds
+            missing.removeValue(forKey: field)
+            cases.append(("missing \(field)", missing))
+            for invalid: CGFloat in [.nan, .infinity, -.infinity] {
+                var bounds = validBounds
+                bounds[field] = invalid
+                cases.append(("\(field) = \(invalid)", bounds))
+            }
+        }
+        for dimension in ["Width", "Height"] {
+            for invalid: CGFloat in [0, -1] {
+                var bounds = validBounds
+                bounds[dimension] = invalid
+                cases.append(("\(dimension) = \(invalid)", bounds))
+            }
+        }
+
+        for (description, bounds) in cases {
+            var candidate = info(layer: 0, x: 10, y: 20, w: 100, h: 200, number: 3, pid: 7)
+            candidate[kCGWindowBounds] = bounds
+            XCTAssertNil(
+                WindowGeometry.window(id: 3, pid: 7, windowList: { [candidate] }),
+                description
+            )
+        }
+    }
+
+    func testExactWindowIdentityDoesNotInventWindowWhenListIsUnavailable() {
+        XCTAssertNil(WindowGeometry.window(id: 3, pid: 7, windowList: { nil }))
+        XCTAssertNil(WindowGeometry.window(id: 3, pid: 7, windowList: { [] }))
+    }
 }
 
 /// Guards the foreground-settle behaviour that makes background actuation

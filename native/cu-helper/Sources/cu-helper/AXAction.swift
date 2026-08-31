@@ -7,9 +7,9 @@
 //  (or, for click/scroll/drag, a window-relative point), preferring real
 //  Accessibility actions over synthesized input. Only when no usable AX action
 //  exists does it fall back to a synthetic pointer/keyboard event — and every such
-//  event is posted with `CGEvent.postToPid(pid)` + a `.combinedSessionState`
-//  source, NEVER `.cghidEventTap`/`.hidSystemState`, so the user's real pointer is
-//  never hijacked.
+//  event is posted with `CGEvent.postToPid(pid)`, never `.cghidEventTap`, so the
+//  user's real pointer is never hijacked. A keyboard event's `.hidSystemState`
+//  source describes its input state; it does not change this PID-only routing.
 //
 //  Why a gradient, not a single AXPress (the v1 mistake):
 //   • Finder sidebars / Activity Monitor / System Settings rows are "clicked" by
@@ -236,6 +236,22 @@ public final class ClipboardLease {
         temporaryChangeCount = pasteboard.changeCount
     }
 
+    func writeTemporaryStringWithReceipt(_ text: String) throws -> ClipboardPasteReceipt {
+        if let captureError { throw captureError }
+        let receipt = ClipboardPasteReceipt(text: text)
+        let item = NSPasteboardItem()
+        guard item.setDataProvider(receipt, forTypes: [.string]) else {
+            throw CUError("clipboard_write_failed", "Could not register temporary pasteboard data")
+        }
+        pasteboard.clearContents()
+        temporaryChangeCount = pasteboard.changeCount
+        guard pasteboard.writeObjects([item]) else {
+            throw CUError("clipboard_write_failed", "Could not write temporary pasteboard data")
+        }
+        temporaryChangeCount = pasteboard.changeCount
+        return receipt
+    }
+
     /// Whether the temporary text is still the latest pasteboard write. Check
     /// this immediately before sending Command-V so a concurrent user copy is
     /// never pasted into the agent's target application.
@@ -308,12 +324,6 @@ public enum AXAction {
         }
     }
 
-    private struct KeyBurstSpec {
-        let keyCode: CGKeyCode
-        let keyDown: Bool
-        let flags: CGEventFlags
-    }
-
     // MARK: - Tunables
 
     /// Synthetic event source — combined session state so events inherit the real
@@ -359,7 +369,7 @@ public enum AXAction {
         index: Int,
         clickCount: Int = 1,
         button: MouseButton = .left
-    ) throws -> String {
+    ) async throws -> String {
         let element = try resolveElement(pid: pid, index: index)
         let record = AXTree.record(pid: pid, index: index)
         let reps = max(1, clickCount)
@@ -371,7 +381,7 @@ public enum AXAction {
             }
             // Fall through to a synthetic right-click at the element center.
             if let p = centerGlobal(record) {
-                try clickPoint(pid: pid, x: p.x, y: p.y, clickCount: reps, button: .right)
+                try await clickPoint(pid: pid, x: p.x, y: p.y, clickCount: reps, button: .right)
                 return "synthetic:point"
             }
             throw CUError("no_action", "Element \(index) exposes no right-click (AXShowMenu) and has no frame to click")
@@ -381,7 +391,7 @@ public enum AXAction {
             // Middle/back/forward have no AX analogue; go straight to a
             // synthetic point click using their exact CoreGraphics button id.
             if let p = centerGlobal(record) {
-                try clickPoint(pid: pid, x: p.x, y: p.y, clickCount: reps, button: button)
+                try await clickPoint(pid: pid, x: p.x, y: p.y, clickCount: reps, button: button)
                 return "synthetic:point"
             }
             throw CUError("no_action", "Element \(index) has no frame for a \(button.rawValue) click")
@@ -428,7 +438,7 @@ public enum AXAction {
 
         // ── ⑥ Last resort: synthetic pointer click via postToPid. ─────────────
         if let center = centerGlobal(record) {
-            try clickPoint(pid: pid, x: center.x, y: center.y, clickCount: reps, button: button)
+            try await clickPoint(pid: pid, x: center.x, y: center.y, clickCount: reps, button: button)
             return "synthetic:point"
         }
 
@@ -438,46 +448,15 @@ public enum AXAction {
         )
     }
 
-    /// Let the target's run loop process a synthetic focus notification. Short
-    /// because nothing comes to the foreground — but not zero, since the target
-    /// has to actually dequeue the event before the burst arrives.
-    private static let syntheticFocusSettleSeconds: TimeInterval = 0.12
-
-    /// Put the target in a state where it will act on synthesized input, and
-    /// wait long enough for that to be true.
-    ///
-    /// This posts a CPS focus notification and nothing else. The target is NOT
-    /// brought to the foreground: driving an app while the user works in a
-    /// different one is the entire feature, and a click that costs them their
-    /// foreground has not delivered it.
-    ///
-    /// WHY THE FOREGROUND GRANT THAT USED TO LIVE HERE IS GONE
-    /// -------------------------------------------------------
-    /// It was added after the notification alone appeared to fail: in one
-    /// session 24 mutating actions produced 1 effect, and in another nine
-    /// window-bound clicks were discarded while the target's traffic lights
-    /// stayed fully coloured.
-    ///
-    /// That second session is what voids the conclusion. The app was active and
-    /// its window was key — precisely the state a foreground grant exists to
-    /// produce — and the clicks were dropped anyway. Focus was not the variable.
-    ///
-    /// What was actually broken has since been fixed. Every click those sessions
-    /// sent carried a leading move claiming `clickState 1`, and a press and a
-    /// release stamped with two different event numbers, so AppKit had no reason
-    /// to read the pair as one click (see `MouseClickStateTests`). Single clicks
-    /// landed as hover; double clicks worked, because the second pair got
-    /// through. A foreground grant plus an 800ms settle made a malformed click
-    /// likelier to survive, which is why it read as the cure.
-    ///
-    /// If background actuation does regress, `WindowKeyFocus.grantIfNeeded` is
-    /// still there to be called from here and from `Injection.focusForClick` —
-    /// but measure it with a SINGLE click on a control that needs a complete
-    /// one. A text field focuses on the press alone and cannot tell the two
-    /// implementations apart.
-    private static func ensureTargetAcceptsInput(pid: pid_t) {
-        SyntheticWindowFocus.enforceActiveState(pid: pid)
-        Thread.sleep(forTimeInterval: syntheticFocusSettleSeconds)
+    /// Shared preparation for every synthetic action. The actor is yielded
+    /// while focus is established, so lifecycle notifications are not delayed.
+    @MainActor
+    @discardableResult
+    private static func ensureTargetAcceptsInput(
+        pid: pid_t, window: WindowGeometry.Window? = nil,
+        beforeFocus: (@MainActor (FocusEventMonitor.RegistrationReceipt) async throws -> Void)? = nil
+    ) async throws -> FocusEventMonitor.RegistrationReceipt {
+        try await SyntheticWindowFocus.prepareInput(pid: pid, window: window, beforeFocus: beforeFocus)
     }
 
     /// Synthetic pointer click at a GLOBAL (Quartz, top-left) point, posted to the
@@ -490,9 +469,8 @@ public enum AXAction {
         y: Double,
         clickCount: Int = 1,
         button: MouseButton = .left
-    ) throws {
+    ) async throws {
         let point = CGPoint(x: x, y: y)
-        let reps = max(1, clickCount)
         guard let src = eventSource else {
             throw CUError(CUError.Code.eventAlloc, "Failed to allocate a combined-session event source for a synthetic click")
         }
@@ -501,20 +479,40 @@ public enum AXAction {
         // named. Every event in the burst is bound to this same window, so the
         // burst can no longer half-succeed against a window that moved.
         let window = try requireBindableWindow(at: point, pid: pid)
+        let target = try Injection.authorizeResolvedTarget(pid: pid)
 
-        ensureTargetAcceptsInput(pid: pid)
+        let focusReceipt = try await ensureTargetAcceptsInput(pid: pid, window: window, beforeFocus: { receipt in
+            try await movePointerBeforeFocus(
+                at: point, window: window,
+                validate: {
+                    _ = try Injection.validateAuthorizedTarget(target)
+                    try SyntheticWindowFocus.validate(receipt)
+                    guard WindowGeometry.window(id: window.id, pid: pid) == window else {
+                        throw CUError("stale_window", "The pointer target window moved or closed. Read its current state before retrying.")
+                    }
+                },
+                post: { WindowTargetedEvent.post($0, to: pid) }
+            )
+        })
+        let events = try clickEvents(
+            at: point, clickCount: clickCount, button: button,
+            source: src, pid: pid, window: window
+        )
+        try await postMouseBurst(
+            events, target: target, window: window, button: button,
+            focusReceipt: focusReceipt, pause: nil
+        )
+    }
 
-        // Allocate the complete move + click sequence before posting its first
-        // event, so allocation failure can never strand a down stroke.
-        // The move carries clickState 0: it delivers the pointer so hover-only
-        // affordances appear, but it is not part of the click that follows.
-        var specs = [MouseBurstSpec(
-            type: .mouseMoved,
-            point: point,
-            button: button,
-            clickState: mouseClickState(for: .mouseMoved, click: 1),
-            eventNumber: WindowTargetedEvent.nextEventNumber()
-        )]
+    static func clickEvents(
+        at point: CGPoint, clickCount: Int, button: MouseButton,
+        source: CGEventSource, pid: pid_t, window: WindowGeometry.Window
+    ) throws -> [CGEvent] {
+        let reps = max(1, clickCount)
+        // Ordinary clicks are only down/up pairs. Pointer movement is a
+        // separate action; inserting it here changes the reference protocol.
+        // Allocate every pair before the first post so failure cannot strand a down.
+        var specs: [MouseBurstSpec] = []
         for i in 1...reps {
             // One number per press/release pair: that pairing is what makes the
             // two events read as a single click rather than two loose halves.
@@ -534,15 +532,43 @@ public enum AXAction {
                 eventNumber: clickNumber
             ))
         }
-        let events: [CGEvent] = try EventBurst.allocateAll(
+        return try EventBurst.allocateAll(
             specs: specs
         ) { spec in
-            makeMouse(spec, source: src, targetPid: pid, window: window)
+            makeMouse(spec, source: source, targetPid: pid, window: window)
         }
-        for event in events {
-            WindowTargetedEvent.post(event, to: pid)
-            Thread.sleep(forTimeInterval: 0.03)
+    }
+
+    /// The reference controller sends this hover before preparing app focus;
+    /// moving the visual cursor alone does not notify the target application.
+    static func movePointerBeforeFocus(
+        at point: CGPoint, window: WindowGeometry.Window,
+        validate: @MainActor () throws -> Void, post: @MainActor (CGEvent) -> Void,
+        pause: @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        makeEvent: @MainActor (CGPoint, WindowGeometry.Window) -> CGEvent? = pointerMoveEvent
+    ) async throws {
+        try Task.checkCancellation()
+        try validate()
+        guard let event = makeEvent(point, window) else {
+            throw CUError(CUError.Code.eventAlloc, "Failed to allocate a window-targeted pointer move")
         }
+        try Task.checkCancellation()
+        try validate()
+        try Task.checkCancellation()
+        post(event)
+        try await pause(.milliseconds(10))
+        try Task.checkCancellation()
+        try validate()
+    }
+
+    static func pointerMoveEvent(at point: CGPoint, window: WindowGeometry.Window) -> CGEvent? {
+        // This standalone hover has clickCount 1 in the reference protocol;
+        // the separate drag-movement rule remains unchanged.
+        WindowTargetedEvent.makeMouseEvent(
+            type: .mouseMoved, nsType: .mouseMoved, point: point, button: .left,
+            clickCount: 1, windowID: window.id, windowBounds: window.bounds,
+            eventNumber: WindowTargetedEvent.nextEventNumber()
+        )
     }
 
     /// The window a coordinate action will name, or a refusal explaining why no
@@ -611,7 +637,7 @@ public enum AXAction {
         y: Double,
         clickCount: Int = 1,
         button: MouseButton = .left
-    ) throws -> String {
+    ) async throws -> String {
         let point = CGPoint(x: x, y: y)
         let reps = max(1, clickCount)
 
@@ -631,7 +657,7 @@ public enum AXAction {
         }
 
         // No AX element answered (or a non-left button): synthetic pointer click.
-        try clickPoint(pid: pid, x: x, y: y, clickCount: reps, button: button)
+        try await clickPoint(pid: pid, x: x, y: y, clickCount: reps, button: button)
         return "synthetic:point"
     }
 
@@ -755,7 +781,7 @@ public enum AXAction {
         y: Double? = nil,
         direction: String,
         pages: Double = 1
-    ) throws {
+    ) async throws {
         let dir = direction.lowercased()
         guard ["up", "down", "left", "right"].contains(dir) else {
             throw CUError("bad_payload", "Invalid scroll direction: \(direction)")
@@ -782,7 +808,7 @@ public enum AXAction {
             if actionNames(element).contains(pageAction) {
                 for _ in 0..<wholePages {
                     _ = AXUIElementPerformAction(element, pageAction as CFString)
-                    Thread.sleep(forTimeInterval: 0.05)
+                    try await Task.sleep(for: .milliseconds(50))
                 }
                 settle()
                 return
@@ -792,6 +818,14 @@ public enum AXAction {
         // ── Synthetic wheel at the element center (or point). ─────────────────
         guard let point = center else {
             throw CUError("no_target", "scroll: element \(index.map(String.init) ?? "?") has no frame and no x/y point was given")
+        }
+        let window = try requireBindableWindow(at: point, pid: pid)
+        let target = try Injection.authorizeResolvedTarget(pid: pid)
+        let focusReceipt = try await ensureTargetAcceptsInput(pid: pid, window: window)
+        _ = try Injection.validateAuthorizedTarget(target)
+        try SyntheticWindowFocus.validate(focusReceipt)
+        guard WindowGeometry.window(id: window.id, pid: pid) == window else {
+            throw CUError("stale_window", "The scroll target moved or closed. Read its current state before retrying.")
         }
         try scrollWheel(at: point, direction: dir, pages: pages, pid: pid)
         settle()
@@ -803,16 +837,17 @@ public enum AXAction {
     /// UTF-16 kAXSelectedTextRange (or inserts at the UTF-16 end when unavailable),
     /// then places the caret immediately after the inserted text. If AX editing is
     /// unavailable, a PID-directed Unicode event path precedes clipboard paste.
-    public static func typeText(pid: pid_t, _ text: String) throws {
+    public static func typeText(pid: pid_t, _ text: String) async throws {
         guard !text.isEmpty else { return }
+        let target = try Injection.authorizeResolvedTarget(pid: pid)
+        let window = try keyboardWindow(pid: pid)
 
-        // Typing needs the same acceptance a click does, and cannot inherit it.
-        // Each MCP call is a separate request seconds apart: the click that
-        // focused the field made the app active at the time, and by the time
-        // `type_text` arrives the user has usually clicked away. That gap is
-        // where nine consecutive type_text calls went nowhere while every one
-        // of them returned "Action completed".
-        ensureTargetAcceptsInput(pid: pid)
+        // Validate the lifetime without resetting a still-focused field. An
+        // observed loss requires preparation again before keyboard input.
+        let focusReceipt = try await ensureTargetAcceptsInput(pid: pid, window: window)
+        _ = try Injection.validateAuthorizedTarget(target)
+        try SyntheticWindowFocus.validate(focusReceipt)
+        try validateKeyboardWindow(window, pid: pid)
 
         let focused = focusedElement(of: pid)
 
@@ -871,6 +906,7 @@ public enum AXAction {
         // ── Fallback 1: Unicode keyboard, only into an actual text field/area
         //    (reliable for native AppKit fields). ───────────────────────────────
         if let focused, isTextEntry(focused) {
+            try SyntheticWindowFocus.validate(focusReceipt)
             do {
                 try postUnicodeText(pid: pid, text: text)
                 return
@@ -887,105 +923,64 @@ public enum AXAction {
         //    postToPid without the app being frontmost. Save + restore the user's
         //    clipboard so we don't clobber it. (This replaces the old hard
         //    `no_focus` throw that stranded every CEF text-input task.)
-        try typeViaClipboard(pid: pid, text)
+        try await typeViaClipboard(target: target, text)
     }
 
     /// Paste `text` into whatever holds in-app keyboard focus in `pid`, via the
     /// system clipboard + ⌘V (Codex's approach for CEF/Chromium text fields).
-    /// Best-effort: if nothing is focused the paste simply goes nowhere and the
-    /// next get_app_state screenshot shows the model it didn't take.
-    private static func typeViaClipboard(pid: pid_t, _ text: String) throws {
-        let lease = ClipboardLease()
-        defer { lease.restoreIfUnchanged() }
-        try lease.writeTemporaryString(text)
-        Thread.sleep(forTimeInterval: 0.04)   // let the pasteboard commit before ⌘V
-        guard lease.temporaryWriteIsCurrent() else {
-            throw CUError(
-                "clipboard_changed",
-                "The user copied new clipboard content before paste; no paste was sent"
-            )
+    /// The read receipt confirms supplied clipboard bytes, not the reader's
+    /// PID or the field's final value; the next screenshot still verifies UI.
+    private static func typeViaClipboard(target: ProvenProcessTarget, _ text: String) async throws {
+        let pid = target.pid
+        try await ClipboardPasteReceipt.perform(text: text, lease: ClipboardLease()) { validate in
+            try await pressKey(pid: pid, "super+v", validateBeforePosting: {
+                _ = try Injection.validateAuthorizedTarget(target)
+                try validate()
+            })
         }
-        try pressKey(pid: pid, "super+v")
-        Thread.sleep(forTimeInterval: 0.18)   // let the app consume the paste
     }
 
     // MARK: - Press key
 
-    /// Press an xdotool-style key sequence (`"super+c"`, `"Return"`, `"shift+Tab"`,
-    /// `"KP_0"`, `"Prior"`) against `pid`. `KeyMapping.parse` yields one or more
-    /// chords (keyCode + folded modifier flags); each is posted as
-    /// modifier-down(s) → key down → key up → modifier-up(s), all via `postToPid`
-    /// so the keystroke lands in the target without touching the HID tap.
-    public static func pressKey(pid: pid_t, _ key: String) throws {
-        ensureTargetAcceptsInput(pid: pid)
+    /// Deliver modifier transitions as flagsChanged events, including for a
+    /// bare Return after a shortcut. Restore the captured session baseline
+    /// without posting anything to the HID tap.
+    public static func pressKey(
+        pid: pid_t, _ key: String,
+        validateBeforePosting: () throws -> Void = {}
+    ) async throws {
         let chords = try KeyMapping.parse(key)
         guard !chords.isEmpty else {
-            throw CUError(CUError.Code.unknownKey, "Empty key sequence: \"\(key)\"")
+            throw CUError(CUError.Code.unknownKey, "Empty key sequence")
         }
-        guard let src = eventSource else {
-            throw CUError(CUError.Code.eventAlloc, "Failed to allocate a combined-session event source for a key press")
-        }
+        let target = try Injection.authorizeResolvedTarget(pid: pid)
+        let window = try keyboardWindow(pid: pid)
+        var focusReceipt: FocusEventMonitor.RegistrationReceipt?
+        try await KeyboardEventBurst.dispatch(
+            chords: chords,
+            prepare: { focusReceipt = try await ensureTargetAcceptsInput(pid: pid, window: window) },
+            validateBeforePosting: {
+                _ = try Injection.validateAuthorizedTarget(target)
+                try SyntheticWindowFocus.validate(focusReceipt)
+                try validateKeyboardWindow(window, pid: pid)
+                try validateBeforePosting()
+            },
+            post: { WindowTargetedEvent.post($0, to: pid) }
+        )
+    }
 
-        var specs: [KeyBurstSpec] = []
-        var chordEventCounts: [Int] = []
-        for chord in chords {
-            let modifiers = modifierKeyCodes(for: chord.flags)
-            let startCount = specs.count
+    private static func keyboardWindow(pid: pid_t) throws -> WindowGeometry.Window {
+        try SnapshotKeyboardWindow.resolve(
+            pid: pid,
+            snapshot: AXTree.snapshotEvidence(pid: pid),
+            currentIdentity: AXTree.currentProcessIdentity(pid: pid),
+            windowForID: { WindowGeometry.window(id: $0, pid: $1) }
+        )
+    }
 
-            // Modifier down(s), accumulating the flag mask.
-            var active: CGEventFlags = []
-            for mod in modifiers {
-                active.insert(mod.flag)
-                specs.append(KeyBurstSpec(
-                    keyCode: mod.keyCode,
-                    keyDown: true,
-                    flags: active
-                ))
-            }
-
-            // The key itself, carrying the full modifier mask.
-            specs.append(KeyBurstSpec(
-                keyCode: chord.keyCode,
-                keyDown: true,
-                flags: chord.flags
-            ))
-            specs.append(KeyBurstSpec(
-                keyCode: chord.keyCode,
-                keyDown: false,
-                flags: chord.flags
-            ))
-
-            // Modifier up(s) in reverse, peeling the mask back down.
-            for mod in modifiers.reversed() {
-                active.remove(mod.flag)
-                specs.append(KeyBurstSpec(
-                    keyCode: mod.keyCode,
-                    keyDown: false,
-                    flags: active
-                ))
-            }
-            chordEventCounts.append(specs.count - startCount)
-        }
-
-        let events: [CGEvent] = try EventBurst.allocateAll(
-            specs: specs
-        ) { spec in
-            guard let event = CGEvent(
-                keyboardEventSource: src,
-                virtualKey: spec.keyCode,
-                keyDown: spec.keyDown
-            ) else { return nil }
-            event.flags = spec.flags
-            return event
-        }
-
-        var offset = 0
-        for count in chordEventCounts {
-            for event in events[offset..<(offset + count)] {
-                WindowTargetedEvent.post(event, to: pid)
-            }
-            offset += count
-            Thread.sleep(forTimeInterval: 0.04)
+    private static func validateKeyboardWindow(_ window: WindowGeometry.Window, pid: pid_t) throws {
+        guard WindowGeometry.window(id: window.id, pid: pid) == window else {
+            throw CUError("stale_window", "The keyboard target window moved or closed. Read its current state before retrying.")
         }
     }
 
@@ -995,7 +990,7 @@ public enum AXAction {
     /// `from`, ten interpolated dragged steps, up at `to`. Posted to the window
     /// explicitly resolved target via `postToPid`. Coordinate-only by contract —
     /// the model drives drags by pixel, not by element index.
-    public static func drag(pid: pid_t, from: CGPoint, to: CGPoint, button: MouseButton = .left) throws {
+    public static func drag(pid: pid_t, from: CGPoint, to: CGPoint, button: MouseButton = .left) async throws {
         guard let src = eventSource else {
             throw CUError(CUError.Code.eventAlloc, "Failed to allocate a combined-session event source for a drag")
         }
@@ -1005,6 +1000,8 @@ public enum AXAction {
         // of a list), and re-binding mid-gesture would send the tail of the
         // drag to a different window.
         let dragWindow = try requireBindableWindow(at: from, pid: pid)
+        let target = try Injection.authorizeResolvedTarget(pid: pid)
+        let focusReceipt = try await ensureTargetAcceptsInput(pid: pid, window: dragWindow)
 
         // Movement carries clickState 0 (both the leading move and every
         // dragged step); only the press and the release belong to the click.
@@ -1051,10 +1048,45 @@ public enum AXAction {
         ) { spec in
             makeMouse(spec, source: src, targetPid: pid, window: dragWindow)
         }
-        for event in events {
-            WindowTargetedEvent.post(event, to: pid)
-            Thread.sleep(forTimeInterval: 0.03)
+        try await postMouseBurst(
+            events, target: target, window: dragWindow, button: button, focusReceipt: focusReceipt
+        )
+    }
+
+    private static func postMouseBurst(
+        _ events: [CGEvent], target: ProvenProcessTarget,
+        window: WindowGeometry.Window, button: MouseButton,
+        focusReceipt: FocusEventMonitor.RegistrationReceipt,
+        pause: (@MainActor () async throws -> Void)? = {
+            try await Task.sleep(for: .milliseconds(30))
         }
+    ) async throws {
+        try await MouseEventBurstDelivery.deliver(
+            events: events,
+            validate: {
+                _ = try Injection.validateAuthorizedTarget(target)
+                try SyntheticWindowFocus.validate(focusReceipt)
+                guard WindowGeometry.window(id: window.id, pid: target.pid) == window else {
+                    throw CUError("stale_window", "The target window moved or closed. Read its current state before retrying.")
+                }
+            },
+            post: { WindowTargetedEvent.post($0, to: target.pid) },
+            release: { down, point in
+                // A canceled gesture still needs its up, but never at a new
+                // process that happened to reuse the original PID.
+                _ = try Injection.validateAuthorizedTarget(target)
+                guard let liveWindow = WindowGeometry.window(id: window.id, pid: target.pid),
+                      let nsType = Injection.nsEventType(for: button.up),
+                      let up = WindowTargetedEvent.makeMouseEvent(
+                        type: button.up, nsType: nsType, point: point, button: button,
+                        clickCount: Int(down.getIntegerValueField(.mouseEventClickState)),
+                        windowID: liveWindow.id, windowBounds: liveWindow.bounds,
+                        eventNumber: Int(down.getIntegerValueField(.mouseEventNumber))
+                      ) else { return }
+                WindowTargetedEvent.post(up, to: target.pid)
+            },
+            pause: pause
+        )
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1359,17 +1391,6 @@ public enum AXAction {
             event.up.postToPid(pid)
             Thread.sleep(forTimeInterval: 0.02)
         }
-    }
-
-    /// Decompose a folded `CGEventFlags` mask into the discrete modifier keys we
-    /// must press/release around the main key, each with its own keyCode + flag.
-    private static func modifierKeyCodes(for flags: CGEventFlags) -> [(keyCode: CGKeyCode, flag: CGEventFlags)] {
-        var mods: [(CGKeyCode, CGEventFlags)] = []
-        if flags.contains(.maskCommand) { mods.append((CGKeyCode(0x37), .maskCommand)) }   // kVK_Command
-        if flags.contains(.maskShift) { mods.append((CGKeyCode(0x38), .maskShift)) }        // kVK_Shift
-        if flags.contains(.maskAlternate) { mods.append((CGKeyCode(0x3A), .maskAlternate)) } // kVK_Option
-        if flags.contains(.maskControl) { mods.append((CGKeyCode(0x3B), .maskControl)) }     // kVK_Control
-        return mods.map { (keyCode: $0.0, flag: $0.1) }
     }
 
     // MARK: Mouse synthesis

@@ -234,25 +234,9 @@ public enum Injection {
     /// carries the same "human click interval" between down and up.
     private static let pressHoldMs: UInt64 = 24
 
-    /// How long to let a synthetic focus notification reach the target's run
-    /// loop before the click burst arrives. Short, because nothing came to the
-    /// foreground — but not zero, since the target has to dequeue the event.
-    /// Mirrors `AXAction.syntheticFocusSettleSeconds`.
-    private static let focusSettleMs: UInt64 = 120
-
-    /// Tell the target it holds keyboard focus, and let it act on that before
-    /// clicking. The user's foreground is never touched.
-    ///
-    /// This used to bring the target's window forward with a CPS grant and wait
-    /// 800ms for the switch to settle — see the note on
-    /// `AXAction.ensureTargetAcceptsInput` for why that was neither necessary
-    /// nor what it appeared to be. Note that this path did not send the
-    /// notification at all: it relied on the foreground change entirely, so
-    /// removing the grant without adding the notification would leave it with
-    /// nothing.
-    private static func focusForClick(pid: pid_t) async {
-        guard SyntheticWindowFocus.enforceActiveState(pid: pid) else { return }
-        await sleepMs(focusSettleMs)
+    /// Share the semantic input path's focus lifecycle and acknowledgement.
+    private static func focusForClick(pid: pid_t) async throws {
+        try await SyntheticWindowFocus.prepareInput(pid: pid)
     }
     private static let interKeyGapMs: UInt64 = 6       // between down/up of a single key
     private static let interGraphemeGapMs: UInt64 = 4  // between typed characters
@@ -550,7 +534,7 @@ public enum Injection {
         let clicks = max(1, count)
         let flags = KeySym.flags(for: modifiers)
 
-        await focusForClick(pid: targetPid)
+        try await focusForClick(pid: targetPid)
 
         let specs = (1...clicks).flatMap { clickState in
             [
@@ -617,7 +601,7 @@ public enum Injection {
         // A press starts an interaction, so the target has to believe it holds
         // focus before it arrives — otherwise the press is discarded and the
         // matching release lands on nothing.
-        await focusForClick(pid: target.pid)
+        try await focusForClick(pid: target.pid)
         let event = try makeMouse(button.down, at: p, button: button, clickState: 1, targetPid: target.pid)
         event.postToPid(target.pid)
         HeldState.buttons.append(
@@ -700,7 +684,7 @@ public enum Injection {
         try ensurePostable(targetPid)
 
         let n = max(1, steps)
-        await focusForClick(pid: targetPid)
+        try await focusForClick(pid: targetPid)
 
         var specs = [
             MouseBurstSpec(

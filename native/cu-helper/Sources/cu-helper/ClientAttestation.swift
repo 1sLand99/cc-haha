@@ -33,7 +33,7 @@ enum HelperClientPolicy {
         "drag", "press_key", "type_text",
         // Private lifecycle / visible-overlay / permission and input diagnostics.
         "ping", "shutdown", "overlay_show", "overlay_hide",
-        "check_permissions", "input_monitor_state", "held_input_state",
+        "check_permissions", "input_monitor_state", "focus_monitor_state", "held_input_state",
         "last_injection_state",
     ]
 

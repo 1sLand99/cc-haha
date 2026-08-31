@@ -192,7 +192,7 @@ public enum AXTree {
 
     // MARK: - Public entry (contract)
 
-    private static func processIdentity(
+    nonisolated private static func processIdentity(
         for running: NSRunningApplication?
     ) -> AXTreeProcessIdentity {
         AXTreeProcessIdentity(
@@ -202,7 +202,7 @@ public enum AXTree {
         )
     }
 
-    static func currentProcessIdentity(pid: pid_t) -> AXTreeProcessIdentity? {
+    nonisolated static func currentProcessIdentity(pid: pid_t) -> AXTreeProcessIdentity? {
         guard let running = NSRunningApplication(processIdentifier: pid) else {
             return nil
         }
@@ -524,6 +524,18 @@ public enum AXTree {
             processIdentity: session.processIdentity,
             keyWindowID: session.keyWindowID
         )
+    }
+
+    /// Reuse the snapshot's proven window identity and the ordinary fresh AX
+    /// refetch path, rather than independently guessing a window from its frame.
+    static func snapshotWindowElement(pid: pid_t, windowID: CGWindowID) throws -> AXUIElement {
+        let roots = sessions[pid]?.locators.filter {
+            $0.value.root.windowID == windowID && $0.value.path?.isEmpty == true
+        } ?? [:]
+        guard windowID != kCGNullWindowID, roots.count == 1, let index = roots.keys.first else {
+            throw CUError("stale_window", "No proven snapshot window; call get_app_state before acting")
+        }
+        return try refetch(pid: pid, index: index)
     }
 
     /// Resolve the live AX key-window to its current Window Server identity.

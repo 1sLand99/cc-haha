@@ -42,6 +42,28 @@ struct WindowCaptureStreamFrame: Equatable, Sendable {
     let receivedUptime: TimeInterval
 }
 
+/// Metadata only: inspecting stream health never fetches or serializes pixels.
+struct WindowCaptureStreamSourceDiagnostic: Equatable, Sendable {
+    let hasFailed: Bool
+    let latestFrameSequence: UInt64?
+    let latestFrameReceivedUptime: TimeInterval?
+    let sampleCount: UInt64
+    let latestSampleStatus: Int?
+    let latestSampleReceivedUptime: TimeInterval?
+}
+
+struct WindowCaptureStreamDiagnostic: Equatable, Sendable {
+    let generation: UInt64
+    let activeKey: WindowCaptureStreamKey?
+    let startingKey: WindowCaptureStreamKey?
+    let hasFailed: Bool?
+    let latestFrameSequence: UInt64?
+    let latestFrameAgeSeconds: TimeInterval?
+    let sampleCount: UInt64?
+    let latestSampleStatus: Int?
+    let latestSampleAgeSeconds: TimeInterval?
+}
+
 enum WindowCaptureFrameStatusPolicy {
     static func accepts(_ status: SCFrameStatus) -> Bool {
         status == .complete || status == .started
@@ -71,6 +93,7 @@ protocol WindowCaptureProviding: AnyObject {
 protocol WindowCaptureStreamSource: AnyObject {
     var targetKey: WindowCaptureStreamKey { get }
     var hasFailed: Bool { get }
+    func sampleDiagnostic() -> WindowCaptureStreamSourceDiagnostic
     func start() async throws
     func latestFrame() -> WindowCaptureStreamFrame?
     func retire()
@@ -271,6 +294,23 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
     var activeGenerationForTesting: UInt64? { active?.generation }
     var activeKeyForTesting: WindowCaptureStreamKey? { active?.source.targetKey }
 
+    func diagnostic(
+        now: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> WindowCaptureStreamDiagnostic {
+        let sample = (active ?? starting)?.source.sampleDiagnostic()
+        return WindowCaptureStreamDiagnostic(
+            generation: generation,
+            activeKey: active?.source.targetKey,
+            startingKey: starting?.source.targetKey,
+            hasFailed: sample?.hasFailed,
+            latestFrameSequence: sample?.latestFrameSequence,
+            latestFrameAgeSeconds: sample?.latestFrameReceivedUptime.map { max(0, now - $0) },
+            sampleCount: sample?.sampleCount,
+            latestSampleStatus: sample?.latestSampleStatus,
+            latestSampleAgeSeconds: sample?.latestSampleReceivedUptime.map { max(0, now - $0) }
+        )
+    }
+
     private func source(
         for target: WindowCaptureStreamTarget
     ) async -> (any WindowCaptureStreamSource)? {
@@ -372,6 +412,10 @@ final class ScreenCaptureKitWindowStreamSource: WindowCaptureStreamSource {
     }
 
     var hasFailed: Bool { output.hasFailed }
+
+    func sampleDiagnostic() -> WindowCaptureStreamSourceDiagnostic {
+        output.sampleDiagnostic()
+    }
 
     func latestFrame() -> WindowCaptureStreamFrame? {
         output.latestFrame()
@@ -509,12 +553,15 @@ final class ScreenCaptureKitWindowStreamSource: WindowCaptureStreamSource {
 /// `.started` is the first generated frame after start and `.complete` is a
 /// later generated frame. Idle, blank, suspended, and stopped notifications
 /// never advance sequence or satisfy a post-mutation freshness watermark.
-private final class WindowCaptureStreamMailbox: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+final class WindowCaptureStreamMailbox: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var accepting = true
     private var failed = false
     private var sequence: UInt64 = 0
     private var frame: WindowCaptureStreamFrame?
+    private var sampleCount: UInt64 = 0
+    private var latestSampleStatus: Int?
+    private var latestSampleReceivedUptime: TimeInterval?
 
     var hasFailed: Bool {
         lock.lock()
@@ -526,6 +573,28 @@ private final class WindowCaptureStreamMailbox: NSObject, SCStreamOutput, SCStre
         lock.lock()
         defer { lock.unlock() }
         return accepting ? frame : nil
+    }
+
+    func sampleDiagnostic() -> WindowCaptureStreamSourceDiagnostic {
+        lock.lock()
+        defer { lock.unlock() }
+        return WindowCaptureStreamSourceDiagnostic(
+            hasFailed: failed,
+            latestFrameSequence: frame?.sequence,
+            latestFrameReceivedUptime: frame?.receivedUptime,
+            sampleCount: sampleCount,
+            latestSampleStatus: latestSampleStatus,
+            latestSampleReceivedUptime: latestSampleReceivedUptime
+        )
+    }
+
+    func recordSampleStatus(_ status: SCFrameStatus, receivedUptime: TimeInterval) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard accepting else { return }
+        sampleCount &+= 1
+        latestSampleStatus = status.rawValue
+        latestSampleReceivedUptime = receivedUptime
     }
 
     func invalidate() {
@@ -546,6 +615,7 @@ private final class WindowCaptureStreamMailbox: NSObject, SCStreamOutput, SCStre
               let status = Self.frameStatus(sampleBuffer) else {
             return
         }
+        recordSampleStatus(status, receivedUptime: ProcessInfo.processInfo.systemUptime)
         if WindowCaptureFrameStatusPolicy.marksFailure(status) {
             markFailed()
             return

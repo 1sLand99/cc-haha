@@ -111,4 +111,59 @@ final class CursorMotionStateTests: XCTestCase {
             XCTFail("unexpected error: \(error)")
         }
     }
+
+    @MainActor
+    func testIndexedActionAwaitsAsyncMutationBeforeReturningItsCommittedResult() async {
+        var events: [String] = []
+        let result = await CursorIndexedActionGate.perform(
+            moveForAction: { events.append("moved") },
+            recheckStaleness: { events.append("validated") },
+            mutate: {
+                events.append("mutation-started")
+                let resultTask = Task { @MainActor in
+                    events.append("async-result-ready")
+                    return "committed"
+                }
+                let result = await resultTask.value
+                events.append("mutation-finished")
+                return result
+            }
+        )
+        events.append("returned")
+
+        XCTAssertEqual(result, "committed")
+        XCTAssertEqual(events, [
+            "moved", "validated", "mutation-started", "async-result-ready",
+            "mutation-finished", "returned",
+        ])
+    }
+
+    @MainActor
+    func testIndexedActionPropagatesFailureFromSuspendedMutationWithoutCommitting() async {
+        enum ExpectedError: Error { case mutationFailed }
+        var events: [String] = []
+        do {
+            try await CursorIndexedActionGate.perform(
+                moveForAction: { events.append("moved") },
+                recheckStaleness: { events.append("validated") },
+                mutate: {
+                    events.append("mutation-started")
+                    let failureTask = Task { @MainActor in
+                        events.append("async-failure")
+                        throw ExpectedError.mutationFailed
+                    }
+                    try await failureTask.value
+                }
+            )
+            XCTFail("a failed async mutation must not commit")
+        } catch ExpectedError.mutationFailed {
+            events.append("failed")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(events, [
+            "moved", "validated", "mutation-started", "async-failure", "failed",
+        ])
+    }
 }

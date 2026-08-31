@@ -383,6 +383,36 @@ struct ClientAttestationTests {
         }
     }
 
+    @Test("focus diagnostics require an authenticated daemon and do not open unknown commands")
+    func focusMonitorDiagnosticPolicy() {
+        let command = "focus_monitor_state"
+        #expect(HelperClientPolicy.isDaemonCommandAllowed(command))
+        #expect(
+            HelperClientPolicy.authorizeDaemon(
+                peer: cli, ancestors: [server, host], helper: helper
+            ) == .allow
+        )
+
+        var unsignedPeer = cli
+        unsignedPeer.signatureValid = false
+        #expect(
+            HelperClientPolicy.authorizeDaemon(
+                peer: unsignedPeer, ancestors: [server, host], helper: helper
+            ) == .deny
+        )
+        #expect(
+            HelperClientPolicy.authorizeOneShot(
+                command: command,
+                processChain: [helperProcess(pid: 400, parentPID: cli.pid), cli, server, host],
+                helper: helper
+            ) == .deny
+        )
+
+        for unknown in ["", "unknown_command", "focus_monitor_state_extra", "focus_monitor_state ", "FOCUS_MONITOR_STATE"] {
+            #expect(!HelperClientPolicy.isDaemonCommandAllowed(unknown))
+        }
+    }
+
     @Test("live process attestation reads a stable executable identity")
     func liveSelfAttestationHook() throws {
         let current = try ProcessAttestor.attest(pid: getpid())

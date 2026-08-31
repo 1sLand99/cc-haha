@@ -288,6 +288,75 @@ public final class CommandRouter {
                 ),
             ])
 
+        // No key contents are collected: this exposes the focus protocol and
+        // continuity evidence needed to distinguish a dispatched input from
+        // an application that can actually receive it.
+        case "focus_monitor_state":
+            let monitor = FocusEventMonitor.shared
+            let diagnostic = monitor.diagnostic
+            var fields: [String: JSONValue] = [
+                "available": .bool(diagnostic.available),
+                "reason": .string(diagnostic.reason),
+                "continuityGeneration": .string(String(diagnostic.continuityGeneration)),
+                "frontmostPID": .int(Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)),
+                "targets": .array(SyntheticWindowFocus.beliefs.sorted { $0.key < $1.key }.map { pid, belief in
+                    .object([
+                        "pid": .int(Int(pid)),
+                        "observedActive": .bool(belief.applicationIsActive),
+                        "believesActive": .bool(belief.applicationBelievesItIsActive),
+                        "believesFocused": .bool(belief.applicationBelievesItHasFocus),
+                        "generation": .string(String(belief.generation)),
+                    ])
+                }),
+            ]
+            if let event = diagnostic.lastEvent {
+                fields["lastEvent"] = .object([
+                    "type": .int(Int(event.type)),
+                    "subtype": .string(String(event.subtype)),
+                    "sourcePID": .int(Int(event.sourcePID)),
+                    "targetPID": .int(Int(event.targetPID)),
+                    "focusPID": .int(Int(event.focusPID)),
+                    "focusToken": .string(String(event.focusToken)),
+                ])
+            }
+            if let prepared = SyntheticWindowFocus.lastPreparedWindow {
+                fields["lastPreparation"] = .object([
+                    "pid": .int(Int(prepared.pid)),
+                    "windowID": .int(Int(prepared.window?.id ?? 0)),
+                    "activationPointAvailable": .bool(prepared.window.map { $0.activationPoint != nil } ?? false),
+                    "activationPoint": prepared.window?.resolvedActivationPoint.map {
+                        .object(["x": .double($0.x), "y": .double($0.y)])
+                    } ?? .null,
+                ])
+            }
+            if let capture = windowCaptureProvider as? WindowCaptureStreamManager {
+                let stream = capture.diagnostic()
+                var streamFields: [String: JSONValue] = ["generation": .string(String(stream.generation))]
+                streamFields["pid"] = stream.activeKey.map { JSONValue.int(Int($0.pid)) } ?? .null
+                streamFields["windowID"] = stream.activeKey.map { JSONValue.int(Int($0.windowID)) } ?? .null
+                streamFields["hasFailed"] = stream.hasFailed.map(JSONValue.bool) ?? .null
+                streamFields["latestFrameSequence"] = stream.latestFrameSequence.map { JSONValue.string(String($0)) } ?? .null
+                streamFields["latestFrameAgeSeconds"] = stream.latestFrameAgeSeconds.map(JSONValue.double) ?? .null
+                streamFields["sampleCount"] = stream.sampleCount.map { JSONValue.string(String($0)) } ?? .null
+                streamFields["latestSampleStatus"] = stream.latestSampleStatus.map { JSONValue.int(Int($0)) } ?? .null
+                streamFields["latestSampleAgeSeconds"] = stream.latestSampleAgeSeconds.map(JSONValue.double) ?? .null
+                fields["windowStream"] = .object(streamFields)
+            }
+            if let paste = ClipboardPasteReceipt.lastDiagnostic {
+                fields["lastPaste"] = .object([
+                    "status": .string(paste.status),
+                    "pastePosted": .bool(paste.pastePosted),
+                    "dataRequested": .bool(paste.dataRequested),
+                    "dataSupplied": .bool(paste.dataSupplied),
+                    "providerFinished": .bool(paste.providerFinished),
+                    "readElapsedMilliseconds": paste.readElapsedMilliseconds.map(JSONValue.double) ?? .null,
+                    "elapsedMilliseconds": .double(paste.elapsedMilliseconds),
+                    "ownedBeforeRestore": .bool(paste.ownedBeforeRestore),
+                    "restored": .bool(paste.restored),
+                ])
+            }
+            return .object(fields)
+
         // Internal smoke/diagnostic command. Not advertised through MCP.
         // Answers "did the last click actually get bound to a window?" — the
         // window-bound path degrades silently to the old broken behaviour, so
@@ -1109,7 +1178,7 @@ public final class CommandRouter {
                 // Coordinate clicks PREFER AX (hit-test the element under the point and
                 // press it) so Chromium/CEF apps — whose tree we can't traverse — still
                 // click; the synthetic postToPid click is the fallback.
-                let tag = try AXAction.clickAtPoint(
+                let tag = try await AXAction.clickAtPoint(
                     pid: target.pid,
                     x: g.x,
                     y: g.y,
@@ -1167,7 +1236,7 @@ public final class CommandRouter {
                     try guardStaleness(pid: target.pid, handle: handle)
                 },
                 mutate: {
-                    try AXAction.click(
+                    try await AXAction.click(
                         pid: target.pid,
                         index: index,
                         clickCount: clickCount,
@@ -1335,7 +1404,7 @@ public final class CommandRouter {
                 x = point.x
                 y = point.y
             }
-            try AXAction.scroll(
+            try await AXAction.scroll(
                 pid: target.pid,
                 index: index,
                 x: x,
@@ -1364,7 +1433,7 @@ public final class CommandRouter {
         ) {
             _ = try Injection.validateAuthorizedTarget(target)
             try self.requireSnapshotProcess(target: target, expected: expected)
-            try AXAction.typeText(pid: target.pid, text)
+            try await AXAction.typeText(pid: target.pid, text)
             return .bool(true)
         }
     }
@@ -1393,7 +1462,7 @@ public final class CommandRouter {
         ) {
             _ = try Injection.validateAuthorizedTarget(target)
             try self.requireSnapshotProcess(target: target, expected: expected)
-            try AXAction.pressKey(pid: target.pid, key)
+            try await AXAction.pressKey(pid: target.pid, key)
             return .bool(true)
         }
     }
@@ -1451,7 +1520,7 @@ public final class CommandRouter {
                 pid: target.pid
             )
             _ = try Injection.validateAuthorizedTarget(target)
-            try AXAction.drag(
+            try await AXAction.drag(
                 pid: target.pid,
                 from: from,
                 to: to,
