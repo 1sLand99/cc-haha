@@ -73,6 +73,47 @@ final class TargetVisibilityPolicyTests: XCTestCase {
         return try String(contentsOf: root.appendingPathComponent(name), encoding: .utf8)
     }
 
+    func testCoveredWindowWithStreamProviderNeverUsesOneShotFallback() {
+        XCTAssertFalse(TargetVisibilityPolicy.permitsOneShotFallback(
+            windowIsCovered: true,
+            streamProviderInstalled: true
+        ))
+    }
+
+    func testCaptureTargetMustRemainTheSameKeyWindow() {
+        XCTAssertTrue(TargetVisibilityPolicy.captureTargetStillMatches(
+            snapshotWindowID: 100,
+            currentWindowID: 100
+        ))
+        XCTAssertTrue(TargetVisibilityPolicy.captureTargetStillMatches(
+            snapshotWindowID: nil,
+            currentWindowID: nil
+        ))
+        XCTAssertFalse(TargetVisibilityPolicy.captureTargetStillMatches(
+            snapshotWindowID: 100,
+            currentWindowID: 101
+        ))
+        XCTAssertFalse(TargetVisibilityPolicy.captureTargetStillMatches(
+            snapshotWindowID: 100,
+            currentWindowID: nil
+        ))
+        XCTAssertFalse(TargetVisibilityPolicy.captureTargetStillMatches(
+            snapshotWindowID: nil,
+            currentWindowID: 100
+        ))
+    }
+
+    func testVisibleOrLegacyWindowCanUseOneShotFallback() {
+        XCTAssertTrue(TargetVisibilityPolicy.permitsOneShotFallback(
+            windowIsCovered: false,
+            streamProviderInstalled: true
+        ))
+        XCTAssertTrue(TargetVisibilityPolicy.permitsOneShotFallback(
+            windowIsCovered: true,
+            streamProviderInstalled: false
+        ))
+    }
+
     /// Regression for session ba87fe5e-a2dc-4d93-932f-4c868df4c05e.
     ///
     /// `withForegroundLease` used to reject every mutation when another app
@@ -114,13 +155,28 @@ final class TargetVisibilityPolicyTests: XCTestCase {
         XCTAssertTrue(body.contains("coveredCaptureNotice"))
     }
 
-    func testFirstCoveredCaptureWarnsWithoutBlockingInput() {
-        let notice = TargetVisibilityPolicy.coveredCaptureNotice
-        XCTAssertTrue(notice.contains("may be stale"))
+    func testCoveredLiveStreamExplainsFreshFramesWithoutBlockingInput() {
+        let notice = TargetVisibilityPolicy.coveredCaptureNotice(
+            liveStreamActive: true
+        )
+        XCTAssertTrue(notice.contains("long-lived window stream"))
+        XCTAssertTrue(notice.contains("latest complete frame"))
         XCTAssertTrue(notice.contains("does not block"))
-        XCTAssertTrue(notice.contains("continue the task"))
+        XCTAssertFalse(notice.contains("may be stale"))
+        XCTAssertFalse(notice.contains("paused its renderer"))
         XCTAssertFalse(notice.contains("refused"))
         XCTAssertFalse(notice.contains("Uncover the window"))
+    }
+
+    func testCoveredStreamFailureOmitsPotentiallyStaleOneShotPixels() {
+        let notice = TargetVisibilityPolicy.coveredCaptureNotice(
+            liveStreamActive: false
+        )
+        XCTAssertTrue(notice.contains("live window-stream frame was unavailable"))
+        XCTAssertTrue(notice.contains("one-shot screenshot is intentionally not used"))
+        XCTAssertTrue(notice.contains("compositor-cached pixels"))
+        XCTAssertTrue(notice.contains("accessibility state"))
+        XCTAssertTrue(notice.contains("does not block"))
     }
 
     /// An explicit AX Raise remains available, but it must not activate the app.
@@ -144,12 +200,17 @@ final class TargetVisibilityPolicyTests: XCTestCase {
 
     func testTheIdenticalCaptureNoticeNamesTheToggleTrap() {
         for covered in [true, false] {
-            let notice = TargetVisibilityPolicy.identicalCaptureNotice(windowIsCovered: covered)
-            XCTAssertTrue(notice.contains("byte-for-byte identical"))
-            XCTAssertTrue(notice.contains("toggle"))
-            XCTAssertTrue(notice.contains("undo the first"))
-            XCTAssertFalse(notice.contains("refused"))
-            XCTAssertFalse(notice.contains("Uncover the window"))
+            for liveStreamActive in [true, false] {
+                let notice = TargetVisibilityPolicy.identicalCaptureNotice(
+                    windowIsCovered: covered,
+                    liveStreamActive: liveStreamActive
+                )
+                XCTAssertTrue(notice.contains("byte-for-byte identical"))
+                XCTAssertTrue(notice.contains("toggle"))
+                XCTAssertTrue(notice.contains("undo the first"))
+                XCTAssertFalse(notice.contains("refused"))
+                XCTAssertFalse(notice.contains("Uncover the window"))
+            }
         }
     }
 
@@ -159,15 +220,23 @@ final class TargetVisibilityPolicyTests: XCTestCase {
         // time, and the model spent four minutes chasing the possibility we had
         // handed it. Coverage is something we compute, so it must not be
         // presented to the model as an open question.
-        let visible = TargetVisibilityPolicy.identicalCaptureNotice(windowIsCovered: false)
+        let visible = TargetVisibilityPolicy.identicalCaptureNotice(
+            windowIsCovered: false,
+            liveStreamActive: true
+        )
         XCTAssertTrue(visible.contains("no visible pixel change"))
         XCTAssertTrue(visible.contains("not fully covered"))
         XCTAssertFalse(visible.contains("repainting"))
         XCTAssertFalse(visible.contains("paused its renderer"))
 
-        let covered = TargetVisibilityPolicy.identicalCaptureNotice(windowIsCovered: true)
-        XCTAssertTrue(covered.contains("paused its renderer"))
+        let covered = TargetVisibilityPolicy.identicalCaptureNotice(
+            windowIsCovered: true,
+            liveStreamActive: true
+        )
+        XCTAssertTrue(covered.contains("long-lived window stream"))
+        XCTAssertTrue(covered.contains("newest complete frame"))
         XCTAssertTrue(covered.contains("does not block"))
-        XCTAssertFalse(covered.contains("no visible pixel change"))
+        XCTAssertTrue(covered.contains("no visible pixel change"))
+        XCTAssertFalse(covered.contains("paused its renderer"))
     }
 }

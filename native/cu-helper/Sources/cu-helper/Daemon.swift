@@ -103,11 +103,18 @@ public final class Daemon {
         self.socketPath = socketPath
         self.inputMonitor = inputMonitor
         let cursor = VirtualCursor(headless: false)
+        let windowCaptureProvider: (any WindowCaptureProviding)?
+        if #available(macOS 14.0, *) {
+            windowCaptureProvider = WindowCaptureStreamManager()
+        } else {
+            windowCaptureProvider = nil
+        }
         self.cursor = cursor
         self.router = CommandRouter(
             cursor: cursor,
             capabilities: Capabilities(headless: false),
-            inputMonitor: inputMonitor
+            inputMonitor: inputMonitor,
+            windowCaptureProvider: windowCaptureProvider
         )
     }
 
@@ -582,6 +589,7 @@ public final class Daemon {
         explicitOverlayTarget = nil
         Injection.clearResolvedTarget()
         cursor.hide()
+        router.invalidateWindowCaptureStream()
     }
 
     /// The app the cursor should follow: ONLY the app the last injection /
@@ -667,6 +675,7 @@ public final class Daemon {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.router.invalidateWindowCaptureStream()
                 // Re-warm cursor windows for the new screen set.
                 self.cursor.preload()
             }

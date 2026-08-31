@@ -71,6 +71,7 @@ public final class CommandRouter {
     private let capabilities: Capabilities
     private let inputMonitor: PhysicalInputEpochMonitor
     private let foregroundRuntime: ForegroundLeaseRuntime
+    private let windowCaptureProvider: (any WindowCaptureProviding)?
 
     /// After a left `mouse_down` (decomposed drag) the held point is parked
     /// here so a following `mouse_up` releases at the same logical location.
@@ -82,12 +83,14 @@ public final class CommandRouter {
     init(
         cursor: VirtualCursor,
         capabilities: Capabilities,
-        inputMonitor: PhysicalInputEpochMonitor
+        inputMonitor: PhysicalInputEpochMonitor,
+        windowCaptureProvider: (any WindowCaptureProviding)? = nil
     ) {
         self.cursor = cursor
         self.capabilities = capabilities
         self.inputMonitor = inputMonitor
         self.foregroundRuntime = .live(monitor: inputMonitor)
+        self.windowCaptureProvider = windowCaptureProvider
     }
 
     func resetHeldSessionState() {
@@ -100,9 +103,14 @@ public final class CommandRouter {
         AXTree.resetSessionSnapshots()
         Self.lastShotTransform.removeAll()
         Self.lastCaptureDigest.removeAll()
+        windowCaptureProvider?.invalidate()
         // Apps we told they were focused must be told they are not, or the
         // belief outlives the session that needed it.
         SyntheticWindowFocus.relinquishAll()
+    }
+
+    func invalidateWindowCaptureStream() {
+        windowCaptureProvider?.invalidate()
     }
 
     /// Dispatch one command. The payload is the raw decoded JSON object the
@@ -554,13 +562,15 @@ public final class CommandRouter {
     private static func identicalCaptureNotice(
         pid: pid_t,
         base64: String,
-        windowID: CGWindowID
+        windowID: CGWindowID,
+        liveStreamActive: Bool
     ) -> String? {
         let digest = base64.hashValue
         defer { lastCaptureDigest[pid] = digest }
         guard let previous = lastCaptureDigest[pid], previous == digest else { return nil }
         return TargetVisibilityPolicy.identicalCaptureNotice(
-            windowIsCovered: WindowGeometry.isFullyCovered(windowID: windowID)
+            windowIsCovered: WindowGeometry.isFullyCovered(windowID: windowID),
+            liveStreamActive: liveStreamActive
         )
     }
 
@@ -572,8 +582,16 @@ public final class CommandRouter {
         object["axText"] = .string(existing + "\n\n" + notice)
     }
 
-    private func handleGetAppState(_ payload: JSONValue) async throws -> JSONValue {
-        let disableDiff = try optionalBoolean(payload, key: "disableDiff") ?? false
+    private func handleGetAppState(
+        _ payload: JSONValue,
+        windowChangeRetriesRemaining: Int = 1,
+        forceFullSnapshot: Bool = false
+    ) async throws -> JSONValue {
+        let requestedDisableDiff = try optionalBoolean(payload, key: "disableDiff") ?? false
+        let disableDiff = Self.effectiveDisableDiff(
+            requested: requestedDisableDiff,
+            forceFullSnapshot: forceFullSnapshot
+        )
         let selector = try AppTargetResolver.requiredSelector(payload: payload)
         try requireAXTrusted()
         // Resolve a RUNNING match first; if an app was named but isn't running,
@@ -631,12 +649,6 @@ public final class CommandRouter {
         )
         if let windowID = snapshotEvidence.keyWindowID {
             object["windowID"] = .int(Int(windowID))
-            if WindowGeometry.isFullyCovered(windowID: windowID) {
-                Self.appendAXNotice(
-                    TargetVisibilityPolicy.coveredCaptureNotice,
-                    to: &object
-                )
-            }
         }
 
         // A failed or mismatched fresh capture must not leave coordinates from
@@ -653,11 +665,96 @@ public final class CommandRouter {
                 appIsBusy: result.axText.contains("progress indicator")
             )
 
-            if let shot = await Capture.windowShot(
+            let streamedShot = await windowCaptureProvider?.windowShot(
                 pid: pid,
+                processIdentity: snapshotEvidence.processIdentity,
                 preferredWindowID: snapshotEvidence.keyWindowID,
-                scale: 0.5
+                scale: 0.5,
+                newerThanUptime: MutationClock.lastMutation()
+            )
+            guard TargetVisibilityPolicy.captureTargetStillMatches(
+                snapshotWindowID: snapshotEvidence.keyWindowID,
+                currentWindowID: AXTree.currentKeyWindowID(pid: pid)
+            ) else {
+                windowCaptureProvider?.invalidate()
+                guard windowChangeRetriesRemaining > 0 else {
+                    throw CUError(
+                        "stale_snapshot",
+                        "The target key window changed while get_app_state was capturing it"
+                    )
+                }
+                return try await handleGetAppState(
+                    payload,
+                    windowChangeRetriesRemaining: windowChangeRetriesRemaining - 1,
+                    forceFullSnapshot: true
+                )
+            }
+
+            var windowIsCovered = snapshotEvidence.keyWindowID.map {
+                WindowGeometry.isFullyCovered(windowID: $0)
+            } ?? false
+            var shot: WindowShot?
+            if let streamedShot {
+                shot = streamedShot
+            } else if TargetVisibilityPolicy.permitsOneShotFallback(
+                windowIsCovered: windowIsCovered,
+                streamProviderInstalled: windowCaptureProvider != nil
             ) {
+                shot = await Capture.windowShot(
+                    pid: pid,
+                    preferredWindowID: snapshotEvidence.keyWindowID,
+                    scale: 0.5
+                )
+            } else {
+                // A one-shot capture can repeat compositor-cached pixels for a
+                // covered Chromium/CEF window. Returning no image is safer than
+                // presenting that stale fallback as post-action evidence; AX
+                // state remains available and the live stream stays installed
+                // for the next read.
+                shot = nil
+            }
+
+            // A fallback capture can itself wait for SCK/CLI. Revalidate both
+            // identity and coverage after that await so a newly opened sheet or
+            // newly covering foreground window cannot turn a safe decision into
+            // a stale screenshot attachment.
+            guard TargetVisibilityPolicy.captureTargetStillMatches(
+                snapshotWindowID: snapshotEvidence.keyWindowID,
+                currentWindowID: AXTree.currentKeyWindowID(pid: pid)
+            ) else {
+                windowCaptureProvider?.invalidate()
+                guard windowChangeRetriesRemaining > 0 else {
+                    throw CUError(
+                        "stale_snapshot",
+                        "The target key window changed while get_app_state was capturing it"
+                    )
+                }
+                return try await handleGetAppState(
+                    payload,
+                    windowChangeRetriesRemaining: windowChangeRetriesRemaining - 1,
+                    forceFullSnapshot: true
+                )
+            }
+            windowIsCovered = snapshotEvidence.keyWindowID.map {
+                WindowGeometry.isFullyCovered(windowID: $0)
+            } ?? false
+            if windowIsCovered,
+               windowCaptureProvider != nil,
+               shot?.source.isLiveStream != true {
+                shot = nil
+            }
+
+            if windowIsCovered {
+                Self.appendAXNotice(
+                    TargetVisibilityPolicy.coveredCaptureNotice(
+                        liveStreamActive: shot?.source.isLiveStream == true
+                    ),
+                    to: &object
+                )
+            }
+
+            if let shot,
+               AXTree.currentProcessIdentity(pid: pid) == snapshotEvidence.processIdentity {
                 // An identical capture is the other half of the same problem:
                 // the pixels cannot say whether the action missed or the window
                 // is not painting, and the model reading them cannot tell
@@ -666,7 +763,8 @@ public final class CommandRouter {
                 if let notice = Self.identicalCaptureNotice(
                     pid: pid,
                     base64: shot.base64,
-                    windowID: shot.windowID
+                    windowID: shot.windowID,
+                    liveStreamActive: shot.source.isLiveStream
                 ) {
                     Self.appendAXNotice(notice, to: &object)
                 }
@@ -700,6 +798,15 @@ public final class CommandRouter {
         }
 
         return .object(object)
+    }
+
+    /// A snapshot discarded by an internal key-window retry was never delivered
+    /// to the model, so it cannot become the baseline for a returned diff.
+    static func effectiveDisableDiff(
+        requested: Bool,
+        forceFullSnapshot: Bool
+    ) -> Bool {
+        requested || forceFullSnapshot
     }
 
     /// The inverse of `windowShot`'s image-pixel space: a window's global Quartz

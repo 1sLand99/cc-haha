@@ -51,4 +51,23 @@ final class DaemonOverlayTargetTests: XCTestCase {
             currentIdentity: { _ in nil }
         ))
     }
+
+    func testEveryOverlayStopAlsoInvalidatesTheLongLivedWindowStream() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/cu-helper/Daemon.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let body = try XCTUnwrap(
+            source.range(of: "private func stopOverlaySession()").flatMap { start in
+                source.range(
+                    of: "private func resolvedInjectionOverlayTarget",
+                    range: start.upperBound..<source.endIndex
+                ).map { end in String(source[start.lowerBound..<end.lowerBound]) }
+            }
+        )
+
+        XCTAssertTrue(body.contains("router.invalidateWindowCaptureStream()"))
+    }
 }

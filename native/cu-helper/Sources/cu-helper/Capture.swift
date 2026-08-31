@@ -38,6 +38,26 @@ import ImageIO
 import ScreenCaptureKit
 import UniformTypeIdentifiers
 
+enum WindowShotCaptureSource: Equatable, Sendable {
+    case stream
+    case screenshotManager
+    case screenCaptureCLI
+
+    var isLiveStream: Bool { self == .stream }
+}
+
+struct WindowShot: Sendable {
+    let base64: String
+    let width: Int
+    let height: Int
+    let originX: Double
+    let originY: Double
+    let pointWidth: Double
+    let pointHeight: Double
+    let windowID: CGWindowID
+    let source: WindowShotCaptureSource
+}
+
 @available(macOS 14.0, *)
 @MainActor
 public enum Capture {
@@ -431,14 +451,11 @@ public enum Capture {
     ///   (pixels-per-point) to invert image-pixel coordinates back into the
     ///   global-point space that clicks/cursor/glow all live in. `nil` on any
     ///   failure. Never throws; never prompts.
-    public static func windowShot(
+    static func windowShot(
         pid: pid_t,
         preferredWindowID: CGWindowID? = nil,
         scale: Double = 0.5
-    ) async -> (base64: String, width: Int, height: Int,
-                originX: Double, originY: Double,
-                pointWidth: Double, pointHeight: Double,
-                windowID: CGWindowID)? {
+    ) async -> WindowShot? {
         // Passive permission gate — no prompt on the hot path. A denied grant
         // means SCK would hand us a black frame, so bail to `nil` early and let
         // the caller fall back to AX-text-only.
@@ -461,9 +478,17 @@ public enum Capture {
             scale: outputScale
         ) {
             if let encoded = pngBase64WithSize(image) {
-                return (encoded.base64, encoded.width, encoded.height,
-                        Double(f.origin.x), Double(f.origin.y),
-                        Double(f.width), Double(f.height), target.windowID)
+                return WindowShot(
+                    base64: encoded.base64,
+                    width: encoded.width,
+                    height: encoded.height,
+                    originX: Double(f.origin.x),
+                    originY: Double(f.origin.y),
+                    pointWidth: Double(f.width),
+                    pointHeight: Double(f.height),
+                    windowID: target.windowID,
+                    source: .screenshotManager
+                )
             }
             // SCK produced pixels but PNG/base64 failed — degrade to `nil`
             // rather than re-capturing; the caller still gets AX text.
@@ -474,9 +499,17 @@ public enum Capture {
         if let raw = screencaptureWindow(windowID: target.windowID) {
             let scaled = (try? scaleImage(raw, scale: outputScale)) ?? raw
             if let encoded = pngBase64WithSize(scaled) {
-                return (encoded.base64, encoded.width, encoded.height,
-                        Double(f.origin.x), Double(f.origin.y),
-                        Double(f.width), Double(f.height), target.windowID)
+                return WindowShot(
+                    base64: encoded.base64,
+                    width: encoded.width,
+                    height: encoded.height,
+                    originX: Double(f.origin.x),
+                    originY: Double(f.origin.y),
+                    pointWidth: Double(f.width),
+                    pointHeight: Double(f.height),
+                    windowID: target.windowID,
+                    source: .screenCaptureCLI
+                )
             }
         }
 
@@ -487,7 +520,7 @@ public enum Capture {
 
     /// A capture candidate: the CoreGraphics window id plus its global Quartz
     /// frame (top-left origin) used to size the SCK output buffer.
-    private struct WindowCandidate {
+    struct WindowCandidate {
         let windowID: CGWindowID
         let frame: CGRect
     }
@@ -505,7 +538,7 @@ public enum Capture {
     /// helper discards the `windowID` (which SCK needs to match a specific
     /// `SCWindow`) and filters to layer-0 only. For a window-locked capture we
     /// want the owner's frontmost window regardless of layer, keyed by id.
-    private static func bestWindow(
+    static func bestWindow(
         forPid pid: pid_t,
         preferredWindowID: CGWindowID?
     ) -> WindowCandidate? {
@@ -739,7 +772,7 @@ public enum Capture {
     /// `get_app_state`'s MCP envelope uses `mimeType: "image/png"`, so unlike the
     /// JPEG `screenshot` path this is lossless PNG. Returns `nil` on any encode
     /// failure (never throws) so `windowShot` degrades to AX-text-only.
-    private static func pngBase64WithSize(
+    static func pngBase64WithSize(
         _ image: CGImage
     ) -> (base64: String, width: Int, height: Int)? {
         let data = NSMutableData()
@@ -759,7 +792,7 @@ public enum Capture {
     /// Backing scale factor (Retina = 2.0) for the screen hosting `frame`. Used
     /// to size the SCK output buffer in native pixels before the requested
     /// downscale. Falls back to the main screen, then 2.0.
-    private static func backingScaleFactor(forWindowFrame frame: CGRect) -> Double {
+    static func backingScaleFactor(forWindowFrame frame: CGRect) -> Double {
         if let screen = NSScreen.screens.first(where: { $0.frame.intersects(frame) }) {
             return Double(screen.backingScaleFactor)
         }

@@ -126,6 +126,36 @@ final class CommandRouterSafetyTests: XCTestCase {
         }
     }
 
+    func testSessionResetAlsoInvalidatesTheWindowCaptureProvider() {
+        let monitor = PhysicalInputEpochMonitor(counterReader: { _ in 0 })
+        let provider = WindowCaptureProviderSpy()
+        let router = CommandRouter(
+            cursor: VirtualCursor(headless: true),
+            capabilities: Capabilities(headless: true),
+            inputMonitor: monitor,
+            windowCaptureProvider: provider
+        )
+
+        router.resetSessionState()
+
+        XCTAssertEqual(provider.invalidateCount, 1)
+    }
+
+    func testDiscardedWindowSnapshotForcesTheRetryToReturnAFullTree() {
+        XCTAssertFalse(CommandRouter.effectiveDisableDiff(
+            requested: false,
+            forceFullSnapshot: false
+        ))
+        XCTAssertTrue(CommandRouter.effectiveDisableDiff(
+            requested: false,
+            forceFullSnapshot: true
+        ))
+        XCTAssertTrue(CommandRouter.effectiveDisableDiff(
+            requested: true,
+            forceFullSnapshot: false
+        ))
+    }
+
     func testCoordinateTransformNeverFallsBackAcrossApps() {
         CommandRouter.clearShotTransformsForTesting()
         CommandRouter.recordShotTransform(
@@ -374,5 +404,24 @@ final class CommandRouterSafetyTests: XCTestCase {
                 XCTAssertEqual(($0 as? CUError)?.code, "bad_payload")
             }
         }
+    }
+}
+
+@MainActor
+private final class WindowCaptureProviderSpy: WindowCaptureProviding {
+    private(set) var invalidateCount = 0
+
+    func windowShot(
+        pid: pid_t,
+        processIdentity: AXTreeProcessIdentity,
+        preferredWindowID: CGWindowID?,
+        scale: Double,
+        newerThanUptime: TimeInterval?
+    ) async -> WindowShot? {
+        nil
+    }
+
+    func invalidate() {
+        invalidateCount += 1
     }
 }
