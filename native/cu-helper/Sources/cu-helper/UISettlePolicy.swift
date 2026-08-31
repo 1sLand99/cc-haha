@@ -88,5 +88,7 @@ enum MutationClock {
         try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
     }
 
-    static func resetForTests() { lastMutationAt = nil }
+    static func reset() { lastMutationAt = nil }
+
+    static func resetForTests() { reset() }
 }

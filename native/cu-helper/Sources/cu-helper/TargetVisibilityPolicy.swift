@@ -33,10 +33,10 @@ enum TargetVisibilityPolicy {
             return """
             NOTE: Another application fully covers the target window. A \
             long-lived window stream remains subscribed while it is covered, \
-            and this screenshot comes from its latest complete frame rather \
-            than the visible desktop. Coverage does not block Accessibility \
-            actions or app- and window-targeted input; continue without \
-            activating or raising the target.
+            and this state uses a new on-demand window screenshot, not the \
+            stream's cached frame or the visible desktop. Keep using app- and \
+            window-targeted input without activating or raising the target. \
+            An action receipt alone does not prove the application responded.
             """
         }
         return """
@@ -59,13 +59,13 @@ enum TargetVisibilityPolicy {
             cause = windowIsCovered
                 ? """
                   The target is covered, but its long-lived window stream is \
-                  still active; the newest complete frame contains no visible \
-                  pixel change. Coverage does not block app- and window-targeted \
-                  input.
+                  still active, and a new on-demand screenshot contains no \
+                  visible pixel change. This does not establish whether the \
+                  app accepted the input or redrew its content.
                   """
                 : """
-                  The target window is not fully covered, and the newest \
-                  complete stream frame contains no visible pixel change.
+                  The target window is not fully covered, and the new \
+                  on-demand screenshot contains no visible pixel change.
                   """
         } else {
             cause = windowIsCovered

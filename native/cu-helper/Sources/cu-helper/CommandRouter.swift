@@ -103,6 +103,7 @@ public final class CommandRouter {
         AXTree.resetSessionSnapshots()
         Self.lastShotTransform.removeAll()
         Self.lastCaptureDigest.removeAll()
+        MutationClock.reset()
         windowCaptureProvider?.invalidate()
         // Apps we told they were focused must be told they are not, or the
         // belief outlives the session that needed it.
@@ -661,17 +662,17 @@ public final class CommandRouter {
             // frame. Costs nothing when no action is pending. The rendered tree
             // doubles as the busy signal — a progress indicator in it means the
             // app is still working, so we allow a longer window.
-            await MutationClock.awaitSettle(
+            let streamedShot = await Self.captureSettledWindowShot(
                 appIsBusy: result.axText.contains("progress indicator")
-            )
-
-            let streamedShot = await windowCaptureProvider?.windowShot(
-                pid: pid,
-                processIdentity: snapshotEvidence.processIdentity,
-                preferredWindowID: snapshotEvidence.keyWindowID,
-                scale: 0.5,
-                newerThanUptime: MutationClock.lastMutation()
-            )
+            ) {
+                await windowCaptureProvider?.windowShot(
+                    pid: pid,
+                    processIdentity: snapshotEvidence.processIdentity,
+                    preferredWindowID: snapshotEvidence.keyWindowID,
+                    scale: 0.5,
+                    newerThanUptime: MutationClock.lastMutation()
+                )
+            }
             guard TargetVisibilityPolicy.captureTargetStillMatches(
                 snapshotWindowID: snapshotEvidence.keyWindowID,
                 currentWindowID: AXTree.currentKeyWindowID(pid: pid)
@@ -777,6 +778,7 @@ public final class CommandRouter {
                     "pointWidth": .double(shot.pointWidth),
                     "pointHeight": .double(shot.pointHeight),
                     "windowID": .int(Int(shot.windowID)),
+                    "captureSource": .string(shot.source.rawValue),
                 ])
                 // Cache the inverse transform so a later coordinate click/scroll/
                 // drag (which arrives in image-pixel space) can be mapped back to
@@ -798,6 +800,16 @@ public final class CommandRouter {
         }
 
         return .object(object)
+    }
+
+    /// Keep the wait and the actual capture in one production boundary so an
+    /// action-to-screenshot regression can exercise both without live AX/TCC.
+    static func captureSettledWindowShot(
+        appIsBusy: Bool,
+        capture: () async -> WindowShot?
+    ) async -> WindowShot? {
+        await MutationClock.awaitSettle(appIsBusy: appIsBusy)
+        return await capture()
     }
 
     /// A snapshot discarded by an internal key-window retry was never delivered

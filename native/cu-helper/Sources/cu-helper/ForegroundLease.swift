@@ -396,6 +396,10 @@ enum ForegroundMutationRunner {
         lease: ForegroundLease,
         action: () async throws -> T
     ) async throws -> T {
+        // Every input path crosses this boundary, including synthetic events
+        // that never call AXAction.settle(). A throw can follow a partial
+        // delivery, so neither success nor failure may reuse pre-action pixels.
+        defer { MutationClock.recordMutation() }
         let result: Result<T, Error>
         do {
             result = .success(try await action())

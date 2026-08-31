@@ -812,8 +812,10 @@ public final class VirtualCursor {
     // MARK: - Headless disk persistence
 
     private static func runtimeDir() -> URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let dir = home.appendingPathComponent(".claude/.runtime", isDirectory: true)
+        let config = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"]
+            .flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
+            ?? (NSHomeDirectory() as NSString).appendingPathComponent(".claude")
+        let dir = URL(fileURLWithPath: config).appendingPathComponent(".runtime", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

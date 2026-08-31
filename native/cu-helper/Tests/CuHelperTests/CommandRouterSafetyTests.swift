@@ -141,6 +141,27 @@ final class CommandRouterSafetyTests: XCTestCase {
         XCTAssertEqual(provider.invalidateCount, 1)
     }
 
+    func testSessionResetClearsThePreviousMutationSettleDeadline() async throws {
+        let monitor = PhysicalInputEpochMonitor(counterReader: { _ in 0 })
+        let router = CommandRouter(
+            cursor: VirtualCursor(headless: true),
+            capabilities: Capabilities(headless: true),
+            inputMonitor: monitor
+        )
+        let process = try XCTUnwrap(ProvenProcessTarget(pid: 77, identity: processA))
+        let lease = try ForegroundLease.acquire(target: process, runtime: ForegroundLeaseRuntime(
+            inputSnapshot: { PhysicalInputEpochSnapshot(epoch: 0, available: true) },
+            frontmostTarget: { nil },
+            currentIdentity: { _ in self.processA },
+            activate: { _ in XCTFail("must not activate"); return false },
+            verifyFrontmost: { _ in XCTFail("must not activate"); return false }
+        ))
+        _ = try await ForegroundMutationRunner.run(lease: lease) { true }
+        XCTAssertNotNil(MutationClock.lastMutation())
+        router.resetSessionState()
+        XCTAssertNil(MutationClock.lastMutation())
+    }
+
     func testDiscardedWindowSnapshotForcesTheRetryToReturnAFullTree() {
         XCTAssertFalse(CommandRouter.effectiveDisableDiff(
             requested: false,

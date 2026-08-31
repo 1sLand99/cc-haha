@@ -160,8 +160,8 @@ final class TargetVisibilityPolicyTests: XCTestCase {
             liveStreamActive: true
         )
         XCTAssertTrue(notice.contains("long-lived window stream"))
-        XCTAssertTrue(notice.contains("latest complete frame"))
-        XCTAssertTrue(notice.contains("does not block"))
+        XCTAssertTrue(notice.contains("new on-demand window screenshot"))
+        XCTAssertTrue(notice.contains("does not prove the application responded"))
         XCTAssertFalse(notice.contains("may be stale"))
         XCTAssertFalse(notice.contains("paused its renderer"))
         XCTAssertFalse(notice.contains("refused"))
@@ -234,8 +234,8 @@ final class TargetVisibilityPolicyTests: XCTestCase {
             liveStreamActive: true
         )
         XCTAssertTrue(covered.contains("long-lived window stream"))
-        XCTAssertTrue(covered.contains("newest complete frame"))
-        XCTAssertTrue(covered.contains("does not block"))
+        XCTAssertTrue(covered.contains("new on-demand screenshot"))
+        XCTAssertTrue(covered.contains("does not establish whether"))
         XCTAssertTrue(covered.contains("no visible pixel change"))
         XCTAssertFalse(covered.contains("paused its renderer"))
     }

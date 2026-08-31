@@ -38,12 +38,13 @@ import ImageIO
 import ScreenCaptureKit
 import UniformTypeIdentifiers
 
-enum WindowShotCaptureSource: Equatable, Sendable {
+enum WindowShotCaptureSource: String, Equatable, Sendable {
     case stream
+    case streamBackedScreenshot
     case screenshotManager
     case screenCaptureCLI
 
-    var isLiveStream: Bool { self == .stream }
+    var isLiveStream: Bool { self == .stream || self == .streamBackedScreenshot }
 }
 
 struct WindowShot: Sendable {
@@ -454,7 +455,8 @@ public enum Capture {
     static func windowShot(
         pid: pid_t,
         preferredWindowID: CGWindowID? = nil,
-        scale: Double = 0.5
+        scale: Double = 0.5,
+        allowCLIFallback: Bool = true
     ) async -> WindowShot? {
         // Passive permission gate — no prompt on the hot path. A denied grant
         // means SCK would hand us a black frame, so bail to `nil` early and let
@@ -495,6 +497,7 @@ public enum Capture {
             return nil
         }
 
+        guard allowCLIFallback else { return nil }
         // ② Fallback: /usr/sbin/screencapture -l <windowID> (SCK hung or failed).
         if let raw = screencaptureWindow(windowID: target.windowID) {
             let scaled = (try? scaleImage(raw, scale: outputScale)) ?? raw
@@ -669,18 +672,14 @@ public enum Capture {
             // lock.
             let filter = SCContentFilter(desktopIndependentWindow: scWindow)
 
-            let config = SCStreamConfiguration()
             let backingScale = backingScaleFactor(forWindowFrame: frame)
             // Native window pixels = points × backing scale, then × requested
             // downscale. Clamp to >= 1 so a tiny window never yields a 0-dim
             // buffer.
-            config.width = max(1, Int((frame.width * backingScale * scale).rounded()))
-            config.height = max(1, Int((frame.height * backingScale * scale).rounded()))
-            config.showsCursor = false                  // never the REAL cursor
-            config.scalesToFit = true
-            config.pixelFormat = kCVPixelFormatType_32BGRA
-            config.colorSpaceName = CGColorSpace.sRGB
-            config.captureResolution = .best
+            let config = makeWindowShotConfiguration(
+                width: max(1, Int(ceil(frame.width * backingScale * scale))),
+                height: max(1, Int(ceil(frame.height * backingScale * scale)))
+            )
 
             return try await SCScreenshotManager.captureImage(
                 contentFilter: filter,
@@ -689,6 +688,31 @@ public enum Capture {
         } catch {
             return nil
         }
+    }
+
+    static func makeWindowShotConfiguration(width: Int, height: Int) -> SCStreamConfiguration {
+        let config = SCStreamConfiguration()
+        config.width = max(1, width)
+        config.height = max(1, height)
+        config.showsCursor = false
+        config.scalesToFit = true
+        config.preservesAspectRatio = true
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.colorSpaceName = CGColorSpace.sRGB
+        config.captureResolution = .best
+        // SCScreenshotManager includes this window's shadow by default. That
+        // shrinks/pads the image while our click transform still names the
+        // shadow-free window bounds, particularly after a cold background start.
+        config.ignoreShadowsSingleWindow = true
+        config.ignoreShadowsDisplay = true
+        if #available(macOS 14.2, *) {
+            // The sharing indicator can become an attached child above the
+            // window. Capturing that union shrinks/offsets the main content
+            // without changing SCWindow.frame or filter.contentRect, breaking
+            // screenshot-to-click coordinates. The target is this exact window.
+            config.includeChildWindows = false
+        }
+        return config
     }
 
     /// CLI fallback when SCK hangs/fails: `/usr/sbin/screencapture -l <windowID>

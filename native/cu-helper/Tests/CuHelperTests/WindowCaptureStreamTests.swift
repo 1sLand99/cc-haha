@@ -6,6 +6,144 @@ import XCTest
 
 @MainActor
 final class WindowCaptureStreamTests: XCTestCase {
+    func testOnDemandScreenshotUsesOnlyTheTargetWindowBounds() {
+        let config = Capture.makeWindowShotConfiguration(width: 1061, height: 752)
+        XCTAssertEqual(config.width, 1061)
+        XCTAssertEqual(config.height, 752)
+        XCTAssertTrue(config.ignoreShadowsSingleWindow)
+        XCTAssertTrue(config.ignoreShadowsDisplay)
+        if #available(macOS 14.2, *) {
+            XCTAssertFalse(config.includeChildWindows, "A sharing child must not expand the screenshot beyond its click transform")
+        }
+        XCTAssertTrue(config.scalesToFit)
+        XCTAssertTrue(config.preservesAspectRatio)
+        XCTAssertFalse(config.showsCursor)
+    }
+
+    func testEveryStateReadTakesANewSnapshotWhileReusingTheLongLivedStream() async throws {
+        let target = makeTarget(windowID: 84)
+        let factory = FakeWindowCaptureStreamFactory { _, _ in }
+        var captures = 0
+        let manager = WindowCaptureStreamManager(factory: factory, takeSnapshot: { target, _ in
+            captures += 1
+            return self.makeSnapshot(target, pixels: "read-\(captures)")
+        })
+        let first = await manager.captureSnapshot(for: target, scale: 0.5)
+        let second = await manager.captureSnapshot(for: target, scale: 0.5)
+        XCTAssertEqual(first?.base64, "read-1")
+        XCTAssertEqual(second?.base64, "read-2")
+        XCTAssertEqual(captures, 2)
+        XCTAssertEqual(factory.sources.count, 1)
+        XCTAssertEqual(factory.sources[0].startCount, 1)
+        XCTAssertEqual(factory.sources[0].latestReadCount, 0, "A cached stream frame must not become the model's screenshot")
+    }
+
+    func testSnapshotFailureDoesNotFallBackToCachedStreamPixels() async {
+        let target = makeTarget(windowID: 85)
+        let factory = FakeWindowCaptureStreamFactory { source, _ in
+            source.startFrame = makeFrame(for: source.targetKey, sequence: 1, uptime: 10, byte: 7)
+        }
+        let manager = WindowCaptureStreamManager(factory: factory, takeSnapshot: { _, _ in nil })
+        let shot = await manager.captureSnapshot(for: target, scale: 0.5)
+        XCTAssertNil(shot)
+        XCTAssertEqual(factory.sources[0].latestReadCount, 0)
+    }
+
+    func testSnapshotFinishingAfterSessionInvalidationIsDiscarded() async {
+        let target = makeTarget(windowID: 86)
+        let factory = FakeWindowCaptureStreamFactory { _, _ in }
+        var manager: WindowCaptureStreamManager!
+        manager = WindowCaptureStreamManager(factory: factory, takeSnapshot: { target, _ in
+            manager.invalidate()
+            return self.makeSnapshot(target, pixels: "late")
+        })
+        let shot = await manager.captureSnapshot(for: target, scale: 0.5)
+        XCTAssertNil(shot)
+        XCTAssertEqual(factory.sources[0].retireCount, 1)
+    }
+
+    private func makeSnapshot(_ target: WindowCaptureStreamTarget, pixels: String) -> WindowShot {
+        WindowShot(
+            base64: pixels, width: target.key.pixelWidth, height: target.key.pixelHeight,
+            originX: target.originX, originY: target.originY,
+            pointWidth: target.pointWidth, pointHeight: target.pointHeight,
+            windowID: target.key.windowID, source: .screenshotManager
+        )
+    }
+
+    func testEveryDispatchedMutationSettlesBeforeTheNextOnDemandSnapshot() async throws {
+        MutationClock.resetForTests()
+        defer { MutationClock.resetForTests() }
+        let target = makeTarget(windowID: 81)
+        let factory = FakeWindowCaptureStreamFactory { _, _ in }
+        var captures = 0
+        let manager = WindowCaptureStreamManager(factory: factory, takeSnapshot: { target, _ in
+            captures += 1
+            self.assertMutationHasSettledBeforeCapture()
+            return self.makeSnapshot(target, pixels: "unchanged-pixels")
+        })
+        var previousMutation: TimeInterval?
+        for expectedCaptureCount in 1...2 {
+            // Drive the real dispatcher; do not hand-write its timestamp.
+            _ = try await ForegroundMutationRunner.run(lease: makeBackgroundLease(target)) { true }
+            XCTAssertNotNil(MutationClock.lastMutation())
+            XCTAssertNotEqual(MutationClock.lastMutation(), previousMutation)
+            previousMutation = MutationClock.lastMutation()
+            let shot = await CommandRouter.captureSettledWindowShot(appIsBusy: false) {
+                await manager.captureSnapshot(for: target, scale: 0.5)
+            }
+            XCTAssertEqual(shot?.base64, "unchanged-pixels")
+            XCTAssertEqual(captures, expectedCaptureCount, "Identical pixels still require a new capture")
+        }
+        XCTAssertEqual(factory.sources.count, 1)
+        XCTAssertEqual(factory.sources[0].latestReadCount, 0)
+    }
+
+    func testPartiallyFailedDispatchAlsoSettlesBeforeTheOnDemandSnapshot() async throws {
+        MutationClock.resetForTests()
+        defer { MutationClock.resetForTests() }
+        let target = makeTarget(windowID: 83)
+        let factory = FakeWindowCaptureStreamFactory { _, _ in }
+        let manager = WindowCaptureStreamManager(factory: factory, takeSnapshot: { target, _ in
+            self.assertMutationHasSettledBeforeCapture()
+            return self.makeSnapshot(target, pixels: "partial-action-state")
+        })
+        do {
+            let _: Bool = try await ForegroundMutationRunner.run(lease: makeBackgroundLease(target)) {
+                throw CUError("partial_action", "An event may already have been delivered")
+            }
+            XCTFail("expected the original action failure")
+        } catch let error as CUError {
+            XCTAssertEqual(error.code, "partial_action")
+        }
+        XCTAssertNotNil(MutationClock.lastMutation())
+        let shot = await CommandRouter.captureSettledWindowShot(appIsBusy: false) {
+            await manager.captureSnapshot(for: target, scale: 0.5)
+        }
+        XCTAssertEqual(shot?.base64, "partial-action-state")
+        XCTAssertEqual(factory.sources[0].latestReadCount, 0)
+    }
+
+    private func assertMutationHasSettledBeforeCapture() {
+        XCTAssertNotNil(MutationClock.lastMutation())
+        XCTAssertEqual(UISettlePolicy.delay(
+            now: ProcessInfo.processInfo.systemUptime,
+            lastMutationAt: MutationClock.lastMutation(),
+            appIsBusy: false
+        ), 0, "The actual screenshot callback must run after the action's settle deadline")
+    }
+
+    private func makeBackgroundLease(_ target: WindowCaptureStreamTarget) throws -> ForegroundLease {
+        let process = try XCTUnwrap(ProvenProcessTarget(pid: target.key.pid, identity: target.key.processIdentity))
+        return try ForegroundLease.acquire(target: process, runtime: ForegroundLeaseRuntime(
+            inputSnapshot: { PhysicalInputEpochSnapshot(epoch: 0, available: true) },
+            frontmostTarget: { nil },
+            currentIdentity: { _ in target.key.processIdentity },
+            activate: { _ in XCTFail("must not take foreground"); return false },
+            verifyFrontmost: { _ in XCTFail("must not take foreground"); return false }
+        ))
+    }
+
     func testSameTargetReusesStreamAndReturnsNewestFrameAcrossCoveredAction() async {
         let factory = FakeWindowCaptureStreamFactory { source, _ in
             source.startFrame = makeFrame(for: source.targetKey, sequence: 1, uptime: 10, byte: 1)

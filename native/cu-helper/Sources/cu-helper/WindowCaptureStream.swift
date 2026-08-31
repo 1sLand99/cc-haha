@@ -94,6 +94,7 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
     private let factory: any WindowCaptureStreamSourceFactory
     private let frameWaitAttempts: Int
     private let frameWaitNanoseconds: UInt64
+    private let takeSnapshot: (WindowCaptureStreamTarget, Double) async -> WindowShot?
     private var generation: UInt64 = 0
     private var starting: Entry?
     private var active: Entry?
@@ -105,11 +106,20 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
     init(
         factory: any WindowCaptureStreamSourceFactory,
         frameWaitAttempts: Int = 12,
-        frameWaitNanoseconds: UInt64 = 50_000_000
+        frameWaitNanoseconds: UInt64 = 50_000_000,
+        takeSnapshot: @escaping (WindowCaptureStreamTarget, Double) async -> WindowShot? = { target, scale in
+            await Capture.windowShot(
+                pid: target.key.pid,
+                preferredWindowID: target.key.windowID,
+                scale: scale,
+                allowCLIFallback: false
+            )
+        }
     ) {
         self.factory = factory
         self.frameWaitAttempts = max(0, frameWaitAttempts)
         self.frameWaitNanoseconds = frameWaitNanoseconds
+        self.takeSnapshot = takeSnapshot
     }
 
     func windowShot(
@@ -139,10 +149,7 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
                 invalidate()
                 return nil
             }
-            guard let frame = await frame(
-                for: target,
-                newerThanUptime: newerThanUptime
-            ) else {
+            guard let shot = await captureSnapshot(for: target, scale: scale) else {
                 return nil
             }
             if let preferredWindowID,
@@ -170,7 +177,38 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
             guard current.key == target.key else {
                 continue
             }
-            return Capture.windowShot(from: frame, target: current)
+            return WindowShot(
+                base64: shot.base64, width: shot.width, height: shot.height,
+                originX: current.originX, originY: current.originY,
+                pointWidth: current.pointWidth, pointHeight: current.pointHeight,
+                windowID: current.key.windowID, source: .streamBackedScreenshot
+            )
+        }
+        return nil
+    }
+
+    /// Match the reference's two separate lifetimes: SCStream remains a
+    /// consumer while covered; every state read runs an on-demand Skyshot/SCK
+    /// capture. An idle stream's cached frame is not evidence of the current UI.
+    func captureSnapshot(for target: WindowCaptureStreamTarget, scale: Double) async -> WindowShot? {
+        for _ in 0..<2 {
+            guard let source = await source(for: target) else { continue }
+            if source.hasFailed {
+                retire(source: source)
+                continue
+            }
+            let snapshotGeneration = generation
+            guard let shot = await takeSnapshot(target, scale),
+                  snapshotGeneration == generation,
+                  active?.source === source,
+                  !source.hasFailed,
+                  shot.source == .screenshotManager,
+                  shot.windowID == target.key.windowID,
+                  shot.width == target.key.pixelWidth,
+                  shot.height == target.key.pixelHeight else {
+                return nil
+            }
+            return shot
         }
         return nil
     }

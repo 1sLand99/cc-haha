@@ -121,9 +121,10 @@ enum WindowTargetedEvent {
     }
 
     private static let runtimeDirectory: URL? = {
-        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
-        let dir = URL(fileURLWithPath: home)
-            .appendingPathComponent(".claude")
+        let config = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"]
+            .flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
+            ?? (NSHomeDirectory() as NSString).appendingPathComponent(".claude")
+        let dir = URL(fileURLWithPath: config)
             .appendingPathComponent(".runtime")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
