@@ -432,6 +432,78 @@ describe('MessageList nested tool calls', () => {
     expect(document.querySelector('img:not([src])')).toBeNull()
   })
 
+  it('preserves local Markdown image placement when a streamed reply becomes final', () => {
+    const firstChunk = [
+      '文字A',
+      '',
+      '![图A](01',
+    ].join('\n')
+    const secondChunk = [
+      '.png)',
+      '',
+      '文字B',
+      '',
+      '![图B](nested/02.png)',
+      '',
+      '文字C',
+      '',
+      '![图C](03.png)',
+      '',
+      '裸路径仍需兜底：outputs/fallback.png',
+      '',
+      '![remote](https://attacker.example/track.png)',
+      '',
+      '![loopback](http://127.0.0.1:3456/status.png)',
+    ].join('\n')
+
+    const { container } = render(<MessageList sessionId={ACTIVE_TAB} />)
+    const store = useChatStore.getState()
+
+    act(() => {
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_delta', text: firstChunk })
+    })
+
+    expect(container.querySelectorAll('img')).toHaveLength(0)
+
+    act(() => {
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_delta', text: secondChunk })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+    })
+
+    const assistant = container.querySelector('[data-message-shell="assistant"]')
+    const prose = assistant?.querySelector('.markdown-prose')
+    expect(prose).not.toBeNull()
+
+    const inlineImages = Array.from(prose!.querySelectorAll('img'))
+    expect(inlineImages.map((image) => image.getAttribute('alt'))).toEqual(['图A', '图B', '图C'])
+    expect(inlineImages.map((image) => image.getAttribute('src'))).toEqual([
+      'http://127.0.0.1:3456/preview-fs/active-tab/01.png',
+      'http://127.0.0.1:3456/preview-fs/active-tab/nested/02.png',
+      'http://127.0.0.1:3456/preview-fs/active-tab/03.png',
+    ])
+
+    const orderedNodes = [
+      screen.getByText('文字A'),
+      inlineImages[0]!,
+      screen.getByText('文字B'),
+      inlineImages[1]!,
+      screen.getByText('文字C'),
+      inlineImages[2]!,
+    ]
+    for (let index = 0; index < orderedNodes.length - 1; index += 1) {
+      expect(orderedNodes[index]!.compareDocumentPosition(orderedNodes[index + 1]!) & Node.DOCUMENT_POSITION_FOLLOWING)
+        .toBeTruthy()
+    }
+
+    const galleryImages = Array.from(assistant!.querySelectorAll('img')).filter((image) => !prose!.contains(image))
+    expect(galleryImages.map((image) => image.getAttribute('alt'))).toEqual(['fallback.png'])
+    expect(assistant!.querySelectorAll('img[alt="图A"]')).toHaveLength(1)
+    expect(assistant!.querySelectorAll('img[alt="图B"]')).toHaveLength(1)
+    expect(assistant!.querySelectorAll('img[alt="图C"]')).toHaveLength(1)
+    expect(assistant!.querySelector('img[alt="remote"], img[alt="loopback"]')).toBeNull()
+  })
+
   it('keeps fractional border-box jitter from invalidating a settled virtual row', async () => {
     const sessionId = 'virtual-row-measurement-jitter'
     const observers: Array<{
