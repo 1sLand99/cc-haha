@@ -17,6 +17,7 @@ import {
   resetMouseButtonHeld,
 } from './toolCalls.js'
 import { buildComputerUseTools } from './tools.js'
+import { COMPUTER_USE_INSTRUCTIONS } from './instructions.js'
 import { isSystemKeyCombo } from './keyBlocklist.js'
 import type {
   ComputerUseHostAdapter,
@@ -128,6 +129,7 @@ function makeEngine(
     drag: record('drag', async () => {}),
     pressKey: record('pressKey', async () => {}),
     typeText: record('typeText', async () => {}),
+    paste: record('paste', async () => {}),
     selectText: record('selectText', async () => {}),
   }
   return { engine, calls }
@@ -208,10 +210,10 @@ function imageBlocks(result: { content: unknown }): Array<{ data?: string; mimeT
 // Tool schema
 // ---------------------------------------------------------------------------
 
-describe('buildComputerUseTools — Codex 10-tool face', () => {
+describe('buildComputerUseTools — current Codex tool face', () => {
   const tools = buildComputerUseTools()
 
-  test('exposes exactly the ten Codex tools, verbatim names', () => {
+  test('exposes the current Codex tools, including explicit paste', () => {
     expect(tools.map(t => t.name).sort()).toEqual(
       [
         'click',
@@ -219,6 +221,7 @@ describe('buildComputerUseTools — Codex 10-tool face', () => {
         'get_app_state',
         'list_apps',
         'perform_secondary_action',
+        'paste',
         'press_key',
         'scroll',
         'select_text',
@@ -318,6 +321,7 @@ describe('buildComputerUseTools — Codex 10-tool face', () => {
       'drag',
       'press_key',
       'type_text',
+      'paste',
     ]) {
       const description = tools.find(t => t.name === name)!.description ?? ''
       expect(description).toContain('get_app_state')
@@ -433,7 +437,7 @@ describe('buildComputerUseTools — Codex 10-tool face', () => {
       'normalized_0_100',
       ['Finder', 'Slack'],
     )
-    expect(withArgs).toHaveLength(10)
+    expect(withArgs).toHaveLength(11)
   })
 })
 
@@ -1573,6 +1577,45 @@ describe('handleToolCall — tool dispatch', () => {
     const { engine, calls } = makeEngine()
     await handleToolCall(makeAdapter({ engine }), 'type_text', { app: 'Activity Monitor', text: 'Codex' }, baseOverrides())
     expect(calls.find(c => c.method === 'typeText')!.args).toMatchObject({ target: { pid: 1234 }, text: 'Codex' })
+  })
+
+  test('paste passes text and format as an explicit recovery action', async () => {
+    const { engine, calls } = makeEngine()
+    await handleToolCall(
+      makeAdapter({ engine }),
+      'paste',
+      { app: 'Activity Monitor', text: '喜欢你', format: 'text' },
+      baseOverrides(),
+    )
+    expect(calls.find(c => c.method === 'paste')!.args).toMatchObject({
+      target: { pid: 1234 },
+      text: '喜欢你',
+      format: 'text',
+    })
+  })
+
+  test('paste rejects missing text and unknown formats before target resolution', async () => {
+    for (const args of [
+      { app: 'Activity Monitor', format: 'text' },
+      { app: 'Activity Monitor', text: 'hello', format: 'rtf' },
+    ]) {
+      const { engine, calls } = makeEngine()
+      const result = await handleToolCall(
+        makeAdapter({ engine }),
+        'paste',
+        args,
+        baseOverrides(),
+      )
+      expect(result.isError).toBe(true)
+      expect(result.telemetry?.error_kind).toBe('bad_args')
+      expect(calls).toHaveLength(0)
+    }
+  })
+
+  test('server guidance treats AX diffs and timed-out paste as non-authoritative', () => {
+    expect(COMPUTER_USE_INSTRUCTIONS).toContain('An empty AX diff does')
+    expect(COMPUTER_USE_INSTRUCTIONS).toContain('paste({ app, text, format: "text" })')
+    expect(COMPUTER_USE_INSTRUCTIONS).toContain('treat the result as unknown')
   })
 
   test('select_text passes the opaque handle, context, and selection mode', async () => {

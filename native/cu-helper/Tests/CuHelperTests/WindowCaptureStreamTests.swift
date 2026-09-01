@@ -132,6 +132,35 @@ final class WindowCaptureStreamTests: XCTestCase {
         XCTAssertEqual(factory.sources[0].latestReadCount, 0, "A cached stream frame must not become the model's screenshot")
     }
 
+    func testPostMutationSnapshotConsumesFreshStreamWatermarkBeforeSkyshot() async throws {
+        let target = makeTarget(windowID: 87)
+        let factory = FakeWindowCaptureStreamFactory { source, _ in
+            source.startFrame = makeFrame(
+                for: source.targetKey,
+                sequence: 1,
+                uptime: 12,
+                byte: 7
+            )
+        }
+        var captures = 0
+        let manager = WindowCaptureStreamManager(factory: factory, takeSnapshot: { target, _ in
+            captures += 1
+            return self.makeSnapshot(target, pixels: "fresh-skyshot")
+        })
+
+        let shot = await manager.captureSnapshot(
+            for: target,
+            scale: 0.5,
+            newerThanUptime: 11
+        )
+
+        XCTAssertEqual(shot?.base64, "fresh-skyshot")
+        XCTAssertEqual(captures, 1)
+        XCTAssertEqual(factory.sources.count, 1)
+        XCTAssertGreaterThan(factory.sources[0].latestReadCount, 0)
+        XCTAssertEqual(factory.sources[0].retireCount, 0)
+    }
+
     func testSnapshotFailureDoesNotFallBackToCachedStreamPixels() async {
         let target = makeTarget(windowID: 85)
         let factory = FakeWindowCaptureStreamFactory { source, _ in
@@ -171,9 +200,10 @@ final class WindowCaptureStreamTests: XCTestCase {
         let target = makeTarget(windowID: 81)
         let factory = FakeWindowCaptureStreamFactory { _, _ in }
         var captures = 0
+        var captureTimes: [TimeInterval] = []
         let manager = WindowCaptureStreamManager(factory: factory, takeSnapshot: { target, _ in
             captures += 1
-            self.assertMutationHasSettledBeforeCapture()
+            captureTimes.append(ProcessInfo.processInfo.systemUptime)
             return self.makeSnapshot(target, pixels: "unchanged-pixels")
         })
         var previousMutation: TimeInterval?
@@ -183,11 +213,20 @@ final class WindowCaptureStreamTests: XCTestCase {
             XCTAssertNotNil(MutationClock.lastMutation())
             XCTAssertNotEqual(MutationClock.lastMutation(), previousMutation)
             previousMutation = MutationClock.lastMutation()
-            let shot = await CommandRouter.captureSettledWindowShot(appIsBusy: false) {
+            let pendingMutation = MutationClock.takeMutation()
+            let shot = await CommandRouter.captureSettledWindowShot(
+                appIsBusy: false,
+                lastMutationAt: pendingMutation
+            ) {
                 await manager.captureSnapshot(for: target, scale: 0.5)
             }
             XCTAssertEqual(shot?.base64, "unchanged-pixels")
             XCTAssertEqual(captures, expectedCaptureCount, "Identical pixels still require a new capture")
+            self.assertMutationHasSettledBeforeCapture(
+                pendingMutation,
+                capturedAt: captureTimes[expectedCaptureCount - 1]
+            )
+            XCTAssertNil(MutationClock.lastMutation(), "The settle marker is one-shot")
         }
         XCTAssertEqual(factory.sources.count, 1)
         XCTAssertEqual(factory.sources[0].latestReadCount, 0)
@@ -198,8 +237,9 @@ final class WindowCaptureStreamTests: XCTestCase {
         defer { MutationClock.resetForTests() }
         let target = makeTarget(windowID: 83)
         let factory = FakeWindowCaptureStreamFactory { _, _ in }
+        var capturedAt: TimeInterval?
         let manager = WindowCaptureStreamManager(factory: factory, takeSnapshot: { target, _ in
-            self.assertMutationHasSettledBeforeCapture()
+            capturedAt = ProcessInfo.processInfo.systemUptime
             return self.makeSnapshot(target, pixels: "partial-action-state")
         })
         do {
@@ -211,18 +251,29 @@ final class WindowCaptureStreamTests: XCTestCase {
             XCTAssertEqual(error.code, "partial_action")
         }
         XCTAssertNotNil(MutationClock.lastMutation())
-        let shot = await CommandRouter.captureSettledWindowShot(appIsBusy: false) {
+        let pendingMutation = MutationClock.takeMutation()
+        let shot = await CommandRouter.captureSettledWindowShot(
+            appIsBusy: false,
+            lastMutationAt: pendingMutation
+        ) {
             await manager.captureSnapshot(for: target, scale: 0.5)
         }
         XCTAssertEqual(shot?.base64, "partial-action-state")
+        self.assertMutationHasSettledBeforeCapture(
+            pendingMutation,
+            capturedAt: try XCTUnwrap(capturedAt)
+        )
         XCTAssertEqual(factory.sources[0].latestReadCount, 0)
     }
 
-    private func assertMutationHasSettledBeforeCapture() {
-        XCTAssertNotNil(MutationClock.lastMutation())
+    private func assertMutationHasSettledBeforeCapture(
+        _ mutationAt: TimeInterval?,
+        capturedAt: TimeInterval
+    ) {
+        XCTAssertNotNil(mutationAt)
         XCTAssertEqual(UISettlePolicy.delay(
-            now: ProcessInfo.processInfo.systemUptime,
-            lastMutationAt: MutationClock.lastMutation(),
+            now: capturedAt,
+            lastMutationAt: mutationAt,
             appIsBusy: false
         ), 0, "The actual screenshot callback must run after the action's settle deadline")
     }

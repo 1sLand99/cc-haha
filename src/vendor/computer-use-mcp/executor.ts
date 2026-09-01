@@ -206,7 +206,7 @@ export interface CodexComputerEngine {
    */
   pressKey(args: { target: AppTarget; key: string; systemKeyCombos: boolean }): Promise<void>
   /** Type literal text (append to focused value; Unicode keyboard fallback). */
-  typeText(args: { target: AppTarget; text: string }): Promise<void>
+  typeText(args: { target: AppTarget; text: string }): Promise<void>; paste(args: { target: AppTarget; text: string; format: 'text' | 'md' | 'html' }): Promise<void>
 }
 
 export interface InstalledApp {

@@ -57,6 +57,8 @@ BIN_PATH="$BUILD_DIR/$BUILD_CONFIG/cc-haha-computer-use"
 # Accessibility tolerates a bare binary (works), Screen Recording does NOT. So
 # the shipped/dragged artifact is the .app; the inner binary is what we spawn.
 APP_PATH="$BUILD_DIR/$BUILD_CONFIG/cc-haha-computer-use.app"
+# Reuse the desktop brand asset so both Privacy lists show the product logo.
+APP_ICON_PATH="$PKG_DIR/../../desktop/src-tauri/icons/icon.icns"
 # Records the (identity, identifier) actually used, so we can detect rotation
 # across rebuilds and warn that TCC grants will have been dropped.
 SIGN_STAMP="$BUILD_DIR/.cu-helper.signid"
@@ -407,6 +409,7 @@ verify() {
 #    makes the inner binary's TCC identity a proper app bundle.
 # ---------------------------------------------------------------------------
 wrap_app() {
+  [ -s "$APP_ICON_PATH" ] || die "App icon not found at $APP_ICON_PATH (needed for the Privacy lists)."
   log ""
   log "==> wrap .app bundle: $APP_PATH"
   rm -rf "$APP_PATH"
@@ -416,6 +419,7 @@ wrap_app() {
 
   [ -f "$PKG_DIR/Info.plist" ] || die "Info.plist not found at $PKG_DIR/Info.plist (needed for the .app bundle)."
   cp "$PKG_DIR/Info.plist" "$APP_PATH/Contents/Info.plist"
+  cp "$APP_ICON_PATH" "$APP_PATH/Contents/Resources/icon.icns"
 
   # SwiftPM resource bundle (LensSequence overlay), loaded via Bundle.module.
   # Standard .app location is Contents/Resources/ (Bundle.main.resourceURL). Do

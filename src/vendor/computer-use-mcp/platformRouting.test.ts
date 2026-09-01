@@ -19,6 +19,7 @@ const DARWIN_TOOL_NAMES = [
   'get_app_state',
   'list_apps',
   'perform_secondary_action',
+  'paste',
   'press_key',
   'scroll',
   'select_text',
@@ -288,7 +289,7 @@ function makeWindowsAdapter(calls: string[]): ComputerUseHostAdapter {
 }
 
 describe('Computer Use platform routing', () => {
-  test('darwin ListTools advertises exactly the ten semantic tools', async () => {
+  test('darwin ListTools advertises the current semantic tools', async () => {
     const connection = await connect(makeDarwinAdapter())
     try {
       const result = await connection.client.listTools()

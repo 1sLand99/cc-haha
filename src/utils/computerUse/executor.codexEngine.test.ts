@@ -264,6 +264,15 @@ describe('CLI executor Codex engine — daemon payload alignment', () => {
     expect(lastCall()).toEqual({ command: 'type_text', payload: { text: 'hello' } })
   })
 
+  itEngine('paste sends explicit content format', async () => {
+    const exec = await loadExecutor()
+    await exec.engine!.paste({ target: { app: 'NeteaseMusic' }, text: '喜欢你', format: 'text' })
+    expect(lastCall()).toEqual({
+      command: 'paste',
+      payload: { app: 'NeteaseMusic', text: '喜欢你', format: 'text' },
+    })
+  })
+
   itEngine('selectText sends text range parameters', async () => {
     const exec = await loadExecutor()
     await exec.engine!.selectText({

@@ -67,7 +67,9 @@ Mutating tools return a fixed receipt. The receipt means "the action was
 dispatched", NOT "it had the intended effect" — you must look at the next
 \`get_app_state\` to know.
 
-If two consecutive attempts leave the state unchanged, the approach is wrong.
+Judge success from the screenshot as well as the AX text. An empty AX diff does
+not mean a Chromium/CEF interface stayed unchanged. If two consecutive screenshots
+leave the relevant UI unchanged, the approach is wrong.
 Change something real: switch from element handle to coordinates, target a
 different element, re-read the full tree with \`disableDiff: true\`, or take a
 different route through the UI. Repeating the same call a third time never helps.
@@ -86,6 +88,10 @@ waste the user's time.
   element in the tree. Do not guess action names.
 - \`press_key\` and \`type_text\` are delivered to the named app, so they cannot
   trigger global system shortcuts.
+- If \`type_text\` does not visually change a Chromium/CEF field, use
+  \`paste({ app, text, format: "text" })\`; it restores the user's prior clipboard.
+  If paste times out after dispatch, treat the result as unknown and call
+  \`get_app_state\` before retrying, because the target may have consumed it late.
 - \`press_key\` uses xdotool key names: "a", "Return", "Tab", "Up", "super+c".
 - \`select_text\` works inside editable elements; use \`prefix\`/\`suffix\` to
   disambiguate repeated matches.

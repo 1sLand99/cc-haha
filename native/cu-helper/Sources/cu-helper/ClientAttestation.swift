@@ -30,9 +30,9 @@ enum HelperClientPolicy {
         // read-only authorization preflight used before the ten public tools.
         "list_apps", "resolve_app_target", "get_app_state", "click",
         "set_value", "select_text", "perform_secondary_action", "scroll",
-        "drag", "press_key", "type_text",
+        "drag", "press_key", "type_text", "paste",
         // Private lifecycle / visible-overlay / permission and input diagnostics.
-        "ping", "shutdown", "overlay_show", "overlay_hide",
+        "ping", "shutdown", "overlay_show", "overlay_hide", "turn_end",
         "check_permissions", "input_monitor_state", "focus_monitor_state", "held_input_state",
         "last_injection_state",
     ]

@@ -13,6 +13,7 @@ const MAC_COMPUTER_USE_TOOLS = [
   'drag',
   'press_key',
   'type_text',
+  'paste',
 ].map(name => `mcp__computer-use__${name}`)
 
 export function getComputerUseToolAllowlist(
@@ -71,9 +72,9 @@ Switch to \`x\`/\`y\` read off the screenshot when either is true:
 
 - **the tree is a dead end.** Many Chromium/Electron apps expose only their
   window frame and menu bar. \`get_app_state\` says so explicitly when it detects
-  this. That is not a slow-loading tree — it will never fill in. Only four tools
+  this. That is not a slow-loading tree — it will never fill in. Five tools
   still work there: \`click\` with x/y, \`drag\` with x/y, \`press_key\`, and
-  \`type_text\`. Everything else needs a handle it cannot get. The menu bar stays
+  \`type_text\`/\`paste\`. Everything else needs a handle it cannot get. The menu bar stays
   fully addressable, so a menu path is often the shortest route.
 - **element actions run but the UI does not change.**
 
@@ -84,11 +85,10 @@ them as-is; do not convert them.
 
 Mutating tools return a fixed receipt. The receipt means the action was
 **dispatched**, never that it had the intended effect. Only the next
-\`get_app_state\` tells you what actually happened — and an empty diff, or the
-line "There has been no change in the accessibility tree", means your action did
-nothing.
+\`get_app_state\` tells you what actually happened. Judge the screenshot as well
+as AX text: Chromium/CEF content can visibly change while the AX diff stays empty.
 
-If two consecutive attempts leave the state unchanged, the approach is wrong.
+If two consecutive screenshots leave the relevant UI unchanged, the approach is wrong.
 Change something real: switch from handle to coordinates, target a different
 element, re-read the full tree with \`disableDiff: true\`, or take a different
 route through the UI such as the menu bar. Repeating the same call a third time
@@ -109,6 +109,10 @@ session.
   element in the tree. Do not guess action names.
 - \`press_key\` and \`type_text\` are delivered to the named app, so they cannot
   trigger global system shortcuts.
+- If \`type_text\` does not visibly change a Chromium/CEF field, use
+  \`paste({ app, text, format: "text" })\`. It restores the user's prior clipboard.
+  If it times out after dispatch, call \`get_app_state\` before retrying: the app
+  may have consumed the paste late.
 - \`press_key\` uses xdotool key names: "a", "Return", "Tab", "Up", "super+c".
 - \`select_text\` works inside editable elements; use \`prefix\`/\`suffix\` to
   disambiguate repeated matches.

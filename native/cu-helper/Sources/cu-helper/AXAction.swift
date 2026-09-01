@@ -237,10 +237,18 @@ public final class ClipboardLease {
     }
 
     func writeTemporaryStringWithReceipt(_ text: String) throws -> ClipboardPasteReceipt {
+        try writeTemporaryContentWithReceipt(text, format: .text)
+    }
+
+    func writeTemporaryContentWithReceipt(
+        _ text: String,
+        format: ClipboardPasteFormat
+    ) throws -> ClipboardPasteReceipt {
         if let captureError { throw captureError }
-        let receipt = ClipboardPasteReceipt(text: text)
+        let receipt = ClipboardPasteReceipt(text: text, format: format)
         let item = NSPasteboardItem()
-        guard item.setDataProvider(receipt, forTypes: [.string]) else {
+        let types = Array(format.promisedData(for: text).keys)
+        guard item.setDataProvider(receipt, forTypes: types) else {
             throw CUError("clipboard_write_failed", "Could not register temporary pasteboard data")
         }
         pasteboard.clearContents()
@@ -926,13 +934,35 @@ public enum AXAction {
         try await typeViaClipboard(target: target, text)
     }
 
+    /// Explicit Codex-compatible paste path. Unlike `typeText`, this does not
+    /// first try AX value mutation or Unicode key events; it targets the app's
+    /// in-process focused field with Command-V and restores the user's original
+    /// pasteboard after observing a real promised-data read.
+    static func pasteText(
+        pid: pid_t,
+        _ text: String,
+        format: ClipboardPasteFormat
+    ) async throws {
+        guard !text.isEmpty else { return }
+        let target = try Injection.authorizeResolvedTarget(pid: pid)
+        try await typeViaClipboard(target: target, text, format: format)
+    }
+
     /// Paste `text` into whatever holds in-app keyboard focus in `pid`, via the
     /// system clipboard + ⌘V (Codex's approach for CEF/Chromium text fields).
     /// The read receipt confirms supplied clipboard bytes, not the reader's
     /// PID or the field's final value; the next screenshot still verifies UI.
-    private static func typeViaClipboard(target: ProvenProcessTarget, _ text: String) async throws {
+    private static func typeViaClipboard(
+        target: ProvenProcessTarget,
+        _ text: String,
+        format: ClipboardPasteFormat = .text
+    ) async throws {
         let pid = target.pid
-        try await ClipboardPasteReceipt.perform(text: text, lease: ClipboardLease()) { validate in
+        try await ClipboardPasteReceipt.perform(
+            text: text,
+            format: format,
+            lease: ClipboardLease()
+        ) { validate in
             try await pressKey(pid: pid, "super+v", validateBeforePosting: {
                 _ = try Injection.validateAuthorizedTarget(target)
                 try validate()
@@ -1609,10 +1639,11 @@ public enum AXAction {
         return CFEqual(lhs, rhs)
     }
 
-    /// Mark that a mutation just landed. Does NOT block: `get_app_state` reads
-    /// this stamp and waits out whatever settle time is still owed, so the cost
-    /// is paid once, and only when someone is actually about to look.
+    /// Settlement is recorded once at `ForegroundMutationRunner`, which covers
+    /// every input path and knows the target PID. AX-local success receipts must
+    /// not create a second, unscoped marker that can leak across apps.
     private static func settle() {
-        MutationClock.recordMutation()
+        // Intentionally empty; retained at the AX call sites as a semantic
+        // marker for successful mutations.
     }
 }

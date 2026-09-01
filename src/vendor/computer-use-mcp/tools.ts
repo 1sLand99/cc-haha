@@ -1,14 +1,14 @@
 /**
  * MCP tool schemas for the computer-use server — Codex-compatible semantic
- * face (blueprint §7). Exactly TEN tools, named verbatim after Codex's public
+ * face (blueprint §7). Eleven tools, named verbatim after Codex's public
  * computer-use MCP:
  *
  *   list_apps, get_app_state, click, perform_secondary_action, set_value,
- *   select_text, scroll, drag, press_key, type_text
+ *   select_text, scroll, drag, press_key, type_text, paste
  *
  * This replaces the prior 27-tool pixel face. The legacy `coordinateMode` /
  * `screenshotFiltering` parameters are accepted for call-site compatibility
- * but no longer influence the schema — the ten tool shapes are static.
+ * but no longer influence the schema — the tool shapes are static.
  *
  * Param names mirror Codex exactly (verified against iFurySt's reverse-
  * engineered ToolDefinitions.swift and the 2026-04-17 tool-call samples):
@@ -83,7 +83,7 @@ function coordinateProp(axis: "x" | "y", role: string) {
 }
 
 /**
- * Build the ten-tool Codex computer-use face.
+ * Build the Codex computer-use face.
  *
  * Signature is preserved from the legacy pixel builder so existing call sites
  * (`setup.ts`, host `mcpServer.ts`) keep compiling. All three parameters are
@@ -413,6 +413,35 @@ export function buildComputerUseTools(
           },
         },
         required: ["app", "text"],
+      },
+    },
+
+    {
+      name: "paste",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      description:
+        "Paste content into whatever currently has keyboard focus in the target " +
+        "app. Prefer this when type_text did not change a Chromium/CEF field, for " +
+        "Chinese text, formatted content, or multiline text. The user's previous " +
+        "clipboard is restored unless they copy something during the operation. " +
+        "A timeout after Command-V is result-unknown: call get_app_state before " +
+        "deciding whether to retry. Call get_app_state afterwards to see the result.",
+      inputSchema: {
+        type: "object" as const,
+        additionalProperties: false,
+        properties: {
+          app: APP_PROP,
+          text: {
+            type: "string",
+            description: "The content to paste.",
+          },
+          format: {
+            type: "string",
+            enum: ["text", "md", "html"],
+            description: "Pasteboard representation to use.",
+          },
+        },
+        required: ["app", "text", "format"],
       },
     },
   ];

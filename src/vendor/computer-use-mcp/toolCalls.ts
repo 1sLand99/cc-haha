@@ -6,7 +6,7 @@
  * commands):
  *
  *   list_apps, get_app_state, click, perform_secondary_action, set_value,
- *   select_text, scroll, drag, press_key, type_text
+ *   select_text, scroll, drag, press_key, type_text, paste
  *
  * ## Three properties this file exists to hold
  *
@@ -565,6 +565,7 @@ const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "drag",
   "press_key",
   "type_text",
+  "paste",
 ]);
 
 const KNOWN_TOOLS: ReadonlySet<string> = new Set([
@@ -796,6 +797,24 @@ function parseRequest(
         ...base,
         run: async (engine, t) => {
           await engine.typeText({ target: t, text });
+          return okText(MUTATION_RECEIPT);
+        },
+      };
+    }
+
+    case "paste": {
+      const text = args.text;
+      if (typeof text !== "string") {
+        throw new BadArgs('Missing required string "text"');
+      }
+      const format = requiredString(args, "format");
+      if (format !== "text" && format !== "md" && format !== "html") {
+        throw new BadArgs('paste format must be "text", "md", or "html"');
+      }
+      return {
+        ...base,
+        run: async (engine, t) => {
+          await engine.paste({ target: t, text, format });
           return okText(MUTATION_RECEIPT);
         },
       };

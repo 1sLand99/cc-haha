@@ -9,7 +9,7 @@ import {
 
 /**
  * Asserting on prose is unusual, but this prose is load-bearing twice over: it
- * is the only thing that carries the operating procedure the ten tools assume,
+ * is the only thing that carries the operating procedure the tool set assumes,
  * and it is the only place that says which clicks must not be made without
  * asking. Each test names the failure it prevents so anyone trimming a line can
  * see what it was buying.
@@ -24,20 +24,27 @@ describe('computer-use skill content', () => {
     // success, and reported the task done while the app had not changed.
     const prompt = await computerUsePrompt()
     expect(prompt).toContain('dispatched')
-    expect(prompt).toContain('no change in the accessibility tree')
+    expect(prompt).toContain('AX diff stays empty')
+    expect(prompt).toContain('Judge the screenshot')
   })
 
-  test('names the four tools that still work on a dead tree', async () => {
+  test('names the tools that still work on a dead tree', async () => {
     // Observed: on a Chromium app whose tree is a bare shell, the model clicked
     // element handles fifteen times and never tried the screenshot coordinates
     // it already had. "The tree is empty" alone is not actionable — the escape
     // hatch has to be enumerated.
     const prompt = await computerUsePrompt()
     expect(prompt).toContain('will never fill in')
-    for (const tool of ['click', 'drag', 'press_key', 'type_text']) {
+    for (const tool of ['click', 'drag', 'press_key', 'type_text', 'paste']) {
       expect(prompt).toContain(tool)
     }
     expect(prompt).toContain('menu bar')
+  })
+
+  test('treats a timed-out paste as result-unknown and refreshes before retry', async () => {
+    const prompt = await computerUsePrompt()
+    expect(prompt).toContain('may have consumed the paste late')
+    expect(prompt).toContain('get_app_state')
   })
 
   test('caps repetition and closes the shell escape hatch', async () => {

@@ -1,7 +1,9 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
+import { getSessionId } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
 import { ensureInstalledHelper } from './cuHelperInstall.js'
 import { attestDaemonSocketPeer } from './cuHelperPeerAttestation.js'
@@ -13,10 +15,10 @@ import { getRuntimePaths } from './pythonBridge.js'
  * The daemon owns the main run loop that the animated virtual cursor and the
  * animated virtual cursor needs, and holds the virtual cursor's position +
  * held-input state across commands. We spawn ONE daemon per CLI process, keep
- * an AF_UNIX socket open to it, and speak the NDJSON request/response protocol:
+ * an AF_UNIX socket open to it, and speak a versioned NDJSON protocol:
  *
- *   readiness : {"ready":true,"pid":N,"proto":1}\n     (the daemon's stdout, once)
- *   request   : {"id":"<n>","cmd":"<verb>","payload":{...}}\n
+ *   readiness : {"ready":true,"pid":N,"protocolVersion":"..."}\n
+ *   request   : {"id":"<n>","requestId":"<n>","cmd":"<verb>",...}\n
  *   response  : {"id":"<n>","ok":true,"result":...}\n | {"id":"<n>","ok":false,"error":{...}}\n
  *
  * Routing through the daemon (instead of one-shot CLI) is what makes execution
@@ -31,6 +33,7 @@ import { getRuntimePaths } from './pythonBridge.js'
 
 const REQUEST_TIMEOUT_MS = 20_000
 const READINESS_TIMEOUT_MS = 8_000
+export const CU_HELPER_PROTOCOL_VERSION = 'CCHahaComputerUseIPC-2'
 
 /**
  * Thrown ONLY for daemon INFRASTRUCTURE failures known to happen before the
@@ -107,6 +110,7 @@ let overlayActualKey: string | undefined
 let overlayRevision = 0
 let overlayReconcilePromise: Promise<void> | undefined
 let requestTimeoutMs = REQUEST_TIMEOUT_MS
+let activeTurnId: string | undefined
 
 function socketPath(generation: number): string {
   const { runtimeStateRoot } = getRuntimePaths()
@@ -379,6 +383,7 @@ function resetState(reason: string, expectedGeneration?: number): void {
   overlayActualVisible = false
   overlayActualKey = undefined
   overlayRevision++
+  activeTurnId = undefined
   const p = statePromise
   statePromise = undefined
   activeDaemonGeneration = undefined
@@ -513,6 +518,8 @@ async function startDaemon(generation: number): Promise<DaemonState> {
 
   attachSocketHandlers(state)
 
+  await negotiateDaemonProtocol(state)
+
   return state
 }
 
@@ -540,6 +547,31 @@ function attachSocketHandlers(state: DaemonState): void {
   // which is the `open` launcher and exits right after handing off.
   state.socket.on('close', () => resetState('socket closed', state.generation))
   state.socket.on('error', err => resetState(`socket error: ${String(err)}`, state.generation))
+}
+
+async function negotiateDaemonProtocol(state: DaemonState): Promise<void> {
+  // Socket ownership + code-signature attestation identify the peer. The
+  // versioned hello additionally proves that the installed helper understands
+  // deadlines and explicit turn cleanup before we dispatch any real command.
+  try {
+    const hello = await dispatchDaemonCommand<{
+      protocolVersion?: string
+      supportsAbsoluteDeadlines?: boolean
+      supportsTurnEnd?: boolean
+    }>(state, 'ping', {})
+    if (
+      hello.protocolVersion !== CU_HELPER_PROTOCOL_VERSION
+      || hello.supportsAbsoluteDeadlines !== true
+      || hello.supportsTurnEnd !== true
+    ) {
+      throw new Error(`unexpected hello ${JSON.stringify(hello)}`)
+    }
+  } catch (err) {
+    state.socket.destroy()
+    throw new DaemonUnavailableError(
+      `cu-helper protocol negotiation failed: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
 }
 
 async function ensureDaemon(): Promise<DaemonState> {
@@ -573,6 +605,19 @@ function dispatchDaemonCommand<T>(
     ))
   }
   const id = String(++state.nextId)
+  const isTurnScoped = !['ping', 'check_permissions', 'shutdown'].includes(command)
+  const turnId = activeTurnId
+    ?? (isTurnScoped ? (activeTurnId = randomUUID()) : `connection-${state.generation}`)
+  const request = {
+    id,
+    requestId: id,
+    cmd: command,
+    payload,
+    clientApiVersion: CU_HELPER_PROTOCOL_VERSION,
+    deadlineUnixMilliseconds: Date.now() + requestTimeoutMs,
+    sessionId: getSessionId(),
+    turnId,
+  }
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       state.pending.delete(id)
@@ -588,7 +633,7 @@ function dispatchDaemonCommand<T>(
     }, requestTimeoutMs)
     state.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
     try {
-      state.socket.write(`${JSON.stringify({ id, cmd: command, payload })}\n`)
+      state.socket.write(`${JSON.stringify(request)}\n`)
     } catch (err) {
       clearTimeout(timer)
       state.pending.delete(id)
@@ -596,6 +641,10 @@ function dispatchDaemonCommand<T>(
       // this request alone is safe to classify as replayable infrastructure.
       reject(new DaemonUnavailableError(err instanceof Error ? err.message : String(err)))
       resetState(`socket write failed: ${String(err)}`, state.generation)
+    }
+  }).finally(() => {
+    if ((command === 'turn_end' || command === 'overlay_hide') && activeTurnId === turnId) {
+      activeTurnId = undefined
     }
   })
 }
@@ -627,7 +676,10 @@ async function callExistingDaemon<T>(
 }
 
 function needsOverlayReconciliation(): boolean {
-  if (!overlayDesiredVisible) return overlayActualVisible
+  // A turn may contain only get_app_state and therefore never show the overlay.
+  // Its native state (capture stream, AX baseline, held-input guard and display
+  // sleep assertion) still needs an explicit turn_end at host cleanup.
+  if (!overlayDesiredVisible) return overlayActualVisible || activeTurnId !== undefined
   return !overlayActualVisible || overlayActualKey !== overlayDesiredKey
 }
 
@@ -662,16 +714,21 @@ async function reconcileOverlay(): Promise<void> {
 
     // A turn-end cleanup must never launch a daemon just to hide it. When a
     // pending show completes this branch sees the already-owned daemon and
-    // serially sends the compensating hide.
+    // serially ends the turn. This also covers read-only turns whose overlay
+    // was never visible.
     if (!statePromise || activeDaemonGeneration === undefined) {
       overlayActualVisible = false
       overlayActualKey = undefined
       return
     }
     try {
-      await callExistingDaemon('overlay_hide', {})
+      await callExistingDaemon('turn_end', {})
     } catch (err) {
-      logForDebugging(`cu-helper overlay_hide failed: ${String(err)}`, { level: 'debug' })
+      logForDebugging(`cu-helper turn_end failed: ${String(err)}`, { level: 'debug' })
+      // If the helper rejected/lost turn_end it may still own the old turn.
+      // Retire it now so the next user turn cannot inherit stale native state
+      // or fail forever with turn_mismatch.
+      resetState('turn_end failed')
     }
     overlayActualVisible = false
     overlayActualKey = undefined
@@ -740,6 +797,7 @@ export function __resetDaemonClientForTests(): void {
   overlayReconcilePromise = undefined
   daemonStartCount = 0
   requestTimeoutMs = REQUEST_TIMEOUT_MS
+  activeTurnId = undefined
 }
 
 /** Focused proof that a no-daemon cleanup did not enter the startup path. */
@@ -774,4 +832,9 @@ export function __setDaemonSocketForTests(
   }
   attachSocketHandlers(state)
   statePromise = Promise.resolve(state)
+}
+
+/** Drive the same hello negotiation used by production against an installed test socket. */
+export async function __negotiateDaemonProtocolForTests(): Promise<void> {
+  await negotiateDaemonProtocol(await ensureDaemon())
 }

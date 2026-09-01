@@ -439,11 +439,30 @@ public struct Request: Decodable, Sendable {
     public let id: String?
     public let cmd: String
     public let payload: JSONValue?
+    public let clientApiVersion: String?
+    public let deadlineUnixMilliseconds: Int64?
+    public let sessionId: String?
+    public let turnId: String?
+    public let requestId: String?
 
-    public init(id: String?, cmd: String, payload: JSONValue?) {
+    public init(
+        id: String?,
+        cmd: String,
+        payload: JSONValue?,
+        clientApiVersion: String? = nil,
+        deadlineUnixMilliseconds: Int64? = nil,
+        sessionId: String? = nil,
+        turnId: String? = nil,
+        requestId: String? = nil
+    ) {
         self.id = id
         self.cmd = cmd
         self.payload = payload
+        self.clientApiVersion = clientApiVersion
+        self.deadlineUnixMilliseconds = deadlineUnixMilliseconds
+        self.sessionId = sessionId
+        self.turnId = turnId
+        self.requestId = requestId
     }
 
     /// The payload, defaulting to an empty object when omitted/null — every

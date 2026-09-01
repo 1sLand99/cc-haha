@@ -14,18 +14,19 @@ import Foundation
 /// which it no longer does. Instead the wait happens once, at the moment of
 /// capture, and only if an action happened recently enough to still be settling.
 ///
-/// This mirrors Codex's `needsUISettleBeforeSkyshot`: wait about a second after
-/// a recent action, and extend that when the app is visibly still working.
+/// This mirrors Codex's one-shot `needsUISettleBeforeSkyshot`: the next capture
+/// for that target waits about 250ms after a recent action. A different app and
+/// later captures do not inherit the wait.
 ///
 /// Pure and clock-injected so the decision is testable without sleeping.
 enum UISettlePolicy {
     /// How long after a mutation the UI is presumed to still be settling.
-    static let postActionWindow: TimeInterval = 1.0
+    static let postActionWindow: TimeInterval = 0.25
 
-    /// Ceiling while the app still shows a busy/progress indicator. Generous
-    /// because "still loading" is a real signal, but bounded so a permanently
-    /// spinning indicator (some apps never stop one) cannot hang the capture.
-    static let busyWindow: TimeInterval = 5.0
+    /// Kept as a named compatibility seam for callers that already compute a
+    /// busy signal. Codex does not turn that signal into a multi-second sleep;
+    /// freshness comes from subsequent on-demand captures instead.
+    static let busyWindow: TimeInterval = postActionWindow
 
     /// Never wait less than this once we've decided to wait at all — a delay
     /// too short to cover a frame boundary is just latency for nothing.
@@ -57,28 +58,52 @@ enum UISettlePolicy {
     }
 }
 
-/// Records when the last mutating action completed, so the capture path can ask
-/// "was something just changed?" without the action path having to block.
+/// Records one pending capture settle per target process, so an action in one
+/// app cannot delay a screenshot of another app.
 ///
 /// `@MainActor` because every mutation already runs there; this keeps the state
 /// single-threaded without a lock.
 @MainActor
 enum MutationClock {
-    private static var lastMutationAt: TimeInterval?
+    private static var pendingByPID: [pid_t: TimeInterval] = [:]
+    private static var unscopedMutationAt: TimeInterval?
 
     /// Called by the action path after a mutation lands. Does not sleep.
-    static func recordMutation(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        lastMutationAt = time
+    static func recordMutation(
+        pid: pid_t? = nil,
+        at time: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        if let pid {
+            pendingByPID[pid] = time
+        } else {
+            unscopedMutationAt = time
+        }
     }
 
-    static func lastMutation() -> TimeInterval? { lastMutationAt }
+    static func lastMutation(pid: pid_t? = nil) -> TimeInterval? {
+        guard let pid else { return unscopedMutationAt }
+        return pendingByPID[pid]
+    }
+
+    /// Consume the one-shot marker before waiting. Another capture cannot pay
+    /// the same action's settle cost a second time.
+    static func takeMutation(pid: pid_t? = nil) -> TimeInterval? {
+        guard let pid else {
+            defer { unscopedMutationAt = nil }
+            return unscopedMutationAt
+        }
+        return pendingByPID.removeValue(forKey: pid)
+    }
 
     /// Wait out whatever settle time the last mutation still owes.
     ///
     /// Uses `Task.sleep`, not `Thread.sleep`: this runs on the main actor, where
     /// blocking would starve the overlay's display link and freeze the virtual
     /// cursor animation mid-glide.
-    static func awaitSettle(appIsBusy: Bool) async {
+    static func awaitSettle(
+        lastMutationAt: TimeInterval?,
+        appIsBusy: Bool
+    ) async {
         let delay = UISettlePolicy.delay(
             now: ProcessInfo.processInfo.systemUptime,
             lastMutationAt: lastMutationAt,
@@ -88,7 +113,10 @@ enum MutationClock {
         try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
     }
 
-    static func reset() { lastMutationAt = nil }
+    static func reset() {
+        pendingByPID.removeAll()
+        unscopedMutationAt = nil
+    }
 
     static func resetForTests() { reset() }
 }

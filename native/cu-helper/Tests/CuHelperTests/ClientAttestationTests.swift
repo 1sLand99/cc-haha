@@ -365,8 +365,8 @@ struct ClientAttestationTests {
         let allowed = [
             "list_apps", "resolve_app_target", "get_app_state", "click",
             "set_value", "select_text", "perform_secondary_action", "scroll",
-            "drag", "press_key", "type_text", "ping", "shutdown",
-            "overlay_show", "overlay_hide", "check_permissions",
+            "drag", "press_key", "type_text", "paste", "ping", "shutdown",
+            "overlay_show", "overlay_hide", "turn_end", "check_permissions",
             "input_monitor_state", "held_input_state",
         ]
         for command in allowed {

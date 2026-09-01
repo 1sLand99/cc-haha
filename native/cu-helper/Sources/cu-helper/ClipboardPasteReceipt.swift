@@ -2,6 +2,32 @@ import AppKit
 import Foundation
 import os
 
+enum ClipboardPasteFormat: String, Sendable {
+    case text
+    case md
+    case html
+
+    func promisedData(for text: String) -> [NSPasteboard.PasteboardType: Data] {
+        switch self {
+        case .text, .md:
+            return [.string: Data(text.utf8)]
+        case .html:
+            let html = Data(text.utf8)
+            let plain = (
+                try? NSAttributedString(
+                    data: html,
+                    options: [
+                        .documentType: NSAttributedString.DocumentType.html,
+                        .characterEncoding: String.Encoding.utf8.rawValue,
+                    ],
+                    documentAttributes: nil
+                ).string
+            ) ?? text
+            return [.html: html, .string: Data(plain.utf8)]
+        }
+    }
+}
+
 /// Confirms that this pasteboard item's promised bytes were requested and
 /// supplied. AppKit does not identify the reader: this is not proof that the
 /// intended application's focused field accepted the text.
@@ -25,16 +51,26 @@ final class ClipboardPasteReceipt: NSObject, NSPasteboardItemDataProvider, @unch
     }
 
     @MainActor private(set) static var lastDiagnostic: Diagnostic?
-    private let data: Data
+    private let promisedData: [NSPasteboard.PasteboardType: Data]
     private let state = OSAllocatedUnfairLock(initialState: State())
 
     init(text: String) {
-        data = Data(text.utf8)
+        promisedData = ClipboardPasteFormat.text.promisedData(for: text)
         super.init()
     }
 
+    init(text: String, format: ClipboardPasteFormat) {
+        promisedData = format.promisedData(for: text)
+        super.init()
+    }
+
+    @MainActor
+    static func resetForTurn() {
+        lastDiagnostic = nil
+    }
+
     func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
-        guard type == .string else { return }
+        guard let data = promisedData[type] else { return }
         state.withLock { $0.requested = true }
         guard item.setData(data, forType: type) else { return }
         state.withLock { value in
@@ -50,6 +86,7 @@ final class ClipboardPasteReceipt: NSObject, NSPasteboardItemDataProvider, @unch
     @MainActor
     static func perform(
         text: String,
+        format: ClipboardPasteFormat = .text,
         lease: ClipboardLease,
         timeout: Duration = .seconds(2),
         sendPaste: @MainActor (_ validateBeforePosting: @MainActor () throws -> Void) async throws -> Void
@@ -79,7 +116,7 @@ final class ClipboardPasteReceipt: NSObject, NSPasteboardItemDataProvider, @unch
         }
         do {
             try Task.checkCancellation()
-            let written = try lease.writeTemporaryStringWithReceipt(text)
+            let written = try lease.writeTemporaryContentWithReceipt(text, format: format)
             receipt = written
             try await Task.sleep(for: .milliseconds(40))
             let validate: @MainActor () throws -> Void = {

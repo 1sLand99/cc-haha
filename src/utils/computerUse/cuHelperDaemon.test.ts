@@ -7,8 +7,10 @@ import {
   __prepareDaemonSocketDirectoryForTests,
   __resetDaemonClientForTests,
   __daemonStartCountForTests,
+  __negotiateDaemonProtocolForTests,
   __reapStaleDaemonsForTests,
   __setDaemonSocketForTests,
+  CU_HELPER_PROTOCOL_VERSION,
   callDaemon,
   DaemonCommandTimeoutError,
   DaemonCommandResultUnknownError,
@@ -185,6 +187,76 @@ describe('cu-helper daemon failure classification', () => {
     expect(error.message).toBe('grant_flag_required')
   })
 
+  test('every request carries negotiated protocol, deadline, and stable turn identity', async () => {
+    const socket = new FakeSocket()
+    __setDaemonSocketForTests(socket as never, 100)
+
+    const first = callDaemon('get_app_state', { app: 'TextEdit' })
+    await waitForWriteCount(socket, 1)
+    const firstEnvelope = JSON.parse(socket.writes[0]!)
+    const firstTurnId = firstEnvelope.turnId
+    expect(firstEnvelope).toMatchObject({
+      clientApiVersion: CU_HELPER_PROTOCOL_VERSION,
+      requestId: firstEnvelope.id,
+      sessionId: expect.any(String),
+      turnId: expect.any(String),
+    })
+    expect(firstEnvelope.deadlineUnixMilliseconds).toBeGreaterThan(Date.now())
+    reply(socket, 0, { ok: true, result: {} })
+    await first
+
+    const second = callDaemon('click', { app: 'TextEdit', x: 1, y: 1 })
+    await waitForWriteCount(socket, 2)
+    const secondEnvelope = JSON.parse(socket.writes[1]!)
+    expect(secondEnvelope.turnId).toBe(firstTurnId)
+    reply(socket, 1, { ok: true, result: true })
+    await second
+  })
+
+  test('accepts only a daemon hello with the complete negotiated capability set', async () => {
+    const socket = new FakeSocket()
+    __setDaemonSocketForTests(socket as never, 100)
+
+    const negotiation = __negotiateDaemonProtocolForTests()
+    await waitForWrite(socket)
+    expect(JSON.parse(socket.writes[0]!)).toMatchObject({
+      cmd: 'ping',
+      clientApiVersion: CU_HELPER_PROTOCOL_VERSION,
+    })
+    reply(socket, 0, {
+      ok: true,
+      result: {
+        protocolVersion: CU_HELPER_PROTOCOL_VERSION,
+        supportsAbsoluteDeadlines: true,
+        supportsTurnEnd: true,
+      },
+    })
+
+    await expect(negotiation).resolves.toBeUndefined()
+    expect(socket.destroyed).toBe(false)
+  })
+
+  test('rejects and retires a daemon that reports an incomplete hello', async () => {
+    const socket = new FakeSocket()
+    __setDaemonSocketForTests(socket as never, 100)
+
+    const negotiation = __negotiateDaemonProtocolForTests().catch(err => err)
+    await waitForWrite(socket)
+    reply(socket, 0, {
+      ok: true,
+      result: {
+        protocolVersion: CU_HELPER_PROTOCOL_VERSION,
+        supportsAbsoluteDeadlines: true,
+        supportsTurnEnd: false,
+      },
+    })
+
+    const error = await negotiation
+    expect(error).toBeInstanceOf(DaemonUnavailableError)
+    expect(error.message).toMatch(/protocol negotiation failed.*unexpected hello/i)
+    expect(socket.destroyed).toBe(true)
+  })
+
   test('post-dispatch timeout is ambiguous and must not be classified as replayable infrastructure', async () => {
     const socket = new FakeSocket()
     __setDaemonSocketForTests(socket as never, 5)
@@ -279,13 +351,20 @@ describe('cu-helper overlay reconciliation', () => {
     reply(socket, 0, { ok: true, result: true })
     await waitForWriteCount(socket, 2)
     expect(JSON.parse(socket.writes[1]!)).toMatchObject({
-      cmd: 'overlay_hide',
+      cmd: 'turn_end',
       payload: {},
     })
     reply(socket, 1, { ok: true, result: true })
 
     await Promise.all([show, hide])
     expect(isOverlayShown()).toBe(false)
+
+    const next = callDaemon('get_app_state', { app: 'TextEdit' })
+    await waitForWriteCount(socket, 3)
+    expect(JSON.parse(socket.writes[2]!).turnId)
+      .not.toBe(JSON.parse(socket.writes[0]!).turnId)
+    reply(socket, 2, { ok: true, result: {} })
+    await next
   })
 
   test('a target change while show is pending serially retargets to the latest app', async () => {
@@ -318,8 +397,66 @@ describe('cu-helper overlay reconciliation', () => {
     await show
 
     expect(isOverlayShown()).toBe(false)
+    const hide = overlayHide()
+    await waitForWriteCount(socket, 2)
+    expect(JSON.parse(socket.writes[1]!)).toMatchObject({ cmd: 'turn_end' })
+    reply(socket, 1, { ok: true, result: true })
+    await hide
+  })
+
+  test('cleanup ends a read-only turn even when no overlay was shown', async () => {
+    const socket = new FakeSocket()
+    __setDaemonSocketForTests(socket as never)
+
+    const state = callDaemon('get_app_state', { app: 'TextEdit' })
+    await waitForWriteCount(socket, 1)
+    const stateEnvelope = JSON.parse(socket.writes[0]!)
+    reply(socket, 0, { ok: true, result: {} })
+    await state
+
+    const hide = overlayHide()
+    await waitForWriteCount(socket, 2)
+    const endEnvelope = JSON.parse(socket.writes[1]!)
+    expect(endEnvelope).toMatchObject({ cmd: 'turn_end', turnId: stateEnvelope.turnId })
+    reply(socket, 1, { ok: true, result: true })
+    await hide
+
+    const next = callDaemon('get_app_state', { app: 'TextEdit' })
+    await waitForWriteCount(socket, 3)
+    expect(JSON.parse(socket.writes[2]!).turnId).not.toBe(stateEnvelope.turnId)
+    reply(socket, 2, { ok: true, result: {} })
+    await next
+  })
+
+  test('connection-scoped permission checks do not manufacture a turn to clean up', async () => {
+    const socket = new FakeSocket()
+    __setDaemonSocketForTests(socket as never)
+
+    const check = callDaemon('check_permissions', {})
+    await waitForWriteCount(socket, 1)
+    expect(JSON.parse(socket.writes[0]!).turnId).toMatch(/^connection-/)
+    reply(socket, 0, { ok: true, result: {} })
+    await check
+
     await overlayHide()
     expect(socket.writes).toHaveLength(1)
+  })
+
+  test('a rejected turn_end retires the daemon instead of poisoning the next turn', async () => {
+    const socket = new FakeSocket()
+    __setDaemonSocketForTests(socket as never)
+
+    const state = callDaemon('get_app_state', { app: 'TextEdit' })
+    await waitForWriteCount(socket, 1)
+    reply(socket, 0, { ok: true, result: {} })
+    await state
+
+    const hide = overlayHide()
+    await waitForWriteCount(socket, 2)
+    reply(socket, 1, { ok: false, error: { message: 'deadline_exceeded' } })
+    await hide
+
+    expect(socket.destroyed).toBe(true)
   })
 
   test('cleanup with no daemon does not start one', async () => {

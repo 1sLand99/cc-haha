@@ -91,7 +91,7 @@ async function writeClipboard(text: string): Promise<void> {
 // ----------------------------------------------------------------------------
 // Codex semantic engine (blueprint §4–§7)
 //
-// Maps the ten `CodexComputerEngine` methods onto `callHelper(<cmd>, payload)`
+// Maps the Codex-compatible `CodexComputerEngine` methods onto `callHelper(<cmd>, payload)`
 // round-trips against the native daemon's `CommandRouter`. Each command's
 // payload key names mirror what `CommandRouter` decodes (see CommandRouter.swift):
 //   - target: `pid` | `bundleId` | `app`  (resolveTargetPid precedence)
@@ -285,6 +285,18 @@ export function createCodexEngine(): CodexComputerEngine {
       await callHelper('type_text', {
         ...appTargetPayload(args.target),
         text: args.text,
+      })
+    },
+
+    async paste(args: {
+      target: AppTarget
+      text: string
+      format: 'text' | 'md' | 'html'
+    }): Promise<void> {
+      await callHelper('paste', {
+        ...appTargetPayload(args.target),
+        text: args.text,
+        format: args.format,
       })
     },
   }

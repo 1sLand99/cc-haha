@@ -6,6 +6,29 @@ import XCTest
 
 final class ClipboardPasteReceiptTests: XCTestCase {
     @MainActor
+    func testHtmlPastePromisesRichAndPlainRepresentationsThenRestoresClipboard() async throws {
+        let fixture = PasteReceiptFixture()
+        defer { fixture.close() }
+        let lease = ClipboardLease(pasteboard: fixture.board)
+
+        try await ClipboardPasteReceipt.perform(
+            text: "<strong>Hello</strong> world",
+            format: .html,
+            lease: lease
+        ) { validate in
+            try await fixture.sendPaste(validate)
+            XCTAssertEqual(
+                String(data: fixture.board.data(forType: .html) ?? Data(), encoding: .utf8),
+                "<strong>Hello</strong> world"
+            )
+            XCTAssertTrue((fixture.board.string(forType: .string) ?? "").contains("Hello world"))
+        }
+
+        XCTAssertEqual(ClipboardPasteReceipt.lastDiagnostic?.status, "completed")
+        XCTAssertEqual(fixture.board.string(forType: .string), "original")
+    }
+
+    @MainActor
     func testPasteWaitsForARealReadBeyondTheOld180MillisecondWindow() async throws {
         let fixture = PasteReceiptFixture()
         defer { fixture.close() }

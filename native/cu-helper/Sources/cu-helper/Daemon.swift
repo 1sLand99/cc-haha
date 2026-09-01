@@ -38,21 +38,21 @@ enum DaemonOverlayTargetResolver {
 // `cursor_position`, implicit-`from` drags and decomposed `mouse_down`/`mouse_up`
 // behave correctly across commands.
 //
-// Transport: a private AF_UNIX SOCK_STREAM socket carrying NDJSON (one JSON
-// object + '\n' per request, same per response). A GUI/AppKit process leaks
+// Transport: a private AF_UNIX SOCK_STREAM socket carrying versioned NDJSON
+// (one JSON object + '\n' per request, same per response). A GUI/AppKit process leaks
 // os_log / CoreGraphics chatter to stdout/stderr, which would corrupt the TS
 // bridge's `JSON.parse`; the daemon therefore reserves stdout for exactly ONE
 // readiness line and serves the request/response stream over the socket.
 //
-//   readiness : {"ready":true,"pid":<N>,"proto":1}\n   (stdout, once)
-//   request   : {"id":"<opaque>","cmd":"<verb>","payload":{...}}\n
+//   readiness : {"ready":true,"pid":<N>,"protocolVersion":"…"}\n
+//   request   : {"id":"<opaque>","requestId":"<opaque>","cmd":"<verb>",…}\n
 //   response  : {"id":"<opaque>","ok":true,"result":<json>}\n
 //               {"id":"<opaque>","ok":false,"error":{"message":"…","code":"…"}}\n
 //
 // Control verbs handled in-daemon (never reach CommandRouter):
 //   overlay_show -> cursor.show()  ; result true
-//   overlay_hide -> cursor.hide()  ; result true
-//   ping         -> result "pong"
+//   turn_end     -> release all turn-owned state ; result true
+//   ping         -> version/capability hello
 //   shutdown     -> result true, then NSApp.terminate(nil)
 // Every other cmd is forwarded to the shared CommandRouter — the exact same
 // dispatcher the one-shot CLI path uses, so each command has one implementation.
@@ -63,6 +63,7 @@ public final class Daemon {
     private let cursor: VirtualCursor
     private let inputMonitor: PhysicalInputEpochMonitor
     private let router: CommandRouter
+    private let displaySleepAssertion = ComputerUseDisplaySleepAssertion()
 
     /// Listening socket fd (AF_UNIX SOCK_STREAM). -1 until `bindAndListen`.
     private var listenFD: Int32 = -1
@@ -78,11 +79,12 @@ public final class Daemon {
     private var connection: Connection?
     private var connectionToken: DaemonSessionToken?
     private var sessionGate = DaemonSessionGate()
+    private var turnGate = DaemonTurnGate()
 
     /// Set once the run loop is live; guards against double `run()`.
     private var didStartRunLoop = false
 
-    /// True between `overlay_show` and `overlay_hide` (CU active this turn). The
+    /// True between `overlay_show` and `turn_end` (CU active this turn). The
     /// cursor re-aims at the actual injection target while this holds.
     private var overlayActive = false
     private var explicitOverlayTarget: ProvenProcessTarget?
@@ -220,6 +222,7 @@ public final class Daemon {
         // immediately by exit() (shutdown verb + signal handlers).
         Injection.releaseAllHeldSync()
         router.resetSessionState()
+        displaySleepAssertion.release()
         inputMonitor.stop()
     }
 
@@ -435,6 +438,8 @@ public final class Daemon {
         stopOverlaySession()
         Injection.releaseAllHeldSync()
         router.resetSessionState()
+        turnGate.reset()
+        displaySleepAssertion.release()
     }
 
     /// A LaunchServices child is reparented to launchd, so the peer socket is
@@ -479,7 +484,16 @@ public final class Daemon {
         let payload = request.payload ?? .object([:])
 
         do {
+            let metadata = try ComputerUseDaemonProtocol.validate(request)
+            let opensTurn = ComputerUseDaemonProtocol.isTurnScoped(command: request.cmd)
+                && turnGate.active == nil
+            try turnGate.admit(metadata, command: request.cmd)
+            if opensTurn { displaySleepAssertion.acquire() }
             let result = try await route(cmd: request.cmd, payload: payload)
+            if request.cmd == "turn_end" || request.cmd == "overlay_hide" {
+                try turnGate.finish(metadata)
+                displaySleepAssertion.release()
+            }
             conn.send(encodeResponse(DaemonResponse(id: id, ok: true, result: result, error: nil)))
         } catch let cuError as CUError {
             conn.send(encodeResponse(DaemonResponse(
@@ -508,12 +522,12 @@ public final class Daemon {
             try showOverlay(payload: payload)
             return .bool(true)
 
-        case "overlay_hide":
-            stopOverlaySession()
+        case "overlay_hide", "turn_end":
+            endTurn()
             return .bool(true)
 
         case "ping":
-            return .string("pong")
+            return ComputerUseDaemonProtocol.hello()
 
         case "check_permissions":
             // Usable in both modes; the daemon exposes it for onboarding /
@@ -590,6 +604,15 @@ public final class Daemon {
         Injection.clearResolvedTarget()
         cursor.hide()
         router.invalidateWindowCaptureStream()
+    }
+
+    /// Codex-parity turn boundary. The helper process stays warm, but no AX
+    /// snapshot, coordinate transform, focus belief, held input, mutation clock,
+    /// clipboard diagnostic, or capture stream may leak into the next turn.
+    private func endTurn() {
+        stopOverlaySession()
+        Injection.releaseAllHeldSync()
+        router.resetSessionState()
     }
 
     /// The app the cursor should follow: ONLY the app the last injection /
@@ -763,9 +786,9 @@ private final class Connection: @unchecked Sendable {
     private var inBuffer = Data()
 
     /// Capped to avoid unbounded growth from a malformed/never-newline client.
-    /// 16 MiB comfortably exceeds the largest legitimate request (a base64
+    /// 8 MiB comfortably exceeds the largest legitimate request (a base64
     /// screenshot travels in *responses*, not requests).
-    private let maxBufferBytes = 16 * 1024 * 1024
+    private let maxBufferBytes = ComputerUseDaemonProtocol.maxFrameBytes
 
     private var onRequest: (@Sendable (Data) -> Void)?
     private var onClose: (@Sendable () -> Void)?

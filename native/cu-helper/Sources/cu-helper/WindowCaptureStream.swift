@@ -172,7 +172,11 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
                 invalidate()
                 return nil
             }
-            guard let shot = await captureSnapshot(for: target, scale: scale) else {
+            guard let shot = await captureSnapshot(
+                for: target,
+                scale: scale,
+                newerThanUptime: newerThanUptime
+            ) else {
                 return nil
             }
             if let preferredWindowID,
@@ -213,7 +217,20 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
     /// Match the reference's two separate lifetimes: SCStream remains a
     /// consumer while covered; every state read runs an on-demand Skyshot/SCK
     /// capture. An idle stream's cached frame is not evidence of the current UI.
-    func captureSnapshot(for target: WindowCaptureStreamTarget, scale: Double) async -> WindowShot? {
+    func captureSnapshot(
+        for target: WindowCaptureStreamTarget,
+        scale: Double,
+        newerThanUptime: TimeInterval? = nil
+    ) async -> WindowShot? {
+        if let newerThanUptime {
+            // The stream is a long-lived render/freshness consumer, not the
+            // model screenshot source. Before the post-action Skyshot, observe
+            // a stream frame newer than the action when possible. `frame`
+            // performs one bounded rebuild for a silently starved stream; a
+            // static/no-op UI may legitimately emit no changed frame, so the
+            // authoritative on-demand screenshot still runs after the bound.
+            _ = await frame(for: target, newerThanUptime: newerThanUptime)
+        }
         for _ in 0..<2 {
             guard let source = await source(for: target) else { continue }
             if source.hasFailed {

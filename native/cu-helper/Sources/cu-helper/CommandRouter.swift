@@ -104,6 +104,7 @@ public final class CommandRouter {
         Self.lastShotTransform.removeAll()
         Self.lastCaptureDigest.removeAll()
         MutationClock.reset()
+        ClipboardPasteReceipt.resetForTurn()
         windowCaptureProvider?.invalidate()
         // Apps we told they were focused must be told they are not, or the
         // belief outlives the session that needed it.
@@ -266,6 +267,9 @@ public final class CommandRouter {
 
         case "type_text":
             return try await handleTypeText(payload)
+
+        case "paste":
+            return try await handlePaste(payload)
 
         case "press_key":
             return try await handlePressKey(payload)
@@ -728,18 +732,19 @@ public final class CommandRouter {
         if #available(macOS 14.0, *) {
             // Let the UI finish whatever the last action started before we
             // photograph it, otherwise the model reasons about a half-drawn
-            // frame. Costs nothing when no action is pending. The rendered tree
-            // doubles as the busy signal — a progress indicator in it means the
-            // app is still working, so we allow a longer window.
+            // frame. Costs nothing when no action is pending, applies only to
+            // this target PID, and is consumed by this single capture.
+            let pendingMutation = MutationClock.takeMutation(pid: pid)
             let streamedShot = await Self.captureSettledWindowShot(
-                appIsBusy: result.axText.contains("progress indicator")
+                appIsBusy: result.axText.contains("progress indicator"),
+                lastMutationAt: pendingMutation
             ) {
                 await windowCaptureProvider?.windowShot(
                     pid: pid,
                     processIdentity: snapshotEvidence.processIdentity,
                     preferredWindowID: snapshotEvidence.keyWindowID,
                     scale: 0.5,
-                    newerThanUptime: MutationClock.lastMutation()
+                    newerThanUptime: pendingMutation
                 )
             }
             guard TargetVisibilityPolicy.captureTargetStillMatches(
@@ -875,9 +880,13 @@ public final class CommandRouter {
     /// action-to-screenshot regression can exercise both without live AX/TCC.
     static func captureSettledWindowShot(
         appIsBusy: Bool,
+        lastMutationAt: TimeInterval?,
         capture: () async -> WindowShot?
     ) async -> WindowShot? {
-        await MutationClock.awaitSettle(appIsBusy: appIsBusy)
+        await MutationClock.awaitSettle(
+            lastMutationAt: lastMutationAt,
+            appIsBusy: appIsBusy
+        )
         return await capture()
     }
 
@@ -1438,6 +1447,31 @@ public final class CommandRouter {
         }
     }
 
+    /// `paste`: bypass AX/Unicode typing and use the target app's in-process
+    /// paste focus. This is the reliable recovery path for Chromium/CEF fields
+    /// such as NeteaseMusic's search box. The clipboard lease restores every
+    /// original pasteboard item unless the user copied something meanwhile.
+    private func handlePaste(_ payload: JSONValue) async throws -> JSONValue {
+        try requireAXTrusted()
+        guard let text = payload["text"]?.asString else {
+            throw CUError("bad_payload", "paste requires a 'text' string")
+        }
+        guard let rawFormat = payload["format"]?.asString,
+              let format = ClipboardPasteFormat(rawValue: rawFormat) else {
+            throw CUError("bad_payload", "paste format must be 'text', 'md', or 'html'")
+        }
+        let expected = try Self.expectedProcessTarget(payload)
+        let target = try resolveTargetForMutation(payload)
+        setResolvedTarget(target)
+        try requireSnapshotProcess(target: target, expected: expected)
+        return try await withForegroundLease(command: "paste", target: target) {
+            _ = try Injection.validateAuthorizedTarget(target)
+            try self.requireSnapshotProcess(target: target, expected: expected)
+            try await AXAction.pasteText(pid: target.pid, text, format: format)
+            return .bool(true)
+        }
+    }
+
     /// `press_key`: send an xdotool-style key spec (e.g. "super+c", "Return",
     /// "Tab", "KP_0", "Prior") to the target app via postToPid.
     private func handlePressKey(_ payload: JSONValue) async throws -> JSONValue {
@@ -1566,6 +1600,7 @@ public final class CommandRouter {
         )
         return try await ForegroundMutationRunner.run(
             lease: lease,
+            targetPID: target.pid,
             action: action
         )
     }
