@@ -52,11 +52,12 @@
       }
     ],
     "apiFormat": "anthropic",
+    "reasoningProviderKind": "zhipu_standard_api",
     "defaultModels": {
-      "main": "glm-5.2[1m]",
-      "haiku": "glm-4.7",
-      "sonnet": "glm-5.2[1m]",
-      "opus": "glm-5.2[1m]"
+      "main": "glm-5.3[1m]",
+      "haiku": "glm-5.3-flash[1m]",
+      "sonnet": "glm-5.3[1m]",
+      "opus": "glm-5.3[1m]"
     },
     "needsApiKey": true,
     "websiteUrl": "https://open.bigmodel.cn",
@@ -65,6 +66,10 @@
     "authStrategy": "auth_token",
     "defaultEnv": {},
     "modelContextWindows": {
+      "glm-5.3[1m]": 1000000,
+      "glm-5.3": 1000000,
+      "glm-5.3-flash[1m]": 1000000,
+      "glm-5.3-flash": 1000000,
       "glm-5.2[1m]": 1000000,
       "glm-5.2": 1000000,
       "glm-5.1": 200000,

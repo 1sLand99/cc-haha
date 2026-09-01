@@ -94,10 +94,11 @@ describe('provider presets API', () => {
       { region: 'global_en', baseUrl: 'https://api.z.ai/api/anthropic' },
     ])
     expect(zhipu?.authStrategy).toBe('auth_token')
-    expect(zhipu?.defaultModels.main).toBe('glm-5.2[1m]')
-    expect(zhipu?.defaultModels.haiku).toBe('glm-4.7')
-    expect(zhipu?.defaultModels.sonnet).toBe('glm-5.2[1m]')
-    expect(zhipu?.defaultModels.opus).toBe('glm-5.2[1m]')
+    expect(zhipu?.reasoningProviderKind).toBe('zhipu_standard_api')
+    expect(zhipu?.defaultModels.main).toBe('glm-5.3[1m]')
+    expect(zhipu?.defaultModels.haiku).toBe('glm-5.3-flash[1m]')
+    expect(zhipu?.defaultModels.sonnet).toBe('glm-5.3[1m]')
+    expect(zhipu?.defaultModels.opus).toBe('glm-5.3[1m]')
     // Presets must not pin a provider-wide auto-compact window: the env is
     // model-agnostic, so it pinned small-context models at 1M and auto-compact
     // never fired (#1162). Real windows come from modelContextWindows instead.
@@ -197,6 +198,8 @@ describe('provider presets API', () => {
     expect(zhipu?.apiKeyUrl).toBe('https://www.bigmodel.cn/invite?icode=d41B2qi8Z5xNwTGLNPPF3OZLO2QH3C0EBTSr%2BArzMw4%3D')
     expect(zhipu?.promoText).toContain('cc-haha')
     expect(zhipu?.defaultEnv?.CC_HAHA_SEND_DISABLED_THINKING).toBeUndefined()
+    expect(zhipu?.modelContextWindows?.['glm-5.3']).toBe(1000000)
+    expect(zhipu?.modelContextWindows?.['glm-5.3-flash']).toBe(1000000)
     expect(zhipu?.modelContextWindows?.['glm-5.2']).toBe(1000000)
     expect(zhipu?.modelContextWindows?.['glm-5.1']).toBe(200000)
     expect(zhipu?.modelContextWindows?.['glm-4.7']).toBe(200000)

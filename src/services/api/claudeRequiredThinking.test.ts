@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -8,6 +8,8 @@ import {
 } from '../../bootstrap/state.js'
 import { enableConfigs } from '../../utils/config.js'
 import { get3PModelCapabilityOverride } from '../../utils/model/modelSupportOverrides.js'
+import { buildProviderManagedEnv } from '../../server/services/providerRuntimeEnv.js'
+import type { SavedProvider } from '../../server/types/provider.js'
 import { queryWithModel } from './claude.js'
 
 function sseEvent(name: string, data: unknown): string {
@@ -260,6 +262,7 @@ function tricklingToolResponse(model: string): Response {
 
 const ENV_KEYS = [
   'NODE_ENV',
+  'HOME',
   'CLAUDE_CONFIG_DIR',
   'CLAUDE_CODE_USE_BEDROCK',
   'CLAUDE_CODE_USE_VERTEX',
@@ -292,6 +295,8 @@ async function captureQueryRequest({
   capabilities,
   effortValue,
   configureCapabilityOverrides = true,
+  globalThinkingEnabled,
+  provider,
   responseFactory,
   env,
 }: {
@@ -300,8 +305,10 @@ async function captureQueryRequest({
   capabilities?: string
   effortValue?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   configureCapabilityOverrides?: boolean
-  responseFactory?: (model: string) => Response
-  env?: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>>
+  globalThinkingEnabled?: boolean
+  provider?: SavedProvider
+  responseFactory?: (model: string, body: Record<string, unknown>) => Response
+  env?: Readonly<Record<string, string | undefined>>
 }): Promise<{
   content: unknown
   apiError: string | undefined
@@ -316,14 +323,23 @@ async function captureQueryRequest({
     port: 0,
     async fetch(request) {
       requestHeaders.push(new Headers(request.headers))
-      requests.push(await request.json() as Record<string, unknown>)
-      return responseFactory?.(model) ?? new Response(successfulResponse(model), {
+      const body = await request.json() as Record<string, unknown>
+      requests.push(body)
+      return responseFactory?.(model, body) ?? new Response(successfulResponse(model), {
         headers: { 'content-type': 'text/event-stream' },
       })
     },
   })
   const configDir = await mkdtemp(join(tmpdir(), 'cc-haha-required-thinking-'))
-  const originalEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]))
+  const managedEnv = provider
+    ? buildProviderManagedEnv({
+        ...provider,
+        baseUrl: `http://127.0.0.1:${server.port}`,
+      })
+    : {}
+  const requestedEnv = { ...managedEnv, ...env }
+  const envKeys = [...new Set([...ENV_KEYS, ...Object.keys(requestedEnv)])]
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]))
   const globals = globalThis as typeof globalThis & { MACRO?: { BUILD_TIME: string } }
   const originalMacro = globals.MACRO
   const originalIsInteractive = getIsInteractive()
@@ -332,7 +348,14 @@ async function captureQueryRequest({
     globals.MACRO = { BUILD_TIME: '' }
     setIsInteractive(false)
     process.env.NODE_ENV = 'production'
+    process.env.HOME = configDir
     process.env.CLAUDE_CONFIG_DIR = configDir
+    if (globalThinkingEnabled !== undefined) {
+      await writeFile(
+        join(configDir, 'settings.json'),
+        JSON.stringify({ alwaysThinkingEnabled: globalThinkingEnabled }),
+      )
+    }
     delete process.env.CLAUDE_CODE_USE_BEDROCK
     delete process.env.CLAUDE_CODE_USE_VERTEX
     delete process.env.CLAUDE_CODE_USE_FOUNDRY
@@ -356,7 +379,7 @@ async function captureQueryRequest({
       process.env.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES =
         capabilities
     }
-    for (const [key, value] of Object.entries(env ?? {})) {
+    for (const [key, value] of Object.entries(requestedEnv)) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
@@ -385,7 +408,7 @@ async function captureQueryRequest({
       requestHeaders,
     }
   } finally {
-    for (const key of ENV_KEYS) {
+    for (const key of envKeys) {
       const value = originalEnv[key]
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
@@ -409,6 +432,59 @@ test('keeps required-thinking models enabled when the caller requests disabled t
   expect(requests).toHaveLength(1)
   expect(requests[0]?.model).toBe('k3')
   expect(requests[0]?.thinking).toMatchObject({ type: 'enabled' })
+}, 10_000)
+
+test('derives GLM 5.3 standard API request controls from the provider-managed environment', async () => {
+  const provider = {
+    id: 'provider-zhipu',
+    presetId: 'zhipuglm',
+    name: 'Zhipu GLM',
+    apiKey: 'loopback-test-key',
+    authStrategy: 'auth_token',
+    baseUrl: 'https://open.bigmodel.cn/api/anthropic',
+    apiFormat: 'anthropic',
+    runtimeKind: 'anthropic_compatible',
+    models: {
+      main: 'glm-5.3-flash[1m]',
+      haiku: 'glm-5.3-flash[1m]',
+      sonnet: 'glm-5.3[1m]',
+      opus: 'glm-5.3[1m]',
+    },
+  } satisfies SavedProvider
+
+  const { content, requests } = await captureQueryRequest({
+    model: 'glm-5.3-flash[1m]',
+    provider,
+    configureCapabilityOverrides: false,
+    globalThinkingEnabled: false,
+    effortValue: 'low',
+    responseFactory: (model, body) => {
+      const thinking = body.thinking as { type?: unknown } | undefined
+      const outputConfig = body.output_config as { effort?: unknown } | undefined
+      if (
+        thinking?.type !== 'enabled' ||
+        !['low', 'high', 'max'].includes(String(outputConfig?.effort))
+      ) {
+        return Response.json({
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            code: '1210',
+            message: '[1210][API 调用参数有误，请检查文档。]',
+          },
+        }, { status: 400 })
+      }
+      return new Response(successfulResponse(model), {
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    },
+  })
+
+  expect(content).toEqual([{ type: 'text', text: 'OK' }])
+  expect(requests).toHaveLength(1)
+  expect(requests[0]?.model).toBe('glm-5.3-flash')
+  expect(requests[0]?.thinking).toMatchObject({ type: 'enabled' })
+  expect(requests[0]?.output_config).toEqual({ effort: 'low' })
 }, 10_000)
 
 test('keeps request effort when thinking is explicitly disabled', async () => {

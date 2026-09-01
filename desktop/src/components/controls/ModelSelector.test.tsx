@@ -1086,6 +1086,44 @@ describe('ModelSelector', () => {
     expect(screen.getByRole('button', { name: 'Effort: X-High' })).toBeInTheDocument()
   })
 
+  it('shows only low, high, and max for the GLM 5.3 standard API profile', async () => {
+    useSettingsStore.setState({
+      locale: 'en',
+      effortLevel: 'medium',
+    })
+    useProviderStore.setState({
+      providers: [{
+        id: 'zhipu-provider',
+        presetId: 'zhipuglm',
+        name: 'Zhipu GLM',
+        apiKey: '***',
+        baseUrl: 'https://open.bigmodel.cn/api/anthropic',
+        apiFormat: 'anthropic',
+        models: {
+          main: 'glm-5.3-flash[1m]',
+          haiku: 'glm-5.3-flash[1m]',
+          sonnet: 'glm-5.3[1m]',
+          opus: 'glm-5.3[1m]',
+        },
+      }],
+      activeId: 'zhipu-provider',
+      hasLoadedProviders: true,
+      isLoading: false,
+    })
+    useSessionRuntimeStore.getState().setSelection('session-zhipu-5-3', {
+      providerId: 'zhipu-provider',
+      modelId: 'glm-5.3-flash[1m]',
+      effortLevel: 'medium',
+    })
+
+    render(<ModelSelector runtimeKey="session-zhipu-5-3" />)
+
+    expect(screen.getByRole('button', { name: 'Effort: Max' })).toBeInTheDocument()
+    await clickByRole('Effort: Max')
+    expect(screen.getByRole('slider', { name: 'Effort' })).toHaveAttribute('aria-valuemax', '2')
+    expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(3)
+  })
+
   it('selects Grok Official models for a logged-in runtime', async () => {
     const grokModels: ModelInfo[] = [{
       id: 'grok-4.5',
