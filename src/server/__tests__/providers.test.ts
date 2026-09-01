@@ -1669,6 +1669,89 @@ describe('ProviderService', () => {
       }
     })
 
+    test('round-trips DeepSeek reasoning by model on generic OpenAI Chat hosts', async () => {
+      const originalFetch = globalThis.fetch
+      const calls: Array<Record<string, unknown>> = []
+      globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+        calls.push(body)
+        const messages = body.messages as Array<Record<string, unknown>>
+        const assistantMessage = messages.find(message => message.role === 'assistant')
+
+        if (body.model === 'deepseek-v4-flash' && assistantMessage?.reasoning_content === undefined) {
+          return new Response(JSON.stringify({
+            error: {
+              message: 'The reasoning_content in the thinking mode must be passed back to the API',
+            },
+          }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        return new Response(JSON.stringify({
+          id: 'chatcmpl-reasoning-round-trip',
+          object: 'chat.completion',
+          created: 0,
+          model: body.model,
+          choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }) as typeof fetch
+
+      try {
+        const svc = new ProviderService()
+        const provider = await svc.addProvider(sampleInput({
+          apiFormat: 'openai_chat',
+          baseUrl: 'https://api.b.ai',
+        }))
+        await svc.activateProvider(provider.id)
+
+        const makeFollowUpRequest = (model: string) => new Request('http://localhost:3456/proxy/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            max_tokens: 64,
+            messages: [
+              {
+                role: 'assistant',
+                content: [
+                  { type: 'thinking', thinking: 'Need to inspect the repository first.' },
+                  { type: 'tool_use', id: 'call_1', name: 'read_file', input: { path: 'README.md' } },
+                ],
+              },
+              {
+                role: 'user',
+                content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'Repository contents' }],
+              },
+            ],
+          }),
+        })
+
+        const deepSeekRequest = makeFollowUpRequest('deepseek-v4-flash')
+        const deepSeekResponse = await handleProxyRequest(deepSeekRequest, new URL(deepSeekRequest.url))
+        expect(deepSeekResponse.status).toBe(200)
+
+        const genericRequest = makeFollowUpRequest('generic-chat-model')
+        const genericResponse = await handleProxyRequest(genericRequest, new URL(genericRequest.url))
+        expect(genericResponse.status).toBe(200)
+
+        const deepSeekMessages = calls[0].messages as Array<Record<string, unknown>>
+        const deepSeekAssistant = deepSeekMessages.find(message => message.role === 'assistant')
+        expect(deepSeekAssistant?.reasoning_content).toBe('Need to inspect the repository first.')
+
+        const genericMessages = calls[1].messages as Array<Record<string, unknown>>
+        const genericAssistant = genericMessages.find(message => message.role === 'assistant')
+        expect(genericAssistant?.reasoning_content).toBeUndefined()
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+
     test('forwards a stable prompt_cache_key from client session metadata for OpenAI Responses upstreams', async () => {
       const originalFetch = globalThis.fetch
       const calls: Array<{ body: Record<string, unknown>; headers: Headers }> = []

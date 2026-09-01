@@ -33,6 +33,7 @@ import {
   type TraceBodySnapshot,
   type TraceProviderInfo,
 } from '../services/traceCaptureService.js'
+import { resolveModelReasoningProfile } from '../../shared/modelReasoning.js'
 
 const providerService = new ProviderService()
 
@@ -266,10 +267,11 @@ async function handleOpenaiChat(
   networkSettings: NetworkSettings,
   traceContext: ProxyTraceContext | null,
 ): Promise<Response> {
-  const deepSeekCompatible = shouldUseDeepSeekReasoningCompat(baseUrl)
+  const knownDeepSeekHost = shouldUseDeepSeekReasoningCompat(baseUrl)
+  const reasoningProfile = resolveModelReasoningProfile(body.model, 'openai_chat')
   const transformed = anthropicToOpenaiChat(body, {
-    roundTripReasoningContent: deepSeekCompatible,
-    passThinkingToggle: deepSeekCompatible,
+    roundTripReasoningContent: knownDeepSeekHost || reasoningProfile?.family === 'deepseek-v4',
+    passThinkingToggle: knownDeepSeekHost,
     imageContentMode: shouldUseTextOnlyOpenAIChatContent(baseUrl) ? 'text_only' : 'vision',
   })
   const url = `${baseUrl}/v1/chat/completions`
