@@ -143,6 +143,121 @@ function hangingToolResponse(model: string): Response {
   })
 }
 
+function progressingToolResponse(model: string): Response {
+  const events = [
+    sseEvent('message_start', {
+      type: 'message_start',
+      message: {
+        id: 'msg_progressing_tool',
+        type: 'message',
+        role: 'assistant',
+        model,
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 0 },
+      },
+    }),
+    sseEvent('content_block_start', {
+      type: 'content_block_start',
+      index: 0,
+      content_block: {
+        type: 'tool_use',
+        id: 'tool_progressing_bash',
+        name: 'Bash',
+        input: {},
+      },
+    }),
+    ...['{', '"command"', ':', '"echo OK"', '}'].map(partialJson =>
+      sseEvent('content_block_delta', {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'input_json_delta', partial_json: partialJson },
+      }),
+    ),
+    sseEvent('content_block_stop', { type: 'content_block_stop', index: 0 }),
+    sseEvent('message_delta', {
+      type: 'message_delta',
+      delta: { stop_reason: 'tool_use', stop_sequence: null },
+      usage: { output_tokens: 5 },
+    }),
+    sseEvent('message_stop', { type: 'message_stop' }),
+  ]
+  let nextEvent = 0
+  let cancelled = false
+
+  return new Response(new ReadableStream({
+    async pull(controller) {
+      if (nextEvent > 0) await Bun.sleep(10)
+      if (cancelled) return
+      controller.enqueue(new TextEncoder().encode(events[nextEvent]))
+      nextEvent += 1
+      if (nextEvent === events.length) controller.close()
+    },
+    cancel() {
+      cancelled = true
+    },
+  }), {
+    headers: { 'content-type': 'text/event-stream' },
+  })
+}
+
+function tricklingToolResponse(model: string): Response {
+  const initialEvents = [
+    sseEvent('message_start', {
+      type: 'message_start',
+      message: {
+        id: 'msg_trickling_tool',
+        type: 'message',
+        role: 'assistant',
+        model,
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 0 },
+      },
+    }),
+    sseEvent('content_block_start', {
+      type: 'content_block_start',
+      index: 0,
+      content_block: {
+        type: 'tool_use',
+        id: 'tool_trickling_write',
+        name: 'Write',
+        input: {},
+      },
+    }),
+    sseEvent('content_block_delta', {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'input_json_delta', partial_json: '{"content":"' },
+    }),
+  ].join('')
+  const progressEvent = sseEvent('content_block_delta', {
+    type: 'content_block_delta',
+    index: 0,
+    delta: { type: 'input_json_delta', partial_json: 'x' },
+  })
+  let sentInitialEvents = false
+  let cancelled = false
+
+  return new Response(new ReadableStream({
+    async pull(controller) {
+      if (sentInitialEvents) await Bun.sleep(10)
+      if (cancelled) return
+      controller.enqueue(new TextEncoder().encode(
+        sentInitialEvents ? progressEvent : initialEvents,
+      ))
+      sentInitialEvents = true
+    },
+    cancel() {
+      cancelled = true
+    },
+  }), {
+    headers: { 'content-type': 'text/event-stream' },
+  })
+}
+
 const ENV_KEYS = [
   'NODE_ENV',
   'CLAUDE_CONFIG_DIR',
@@ -371,7 +486,7 @@ test('drops a tool call truncated at the output-token boundary', async () => {
   expect(error).toBe('max_output_tokens')
 }, 10_000)
 
-test('aborts a tool input that keeps streaming without completing', async () => {
+test('aborts a tool input that stops progressing without completing', async () => {
   const { content, error, requests } = await captureQueryRequest({
     model: 'deepseek-v4-flash',
     configureCapabilityOverrides: false,
@@ -390,6 +505,55 @@ test('aborts a tool input that keeps streaming without completing', async () => 
     expect.objectContaining({
       type: 'text',
       text: expect.stringContaining('Tool input generation exceeded'),
+    }),
+  ])
+  expect(error).toBe('server_error')
+}, 10_000)
+
+test('allows a progressing tool input to outlive its inactivity budget', async () => {
+  const { content, error, requests } = await captureQueryRequest({
+    model: 'deepseek-v4-flash',
+    configureCapabilityOverrides: false,
+    responseFactory: progressingToolResponse,
+    env: {
+      CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: '1',
+      CLAUDE_ENABLE_STREAM_WATCHDOG: '1',
+      CLAUDE_STREAM_IDLE_TIMEOUT_MS: '1000',
+      CLAUDE_STREAM_MAX_DURATION_MS: '1000',
+      CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS: '40',
+    },
+  })
+
+  expect(requests).toHaveLength(1)
+  expect(content).toEqual([
+    expect.objectContaining({
+      type: 'tool_use',
+      name: 'Bash',
+      input: { command: 'echo OK' },
+    }),
+  ])
+  expect(error).toBeUndefined()
+}, 10_000)
+
+test('bounds a tool input that keeps progressing but never completes', async () => {
+  const { content, error, requests } = await captureQueryRequest({
+    model: 'deepseek-v4-flash',
+    configureCapabilityOverrides: false,
+    responseFactory: tricklingToolResponse,
+    env: {
+      CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: '1',
+      CLAUDE_ENABLE_STREAM_WATCHDOG: '1',
+      CLAUDE_STREAM_IDLE_TIMEOUT_MS: '1000',
+      CLAUDE_STREAM_MAX_DURATION_MS: '200',
+      CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS: '100',
+    },
+  })
+
+  expect(requests).toHaveLength(1)
+  expect(content).toEqual([
+    expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('Stream max duration exceeded'),
     }),
   ])
   expect(error).toBe('server_error')

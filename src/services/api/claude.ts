@@ -2064,6 +2064,9 @@ async function* queryModel(
     // 0 disables it (terminal CLI default); the desktop injects a value.
     const STREAM_MAX_DURATION_MS =
       parseInt(process.env.CLAUDE_STREAM_MAX_DURATION_MS || "", 10) || 0;
+    // Despite the legacy env name, this is an inactivity budget: each
+    // non-empty input_json_delta proves the tool call is still progressing.
+    // STREAM_MAX_DURATION_MS remains the independent total response cap.
     const STREAM_TOOL_INPUT_MAX_DURATION_MS =
       parseInt(
         process.env.CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS || "",
@@ -2400,6 +2403,9 @@ async function* queryModel(
                     throw new Error("Content block input is not a string");
                   }
                   contentBlock.input += delta.partial_json;
+                  if (delta.partial_json.length > 0) {
+                    toolInputDurationGuard.progress(part.index);
+                  }
                   break;
                 case "text_delta":
                   if (contentBlock.type !== "text") {
