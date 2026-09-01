@@ -257,7 +257,7 @@ describe('release desktop workflow', () => {
     expect(workflow.indexOf('Build unsigned Electron release artifacts')).toBeLessThan(workflow.indexOf('Verify packaged app structure'))
   })
 
-  test('release workflow records macOS and SignPath signing state and blocks unsigned releases', () => {
+  test('release workflow requires signed macOS Computer Use and preserves SignPath draft policy', () => {
     const workflow = readReleaseWorkflow()
     const signingJob = workflow.match(
       /signing-preflight:[\s\S]*?(?:\n {2}[a-zA-Z0-9_-]+:|$)/,
@@ -289,10 +289,8 @@ describe('release desktop workflow', () => {
       expect(signingJob).toContain(setting)
     }
     expect(signingJob).toContain('Missing macOS signing/notarization secrets')
-    expect(signingJob).toContain('macOS artifacts will be unsigned')
-    expect(signingJob).toContain('install-macos-unsigned.sh')
+    expect(signingJob).toContain('refusing to build a macOS release whose Computer Use runtime cannot pass client attestation')
     expect(signingJob).toContain("RELEASE_DRAFT: ${{ github.event_name == 'workflow_dispatch' && inputs.draft == true }}")
-    expect(signingJob).toContain('Refusing to publish a non-draft desktop release without macOS signing/notarization secrets.')
     expect(signingJob).toContain('macos_signed=false')
     expect(signingJob).toContain('macos_signed=true')
     expect(signingJob).toContain('SignPath configuration missing')
@@ -304,7 +302,7 @@ describe('release desktop workflow', () => {
     const macRequiredBlock = signingJob?.match(
       /missing=\(\)[\s\S]*?# Drafts may remain unsigned/,
     )?.[0]
-    expect(macRequiredBlock).toContain('if [ "$RELEASE_DRAFT" != "true" ]; then')
+    expect(macRequiredBlock).not.toContain('if [ "$RELEASE_DRAFT" != "true" ]; then')
     expect(macRequiredBlock).toContain('exit 1')
     expect(signingJob).toContain('if [ "$RELEASE_DRAFT" != "true" ]; then')
     expect(signingJob).toContain('exit 1')
@@ -609,10 +607,64 @@ describe('release desktop workflow', () => {
     expect(desktopPackage.build.mac?.notarize).toBe(true)
     expect(desktopPackage.build.mac?.entitlements).toBe('build/entitlements.mac.plist')
     expect(desktopPackage.build.mac?.entitlementsInherit).toBe('build/entitlements.mac.inherit.plist')
+    // The Computer Use helper is excluded on purpose. `native/cu-helper/build.sh`
+    // already signed it under the stable identity `dev.cchaha.cu-helper`, and
+    // macOS ties the user's Accessibility and Screen Recording grants to that
+    // signing identity — re-signing it here would rotate the identity and
+    // silently drop both permissions on every update.
+    //
+    // The sidecar is excluded for a different reason — see the dedicated test
+    // below, which states the causal chain this literal list cannot express.
     expect(desktopPackage.build.mac?.signIgnore).toEqual([
       '/Contents/Frameworks/.+\\.(?:pak|bin|dat|nib)$',
       '/Contents/Resources/.+\\.(?:asar|pak|bin|dat|icns|png|jpg|jpeg|gif|svg|ttf|woff|woff2)$',
+      'cc-haha-computer-use\\.app',
+      'claude-sidecar-[^/]+$',
     ])
+  })
+
+  // Regression: this entry was once dropped from signIgnore while the literal
+  // assertion above was edited to match, so the suite stayed green and every
+  // Computer Use call in the shipped build failed closed with
+  // `unauthorized_client` — the settings page just said "checking…" forever.
+  //
+  // The causal chain: `build-sidecars.ts` signs the sidecar with an explicit
+  // `--identifier com.claude-code-haha.desktop.sidecar`, because
+  // `ClientAttestation.swift` compares that identifier EXACTLY when it walks the
+  // helper -> sidecar -> desktop process chain. If electron-builder re-signs the
+  // sidecar it drops that flag, and codesign falls back to deriving the
+  // identifier from the file name (`claude-sidecar-aarch64-apple-darwin`), which
+  // never matches. So this test asserts the behaviour (real sidecar file names
+  // are excluded) rather than the spelling of one array element.
+  test('macOS signIgnore keeps electron-builder off the attested sidecar', () => {
+    const desktopPackage = JSON.parse(readFileSync('desktop/package.json', 'utf8')) as {
+      build: { mac?: { signIgnore?: string[] } }
+    }
+    const patterns = (desktopPackage.build.mac?.signIgnore ?? []).map(
+      p => new RegExp(p),
+    )
+
+    // Both architectures ship under these names; ClientAttestation.swift accepts
+    // exactly these two, so both must survive electron-builder's signing pass.
+    for (const sidecar of [
+      '/Contents/Resources/app.asar.unpacked/src-tauri/binaries/claude-sidecar-aarch64-apple-darwin',
+      '/Contents/Resources/app.asar.unpacked/src-tauri/binaries/claude-sidecar-x86_64-apple-darwin',
+    ]) {
+      expect(
+        patterns.some(p => p.test(sidecar)),
+        `${sidecar} must be in signIgnore, or electron-builder re-signs it and ` +
+          'the attestation chain breaks',
+      ).toBe(true)
+    }
+
+    // The identifier the exclusion exists to protect. If this constant moves,
+    // ClientAttestation.swift's `sidecarIdentifier` has to move with it.
+    expect(
+      readFileSync('desktop/scripts/sign-identity.ts', 'utf8'),
+    ).toContain("SIDECAR_SIGNING_IDENTIFIER = 'com.claude-code-haha.desktop.sidecar'")
+    expect(
+      readFileSync('native/cu-helper/Sources/cu-helper/ClientAttestation.swift', 'utf8'),
+    ).toContain('sidecarIdentifier = "com.claude-code-haha.desktop.sidecar"')
   })
 
   test('Windows NSIS installer lets users choose the install directory', () => {

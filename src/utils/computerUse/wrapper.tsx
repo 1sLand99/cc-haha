@@ -30,6 +30,8 @@ import { getComputerUseMCPRenderingOverrides } from './toolRendering.js';
 import {
   buildPreAuthorizedAppGrants,
   loadStoredComputerUseConfig,
+  saveStoredComputerUseConfig,
+  type StoredAuthorizedApp,
 } from './preauthorizedConfig.js';
 type CallOverride = Pick<Tool, 'call'>['call'];
 type Binding = {
@@ -61,6 +63,37 @@ function tuc(): ToolUseContext {
 function formatLockHeld(holder: string): string {
   return `Computer use is in use by another Claude session (${holder.slice(0, 8)}…). Wait for that session to finish or run /exit there.`;
 }
+
+/**
+ * Persist runtime-granted apps into the stored "always-allowed" list so they
+ * show up in the Computer Use settings page. This is the AUTO-ADD half of the
+ * user's "both ways" choice (the settings picker is the manual half). Fire-and-
+ * forget + deduped by bundleId; a failure here must never break a turn.
+ */
+async function persistGrantedAppsToConfig(
+  apps: readonly { bundleId: string; displayName: string; grantedAt?: number }[],
+): Promise<void> {
+  try {
+    if (apps.length === 0) return;
+    const config = await loadStoredComputerUseConfig();
+    const existing = new Set((config.authorizedApps ?? []).map(a => a.bundleId));
+    const additions = apps.filter(a => !existing.has(a.bundleId));
+    if (additions.length === 0) return;
+    const now = Date.now();
+    const merged: StoredAuthorizedApp[] = [
+      ...(config.authorizedApps ?? []),
+      ...additions.map(a => ({
+        bundleId: a.bundleId,
+        displayName: a.displayName,
+        authorizedAt: new Date(a.grantedAt ?? now).toISOString(),
+      })),
+    ];
+    await saveStoredComputerUseConfig({ ...config, authorizedApps: merged });
+  } catch {
+    // best-effort; never throw into the grant callback
+  }
+}
+
 export function buildSessionContext(): ComputerUseSessionContext {
   return {
     // ── Read state fresh via the per-call ref ─────────────────────────────
@@ -88,7 +121,11 @@ export function buildSessionContext(): ComputerUseSessionContext {
     // `runPermissionDialog` wires that from the per-call ref's abortController.
     onPermissionRequest: (req, _dialogSignal) => runPermissionDialog(req),
     // Package does the merge (dedupe + truthy-only flags). We just persist.
-    onAllowedAppsChanged: (apps, flags) => tuc().setAppState(prev => {
+    onAllowedAppsChanged: (apps, flags) => {
+      // Auto-add newly granted apps to the persistent always-allowed list so
+      // they appear in the settings page (the runtime half of "both ways").
+      void persistGrantedAppsToConfig(apps);
+      tuc().setAppState(prev => {
       const cu = prev.computerUseMcpState;
       const prevApps = cu?.allowedApps;
       const prevFlags = cu?.grantFlags;
@@ -102,7 +139,8 @@ export function buildSessionContext(): ComputerUseSessionContext {
           grantFlags: flags
         }
       };
-    }),
+      });
+    },
     onAppsHidden: ids => {
       if (ids.length === 0) return;
       tuc().setAppState(prev => {

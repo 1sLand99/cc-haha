@@ -1,5 +1,5 @@
 import {
-  buildComputerUseTools,
+  buildPlatformComputerUseTools,
   createComputerUseMcpServer,
 } from '../../vendor/computer-use-mcp/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -65,7 +65,7 @@ export async function createComputerUseMcpServerForCli(): Promise<
   const server = createComputerUseMcpServer(adapter, coordinateMode)
 
   const installedAppNames = await tryGetInstalledAppNames()
-  const tools = buildComputerUseTools(
+  const tools = buildPlatformComputerUseTools(
     adapter.executor.capabilities,
     coordinateMode,
     installedAppNames,
