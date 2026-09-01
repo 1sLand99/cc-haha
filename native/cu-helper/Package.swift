@@ -16,15 +16,15 @@
 // (Swift 6.3.2 / Xcode 26.5 / macOS 26.4.1, Apple Silicon arm64) compiles the
 // `@MainActor` AppKit/ScreenCaptureKit code under full isolation checking.
 //
-// platforms .macOS("14.0"): SCShareableContent / SCContentFilter /
-// SCScreenshotManager (the modern screenshot path) require macOS 14+. The build
-// host (26.5) far exceeds this; the floor only constrains the availability
-// annotations the capture code must carry.
+// platforms .macOS("14.4"): match the reference Computer Use service's runtime
+// floor. Keeping this subsystem floor above the desktop host's floor lets the
+// app show a deterministic unsupported state instead of launching a helper the
+// OS loader will reject.
 import PackageDescription
 
 let package = Package(
   name: "cu-helper",
-  platforms: [.macOS("14.0")],
+  platforms: [.macOS("14.4")],
   targets: [
     // Tiny C shim exposing the private `responsibility_spawnattrs_setdisclaim`
     // self-re-exec (see Sources/CDisclaim/disclaim.c). Lets cu-helper become its

@@ -7,6 +7,40 @@ const buildScript = path.resolve(import.meta.dirname, 'build.sh')
 const productIcon = path.resolve(import.meta.dirname, '../../desktop/src-tauri/icons/icon.icns')
 const fixtureDirectories: string[] = []
 
+function resolveArchitectureSpecificBuildPaths(arch: 'arm64' | 'x86_64') {
+  const directory = mkdtempSync(path.join(tmpdir(), 'cu-helper-build-path-'))
+  fixtureDirectories.push(directory)
+  const binDir = path.join(directory, arch, `${arch}-apple-macosx`, 'release')
+  const result = Bun.spawnSync([
+    'bash',
+    '-c',
+    `
+source "$1"
+ARCH="$2"
+BUILD_DIR="$3"
+SWIFT_SCRATCH_PATH="$BUILD_DIR/$ARCH"
+EXPECTED_BIN_DIR="$4"
+swift() {
+  printf '%s\\n' "$EXPECTED_BIN_DIR"
+}
+resolve_build_paths
+printf '%s\\n%s\\n%s\\n%s\\n' "$BIN_DIR" "$BIN_PATH" "$APP_PATH" "$RESOURCE_BUNDLE_PATH"
+`,
+    'cu-helper-build-path-test',
+    buildScript,
+    arch,
+    directory,
+    binDir,
+  ])
+
+  return {
+    exitCode: result.exitCode,
+    lines: result.stdout.toString().trim().split('\n'),
+    stderr: result.stderr.toString(),
+    binDir,
+  }
+}
+
 afterEach(() => {
   for (const directory of fixtureDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true })
@@ -124,6 +158,29 @@ describe('cu-helper build signing identity', () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe('Developer ID Application: Example Corp (TEAM123456)')
+  })
+})
+
+describe('cu-helper architecture-specific build output', () => {
+  test.each(['arm64', 'x86_64'] as const)(
+    'resolves %s products from the matching SwiftPM bin directory',
+    (arch) => {
+      const result = resolveArchitectureSpecificBuildPaths(arch)
+      expect(result.exitCode).toBe(0)
+      expect(result.lines).toEqual([
+        result.binDir,
+        path.join(result.binDir, 'cc-haha-computer-use'),
+        path.join(result.binDir, 'cc-haha-computer-use.app'),
+        path.join(result.binDir, 'cu-helper_cc-haha-computer-use.bundle'),
+      ])
+    },
+  )
+
+  test('verifies the requested Mach-O architecture before signing', () => {
+    const source = readFileSync(buildScript, 'utf8')
+    expect(source).toContain('lipo "$BIN_PATH" -verify_arch "$ARCH"')
+    expect(source.indexOf('lipo "$BIN_PATH" -verify_arch "$ARCH"'))
+      .toBeLessThan(source.indexOf('\nsign() {'))
   })
 })
 

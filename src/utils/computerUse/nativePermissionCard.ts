@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process'
 import { logForDebugging } from '../debug.js'
-import { resolveCuHelperBinary } from './cuHelperBridge.js'
-import { ensureInstalledHelper } from './cuHelperInstall.js'
+import { resolveLaunchableCuHelperBinary } from './cuHelperBridge.js'
 
 /**
  * Auto-present the native macOS permission card (`cu-helper request-access`)
@@ -53,7 +52,7 @@ export function maybeShowNativePermissionCard(
   // dragging THAT into Screen Recording grants the helper's own SR subject, and
   // dragging it into Accessibility grants the helper too. One identity, both
   // permissions. (See cuHelperInstall.ts.)
-  const resolveBin = deps.resolveBin ?? (() => ensureInstalledHelper()?.binary ?? resolveCuHelperBinary())
+  const resolveBin = deps.resolveBin ?? resolveLaunchableCuHelperBinary
   const bin = resolveBin()
   if (!bin) return
 

@@ -126,7 +126,7 @@ final class CommandRouterSafetyTests: XCTestCase {
         }
     }
 
-    func testSessionResetAlsoInvalidatesTheWindowCaptureProvider() {
+    func testTurnStateResetPreservesTheDaemonLifetimeWindowCaptureProvider() {
         let monitor = PhysicalInputEpochMonitor(counterReader: { _ in 0 })
         let provider = WindowCaptureProviderSpy()
         let router = CommandRouter(
@@ -138,6 +138,8 @@ final class CommandRouterSafetyTests: XCTestCase {
 
         router.resetSessionState()
 
+        XCTAssertEqual(provider.invalidateCount, 0)
+        router.invalidateWindowCaptureStream()
         XCTAssertEqual(provider.invalidateCount, 1)
     }
 

@@ -11,7 +11,7 @@
 #   CU_HELPER_TIMESTAMP_MODE
 #                        (default: auto; secure for Developer ID, none for local development)
 #
-# Output: prints "built: <abs path to .build/release/cc-haha-computer-use.app>"
+# Output: prints "built: <arch-specific abs path>/cc-haha-computer-use.app"
 #
 # Stable-identity contract: same cert + same --identifier on every build,
 # --options runtime, a secure timestamp for Developer ID distribution, no ad-hoc.
@@ -46,25 +46,19 @@ PKG_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" >/dev/null 2>&1 && pwd)"
 
 BUILD_CONFIG="release"
 BUILD_DIR="$PKG_DIR/.build"
-# Output binary name == the SwiftPM executable-target name (see Package.swift).
-# This is the brand-facing name macOS shows in the Privacy lists.
-BIN_PATH="$BUILD_DIR/$BUILD_CONFIG/cc-haha-computer-use"
-
-# After build+sign we wrap the binary in a minimal .app bundle. WHY: macOS Screen
-# Recording (ScreenCaptureKit / TCC kTCCServiceScreenCapture) only grants
-# EFFECTIVE access to a real .app bundle process — a bare Mach-O can be toggled
-# ON in the Privacy list but CGPreflightScreenCaptureAccess() still reads false.
-# Accessibility tolerates a bare binary (works), Screen Recording does NOT. So
-# the shipped/dragged artifact is the .app; the inner binary is what we spawn.
-APP_PATH="$BUILD_DIR/$BUILD_CONFIG/cc-haha-computer-use.app"
 # Reuse the desktop brand asset so both Privacy lists show the product logo.
 APP_ICON_PATH="$PKG_DIR/../../desktop/src-tauri/icons/icon.icns"
-# Records the (identity, identifier) actually used, so we can detect rotation
-# across rebuilds and warn that TCC grants will have been dropped.
-SIGN_STAMP="$BUILD_DIR/.cu-helper.signid"
 
 BUNDLE_ID="${CU_HELPER_BUNDLE_ID:-dev.cchaha.cu-helper}"
 ARCH="${CU_HELPER_ARCH:-$(uname -m)}"
+SWIFT_SCRATCH_PATH="$BUILD_DIR/$ARCH"
+BIN_DIR=""
+BIN_PATH=""
+APP_PATH=""
+RESOURCE_BUNDLE_PATH=""
+# Records the (identity, identifier) actually used, so we can detect rotation
+# across rebuilds and warn that TCC grants will have been dropped.
+SIGN_STAMP="$BUILD_DIR/.cu-helper.$ARCH.signid"
 
 # ---------------------------------------------------------------------------
 # Logging helpers — everything diagnostic goes to STDERR so the final
@@ -84,6 +78,7 @@ preflight() {
   fi
 
   command -v swift   >/dev/null 2>&1 || die "swift not found on PATH. Install Xcode / Command Line Tools."
+  command -v lipo    >/dev/null 2>&1 || die "lipo not found on PATH. Install Xcode / Command Line Tools."
   command -v codesign >/dev/null 2>&1 || die "codesign not found on PATH. Install Xcode / Command Line Tools."
   command -v security >/dev/null 2>&1 || die "security tool not found on PATH (needed to enumerate signing identities)."
 
@@ -102,12 +97,12 @@ preflight() {
 # 2. Resolve a STABLE signing identity.
 #
 #    Priority:
-#      a) $CU_HELPER_IDENTITY (explicit override — trusted verbatim)
-#      b) the first real 'Apple Development: ...' identity in the keychain
-#         (preferred for fast, offline local iteration)
+#      a) $CC_HAHA_SIGN_IDENTITY (shared host/sidecar/helper build identity)
+#      b) $CU_HELPER_IDENTITY (legacy helper-only override for direct builds)
 #      c) the first 'Developer ID Application: ...' identity (release/CI)
-#      d) a self-signed 'cu-helper-dev' identity if one exists
-#      e) NONE -> print one-time create instructions and FAIL (never ad-hoc).
+#      d) the first real 'Apple Development: ...' identity in the keychain
+#      e) a self-signed 'cu-helper-dev' identity if one exists
+#      f) NONE -> print one-time create instructions and FAIL (never ad-hoc).
 #
 #    Sets globals: SIGN_IDENTITY (string passed to codesign --sign)
 # ---------------------------------------------------------------------------
@@ -182,7 +177,21 @@ EOF
 }
 
 resolve_identity() {
-  # a) explicit override.
+  # a) shared build-wide override. The helper, the sidecar and the Electron host
+  #     must end up on ONE certificate or the helper's client attestation rejects
+  #     every call (see desktop/scripts/sign-identity.ts). It deliberately wins
+  #     over the legacy helper-only variable so stale shell state cannot split a
+  #     signed app across two certificates.
+  if [ -n "${CC_HAHA_SIGN_IDENTITY:-}" ]; then
+    SIGN_IDENTITY="$CC_HAHA_SIGN_IDENTITY"
+    if [ "$SIGN_IDENTITY" = "-" ]; then
+      die "CC_HAHA_SIGN_IDENTITY='-' (ad-hoc) is refused. Ad-hoc signing rotates the TCC identity every build. Use a stable cert."
+    fi
+    log "identity: $SIGN_IDENTITY (from CC_HAHA_SIGN_IDENTITY)"
+    return 0
+  fi
+
+  # b) legacy explicit helper-only override for direct build.sh use.
   if [ -n "${CU_HELPER_IDENTITY:-}" ]; then
     SIGN_IDENTITY="$CU_HELPER_IDENTITY"
     # Best-effort sanity check; do not hard-fail on an override the user insists on,
@@ -198,20 +207,7 @@ resolve_identity() {
     return 0
   fi
 
-  # a2) shared build-wide override. The helper, the sidecar and the Electron host
-  #     must end up on ONE certificate or the helper's client attestation rejects
-  #     every call (see desktop/scripts/sign-identity.ts). This variable is how
-  #     the whole build agrees on which one.
-  if [ -n "${CC_HAHA_SIGN_IDENTITY:-}" ]; then
-    SIGN_IDENTITY="$CC_HAHA_SIGN_IDENTITY"
-    if [ "$SIGN_IDENTITY" = "-" ]; then
-      die "CC_HAHA_SIGN_IDENTITY='-' (ad-hoc) is refused. Ad-hoc signing rotates the TCC identity every build. Use a stable cert."
-    fi
-    log "identity: $SIGN_IDENTITY (from CC_HAHA_SIGN_IDENTITY)"
-    return 0
-  fi
-
-  # b) Developer ID distribution identity — PREFERRED. It is long-lived and
+  # c) Developer ID distribution identity — PREFERRED. It is long-lived and
   #    notarizable, and TCC grants are keyed to the signing identity: an
   #    Apple Development cert expires in about a year and its replacement
   #    silently drops the user's Accessibility + Screen Recording grants.
@@ -226,7 +222,7 @@ resolve_identity() {
     return 0
   fi
 
-  # c) real Apple Development identity.
+  # d) real Apple Development identity.
   local apple_dev
   apple_dev="$(first_apple_development_identity || true)"
   if [ -n "$apple_dev" ]; then
@@ -235,14 +231,14 @@ resolve_identity() {
     return 0
   fi
 
-  # d) self-signed fallback cert.
+  # e) self-signed fallback cert.
   if identity_exists "$SELF_SIGNED_NAME"; then
     SIGN_IDENTITY="$SELF_SIGNED_NAME"
     log "identity: $SIGN_IDENTITY (auto-detected self-signed Code Signing cert)"
     return 0
   fi
 
-  # e) nothing usable -> instructions + fail. NEVER ad-hoc.
+  # f) nothing usable -> instructions + fail. NEVER ad-hoc.
   print_self_signed_instructions
   die "no stable code-signing identity available (refusing to ad-hoc sign)."
 }
@@ -302,6 +298,23 @@ resolve_timestamp_mode() {
 # ---------------------------------------------------------------------------
 # 4. Build (release, requested target architecture).
 # ---------------------------------------------------------------------------
+resolve_build_paths() {
+  # `.build/release` is a mutable SwiftPM convenience symlink. It can point at
+  # the host architecture after a cross-build, so resolve the bin directory
+  # with the exact target arguments and keep each architecture in its own
+  # scratch tree.
+  BIN_DIR="$(swift build \
+    -c "$BUILD_CONFIG" \
+    --arch "$ARCH" \
+    --package-path "$PKG_DIR" \
+    --scratch-path "$SWIFT_SCRATCH_PATH" \
+    --show-bin-path)"
+  [ -n "$BIN_DIR" ] || die "swift build --show-bin-path returned an empty path for $ARCH"
+  BIN_PATH="$BIN_DIR/cc-haha-computer-use"
+  APP_PATH="$BIN_DIR/cc-haha-computer-use.app"
+  RESOURCE_BUNDLE_PATH="$BIN_DIR/cu-helper_cc-haha-computer-use.bundle"
+}
+
 build() {
   log ""
   log "==> swift build -c $BUILD_CONFIG --arch $ARCH (+embed Info.plist)"
@@ -314,13 +327,19 @@ build() {
   # Screen Recording. Done here (not in Package.swift) so the path is an absolute
   # build-time value, not a hardcoded machine path in the manifest. The section
   # is created before sign() runs, so the signature seals it.
+  resolve_build_paths
   swift build \
     -c "$BUILD_CONFIG" \
     --arch "$ARCH" \
     --package-path "$PKG_DIR" \
+    --scratch-path "$SWIFT_SCRATCH_PATH" \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$PKG_DIR/Info.plist" 1>&2
 
   [ -x "$BIN_PATH" ] || die "expected product not found or not executable at: $BIN_PATH"
+  if ! lipo "$BIN_PATH" -verify_arch "$ARCH" 1>&2; then
+    die "built product at $BIN_PATH does not contain required architecture $ARCH"
+  fi
+  log "verified architecture: $ARCH"
 
   # Hard assertion: the Info.plist section MUST be embedded, or Screen Recording
   # grants silently fail (Accessibility would still work, masking the bug).
@@ -425,7 +444,7 @@ wrap_app() {
   # Standard .app location is Contents/Resources/ (Bundle.main.resourceURL). Do
   # NOT also put it in MacOS/ — a nested .bundle there breaks codesign with an
   # "In subcomponent" error. Overlay degrades to a procedural ring if unresolved.
-  local res_bundle="$BUILD_DIR/$BUILD_CONFIG/cu-helper_cc-haha-computer-use.bundle"
+  local res_bundle="${RESOURCE_BUNDLE_PATH:-$BUILD_DIR/$BUILD_CONFIG/cu-helper_cc-haha-computer-use.bundle}"
   if [ -d "$res_bundle" ]; then
     cp -R "$res_bundle" "$APP_PATH/Contents/Resources/"
   fi

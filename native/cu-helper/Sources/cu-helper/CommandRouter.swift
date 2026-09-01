@@ -105,7 +105,6 @@ public final class CommandRouter {
         Self.lastCaptureDigest.removeAll()
         MutationClock.reset()
         ClipboardPasteReceipt.resetForTurn()
-        windowCaptureProvider?.invalidate()
         // Apps we told they were focused must be told they are not, or the
         // belief outlives the session that needed it.
         SyntheticWindowFocus.relinquishAll()

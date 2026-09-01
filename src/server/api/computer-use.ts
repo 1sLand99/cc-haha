@@ -29,9 +29,9 @@ import {
 } from '../../utils/computerUse/preauthorizedConfig.js'
 import {
   callCuHelper,
-  resolveCuHelperBinary,
+  isMacosComputerUseRuntimeSupported,
+  resolveLaunchableCuHelperBinary,
 } from '../../utils/computerUse/cuHelperBridge.js'
-import { ensureInstalledHelper } from '../../utils/computerUse/cuHelperInstall.js'
 // Embed the runtime scripts at compile time so bundled mode has them without
 // shipping loose files. Windows only: macOS drives Computer Use through the
 // signed native `cu-helper` daemon, and `helperBridge` refuses to fall back to
@@ -55,6 +55,7 @@ const installStampPath = join(runtimeStateRoot, 'requirements.sha256')
 const baseInterpreterMarkerPath = join(runtimeStateRoot, 'venv-base-interpreter.txt')
 const MIN_PYTHON_MAJOR = 3
 const MIN_PYTHON_MINOR = 9
+export const MIN_MACOS_COMPUTER_USE_VERSION = '14.4'
 
 const isWindows = process.platform === 'win32'
 const REQUIREMENTS_CONTENT = REQUIREMENTS_WIN32
@@ -179,6 +180,9 @@ async function ensureRuntimeFiles(): Promise<void> {
 type EnvStatus = {
   platform: string
   supported: boolean
+  engine: 'macos-native' | 'windows-compat' | 'unsupported'
+  systemVersion: string | null
+  arch: string
   /**
    * Native cu-helper engine availability. `available` is true only on macOS
    * AND when the Swift `cu-helper` binary resolves. The desktop UI branches on
@@ -186,6 +190,14 @@ type EnvStatus = {
    */
   cuHelper: {
     available: boolean
+    supported: boolean
+    minimumMacosVersion: typeof MIN_MACOS_COMPUTER_USE_VERSION
+    reason:
+      | 'unsupported_platform'
+      | 'system_version_unknown'
+      | 'os_too_old'
+      | 'helper_missing'
+      | null
   }
   python: {
     installed: boolean
@@ -205,6 +217,101 @@ type EnvStatus = {
   permissions: {
     accessibility: boolean | null
     screenRecording: boolean | null
+    error: string | null
+  }
+}
+
+type ComputerUseCapability = Pick<EnvStatus, 'supported' | 'engine'> & {
+  cuHelper: EnvStatus['cuHelper']
+}
+
+export function isVersionAtLeast(version: string, minimum: string): boolean {
+  const parse = (value: string) => value.split('.').map((part) => {
+    const parsed = Number.parseInt(part, 10)
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+  })
+  const actual = parse(version)
+  const floor = parse(minimum)
+  const length = Math.max(actual.length, floor.length)
+  for (let index = 0; index < length; index += 1) {
+    const left = actual[index] ?? 0
+    const right = floor[index] ?? 0
+    if (left !== right) return left > right
+  }
+  return true
+}
+
+/**
+ * Choose the implementation from platform/OS eligibility first. A missing
+ * native helper is a runtime failure on the native path, never a reason to
+ * fall back to the obsolete macOS Python page.
+ */
+export function resolveComputerUseCapability(
+  platform: string,
+  systemVersion: string | null,
+  helperPresent: boolean,
+  kernelVersionEligible = false,
+): ComputerUseCapability {
+  const baseHelper = {
+    minimumMacosVersion: MIN_MACOS_COMPUTER_USE_VERSION,
+  } as const
+  if (platform === 'win32') {
+    return {
+      supported: true,
+      engine: 'windows-compat',
+      cuHelper: {
+        ...baseHelper,
+        available: false,
+        supported: false,
+        reason: 'unsupported_platform',
+      },
+    }
+  }
+  if (platform !== 'darwin') {
+    return {
+      supported: false,
+      engine: 'unsupported',
+      cuHelper: {
+        ...baseHelper,
+        available: false,
+        supported: false,
+        reason: 'unsupported_platform',
+      },
+    }
+  }
+  if (!systemVersion && !kernelVersionEligible) {
+    return {
+      supported: false,
+      engine: 'unsupported',
+      cuHelper: {
+        ...baseHelper,
+        available: false,
+        supported: false,
+        reason: 'system_version_unknown',
+      },
+    }
+  }
+  if (systemVersion && !isVersionAtLeast(systemVersion, MIN_MACOS_COMPUTER_USE_VERSION)) {
+    return {
+      supported: false,
+      engine: 'unsupported',
+      cuHelper: {
+        ...baseHelper,
+        available: false,
+        supported: false,
+        reason: 'os_too_old',
+      },
+    }
+  }
+  return {
+    supported: true,
+    engine: 'macos-native',
+    cuHelper: {
+      ...baseHelper,
+      available: helperPresent,
+      supported: true,
+      reason: helperPresent ? null : 'helper_missing',
+    },
   }
 }
 
@@ -219,13 +326,12 @@ type CuHelperPermissions = {
 }
 
 /**
- * True only on macOS AND when the native `cu-helper` binary resolves. Mirrors
- * isCuHelperAvailable() from cuHelperBridge, re-derived here because the server
- * is a separate process; resolveCuHelperBinary() applies the identical path
- * logic and is safe to call from any process.
+ * True only on macOS AND when the native `cu-helper` can be launched from its
+ * canonical installation. This also verifies/install-repairs the packaged
+ * helper instead of reporting a nested app-bundle binary as healthy.
  */
 function isCuHelperAvailableForServer(): boolean {
-  return process.platform === 'darwin' && resolveCuHelperBinary() !== null
+  return process.platform === 'darwin' && resolveLaunchableCuHelperBinary() !== null
 }
 
 /**
@@ -240,12 +346,14 @@ export async function checkCuHelperPermissions(
 ): Promise<{
   accessibility: boolean | null
   screenRecording: boolean | null
+  error: string | null
 }> {
   try {
     const result = await call<CuHelperPermissions>('check_permissions')
     return {
       accessibility: result.accessibility ?? null,
       screenRecording: result.screenRecording ?? null,
+      error: null,
     }
   } catch (error) {
     // Nulls reach the settings page as a permanent "checking…" — the UI cannot
@@ -271,7 +379,13 @@ export async function checkCuHelperPermissions(
         hint: 'permissions stay unknown until this call succeeds',
       },
     })
-    return { accessibility: null, screenRecording: null }
+    return {
+      accessibility: null,
+      screenRecording: null,
+      error: error instanceof Error
+        ? error.message
+        : 'cu-helper check_permissions failed',
+    }
   }
 }
 
@@ -318,7 +432,7 @@ async function openNativePermissionCard(): Promise<{
   }
   // Launch from the standalone-installed helper so the card drags the same `.app`
   // the daemon runs from (its own Screen Recording subject). See cuHelperInstall.ts.
-  const bin = ensureInstalledHelper()?.binary ?? resolveCuHelperBinary()
+  const bin = resolveLaunchableCuHelperBinary()
   if (!bin) {
     return { ok: false, reason: 'helper-missing', accessibility: null, screenRecording: null }
   }
@@ -328,10 +442,40 @@ async function openNativePermissionCard(): Promise<{
   // then prints exactly one `{ok,result}` line. runCommand spawns + reads
   // stdout + awaits exit, which is exactly what we need.
   const result = await runCommand(bin, ['request-access'])
+  return resolvePermissionCardCommandResult(result)
+}
+
+export function resolvePermissionCardCommandResult(result: {
+  ok: boolean
+  stdout: string
+  stderr: string
+  code: number
+}): {
+  ok: boolean
+  reason?: string
+  accessibility: boolean | null
+  screenRecording: boolean | null
+} {
+  if (!result.ok) {
+    return {
+      ok: false,
+      reason: result.stderr || `permission card exited with code ${result.code}`,
+      accessibility: null,
+      screenRecording: null,
+    }
+  }
 
   // Parse the final snapshot line. The card always exits 0; tolerate trailing
   // log chatter by scanning lines for the last valid JSON envelope.
   const perms = parsePermissionSnapshot(result.stdout)
+  if (perms.accessibility === null && perms.screenRecording === null) {
+    return {
+      ok: false,
+      reason: 'permission card returned no permission snapshot',
+      accessibility: null,
+      screenRecording: null,
+    }
+  }
   return { ok: true, accessibility: perms.accessibility, screenRecording: perms.screenRecording }
 }
 
@@ -367,9 +511,64 @@ export function parsePermissionSnapshot(stdout: string): {
   return { accessibility: null, screenRecording: null }
 }
 
-async function checkStatus(): Promise<EnvStatus> {
-  const platform = process.platform
-  const supported = platform === 'darwin' || platform === 'win32'
+async function detectMacosProductVersion(): Promise<string | null> {
+  if (process.platform !== 'darwin') return null
+  const result = await runCommand('/usr/bin/sw_vers', ['-productVersion'])
+  return result.ok && result.stdout ? result.stdout : null
+}
+
+type CheckStatusDependencies = {
+  platform?: string
+  arch?: string
+  detectMacosProductVersion?: () => Promise<string | null>
+  isMacosRuntimeSupported?: (platform: string) => boolean
+  isCuHelperAvailable?: () => boolean
+  checkPermissions?: typeof checkCuHelperPermissions
+}
+
+export async function checkStatus(
+  dependencies: CheckStatusDependencies = {},
+): Promise<EnvStatus> {
+  const platform = dependencies.platform ?? process.platform
+  const arch = dependencies.arch ?? process.arch
+  const systemVersion = platform === 'darwin'
+    ? await (dependencies.detectMacosProductVersion ?? detectMacosProductVersion)()
+    : null
+  const kernelVersionEligible = platform === 'darwin'
+    && (dependencies.isMacosRuntimeSupported ?? isMacosComputerUseRuntimeSupported)(platform)
+  const macosEligible = platform === 'darwin'
+    && (systemVersion !== null
+      ? isVersionAtLeast(systemVersion, MIN_MACOS_COMPUTER_USE_VERSION)
+      : kernelVersionEligible)
+  const helperPresent = macosEligible
+    && (dependencies.isCuHelperAvailable ?? isCuHelperAvailableForServer)()
+  const capability = resolveComputerUseCapability(
+    platform,
+    systemVersion,
+    helperPresent,
+    kernelVersionEligible,
+  )
+  const supported = capability.supported
+
+  // macOS has a self-contained native runtime. Its status must never wait for
+  // a stale custom Python executable or expose the retired setup flow.
+  if (platform === 'darwin') {
+    const permissions = capability.cuHelper.available
+      ? await (dependencies.checkPermissions ?? checkCuHelperPermissions)()
+      : { accessibility: null, screenRecording: null, error: null }
+    return {
+      platform,
+      supported,
+      engine: capability.engine,
+      systemVersion,
+      arch,
+      cuHelper: capability.cuHelper,
+      python: { installed: false, version: null, path: null, source: null, error: null },
+      venv: { created: false, path: venvRoot },
+      dependencies: { installed: false, requirementsFound: false },
+      permissions,
+    }
+  }
 
   // Check venv — different paths on Windows vs Unix
   const venvPython = isWindows
@@ -419,12 +618,12 @@ async function checkStatus(): Promise<EnvStatus> {
   // straight from its `check_permissions` snapshot, with NO Python prerequisite.
   // This is what lets the new settings UI show 辅助功能 / 屏幕录制 status even
   // before (or entirely without) a Python venv.
-  const cuHelperAvailable = isCuHelperAvailableForServer()
+  const cuHelperAvailable = capability.cuHelper.available
   if (cuHelperAvailable) {
     const perms = await checkCuHelperPermissions()
     accessibility = perms.accessibility
     screenRecording = perms.screenRecording
-  } else if (supported && effectiveVenvCreated && depsInstalled) {
+  } else if (capability.engine === 'windows-compat' && effectiveVenvCreated && depsInstalled) {
     // Python path (Windows, or macOS without cu-helper). The helper uses
     // preflight + visible-window metadata as a passive fallback because plain
     // preflight can misreport child processes launched by the desktop app.
@@ -447,7 +646,10 @@ async function checkStatus(): Promise<EnvStatus> {
   return {
     platform,
     supported,
-    cuHelper: { available: cuHelperAvailable },
+    engine: capability.engine,
+    systemVersion,
+    arch,
+    cuHelper: capability.cuHelper,
     python: {
       installed: pythonRuntime.installed,
       version: pythonRuntime.version,
@@ -457,7 +659,7 @@ async function checkStatus(): Promise<EnvStatus> {
     },
     venv: { created: effectiveVenvCreated, path: venvRoot },
     dependencies: { installed: depsInstalled, requirementsFound: requirementsFound || true },
-    permissions: { accessibility, screenRecording },
+    permissions: { accessibility, screenRecording, error: null },
   }
 }
 
@@ -499,6 +701,16 @@ export async function installSetupDependencies(
 
 async function runSetup(): Promise<SetupResult> {
   const steps: SetupResult['steps'] = []
+  if (process.platform === 'darwin') {
+    return {
+      success: false,
+      steps: [{
+        name: 'native_runtime',
+        ok: false,
+        message: 'Computer Use on macOS uses the built-in native runtime and does not require Python setup.',
+      }],
+    }
+  }
   const unsupportedPlatformStep = getUnsupportedComputerUsePlatformStep(process.platform)
   if (unsupportedPlatformStep) {
     return { success: false, steps: [unsupportedPlatformStep] }
@@ -887,12 +1099,10 @@ async function listInstalledApps(): Promise<{ bundleId: string; displayName: str
   if (process.platform === 'darwin') {
     const apps = await listInstalledMacApps()
     if (apps.length > 0) return apps
-  }
-
-  // macOS fallback: ask the Swift cu-helper (still ahead of the Python path,
-  // which additionally gates on venv+helper being installed).
-  if (isCuHelperAvailableForServer()) {
-    return listInstalledAppsViaCuHelper()
+    // The native helper is the only macOS fallback. Never cross into the
+    // retired Python runtime when native app enumeration is temporarily empty.
+    if (isCuHelperAvailableForServer()) return listInstalledAppsViaCuHelper()
+    return []
   }
 
   const helperPath = getHelperPath()

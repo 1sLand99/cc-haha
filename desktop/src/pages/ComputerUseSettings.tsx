@@ -54,7 +54,8 @@ export function ComputerUseSettings() {
   const t = useTranslation()
   const [status, setStatus] = useState<ComputerUseStatus | null>(null)
   const [checkState, setCheckState] = useState<CheckState>('loading')
-  const [configSettled, setConfigSettled] = useState(false)
+  const [configState, setConfigState] = useState<CheckState>('loading')
+  const [configError, setConfigError] = useState<string | null>(null)
   const [setupRunning, setSetupRunning] = useState(false)
   const [setupResult, setSetupResult] = useState<SetupResult | null>(null)
 
@@ -77,14 +78,18 @@ export function ComputerUseSettings() {
   const [cardOpening, setCardOpening] = useState(false)
   const [cardError, setCardError] = useState<string | null>(null)
   const configMutationSeqRef = useRef(0)
+  const statusRequestSeqRef = useRef(0)
 
   const fetchStatus = useCallback(async () => {
+    const requestSeq = ++statusRequestSeqRef.current
     setCheckState('loading')
     try {
       const s = await computerUseApi.getStatus()
+      if (requestSeq !== statusRequestSeqRef.current) return
       setStatus(s)
       setCheckState('ready')
     } catch {
+      if (requestSeq !== statusRequestSeqRef.current) return
       setCheckState('error')
     }
   }, [])
@@ -105,12 +110,15 @@ export function ComputerUseSettings() {
 
   const fetchConfig = useCallback(async () => {
     const requestSeq = configMutationSeqRef.current
+    setConfigState('loading')
     try {
-      applyConfig(await computerUseApi.getAuthorizedApps(), requestSeq)
+      const config = await computerUseApi.getAuthorizedApps()
+      if (requestSeq !== configMutationSeqRef.current) return
+      applyConfig(config, requestSeq)
+      setConfigState('ready')
     } catch {
-      // API not ready
-    } finally {
-      setConfigSettled(true)
+      if (requestSeq !== configMutationSeqRef.current) return
+      setConfigState('error')
     }
   }, [applyConfig])
 
@@ -200,13 +208,24 @@ export function ComputerUseSettings() {
     })
   }
 
-  const toggleComputerUseEnabled = (value: boolean) => {
-    configMutationSeqRef.current += 1
+  const toggleComputerUseEnabled = async (value: boolean): Promise<boolean> => {
+    const requestSeq = ++configMutationSeqRef.current
+    const previous = computerUseEnabled
+    setConfigError(null)
     setComputerUseEnabled(value)
-    computerUseApi.setAuthorizedApps({ enabled: value }).then(() => {
+    try {
+      await computerUseApi.setAuthorizedApps({ enabled: value })
+      if (requestSeq !== configMutationSeqRef.current) return true
       setAppsSaved(true)
       setTimeout(() => setAppsSaved(false), 1500)
-    })
+      return true
+    } catch {
+      if (requestSeq === configMutationSeqRef.current) {
+        setComputerUseEnabled(previous)
+        setConfigError(t('settings.computerUse.configSaveFailed'))
+      }
+      return false
+    }
   }
 
   // ── Native (cu-helper) handlers ──
@@ -218,7 +237,8 @@ export function ComputerUseSettings() {
     setCardOpening(true)
     setCardError(null)
     try {
-      await computerUseApi.openPermissionCard()
+      const result = await computerUseApi.openPermissionCard()
+      if (!result.ok) throw new Error(result.reason ?? 'permission card failed')
     } catch {
       setCardError(t('settings.computerUse.openCardFailed'))
     } finally {
@@ -232,14 +252,17 @@ export function ComputerUseSettings() {
   // for persistence, but additionally pops the native OS-permission card when
   // turning ON while macOS permissions are still missing (the headline flow).
   const toggleAnyApp = (value: boolean) => {
-    toggleComputerUseEnabled(value)
-    if (
-      value &&
-      (status?.permissions.accessibility === false ||
-        status?.permissions.screenRecording === false)
-    ) {
-      void openPermissionCard()
-    }
+    void (async () => {
+      const saved = await toggleComputerUseEnabled(value)
+      if (
+        saved &&
+        value &&
+        (status?.permissions.accessibility === false ||
+          status?.permissions.screenRecording === false)
+      ) {
+        await openPermissionCard()
+      }
+    })()
   }
 
   // Persist an authorized-apps list change (native add/remove). Reuses the same
@@ -365,7 +388,7 @@ export function ComputerUseSettings() {
 
   // Native (cu-helper) path: drop the entire Python setup flow in favor of the
   // Codex-style page. Branch ONLY when on macOS AND the Swift helper resolves.
-  const native = status?.platform === 'darwin' && status?.cuHelper?.available === true
+  const native = status?.engine === 'macos-native'
 
   // Picker list (native "+ 添加应用"): installed apps not yet authorized, sorted.
   const pickerApps = useMemo(() => {
@@ -398,10 +421,56 @@ export function ComputerUseSettings() {
   // Status chooses the page implementation, while config supplies the switch
   // value. Waiting for both prevents a native disabled setting from briefly
   // rendering as enabled when the capability probe wins the race.
-  if (!configSettled) {
+  if (configState === 'loading') {
     return (
       <div className="max-w-2xl">
         <LoadingState size="md" label={t('common.loading')} />
+      </div>
+    )
+  }
+
+  if (configState === 'error') {
+    return (
+      <div className="max-w-2xl">
+        <ErrorState
+          size="lg"
+          title={t('settings.computerUse.configLoadFailed')}
+          retryLabel={t('common.retry')}
+          onRetry={fetchConfig}
+        />
+      </div>
+    )
+  }
+
+  if (status.engine === 'unsupported') {
+    const macosVersionProblem = status.platform === 'darwin'
+    const versionDetectionFailed = status.cuHelper.reason === 'system_version_unknown'
+    return (
+      <div className="max-w-2xl space-y-5">
+        <div>
+          <h2 className="text-[24px] font-semibold leading-tight text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-headline)' }}>
+            {t('settings.computerUse.controlTitle')}
+          </h2>
+          <p className="mt-1.5 text-[13.5px] leading-6 text-[var(--color-text-secondary)]">
+            {t('settings.computerUse.controlSubtitle')}
+          </p>
+        </div>
+        <ErrorState
+          size="lg"
+          title={versionDetectionFailed
+            ? t('settings.computerUse.macosDetectionFailedTitle')
+            : macosVersionProblem
+            ? t('settings.computerUse.macosUnsupportedTitle', { version: status.cuHelper.minimumMacosVersion })
+            : t('settings.computerUse.notSupported')}
+          detail={versionDetectionFailed
+            ? t('settings.computerUse.macosDetectionFailedDetail')
+            : macosVersionProblem
+            ? t('settings.computerUse.macosUnsupportedDetail', { current: status.systemVersion ?? t('settings.computerUse.unknownVersion') })
+            : undefined}
+          retryLabel={versionDetectionFailed ? t('settings.computerUse.recheckBtn') : undefined}
+          onRetry={versionDetectionFailed ? fetchStatus : undefined}
+          tone="strong"
+        />
       </div>
     )
   }
@@ -416,6 +485,8 @@ export function ComputerUseSettings() {
         authorizedApps={authorizedApps}
         onRemoveApp={removeAuthorizedApp}
         appsSaved={appsSaved}
+        configError={configError}
+        statusError={checkState === 'error'}
         cardOpening={cardOpening}
         cardError={cardError}
         onOpenCard={openPermissionCard}
@@ -432,6 +503,24 @@ export function ComputerUseSettings() {
     )
   }
 
+  // The Python compatibility page is Windows-only. Missing or future engine
+  // values (for example during a rolling sidecar/UI upgrade) fail closed on
+  // the native page instead of resurrecting the retired macOS setup screen.
+  if (status.engine !== 'windows-compat') {
+    return (
+      <div className="max-w-2xl space-y-5">
+        <ErrorState
+          size="lg"
+          title={t('settings.computerUse.nativeUnavailableTitle')}
+          detail={t('settings.computerUse.nativeUnavailableDetail')}
+          retryLabel={t('settings.computerUse.recheckBtn')}
+          onRetry={fetchStatus}
+          tone="strong"
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-2xl space-y-6">
       {/* Title */}
@@ -442,7 +531,7 @@ export function ComputerUseSettings() {
           </h2>
           <Switch
             checked={computerUseEnabled}
-            onChange={toggleComputerUseEnabled}
+            onChange={value => { void toggleComputerUseEnabled(value) }}
             label={t('settings.computerUse.enabledToggle')}
             size="sm"
           />
@@ -451,6 +540,12 @@ export function ComputerUseSettings() {
           {t('settings.computerUse.description')}
         </p>
       </div>
+
+      {configError && (
+        <div className="px-4 py-3 rounded-[var(--radius-lg)] border border-[var(--color-error)] bg-[var(--color-error-container)] text-sm text-[var(--color-on-error-container)]">
+          {configError}
+        </div>
+      )}
 
       {!computerUseEnabled && (
         <div className="px-4 py-3 rounded-[var(--radius-lg)] border border-[var(--color-warning)] bg-[var(--color-warning-container)] text-sm text-[var(--color-on-warning-container)]">
@@ -826,26 +921,34 @@ function PermissionStatusRow({
   t,
   label,
   state,
+  failed = false,
 }: {
   t: Translate
   label: string
   state: boolean | null
+  failed?: boolean
 }) {
   const granted = state === true
   const needed = state === false
-  const detail = granted
+  const detail = failed
+    ? t('settings.computerUse.permCheckFailed')
+    : granted
     ? t('settings.computerUse.permGranted')
     : needed
       ? t('settings.computerUse.permNeeded')
       : t('settings.computerUse.permChecking')
-  const dotClass = granted
+  const dotClass = failed
+    ? 'bg-[var(--color-error)]'
+    : granted
     ? 'bg-[var(--color-success)]'
     : needed
       ? 'bg-[var(--color-warning)]'
       : 'bg-[var(--color-text-tertiary)]'
   // Status colors ride the semantic tokens so they follow [data-theme]
   // (stock emerald/amber shades are fixed colors — see paletteEscapes.test.ts).
-  const detailClass = granted
+  const detailClass = failed
+    ? 'text-[var(--color-error)]'
+    : granted
     ? 'text-[var(--color-success)]'
     : needed
       ? 'text-[var(--color-warning)]'
@@ -874,6 +977,8 @@ function NativeComputerUse({
   authorizedApps,
   onRemoveApp,
   appsSaved,
+  configError,
+  statusError,
   cardOpening,
   cardError,
   onOpenCard,
@@ -894,6 +999,8 @@ function NativeComputerUse({
   authorizedApps: AuthorizedApp[]
   onRemoveApp: (bundleId: string) => void
   appsSaved: boolean
+  configError: string | null
+  statusError: boolean
   cardOpening: boolean
   cardError: string | null
   onOpenCard: () => void
@@ -909,26 +1016,68 @@ function NativeComputerUse({
 }) {
   const accessibility = status.permissions.accessibility
   const screenRecording = status.permissions.screenRecording
+  const permissionProbeFailed = Boolean(status.permissions.error)
+  const header = (
+    <div className="flex items-start justify-between gap-6">
+      <div className="min-w-0">
+        <h2 className="text-lg font-semibold tracking-tight text-[var(--color-text-primary)]">
+          {t('settings.computerUse.controlTitle')}
+        </h2>
+        <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+          {t('settings.computerUse.controlSubtitle')}
+        </p>
+      </div>
+      <Switch
+        checked={enabled}
+        onChange={onToggleEnabled}
+        label={t('settings.computerUse.enabledToggle')}
+        size="sm"
+      />
+    </div>
+  )
+  const configErrorNotice = configError ? (
+    <div className="px-4 py-3 rounded-[var(--radius-lg)] border border-[var(--color-error)] bg-[var(--color-error-container)] text-sm text-[var(--color-on-error-container)]">
+      {configError}
+    </div>
+  ) : null
+
+  if (statusError) {
+    return (
+      <div className="max-w-2xl space-y-5">
+        {header}
+        {configErrorNotice}
+        <ErrorState
+          size="lg"
+          title="Failed to check status."
+          retryLabel={t('common.retry')}
+          onRetry={onRecheck}
+          tone="strong"
+        />
+      </div>
+    )
+  }
+
+  if (!status.cuHelper.available) {
+    return (
+      <div className="max-w-2xl space-y-5">
+        {header}
+        {configErrorNotice}
+        <ErrorState
+          size="lg"
+          title={t('settings.computerUse.nativeUnavailableTitle')}
+          detail={t('settings.computerUse.nativeUnavailableDetail')}
+          retryLabel={t('settings.computerUse.recheckBtn')}
+          onRetry={onRecheck}
+          tone="strong"
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-2xl space-y-10">
-      {/* Title */}
-      <div className="flex items-start justify-between gap-6">
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold tracking-tight text-[var(--color-text-primary)]">
-            {t('settings.computerUse.controlTitle')}
-          </h2>
-          <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-text-secondary)]">
-            {t('settings.computerUse.controlSubtitle')}
-          </p>
-        </div>
-        <Switch
-          checked={enabled}
-          onChange={onToggleEnabled}
-          label={t('settings.computerUse.enabledToggle')}
-          size="sm"
-        />
-      </div>
+      {header}
+      {configErrorNotice}
 
       {/* ─── 控制 (Control) ─── */}
       <section className="space-y-3">
@@ -952,11 +1101,13 @@ function NativeComputerUse({
                 t={t}
                 label={t('settings.computerUse.accessibility')}
                 state={accessibility}
+                failed={permissionProbeFailed}
               />
               <PermissionStatusRow
                 t={t}
                 label={t('settings.computerUse.screenRecording')}
                 state={screenRecording}
+                failed={permissionProbeFailed}
               />
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">

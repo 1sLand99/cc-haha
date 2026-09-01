@@ -677,8 +677,10 @@ async function callExistingDaemon<T>(
 
 function needsOverlayReconciliation(): boolean {
   // A turn may contain only get_app_state and therefore never show the overlay.
-  // Its native state (capture stream, AX baseline, held-input guard and display
-  // sleep assertion) still needs an explicit turn_end at host cleanup.
+  // Its turn-owned native state (AX baseline, held-input guard and display
+  // sleep assertion) still needs an explicit turn_end at host cleanup. The
+  // keyed SCStream consumer deliberately survives that boundary and retires on
+  // target/config changes or daemon teardown.
   if (!overlayDesiredVisible) return overlayActualVisible || activeTurnId !== undefined
   return !overlayActualVisible || overlayActualKey !== overlayDesiredKey
 }

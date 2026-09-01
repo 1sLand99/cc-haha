@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   __resetInstalledHelperCache,
@@ -38,11 +40,11 @@ describe('installedHelperAppBundle / installedHelperRoot', () => {
 })
 
 describe('standalone helper copy command', () => {
-  test('uses the trusted system cp binary instead of PATH lookup', async () => {
+  test('uses system ditto without quarantine metadata', async () => {
     const { __copyAppCommandForTests } = await import('./cuHelperInstall.js')
     expect(__copyAppCommandForTests('/source/helper.app', '/dest/helper.app')).toEqual({
-      command: '/bin/cp',
-      args: ['-R', '/source/helper.app', '/dest/helper.app'],
+      command: '/usr/bin/ditto',
+      args: ['--noqtn', '/source/helper.app', '/dest/helper.app'],
     })
   })
 })
@@ -51,6 +53,7 @@ describe('ensureInstalledHelper', () => {
   const CONFIG = '/cfg'
   const DEST_APP = path.join(CONFIG, 'cu-helper', 'cc-haha-computer-use.app')
   const DEST_INNER = path.join(DEST_APP, INNER)
+  const STAGING_APP = path.join(CONFIG, 'cu-helper', '.cc-haha-computer-use.app.staging-test')
   const NESTED =
     '/Applications/Claude Code Haha.app/Contents/Resources/app.asar.unpacked/src-tauri/binaries/cc-haha-computer-use.app'
   const STANDALONE = '/dev/native/cu-helper/.build/release/cc-haha-computer-use.app'
@@ -85,14 +88,13 @@ describe('ensureInstalledHelper', () => {
         sourceApp: NESTED,
         configHome: CONFIG,
         exists: (p: string) => (p === DEST_INNER ? state.destExists : false),
-        readFileBytes: (p: string) => p.startsWith(DEST_APP)
+        readFileBytes: (p: string) => p.startsWith(DEST_APP) || p.startsWith(STAGING_APP)
           ? state.destBytes
           : BYTES,
         readMarker: () => state.marker,
         copyApp: (_src: string, _dest: string) => {
           if (initial.failCopy) throw new Error('cp -R failed')
           state.ops.push('cp')
-          state.destExists = true
           state.destBytes = initial.copyCorrupt ? Buffer.from('corrupt') : BYTES
           state.signatureValid = initial.copiedSignatureValid ?? true
         },
@@ -109,6 +111,15 @@ describe('ensureInstalledHelper', () => {
           if (p === DEST_APP) state.destExists = false
         },
         mkdir: () => state.ops.push('mkdir'),
+        stagingApp: STAGING_APP,
+        withInstallLock: <T>(_path: string, operation: () => T) => {
+          state.ops.push('lock')
+          return operation()
+        },
+        replaceApp: () => {
+          state.ops.push('replace')
+          state.destExists = true
+        },
       },
     }
   }
@@ -134,8 +145,99 @@ describe('ensureInstalledHelper', () => {
     const { state, deps } = fakeFs({ destExists: false })
     const r = ensureInstalledHelper(deps)
     expect(state.ops).toContain('cp')
+    expect(state.ops).toContain('replace')
     expect(state.marker).toBe(HASH)
     expect(r).toEqual({ appBundle: DEST_APP, binary: DEST_INNER })
+  })
+
+  test('installs and refreshes a canonical bundle through the real lock and recoverable replace path', () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), 'cc-haha-cu-install-'))
+    try {
+      const sourceApp = path.join(
+        tempRoot,
+        'Host.app',
+        'Contents',
+        'Resources',
+        'cc-haha-computer-use.app',
+      )
+      const configHome = path.join(tempRoot, 'config')
+      const fixtureFiles = [
+        INNER,
+        path.join('Contents', 'Info.plist'),
+        path.join('Contents', '_CodeSignature', 'CodeResources'),
+      ]
+      for (const relative of fixtureFiles) {
+        const target = path.join(sourceApp, relative)
+        mkdirSync(path.dirname(target), { recursive: true })
+        writeFileSync(target, `signed fixture: ${relative}`)
+      }
+
+      let copyCount = 0
+      const deps = {
+        sourceApp,
+        configHome,
+        copyApp: (src: string, dest: string) => {
+          copyCount += 1
+          cpSync(src, dest, { recursive: true })
+        },
+        verifyPackagedSignatures: () => true,
+      }
+      const destApp = installedHelperAppBundle(configHome)
+      const destInfo = path.join(destApp, 'Contents', 'Info.plist')
+
+      expect(ensureInstalledHelper(deps)?.appBundle).toBe(destApp)
+      expect(ensureInstalledHelper(deps)?.appBundle).toBe(destApp)
+      expect(copyCount).toBe(1)
+
+      writeFileSync(destInfo, 'tampered destination')
+      expect(ensureInstalledHelper(deps)?.appBundle).toBe(destApp)
+      expect(copyCount).toBe(2)
+      expect(readFileSync(destInfo, 'utf8')).toBe('signed fixture: Contents/Info.plist')
+      expect(existsSync(path.join(configHome, 'cu-helper', '.install.lock'))).toBe(false)
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('restores the last working bundle when post-replacement verification fails', () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), 'cc-haha-cu-rollback-'))
+    try {
+      const sourceApp = path.join(
+        tempRoot,
+        'Host.app',
+        'Contents',
+        'Resources',
+        'cc-haha-computer-use.app',
+      )
+      const configHome = path.join(tempRoot, 'config')
+      const destApp = installedHelperAppBundle(configHome)
+      const fixtureFiles = [
+        INNER,
+        path.join('Contents', 'Info.plist'),
+        path.join('Contents', '_CodeSignature', 'CodeResources'),
+      ]
+      for (const relative of fixtureFiles) {
+        const source = path.join(sourceApp, relative)
+        const destination = path.join(destApp, relative)
+        mkdirSync(path.dirname(source), { recursive: true })
+        mkdirSync(path.dirname(destination), { recursive: true })
+        writeFileSync(source, `new signed fixture: ${relative}`)
+        writeFileSync(destination, `last working fixture: ${relative}`)
+      }
+
+      const installed = ensureInstalledHelper({
+        sourceApp,
+        configHome,
+        copyApp: (src, dest) => cpSync(src, dest, { recursive: true }),
+        verifyPackagedSignatures: (_source, candidate) => candidate.includes('.staging-'),
+      })
+
+      expect(installed).toBeNull()
+      expect(readFileSync(path.join(destApp, INNER), 'utf8'))
+        .toBe(`last working fixture: ${INNER}`)
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true })
+    }
   })
 
   test('nested source + dest present + marker matches → NO copy (idempotent)', () => {
@@ -144,6 +246,20 @@ describe('ensureInstalledHelper', () => {
     expect(state.ops).not.toContain('cp')
     expect(state.ops.filter(op => op === 'verify-signature')).toHaveLength(1)
     expect(r).toEqual({ appBundle: DEST_APP, binary: DEST_INNER })
+  })
+
+  test('rechecks the destination after acquiring the install lock', () => {
+    const { state, deps } = fakeFs({ destExists: false })
+    deps.withInstallLock = <T>(_path: string, operation: () => T) => {
+      state.ops.push('lock')
+      state.destExists = true
+      state.marker = HASH
+      return operation()
+    }
+
+    expect(ensureInstalledHelper(deps)).toEqual({ appBundle: DEST_APP, binary: DEST_INNER })
+    expect(state.ops).not.toContain('cp')
+    expect(state.ops).not.toContain('replace')
   })
 
   test('matching marker does not hide destination bundle corruption', () => {

@@ -221,6 +221,7 @@ public final class Daemon {
         // never strand a stuck modifier/button when teardown is followed
         // immediately by exit() (shutdown verb + signal handlers).
         Injection.releaseAllHeldSync()
+        router.invalidateWindowCaptureStream()
         router.resetSessionState()
         displaySleepAssertion.release()
         inputMonitor.stop()
@@ -437,6 +438,7 @@ public final class Daemon {
     private func cleanupDisconnectedSession() {
         stopOverlaySession()
         Injection.releaseAllHeldSync()
+        router.invalidateWindowCaptureStream()
         router.resetSessionState()
         turnGate.reset()
         displaySleepAssertion.release()
@@ -603,12 +605,13 @@ public final class Daemon {
         explicitOverlayTarget = nil
         Injection.clearResolvedTarget()
         cursor.hide()
-        router.invalidateWindowCaptureStream()
     }
 
-    /// Codex-parity turn boundary. The helper process stays warm, but no AX
-    /// snapshot, coordinate transform, focus belief, held input, mutation clock,
-    /// clipboard diagnostic, or capture stream may leak into the next turn.
+    /// Codex-parity turn boundary. The helper process and its SCStream consumer
+    /// stay warm, while AX snapshots, coordinate transforms, focus belief,
+    /// held input, mutation clocks, and clipboard diagnostics are reset. The
+    /// stream key itself proves process/window/config identity and retires on
+    /// any target change, screen reconfiguration, disconnect, or shutdown.
     private func endTurn() {
         stopOverlaySession()
         Injection.releaseAllHeldSync()

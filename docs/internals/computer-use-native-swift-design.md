@@ -4,7 +4,7 @@
 >
 > 本文是**技术方案/评审稿**，不含落地代码。决策点见末尾「八、待决策」。
 
-相关文档：[Computer Use 架构深度解析](./computer-use-architecture.md) · [功能指南](./computer-use.md)
+相关文档：[Computer Use 架构深度解析](./computer-use.md) · [功能指南](../desktop/computer-use.md)
 
 ---
 

@@ -74,6 +74,9 @@ export function __resetAppIconCacheForTests(): void {
 export type ComputerUseStatus = {
   platform: string
   supported: boolean
+  engine: 'macos-native' | 'windows-compat' | 'unsupported'
+  systemVersion: string | null
+  arch: string
   /**
    * Native cu-helper engine availability. `available` is true only on macOS AND
    * when the Swift `cu-helper` binary resolves on the server. The settings page
@@ -83,6 +86,14 @@ export type ComputerUseStatus = {
    */
   cuHelper: {
     available: boolean
+    supported: boolean
+    minimumMacosVersion: string
+    reason:
+      | 'unsupported_platform'
+      | 'system_version_unknown'
+      | 'os_too_old'
+      | 'helper_missing'
+      | null
   }
   python: {
     installed: boolean
@@ -102,6 +113,7 @@ export type ComputerUseStatus = {
   permissions: {
     accessibility: boolean | null
     screenRecording: boolean | null
+    error?: string | null
   }
 }
 

@@ -661,7 +661,7 @@ describe('build-sidecars cu-helper macOS gating', () => {
     // guard, so non-macOS sidecar builds keep using the Python helper instead of
     // attempting a macOS-only Swift build.
     const guarded = source.match(
-      /if \(process\.platform === 'darwin'\) \{\s*await buildCuHelper\(\)\s*\}/,
+      /if \(process\.platform === 'darwin' && cuHelperArch\) \{\s*await buildCuHelper\(cuHelperArch\)\s*\}/,
     )
     expect(guarded).not.toBeNull()
   })
@@ -669,6 +669,7 @@ describe('build-sidecars cu-helper macOS gating', () => {
   it('invokes native/cu-helper/build.sh from the cu-helper build step', () => {
     const source = readBuildScript()
     expect(source).toMatch(/'native',\s*'cu-helper',\s*'build\.sh'/)
+    expect(source).toContain('env: createCuHelperBuildEnv(targetTriple, process.env)')
   })
 
   it('copies the cu-helper binary and its resource bundle into the binaries dir', () => {

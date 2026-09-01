@@ -215,21 +215,27 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
     }
 
     /// Match the reference's two separate lifetimes: SCStream remains a
-    /// consumer while covered; every state read runs an on-demand Skyshot/SCK
-    /// capture. An idle stream's cached frame is not evidence of the current UI.
+    /// daemon-lifetime consumer while covered; every state read runs an
+    /// on-demand Skyshot/SCK capture. The stream must have produced a real
+    /// pixel frame before its on-demand screenshot may be treated as live.
     func captureSnapshot(
         for target: WindowCaptureStreamTarget,
         scale: Double,
         newerThanUptime: TimeInterval? = nil
     ) async -> WindowShot? {
-        if let newerThanUptime {
-            // The stream is a long-lived render/freshness consumer, not the
-            // model screenshot source. Before the post-action Skyshot, observe
-            // a stream frame newer than the action when possible. `frame`
-            // performs one bounded rebuild for a silently starved stream; a
-            // static/no-op UI may legitimately emit no changed frame, so the
-            // authoritative on-demand screenshot still runs after the bound.
-            _ = await frame(for: target, newerThanUptime: newerThanUptime)
+        // The stream is a long-lived render/freshness consumer, not the model
+        // screenshot source. A brand-new source must deliver its first pixel
+        // frame before we trust an on-demand screenshot for a covered window.
+        // After an input mutation, the frame must additionally be newer than
+        // the action watermark. `frame` performs one bounded rebuild for a
+        // silently starved stream; if neither source produces qualifying
+        // pixels, fail closed instead of labelling compositor-cached pixels as
+        // stream-backed.
+        guard await frame(
+            for: target,
+            newerThanUptime: newerThanUptime
+        ) != nil else {
+            return nil
         }
         for _ in 0..<2 {
             guard let source = await source(for: target) else { continue }
@@ -534,9 +540,10 @@ final class ScreenCaptureKitWindowStreamSource: WindowCaptureStreamSource {
         guard let stream else { return }
         self.stream = nil
 
-        // Do not await SCK shutdown on overlay_hide/disconnect. The mailbox is
-        // already inert, and retaining the stream in this completion closure
-        // lets ScreenCaptureKit finish cleanup without delaying the turn.
+        // Do not await SCK shutdown on target replacement, disconnect, or
+        // daemon teardown. The mailbox is already inert, and retaining the
+        // stream in this completion closure lets ScreenCaptureKit finish
+        // cleanup without delaying the request.
         Task { @MainActor in
             try? await stream.stopCapture()
         }

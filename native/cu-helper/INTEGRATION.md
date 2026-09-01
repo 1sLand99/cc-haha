@@ -170,7 +170,7 @@ socket, which avoids a connect race against `bind()`/`listen()`.
 | Verb           | Effect                                                                                  | `result` |
 |----------------|-----------------------------------------------------------------------------------------|----------|
 | `overlay_show` | `cursor.show()` + `glow.show(over: frontmost app)`. Reveals the virtual cursor + glow.  | `true`   |
-| `overlay_hide` | `cursor.hide()` + `glow.hide(animated: true)`. Parks the cursor, fades the glow.        | `true`   |
+| `overlay_hide` | Parks the cursor and resets turn-owned AX/input/focus state. The keyed `SCStream` remains warm until target/config change, disconnect, or daemon teardown. | `true`   |
 | `ping`         | Liveness probe.                                                                         | `"pong"` |
 | `shutdown`     | Returns `true`, then `NSApp.terminate(nil)` for a graceful exit.                        | `true`   |
 
@@ -263,7 +263,7 @@ invocation*, swapping the Python interpreter + `mac_helper.py` for the signed
 - **bundled (Tauri):** the sidecar resolved from `binaries/cu-helper` (§3.5).
 
 `pythonBridge.ts` is **not** edited; the Windows path (`win_helper.py`) is
-untouched (this helper is macOS-only — `Package.swift` targets `.macOS("14.0")`).
+untouched (this helper is macOS-only — `Package.swift` targets `.macOS("14.4")`).
 
 ### 3.3 `src/utils/computerUse/wrapper.tsx` — `acquireCuLock` fresh branch
 

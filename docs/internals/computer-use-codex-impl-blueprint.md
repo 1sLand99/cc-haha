@@ -50,7 +50,7 @@ The focused UI element is 2 outline.
 
 - **子节点不止 kAXChildren**:并 `kAXChildren + kAXRows + AXContents + AXVisibleChildren`,按角色选主源(outline/list/table/AXBrowser 用 AXRows),CFEqual 去重,跳过菜单栏下的 Apple 菜单。**否则 Finder/系统设置/活动监视器的行全丢。**
 - **环路守卫**:传 ancestors 集合,CFEqual 命中祖先则跳过(Electron 树有环,否则重复子树)。
-- **【关键】泛容器消除 + 扁平化**:剪掉无描述的 AXGroup/AXUnknown 包装(同深递归进子)、单子无意义组折叠、纯文本兄弟合并成一个 ` text …`、链接渲染成 markdown `[text](url)` 并吞子。**没有这步,Electron 的 AXWebArea 是几千个空 wrapper,在到达有用控件前就撑爆 cap——这正是"Electron 看起来读不到树"的真因。**
+- **【关键】泛容器消除 + 扁平化**:剪掉无描述的 AXGroup/AXUnknown 包装(同深递归进子)、单子无意义组折叠、纯文本兄弟合并成一个 ` text …`、链接渲染成 Markdown 的文本加 URL 形式并吞子。**没有这步,Electron 的 AXWebArea 是几千个空 wrapper,在到达有用控件前就撑爆 cap——这正是"Electron 看起来读不到树"的真因。**
 - **菜单栏第二趟**:走完窗口后 `walk(copyElement(app, kAXMenuBar))` 追加(否则不能按 index 点菜单)。
 - **行可见性窗口化**:outline/list 只 emit 可见行(与父框相交),cap 20,容器加 ` (showing 0-N of M items)` 摘要。
 - **window-relative frame**:`localFrame = elementFrame - windowBounds.origin`,内部存。

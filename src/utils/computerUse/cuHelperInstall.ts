@@ -1,11 +1,16 @@
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   existsSync,
+  closeSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
+  renameSync,
   rmSync,
+  statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import os from 'node:os'
@@ -92,15 +97,22 @@ type InstallDeps = {
   writeMarker?: (p: string, v: string) => void
   readMarker?: (p: string) => string | null
   verifyPackagedSignatures?: (sourceApp: string, destApp: string) => boolean
+  replaceApp?: (
+    stagingApp: string,
+    destApp: string,
+    verifyInstalled: () => boolean,
+  ) => void
+  withInstallLock?: <T>(lockPath: string, operation: () => T) => T
+  stagingApp?: string
 }
 
-/** Real-FS copy via `cp -R`: preserves the code signature + exec mode bits, and
- *  the self-written copy carries no quarantine xattr (so it isn't translocated). */
+/** Real-FS copy via the system `ditto --noqtn`: preserves the signed bundle and
+ * explicitly strips quarantine metadata from the canonical runtime copy. */
 function copyAppCommand(src: string, dest: string): {
   command: string
   args: string[]
 } {
-  return { command: '/bin/cp', args: ['-R', src, dest] }
+  return { command: '/usr/bin/ditto', args: ['--noqtn', src, dest] }
 }
 
 /** Focused security seam: production and the regression test share this spec. */
@@ -111,11 +123,84 @@ export function __copyAppCommandForTests(src: string, dest: string): {
   return copyAppCommand(src, dest)
 }
 
-function cpDashR(src: string, dest: string): void {
+function dittoNoQuarantine(src: string, dest: string): void {
   const command = copyAppCommand(src, dest)
   const r = spawnSync(command.command, command.args, { stdio: 'ignore' })
   if (r.status !== 0) {
-    throw new Error(`cp -R failed (status ${String(r.status)}): ${r.error?.message ?? 'unknown'}`)
+    throw new Error(`ditto --noqtn failed (status ${String(r.status)}): ${r.error?.message ?? 'unknown'}`)
+  }
+}
+
+function withExclusiveInstallLock<T>(lockPath: string, operation: () => T): T {
+  const deadline = Date.now() + 5_000
+  const ownerToken = `${process.pid}:${Date.now()}:${randomUUID()}`
+  let descriptor: number | null = null
+  while (descriptor === null) {
+    try {
+      descriptor = openSync(lockPath, 'wx', 0o600)
+      writeFileSync(descriptor, `${ownerToken}\n`, 'utf8')
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'EEXIST') throw error
+      try {
+        const oldEnough = Date.now() - statSync(lockPath).mtimeMs > 30_000
+        const ownerText = readFileSync(lockPath, 'utf8').trim()
+        const ownerPid = Number.parseInt(ownerText.split(':', 1)[0] ?? '', 10)
+        let ownerAlive = Number.isFinite(ownerPid) && ownerPid > 0
+        if (ownerAlive) {
+          try {
+            process.kill(ownerPid, 0)
+          } catch (probeError) {
+            ownerAlive = (probeError as NodeJS.ErrnoException).code === 'EPERM'
+          }
+        }
+        if (oldEnough && !ownerAlive) {
+          // Rename the stale inode out of the lock path atomically. Competing
+          // recoverers can no longer unlink a fresh lock acquired afterward.
+          const stalePath = `${lockPath}.stale-${process.pid}-${randomUUID()}`
+          renameSync(lockPath, stalePath)
+          rmSync(stalePath, { force: true })
+        }
+      } catch {}
+      if (Date.now() >= deadline) {
+        throw new Error('timed out waiting for the cu-helper install lock')
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
+    }
+  }
+  try {
+    return operation()
+  } finally {
+    closeSync(descriptor)
+    try {
+      // Only remove the lock inode we created. If an external repair replaced
+      // the path, leave its owner's lock intact.
+      if (readFileSync(lockPath, 'utf8').trim() === ownerToken) unlinkSync(lockPath)
+    } catch {}
+  }
+}
+
+function replaceAppRecoverably(
+  stagingApp: string,
+  destApp: string,
+  verifyInstalled: () => boolean,
+): void {
+  const backupApp = `${destApp}.previous-${process.pid}`
+  rmSync(backupApp, { recursive: true, force: true })
+  const hadDestination = existsSync(destApp)
+  if (hadDestination) renameSync(destApp, backupApp)
+  try {
+    renameSync(stagingApp, destApp)
+    if (!verifyInstalled()) {
+      throw new Error('installed cu-helper failed post-replacement verification')
+    }
+    rmSync(backupApp, { recursive: true, force: true })
+  } catch (error) {
+    rmSync(destApp, { recursive: true, force: true })
+    if (hadDestination && existsSync(backupApp)) {
+      renameSync(backupApp, destApp)
+    }
+    throw error
   }
 }
 
@@ -272,36 +357,61 @@ function ensureInstalledHelperUncached(deps: InstallDeps): InstalledHelper | nul
     const srcHash = signedBundleFingerprint(sourceApp, readBytes)
 
     let destinationVerified = false
-    let destinationMatches = false
-    if (exists(destInner) && readMarker(markerPath) === srcHash) {
+    const verifyDestination = () => {
+      if (!exists(destInner) || readMarker(markerPath) !== srcHash) return false
       try {
         const fingerprintMatches = signedBundleFingerprint(destApp, readBytes) === srcHash
         destinationVerified = fingerprintMatches
           && verifySignatures(sourceApp, destApp)
-        destinationMatches = fingerprintMatches && destinationVerified
+        return fingerprintMatches && destinationVerified
       } catch {
         destinationVerified = false
-        destinationMatches = false
+        return false
       }
     }
-    const upToDate = destinationMatches
+    const upToDate = verifyDestination()
     if (!upToDate) {
       const rm = deps.rm ?? ((p) => rmSync(p, { recursive: true, force: true }))
       const mkdir = deps.mkdir ?? ((p) => mkdirSync(p, { recursive: true, mode: 0o700 }))
-      const copyApp = deps.copyApp ?? cpDashR
+      const copyApp = deps.copyApp ?? dittoNoQuarantine
       const writeMarker = deps.writeMarker ?? ((p, v) => writeFileSync(p, `${v}\n`, 'utf8'))
+      const replaceApp = deps.replaceApp ?? replaceAppRecoverably
+      const withInstallLock = deps.withInstallLock ?? withExclusiveInstallLock
+      const stagingApp = deps.stagingApp
+        ?? path.join(root, `.${APP_NAME}.staging-${process.pid}`)
       mkdir(root)
-      rm(destApp)
-      copyApp(sourceApp, destApp)
-      if (signedBundleFingerprint(destApp, readBytes) !== srcHash) {
-        throw new Error('copied cu-helper bundle fingerprint does not match source')
-      }
-      destinationVerified = verifySignatures(sourceApp, destApp)
-      if (!destinationVerified) {
-        throw new Error('copied cu-helper signature does not match the packaged sidecar')
-      }
-      writeMarker(markerPath, srcHash)
-      logForDebugging(`installed cu-helper to standalone path: ${destApp}`, { level: 'debug' })
+      withInstallLock(path.join(root, '.install.lock'), () => {
+        // Another sidecar may have completed the same install while this one
+        // waited. Re-check under the cross-process lock before copying.
+        if (verifyDestination()) return
+        rm(stagingApp)
+        try {
+          copyApp(sourceApp, stagingApp)
+          if (signedBundleFingerprint(stagingApp, readBytes) !== srcHash) {
+            throw new Error('copied cu-helper bundle fingerprint does not match source')
+          }
+          if (!verifySignatures(sourceApp, stagingApp)) {
+            throw new Error('copied cu-helper signature does not match the packaged sidecar')
+          }
+          const verifyInstalled = () => {
+            try {
+              return signedBundleFingerprint(destApp, readBytes) === srcHash
+                && verifySignatures(sourceApp, destApp)
+            } catch {
+              return false
+            }
+          }
+          replaceApp(stagingApp, destApp, verifyInstalled)
+          destinationVerified = verifyInstalled()
+          if (!destinationVerified) {
+            throw new Error('installed cu-helper signature does not match the packaged sidecar')
+          }
+          writeMarker(markerPath, srcHash)
+          logForDebugging(`installed cu-helper to standalone path: ${destApp}`, { level: 'debug' })
+        } finally {
+          rm(stagingApp)
+        }
+      })
     }
     if (exists(destInner) && destinationVerified) {
       return { appBundle: destApp, binary: destInner }

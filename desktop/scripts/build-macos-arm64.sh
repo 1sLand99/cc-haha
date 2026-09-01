@@ -216,7 +216,7 @@ Built at: $(date '+%Y-%m-%d %H:%M:%S %z')
 EOF
 
 if [[ "${SKIP_PACKAGE_SMOKE:-0}" != "1" ]]; then
-  PACKAGE_SMOKE_ARGS=(bun run test:package-smoke --platform macos --package-kind release --artifacts-dir desktop/build-artifacts/macos-arm64)
+  PACKAGE_SMOKE_ARGS=(bun run test:package-smoke --platform macos --arch arm64 --package-kind release --artifacts-dir desktop/build-artifacts/macos-arm64)
   if [[ "${REQUIRE_MACOS_GATEKEEPER_SMOKE:-0}" == "1" ]]; then
     PACKAGE_SMOKE_ARGS+=(--require-macos-gatekeeper)
   fi

@@ -245,6 +245,135 @@ describe('Computer Use API authorized app config', () => {
   })
 })
 
+describe('Computer Use platform capability', () => {
+  it('builds native macOS status through the real capability transition', async () => {
+    const { checkStatus } = await importComputerUseApi()
+    const calls: string[] = []
+
+    const status = await checkStatus({
+      platform: 'darwin',
+      arch: 'x64',
+      detectMacosProductVersion: async () => {
+        calls.push('version')
+        return '14.4.1'
+      },
+      isMacosRuntimeSupported: (platform) => {
+        calls.push(`runtime:${platform}`)
+        return true
+      },
+      isCuHelperAvailable: () => {
+        calls.push('helper')
+        return true
+      },
+      checkPermissions: async () => {
+        calls.push('permissions')
+        return { accessibility: true, screenRecording: false, error: null }
+      },
+    })
+
+    expect(calls).toEqual(['version', 'runtime:darwin', 'helper', 'permissions'])
+    expect(status).toEqual({
+      platform: 'darwin',
+      supported: true,
+      engine: 'macos-native',
+      systemVersion: '14.4.1',
+      arch: 'x64',
+      cuHelper: {
+        available: true,
+        supported: true,
+        minimumMacosVersion: '14.4',
+        reason: null,
+      },
+      python: { installed: false, version: null, path: null, source: null, error: null },
+      venv: { created: false, path: expect.any(String) },
+      dependencies: { installed: false, requirementsFound: false },
+      permissions: { accessibility: true, screenRecording: false, error: null },
+    })
+  })
+
+  it('does not probe or launch the helper below the macOS system floor', async () => {
+    const { checkStatus } = await importComputerUseApi()
+    let helperCalls = 0
+    let permissionCalls = 0
+
+    const status = await checkStatus({
+      platform: 'darwin',
+      arch: 'arm64',
+      detectMacosProductVersion: async () => '14.3.9',
+      isMacosRuntimeSupported: () => true,
+      isCuHelperAvailable: () => {
+        helperCalls += 1
+        return true
+      },
+      checkPermissions: async () => {
+        permissionCalls += 1
+        return { accessibility: true, screenRecording: true, error: null }
+      },
+    })
+
+    expect(helperCalls).toBe(0)
+    expect(permissionCalls).toBe(0)
+    expect(status).toMatchObject({
+      supported: false,
+      engine: 'unsupported',
+      systemVersion: '14.3.9',
+      arch: 'arm64',
+      cuHelper: { available: false, supported: false, reason: 'os_too_old' },
+      permissions: { accessibility: null, screenRecording: null, error: null },
+    })
+  })
+
+  it('keeps eligible macOS on the native engine when the helper is missing', async () => {
+    const { resolveComputerUseCapability } = await importComputerUseApi()
+
+    expect(resolveComputerUseCapability('darwin', '14.4', false)).toEqual({
+      supported: true,
+      engine: 'macos-native',
+      cuHelper: {
+        available: false,
+        supported: true,
+        minimumMacosVersion: '14.4',
+        reason: 'helper_missing',
+      },
+    })
+    expect(resolveComputerUseCapability('darwin', '15.0', true).engine)
+      .toBe('macos-native')
+  })
+
+  it('fails closed below the native system floor without string comparison bugs', async () => {
+    const { isVersionAtLeast, resolveComputerUseCapability } = await importComputerUseApi()
+
+    expect(isVersionAtLeast('14.10', '14.4')).toBe(true)
+    expect(isVersionAtLeast('14.3.9', '14.4')).toBe(false)
+    expect(resolveComputerUseCapability('darwin', '14.3.9', true)).toMatchObject({
+      supported: false,
+      engine: 'unsupported',
+      cuHelper: { available: false, reason: 'os_too_old' },
+    })
+    expect(resolveComputerUseCapability('darwin', null, true)).toMatchObject({
+      supported: false,
+      engine: 'unsupported',
+      cuHelper: { available: false, reason: 'system_version_unknown' },
+    })
+    expect(resolveComputerUseCapability('darwin', null, true, true)).toMatchObject({
+      supported: true,
+      engine: 'macos-native',
+      cuHelper: { available: true, reason: null },
+    })
+  })
+
+  it('routes Windows to compatibility and rejects unsupported platforms', async () => {
+    const { resolveComputerUseCapability } = await importComputerUseApi()
+
+    expect(resolveComputerUseCapability('win32', null, false).engine)
+      .toBe('windows-compat')
+    expect(resolveComputerUseCapability('linux', null, false)).toMatchObject({
+      supported: false,
+      engine: 'unsupported',
+    })
+  })
+})
+
 describe('runPipInstallWithFallback', () => {
   it('rejects setup on unsupported platforms before writing runtime files', async () => {
     const { getUnsupportedComputerUsePlatformStep } = await importComputerUseApi()
@@ -543,6 +672,41 @@ describe('app icon endpoint input', () => {
   })
 })
 
+describe('native permission card command result', () => {
+  it('fails when the helper exits unsuccessfully or returns no snapshot', async () => {
+    const { resolvePermissionCardCommandResult } = await importComputerUseApi()
+
+    expect(resolvePermissionCardCommandResult({
+      ok: false,
+      stdout: '',
+      stderr: 'loader rejected helper',
+      code: 1,
+    })).toEqual({
+      ok: false,
+      reason: 'loader rejected helper',
+      accessibility: null,
+      screenRecording: null,
+    })
+    expect(resolvePermissionCardCommandResult({
+      ok: true,
+      stdout: 'not-json',
+      stderr: '',
+      code: 0,
+    })).toMatchObject({ ok: false, accessibility: null, screenRecording: null })
+  })
+
+  it('returns the final valid permission snapshot', async () => {
+    const { resolvePermissionCardCommandResult } = await importComputerUseApi()
+
+    expect(resolvePermissionCardCommandResult({
+      ok: true,
+      stdout: 'log\n{"ok":true,"result":{"accessibility":true,"screenRecording":false}}',
+      stderr: '',
+      code: 0,
+    })).toEqual({ ok: true, accessibility: true, screenRecording: false })
+  })
+})
+
 /**
  * Nulls render as a permanent "checking…" in the settings page, so a probe that
  * fails silently is indistinguishable from one still in flight. That happened:
@@ -567,8 +731,11 @@ describe('checkCuHelperPermissions failure reporting', () => {
         )
       })
 
-      // Still degrades to unknown — the caller contract does not change.
-      expect(result).toEqual({ accessibility: null, screenRecording: null })
+      expect(result).toEqual({
+        accessibility: null,
+        screenRecording: null,
+        error: 'This helper command requires the signed Claude Code Haha desktop app.',
+      })
 
       expect(recorded).toHaveLength(1)
       expect(recorded[0]).toMatchObject({
@@ -596,7 +763,7 @@ describe('checkCuHelperPermissions failure reporting', () => {
           ({ accessibility: true, screenRecording: false }) as never,
       )
 
-      expect(result).toEqual({ accessibility: true, screenRecording: false })
+      expect(result).toEqual({ accessibility: true, screenRecording: false, error: null })
       // A granted-or-denied answer is a completed check, not a diagnostic event.
       expect(spy).not.toHaveBeenCalled()
     } finally {

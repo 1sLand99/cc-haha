@@ -40,11 +40,11 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           WIN_CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          RELEASE_DRAFT: ${{ github.event_name == 'workflow_dispatch' && inputs.draft == true }}
         run: |
           # macOS signing + notarization is preferred: Squirrel.Mac auto-update and
-          # first-launch Gatekeeper approval work best with a notarized Developer ID build.
-          # Drafts may still build unsigned while Apple Developer ID setup is being tested.
+          # first-launch Gatekeeper approval and Computer Use client attestation
+          # require a consistent Developer ID build. Drafts use the same native
+          # runtime, so an unsigned macOS lane would be a knowingly broken app.
           missing=()
           [ -n "$CSC_LINK" ] || missing+=("MACOS_CERTIFICATE")
           [ -n "$CSC_KEY_PASSWORD" ] || missing+=("MACOS_CERTIFICATE_PASSWORD")
@@ -52,12 +52,9 @@ jobs:
           [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] || missing+=("APPLE_APP_SPECIFIC_PASSWORD")
           [ -n "$APPLE_TEAM_ID" ] || missing+=("APPLE_TEAM_ID")
           if [ "${#missing[@]}" -gt 0 ]; then
-            printf '::warning::Missing macOS signing/notarization secrets (%s): macOS artifacts will be unsigned and users must use install-macos-unsigned.sh.\n' "${missing[*]}"
+            printf '::error::Missing macOS signing/notarization secrets (%s): refusing to build a macOS release whose Computer Use runtime cannot pass client attestation.\n' "${missing[*]}"
             echo "macos_signed=false" >> "$GITHUB_OUTPUT"
-            if [ "$RELEASE_DRAFT" != "true" ]; then
-              echo "::error::Refusing to publish a non-draft desktop release without macOS signing/notarization secrets."
-              exit 1
-            fi
+            exit 1
           else
             echo "macos_signed=true" >> "$GITHUB_OUTPUT"
           fi
@@ -172,6 +169,48 @@ jobs:
         if: matrix.smoke_platform == 'windows'
         working-directory: desktop
         run: bun run test:windows-storage-recovery
+
+      - name: Import macOS signing identity for native runtimes
+        if: matrix.smoke_platform == 'macos' && needs.signing-preflight.outputs.macos_signed == 'true'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          certificate_path="${RUNNER_TEMP}/cc-haha-signing.p12"
+          keychain_path="${RUNNER_TEMP}/cc-haha-signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          printf '%s' "$CSC_LINK" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -P "$CSC_KEY_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          identity="$(
+            security find-identity -v -p codesigning "$keychain_path" \
+              | grep -E '"Developer ID Application:' \
+              | head -1 \
+              | sed -E 's/^[^"]*"([^"]+)".*$/\1/'
+          )"
+          if [ -z "$identity" ]; then
+            echo "::error::Imported certificate does not contain a Developer ID Application identity."
+            exit 1
+          fi
+          echo "CC_HAHA_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "CC_HAHA_CI_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+          echo "CC_HAHA_CI_CERTIFICATE=$certificate_path" >> "$GITHUB_ENV"
+          echo "Imported native-runtime signing identity: $identity"
 
       - name: Prepare bundled ripgrep
         working-directory: desktop
@@ -483,6 +522,17 @@ jobs:
           if [ "${#missing[@]}" -gt 0 ]; then
             printf '::error::Missing release assets for %s: %s\n' "${{ matrix.label }}" "${missing[*]}"
             exit 1
+          fi
+
+      - name: Remove temporary macOS signing keychain
+        if: always() && matrix.smoke_platform == 'macos' && needs.signing-preflight.outputs.macos_signed == 'true'
+        shell: bash
+        run: |
+          if [ -n "${CC_HAHA_CI_KEYCHAIN:-}" ]; then
+            security delete-keychain "$CC_HAHA_CI_KEYCHAIN" 2>/dev/null || true
+          fi
+          if [ -n "${CC_HAHA_CI_CERTIFICATE:-}" ]; then
+            rm -f "$CC_HAHA_CI_CERTIFICATE"
           fi
 
       - name: Namespace update metadata assets

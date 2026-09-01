@@ -5,6 +5,7 @@ import '@testing-library/jest-dom'
 import { ComputerUseSettings } from './ComputerUseSettings'
 import { useSettingsStore } from '../stores/settingsStore'
 import { browserHost } from '../lib/desktopHost/browserHost'
+import type { ComputerUseStatus } from '../api/computerUse'
 
 const computerUseApiMock = vi.hoisted(() => ({
   getStatus: vi.fn(),
@@ -21,10 +22,18 @@ vi.mock('../api/computerUse', () => ({
   computerUseApi: computerUseApiMock,
 }))
 
-const readyStatus = {
-  platform: 'darwin',
+const readyStatus: ComputerUseStatus = {
+  platform: 'win32',
   supported: true,
-  cuHelper: { available: false },
+  engine: 'windows-compat' as const,
+  systemVersion: null,
+  arch: 'x64',
+  cuHelper: {
+    available: false,
+    supported: false,
+    minimumMacosVersion: '14.4',
+    reason: 'unsupported_platform' as const,
+  },
   python: {
     installed: true,
     version: '3.12.0',
@@ -307,9 +316,18 @@ describe('ComputerUseSettings', () => {
   })
 
   describe('native cu-helper branch', () => {
-    const nativeStatus = {
+    const nativeStatus: ComputerUseStatus = {
       ...readyStatus,
-      cuHelper: { available: true },
+      platform: 'darwin',
+      engine: 'macos-native' as const,
+      systemVersion: '15.6',
+      arch: 'arm64',
+      cuHelper: {
+        available: true,
+        supported: true,
+        minimumMacosVersion: '14.4',
+        reason: null,
+      },
       permissions: {
         accessibility: false,
         screenRecording: true,
@@ -345,6 +363,77 @@ describe('ComputerUseSettings', () => {
       expect(screen.queryByRole('heading', { name: 'Computer Control' })).not.toBeInTheDocument()
     })
 
+    it('keeps the native page selected when the helper is temporarily missing', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue({
+        ...nativeStatus,
+        cuHelper: {
+          ...nativeStatus.cuHelper,
+          available: false,
+          reason: 'helper_missing',
+        },
+      })
+
+      render(<ComputerUseSettings />)
+
+      expect(await screen.findByText('Computer Use runtime is unavailable')).toBeInTheDocument()
+      expect(screen.getByRole('switch', { name: 'Enabled' })).toBeInTheDocument()
+      expect(screen.queryByLabelText('Python Interpreter Path')).not.toBeInTheDocument()
+      expect(screen.queryByText('Install Environment')).not.toBeInTheDocument()
+    })
+
+    it('shows the macOS floor instead of falling back to the compatibility page', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue({
+        ...nativeStatus,
+        supported: false,
+        engine: 'unsupported',
+        systemVersion: '14.3.1',
+        cuHelper: {
+          ...nativeStatus.cuHelper,
+          available: false,
+          supported: false,
+          reason: 'os_too_old',
+        },
+      })
+
+      render(<ComputerUseSettings />)
+
+      expect(await screen.findByText('Computer Use requires macOS 14.4 or later')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Python Interpreter Path')).not.toBeInTheDocument()
+    })
+
+    it('offers a retry when the macOS version probe is temporarily unavailable', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue({
+        ...nativeStatus,
+        supported: false,
+        engine: 'unsupported',
+        systemVersion: null,
+        cuHelper: {
+          ...nativeStatus.cuHelper,
+          available: false,
+          supported: false,
+          reason: 'system_version_unknown',
+        },
+      })
+
+      render(<ComputerUseSettings />)
+
+      expect(await screen.findByText('Unable to verify the macOS version')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Recheck Status/ })).toBeInTheDocument()
+      expect(screen.queryByText('Computer Use requires macOS 14.4 or later')).not.toBeInTheDocument()
+    })
+
+    it('never falls through to the old Python page for a legacy macOS response', async () => {
+      const legacyStatus = { ...nativeStatus } as Partial<ComputerUseStatus>
+      delete legacyStatus.engine
+      computerUseApiMock.getStatus.mockResolvedValue(legacyStatus)
+
+      render(<ComputerUseSettings />)
+
+      expect(await screen.findByText('Computer Use runtime is unavailable')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Python Interpreter Path')).not.toBeInTheDocument()
+      expect(screen.queryByText('Install Environment')).not.toBeInTheDocument()
+    })
+
     it('waits for persisted config before showing the native toggle state', async () => {
       const configRequest = deferred<typeof enabledConfig>()
       computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
@@ -362,6 +451,108 @@ describe('ComputerUseSettings', () => {
       })
 
       expect(await screen.findByRole('switch', { name: 'Enabled' })).not.toBeChecked()
+    })
+
+    it('does not invent an enabled state when the saved config cannot be loaded', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
+      computerUseApiMock.getAuthorizedApps.mockRejectedValue(new Error('corrupt config'))
+
+      render(<ComputerUseSettings />)
+
+      expect(
+        await screen.findByText('Could not load the saved Computer Use setting.'),
+      ).toBeInTheDocument()
+      expect(screen.queryByRole('switch', { name: 'Enabled' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    })
+
+    it('restores the prior toggle and does not open permissions when saving fails', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
+      computerUseApiMock.getAuthorizedApps.mockResolvedValue({
+        ...enabledConfig,
+        enabled: false,
+      })
+      computerUseApiMock.setAuthorizedApps.mockRejectedValueOnce(new Error('write failed'))
+
+      render(<ComputerUseSettings />)
+      const toggle = await screen.findByRole('switch', { name: 'Enabled' })
+      expect(toggle).not.toBeChecked()
+
+      fireEvent.click(toggle)
+
+      expect(
+        await screen.findByText(
+          'Could not save the Computer Use setting. The previous value was restored.',
+        ),
+      ).toBeInTheDocument()
+      expect(toggle).not.toBeChecked()
+      expect(computerUseApiMock.openPermissionCard).not.toHaveBeenCalled()
+    })
+
+    it('keeps the native header and toggle when a later status refresh fails', async () => {
+      computerUseApiMock.getStatus
+        .mockResolvedValueOnce(nativeStatus)
+        .mockRejectedValueOnce(new Error('probe failed'))
+
+      render(<ComputerUseSettings />)
+      await screen.findByRole('heading', { name: 'Computer Control' })
+
+      fireEvent.click(screen.getByRole('button', { name: /Recheck Status/ }))
+
+      expect(await screen.findByText('Failed to check status.')).toBeInTheDocument()
+      expect(screen.getByRole('switch', { name: 'Enabled' })).toBeInTheDocument()
+    })
+
+    it('shows a permission probe failure instead of permanent checking labels', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue({
+        ...nativeStatus,
+        permissions: {
+          accessibility: null,
+          screenRecording: null,
+          error: 'unauthorized_client',
+        },
+      })
+
+      render(<ComputerUseSettings />)
+
+      expect(await screen.findAllByText('Check failed')).toHaveLength(2)
+      expect(screen.queryByText('Checking…')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Recheck Status/ })).toBeInTheDocument()
+    })
+
+    it('ignores an older status refresh that resolves after a newer one', async () => {
+      const older = deferred<typeof nativeStatus>()
+      const newer = deferred<typeof nativeStatus>()
+      computerUseApiMock.getStatus
+        .mockResolvedValueOnce(nativeStatus)
+        .mockReturnValueOnce(older.promise)
+        .mockReturnValueOnce(newer.promise)
+
+      render(<ComputerUseSettings />)
+      await screen.findByRole('heading', { name: 'Computer Control' })
+
+      const recheck = screen.getByRole('button', { name: /Recheck Status/ })
+      fireEvent.click(recheck)
+      fireEvent.click(recheck)
+
+      await act(async () => {
+        newer.resolve(nativeStatus)
+        await newer.promise
+      })
+      await act(async () => {
+        older.resolve({
+          ...nativeStatus,
+          cuHelper: {
+            ...nativeStatus.cuHelper,
+            available: false,
+            reason: 'helper_missing',
+          },
+        })
+        await older.promise
+      })
+
+      expect(screen.queryByText('Computer Use runtime is unavailable')).not.toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Computer Control' })).toBeInTheDocument()
     })
 
     /**
@@ -488,6 +679,21 @@ describe('ComputerUseSettings', () => {
       })
 
       expect(computerUseApiMock.openPermissionCard).toHaveBeenCalledTimes(1)
+    })
+
+    it('surfaces a permission-card command failure returned by the server', async () => {
+      computerUseApiMock.getStatus.mockResolvedValue(nativeStatus)
+      computerUseApiMock.openPermissionCard.mockResolvedValue({
+        ok: false,
+        reason: 'helper launch failed',
+      })
+
+      render(<ComputerUseSettings />)
+      fireEvent.click(await screen.findByText('Reopen authorization card'))
+
+      expect(
+        await screen.findByText('Could not open the authorization card. Please try again later.'),
+      ).toBeInTheDocument()
     })
 
     it('removes an always-allowed app via the trash button', async () => {

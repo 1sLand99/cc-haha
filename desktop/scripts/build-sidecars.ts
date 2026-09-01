@@ -6,8 +6,14 @@ import {
 } from './prepare-ripgrep'
 import {
   SIDECAR_SIGNING_IDENTIFIER,
+  codesignTimestampArgument,
   detectStableSigningIdentity,
 } from './sign-identity'
+import {
+  createCuHelperBuildEnv,
+  resolveCuHelperArch,
+  type CuHelperArch,
+} from './cu-helper-build-target'
 
 const desktopRoot = path.resolve(import.meta.dir, '..')
 const repoRoot = path.resolve(desktopRoot, '..')
@@ -64,8 +70,9 @@ console.log(`[build-sidecars] Built desktop sidecar for ${targetTriple} (${bunTa
 // re-sign cu-helper here: native/cu-helper/build.sh already signs it with a
 // STABLE identity + hardened runtime, and re-signing would rotate its TCC
 // identity, dropping the user's Accessibility + Screen Recording grants.
-if (process.platform === 'darwin') {
-  await buildCuHelper()
+const cuHelperArch = resolveCuHelperArch(targetTriple)
+if (process.platform === 'darwin' && cuHelperArch) {
+  await buildCuHelper(cuHelperArch)
 }
 
 async function stageHostRipgrepForOfflineBuild() {
@@ -299,7 +306,7 @@ async function signMacBinary(outputPath: string) {
     '--force',
     '--identifier',
     SIDECAR_SIGNING_IDENTIFIER,
-    '--timestamp=none',
+    codesignTimestampArgument(identity),
   ]
   if (identity) {
     // Hardened runtime + inherited entitlements match what electron-builder
@@ -333,12 +340,13 @@ async function signMacBinary(outputPath: string) {
  * The copy is byte-preserving (`cp -R`) so cu-helper's stable `dev.cchaha.cu-helper`
  * Mach-O signature is left intact — we never strip or re-sign it here.
  */
-async function buildCuHelper() {
+async function buildCuHelper(arch: CuHelperArch) {
   const buildScript = path.join(repoRoot, 'native', 'cu-helper', 'build.sh')
-  console.log(`[build-sidecars] Building native cu-helper via ${buildScript} ...`)
+  console.log(`[build-sidecars] Building native cu-helper (${arch}) via ${buildScript} ...`)
 
   const proc = Bun.spawn(['bash', buildScript], {
     cwd: path.dirname(buildScript),
+    env: createCuHelperBuildEnv(targetTriple, process.env),
     // build.sh prints all diagnostics to STDERR and the ONE machine-readable
     // `built: <abs path>` line to STDOUT, so capture stdout and inherit stderr.
     stdout: 'pipe',

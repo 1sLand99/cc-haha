@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { release } from 'node:os'
 import path from 'node:path'
 import { execFileNoThrow } from '../execFileNoThrow.js'
 import { ensureInstalledHelper, isNestedInHostApp } from './cuHelperInstall.js'
@@ -52,12 +53,11 @@ function resolveUncached(exists: (p: string) => boolean): string | null {
   const { projectRoot } = getRuntimePaths()
   const candidates: string[] = []
   if (!isPackaged) {
-    // dev: `native/cu-helper/build.sh` release output. cu-helper ships as a
-    // real .app bundle because Screen Recording requires that stable subject.
-    candidates.push(path.join(
-      projectRoot, 'native', 'cu-helper', '.build', 'release',
-      'cc-haha-computer-use.app', 'Contents', 'MacOS', 'cc-haha-computer-use',
-    ))
+    // build.sh deliberately uses architecture-specific SwiftPM scratch paths.
+    // Never fall back to the legacy `.build/release` symlink: it can point at a
+    // stale helper with the wrong architecture or deployment target.
+    const developmentBinary = resolveCuHelperDevelopmentBinary(projectRoot)
+    if (developmentBinary) candidates.push(developmentBinary)
   }
 
   // bundled: in a packaged Electron app this resolver runs inside the spawned
@@ -82,6 +82,31 @@ function resolveUncached(exists: (p: string) => boolean): string | null {
     if (exists(candidate)) return candidate
   }
   return null
+}
+
+export function resolveCuHelperDevelopmentBinary(
+  projectRoot: string,
+  nodeArch: string = process.arch,
+): string | null {
+  const swiftArch = nodeArch === 'arm64'
+    ? 'arm64'
+    : nodeArch === 'x64'
+      ? 'x86_64'
+      : null
+  if (!swiftArch) return null
+  return path.join(
+    projectRoot,
+    'native',
+    'cu-helper',
+    '.build',
+    swiftArch,
+    `${swiftArch}-apple-macosx`,
+    'release',
+    'cc-haha-computer-use.app',
+    'Contents',
+    'MacOS',
+    'cc-haha-computer-use',
+  )
 }
 
 /**
@@ -115,8 +140,40 @@ export function resolveCuHelperAppBundle(
 }
 
 /** True only on macOS AND when the native binary is actually present. */
+export function isMacosComputerUseRuntimeSupported(
+  platform: NodeJS.Platform = process.platform,
+  darwinRelease: string = release(),
+): boolean {
+  if (platform !== 'darwin') return false
+  const [majorText, minorText] = darwinRelease.split('.')
+  const major = Number.parseInt(majorText ?? '', 10)
+  const minor = Number.parseInt(minorText ?? '', 10)
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false
+  // Darwin 23.4 == macOS 14.4. Darwin 24+ are newer supported macOS
+  // releases. This synchronous runtime gate complements the status API's
+  // authoritative `sw_vers` check and prevents old systems from injecting a
+  // helper their loader cannot execute.
+  return major > 23 || (major === 23 && minor >= 4)
+}
+
 export function isCuHelperAvailable(): boolean {
-  return process.platform === 'darwin' && resolveCuHelperBinary() !== null
+  return isMacosComputerUseRuntimeSupported() && resolveCuHelperBinary() !== null
+}
+
+/**
+ * Return the only helper path that is safe to launch. Packaged nested bundles
+ * are a copy source, not a TCC subject: if canonical installation fails we
+ * fail closed instead of silently attributing Screen Recording to the host.
+ */
+export function resolveLaunchableCuHelperBinary(
+  runtimeSupported: boolean = isMacosComputerUseRuntimeSupported(),
+): string | null {
+  if (!runtimeSupported) return null
+  const installed = ensureInstalledHelper()
+  if (installed?.binary) return installed.binary
+  const sourceApp = resolveCuHelperAppBundle()
+  if (sourceApp && isNestedInHostApp(sourceApp)) return null
+  return resolveCuHelperBinary()
 }
 
 /**
@@ -128,6 +185,7 @@ export async function callCuHelper<T>(
   command: string,
   payload: Record<string, unknown> = {},
   exec: typeof execFileNoThrow = execFileNoThrow,
+  resolveBin: () => string | null = resolveLaunchableCuHelperBinary,
 ): Promise<T> {
   // Prefer the STANDALONE-INSTALLED helper (same path the daemon + card use) so a
   // CLI-fallback screenshot's Screen Recording subject is the helper, not the
@@ -135,20 +193,10 @@ export async function callCuHelper<T>(
   // have failed because its bytes/signer did not match, and launching it would
   // also re-attribute Screen Recording to the outer Electron app. Bare dev/test
   // overrides remain valid because they have no nested `.app` source bundle.
-  const installed = ensureInstalledHelper()
-  let bin = installed?.binary ?? null
-  if (!bin) {
-    const sourceApp = resolveCuHelperAppBundle()
-    if (sourceApp && isNestedInHostApp(sourceApp)) {
-      throw new Error(
-        'cu-helper standalone installation failed; refusing packaged nested source',
-      )
-    }
-    bin = resolveCuHelperBinary()
-  }
+  const bin = resolveBin()
   if (!bin) {
     throw new Error(
-      'cu-helper binary not found. Build it: native/cu-helper/build.sh',
+      'cu-helper standalone installation failed or binary was not found. Build it: native/cu-helper/build.sh',
     )
   }
 

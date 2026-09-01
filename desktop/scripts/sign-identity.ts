@@ -31,6 +31,12 @@
 /** A code-signing identity's full common name, as `codesign --sign` wants it. */
 export type SigningIdentity = string
 
+export function codesignTimestampArgument(identity: SigningIdentity | null): '--timestamp' | '--timestamp=none' {
+  return identity?.startsWith('Developer ID Application:')
+    ? '--timestamp'
+    : '--timestamp=none'
+}
+
 /** The fixed code-signing identifier the helper's attestation policy expects. */
 export const SIDECAR_SIGNING_IDENTIFIER = 'com.claude-code-haha.desktop.sidecar'
 
@@ -46,16 +52,28 @@ export function resolveStableSigningIdentity(
   securityOutput: string,
   override?: string | null,
 ): SigningIdentity | null {
+  const rows: Array<{ hash: string; name: string }> = []
+  for (const line of securityOutput.split('\n')) {
+    const match = /^\s*\d+\)\s+([0-9A-F]{40})\s+"(.+)"\s*$/i.exec(line)
+    if (match) rows.push({ hash: match[1].toUpperCase(), name: match[2] })
+  }
+
   const explicit = override?.trim()
-  if (explicit) return explicit
+  if (explicit) {
+    // `codesign --sign` accepts a SHA-1 fingerprint, but downstream timestamp
+    // policy needs the certificate kind. Resolve a matching hash to its common
+    // name so Developer ID sidecars cannot accidentally ship without a secure
+    // timestamp. Unknown overrides remain trusted verbatim and will fail at
+    // codesign if they truly do not exist.
+    if (/^[0-9A-F]{40}$/i.test(explicit)) {
+      return rows.find(row => row.hash === explicit.toUpperCase())?.name ?? explicit
+    }
+    return explicit
+  }
 
   // Rows look like:  1) <40-hex-sha> "Developer ID Application: Name (TEAMID)"
   // Only the quoted common name is meaningful to `codesign --sign`.
-  const names: string[] = []
-  for (const line of securityOutput.split('\n')) {
-    const match = /^\s*\d+\)\s+[0-9A-F]{40}\s+"(.+)"\s*$/i.exec(line)
-    if (match) names.push(match[1])
-  }
+  const names = rows.map(row => row.name)
 
   return (
     names.find(name => name.startsWith('Developer ID Application:')) ??

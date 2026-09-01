@@ -52,7 +52,7 @@ final class DaemonOverlayTargetTests: XCTestCase {
         ))
     }
 
-    func testEveryOverlayStopAlsoInvalidatesTheLongLivedWindowStream() throws {
+    func testTurnEndPreservesTheLongLivedWindowStreamUntilDaemonTeardown() throws {
         let sourceURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -68,6 +68,17 @@ final class DaemonOverlayTargetTests: XCTestCase {
             }
         )
 
-        XCTAssertTrue(body.contains("router.invalidateWindowCaptureStream()"))
+        XCTAssertFalse(body.contains("router.invalidateWindowCaptureStream()"))
+        XCTAssertTrue(body.contains("router.resetSessionState()"))
+
+        let teardownBody = try XCTUnwrap(
+            source.range(of: "private func teardown()").flatMap { start in
+                source.range(
+                    of: "private func bindAndListen",
+                    range: start.upperBound..<source.endIndex
+                ).map { end in String(source[start.lowerBound..<end.lowerBound]) }
+            }
+        )
+        XCTAssertTrue(teardownBody.contains("router.invalidateWindowCaptureStream()"))
     }
 }

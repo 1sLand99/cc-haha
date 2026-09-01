@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   SIDECAR_SIGNING_IDENTIFIER,
+  codesignTimestampArgument,
   resolveStableSigningIdentity,
 } from './sign-identity'
 
@@ -40,6 +41,15 @@ describe('resolveStableSigningIdentity', () => {
     expect(
       resolveStableSigningIdentity(BOTH_IDENTITIES, 'Developer ID Application: Other (AAAAAAAAAA)'),
     ).toBe('Developer ID Application: Other (AAAAAAAAAA)')
+  })
+
+  it('resolves a SHA-1 override to its Developer ID common name', () => {
+    expect(
+      resolveStableSigningIdentity(
+        BOTH_IDENTITIES,
+        '5145958D6E31AD0CD6BBACD804A0B357E3CEDEA7',
+      ),
+    ).toBe('Developer ID Application: Example Co., Ltd (D3RS24869F)')
   })
 
   it('ignores a blank override rather than treating it as "no identity"', () => {
@@ -82,5 +92,18 @@ describe('SIDECAR_SIGNING_IDENTIFIER', () => {
     // hard-code this exact string, and the helper rejects every Computer Use
     // call when the sidecar's real identifier differs.
     expect(SIDECAR_SIGNING_IDENTIFIER).toBe('com.claude-code-haha.desktop.sidecar')
+  })
+})
+
+describe('codesignTimestampArgument', () => {
+  it('requires a secure timestamp for Developer ID distribution', () => {
+    expect(codesignTimestampArgument('Developer ID Application: Example (TEAMID1234)'))
+      .toBe('--timestamp')
+  })
+
+  it('keeps local development and ad-hoc signing offline', () => {
+    expect(codesignTimestampArgument('Apple Development: Example (TEAMID1234)'))
+      .toBe('--timestamp=none')
+    expect(codesignTimestampArgument(null)).toBe('--timestamp=none')
   })
 })

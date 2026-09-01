@@ -1,21 +1,35 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
   __resetCuHelperCache,
   callCuHelper,
   isCuHelperAvailable,
+  isMacosComputerUseRuntimeSupported,
   resolveCuHelperAppBundle,
   resolveCuHelperBinary,
+  resolveCuHelperDevelopmentBinary,
+  resolveLaunchableCuHelperBinary,
 } from './cuHelperBridge.js'
 import { __resetInstalledHelperCache } from './cuHelperInstall.js'
 
-afterEach(() => {
+function resetComputerUseHelperState(): void {
   __resetCuHelperCache()
   // callCuHelper now resolves through ensureInstalledHelper(); clear its module
   // cache too so a prior test's resolution can't leak into the next.
   __resetInstalledHelperCache()
   delete process.env.CC_HAHA_CU_HELPER_PATH
   delete process.env.CLAUDE_APP_ROOT
-})
+}
+
+beforeEach(resetComputerUseHelperState)
+afterEach(resetComputerUseHelperState)
+
+const currentDevBinary = resolveCuHelperDevelopmentBinary('/project')
+if (!currentDevBinary) throw new Error(`unsupported test architecture: ${process.arch}`)
+const currentDevSuffix = currentDevBinary.slice('/project'.length)
+
+function isCurrentDevBinary(candidate: string): boolean {
+  return candidate.endsWith(currentDevSuffix)
+}
 
 describe('resolveCuHelperBinary', () => {
   test('returns the env override when it exists', () => {
@@ -31,7 +45,7 @@ describe('resolveCuHelperBinary', () => {
 
     const found = resolveCuHelperBinary(p =>
       p === '/tmp/evil-helper'
-      || p.endsWith('/native/cu-helper/.build/release/cc-haha-computer-use.app/Contents/MacOS/cc-haha-computer-use')
+      || isCurrentDevBinary(p)
       || p === bundled,
     )
     expect(found).toBe(bundled)
@@ -39,21 +53,24 @@ describe('resolveCuHelperBinary', () => {
 
   test('ignores the env override when it does not exist, falling to candidates', () => {
     process.env.CC_HAHA_CU_HELPER_PATH = '/missing/cu-helper'
-    const found = resolveCuHelperBinary(p =>
-      p.endsWith('/native/cu-helper/.build/release/cc-haha-computer-use.app/Contents/MacOS/cc-haha-computer-use'),
-    )
-    expect(found).toContain(
-      'native/cu-helper/.build/release/cc-haha-computer-use.app/Contents/MacOS/cc-haha-computer-use',
-    )
+    const found = resolveCuHelperBinary(isCurrentDevBinary)
+    expect(found?.endsWith(currentDevSuffix)).toBe(true)
   })
 
   test('resolves the dev build path (.app inner executable)', () => {
-    const found = resolveCuHelperBinary(p =>
-      p.endsWith('/native/cu-helper/.build/release/cc-haha-computer-use.app/Contents/MacOS/cc-haha-computer-use'),
+    const found = resolveCuHelperBinary(isCurrentDevBinary)
+    expect(found?.endsWith(currentDevSuffix)).toBe(true)
+    expect(found).not.toContain('/.build/release/')
+  })
+
+  test('maps Node architectures to matching thin SwiftPM products', () => {
+    expect(resolveCuHelperDevelopmentBinary('/repo', 'arm64')).toBe(
+      '/repo/native/cu-helper/.build/arm64/arm64-apple-macosx/release/cc-haha-computer-use.app/Contents/MacOS/cc-haha-computer-use',
     )
-    expect(found).toContain(
-      'native/cu-helper/.build/release/cc-haha-computer-use.app/Contents/MacOS/cc-haha-computer-use',
+    expect(resolveCuHelperDevelopmentBinary('/repo', 'x64')).toBe(
+      '/repo/native/cu-helper/.build/x86_64/x86_64-apple-macosx/release/cc-haha-computer-use.app/Contents/MacOS/cc-haha-computer-use',
     )
+    expect(resolveCuHelperDevelopmentBinary('/repo', 'ia32')).toBeNull()
   })
 
   test('resolves the bundled unpacked path from CLAUDE_APP_ROOT (.asar → .asar.unpacked)', () => {
@@ -79,7 +96,7 @@ describe('resolveCuHelperBinary', () => {
     // A packaged process must never escape to a writable development build.
     const found = resolveCuHelperBinary(
       p =>
-        p.endsWith('/native/cu-helper/.build/release/cc-haha-computer-use.app/Contents/MacOS/cc-haha-computer-use') ||
+        isCurrentDevBinary(p) ||
         p.endsWith('/app.asar.unpacked/src-tauri/binaries/cc-haha-computer-use.app/Contents/MacOS/cc-haha-computer-use'),
     )
     expect(found).toContain('app.asar.unpacked')
@@ -98,10 +115,8 @@ describe('resolveCuHelperBinary', () => {
 
 describe('resolveCuHelperAppBundle', () => {
   test('derives the .app bundle path from the resolved inner executable', () => {
-    const app = resolveCuHelperAppBundle(p =>
-      p.endsWith('/native/cu-helper/.build/release/cc-haha-computer-use.app/Contents/MacOS/cc-haha-computer-use'),
-    )
-    expect(app).toContain('native/cu-helper/.build/release/cc-haha-computer-use.app')
+    const app = resolveCuHelperAppBundle(isCurrentDevBinary)
+    expect(app).toContain(`native/cu-helper/.build/${process.arch === 'x64' ? 'x86_64' : 'arm64'}`)
     expect(app?.endsWith('cc-haha-computer-use.app')).toBe(true)
     // The bundle path stops at `.app` — it must NOT include the inner Contents/MacOS.
     expect(app).not.toContain('Contents')
@@ -118,6 +133,14 @@ describe('resolveCuHelperAppBundle', () => {
 })
 
 describe('isCuHelperAvailable', () => {
+  test('gates the native runtime at macOS 14.4 in both directions', () => {
+    expect(isMacosComputerUseRuntimeSupported('darwin', '23.3.0')).toBe(false)
+    expect(isMacosComputerUseRuntimeSupported('darwin', '23.4.0')).toBe(true)
+    expect(isMacosComputerUseRuntimeSupported('darwin', '24.0.0')).toBe(true)
+    expect(isMacosComputerUseRuntimeSupported('linux', '24.0.0')).toBe(false)
+    expect(isMacosComputerUseRuntimeSupported('darwin', 'invalid')).toBe(false)
+  })
+
   test('is false off darwin regardless of binary', () => {
     if (process.platform !== 'darwin') {
       expect(isCuHelperAvailable()).toBe(false)
@@ -126,6 +149,14 @@ describe('isCuHelperAvailable', () => {
       // the function must not throw and returns a boolean.
       expect(typeof isCuHelperAvailable()).toBe('boolean')
     }
+  })
+
+  test('launch resolution fails closed before touching a helper on unsupported systems', () => {
+    process.env.CC_HAHA_CU_HELPER_PATH = '/x/cu-helper'
+    __resetCuHelperCache()
+    resolveCuHelperBinary(p => p === '/x/cu-helper')
+    expect(resolveLaunchableCuHelperBinary(false)).toBeNull()
+    expect(resolveLaunchableCuHelperBinary(true)).toBe('/x/cu-helper')
   })
 })
 
@@ -139,26 +170,26 @@ describe('callCuHelper', () => {
   test('parses an ok envelope and returns result', async () => {
     primeBinary()
     const exec = async () => ({ code: 0, stdout: '{"ok":true,"result":{"x":1}}', stderr: '' })
-    const r = await callCuHelper<{ x: number }>('foo', {}, exec as never)
+    const r = await callCuHelper<{ x: number }>('foo', {}, exec as never, () => '/x/cu-helper')
     expect(r).toEqual({ x: 1 })
   })
 
   test('throws the helper error message on ok:false', async () => {
     primeBinary()
     const exec = async () => ({ code: 0, stdout: '{"ok":false,"error":{"message":"nope"}}', stderr: '' })
-    await expect(callCuHelper('foo', {}, exec as never)).rejects.toThrow('nope')
+    await expect(callCuHelper('foo', {}, exec as never, () => '/x/cu-helper')).rejects.toThrow('nope')
   })
 
   test('throws on invalid JSON', async () => {
     primeBinary()
     const exec = async () => ({ code: 0, stdout: 'not json', stderr: 'boom' })
-    await expect(callCuHelper('foo', {}, exec as never)).rejects.toThrow()
+    await expect(callCuHelper('foo', {}, exec as never, () => '/x/cu-helper')).rejects.toThrow()
   })
 
   test('throws a clear error when the binary is missing', async () => {
     __resetCuHelperCache()
     resolveCuHelperBinary(() => false) // prime cache to null
-    await expect(callCuHelper('foo', {})).rejects.toThrow(/not found/)
+    await expect(callCuHelper('foo', {}, undefined, () => null)).rejects.toThrow(/not found/)
   })
 
   test('never falls back to a packaged nested source when standalone installation fails', async () => {
@@ -187,7 +218,7 @@ describe('callCuHelper', () => {
       seenArgs = args
       return { code: 0, stdout: '{"ok":true,"result":true}', stderr: '' }
     }
-    await callCuHelper('click', { x: 5, y: 9 }, exec as never)
+    await callCuHelper('click', { x: 5, y: 9 }, exec as never, () => '/x/cu-helper')
     expect(seenArgs).toEqual(['click', '--payload', '{"x":5,"y":9}'])
   })
 })
