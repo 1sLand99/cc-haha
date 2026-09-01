@@ -1970,6 +1970,8 @@ export const zh: Record<TranslationKey, string> = {
   'chat.rewindSuccessWithCode': '已回滚 {count} 条消息，并恢复相关文件。',
   'chat.rewindSuccessConversationOnly': '已回滚 {count} 条消息。这一轮没有可用的文件检查点。',
   'chat.rewindSuccessPartialCoverage': '已回滚 {count} 条消息并恢复已记录的文件；{sources} 造成的改动未被记录，仍留在磁盘上。',
+  'chat.conversationRewindAction': '回滚对话',
+  'chat.conversationRewindConfirmBody': '这会把对话回滚到这一轮之前，磁盘上的文件不会被更改。',
   'chat.turnChangesTitle': '{count} 个文件已更改',
   'chat.turnChangesLatestCardLabel': '轮次已更改文件',
   'chat.turnChangesHistoricalCardLabel': '轮次已更改文件',

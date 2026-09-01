@@ -1971,6 +1971,8 @@ export const kr: Record<TranslationKey, string> = {
   'chat.rewindSuccessWithCode': '{count}개의 메시지를 되감고 추적된 파일을 복원했습니다.',
   'chat.rewindSuccessConversationOnly': '{count}개의 메시지를 되감았습니다. 이 턴에는 사용할 수 있는 파일 체크포인트가 없었습니다.',
   'chat.rewindSuccessPartialCoverage': '메시지 {count}개를 되돌리고 기록된 파일을 복원했습니다. {sources}(으)로 인한 변경은 기록되지 않아 디스크에 그대로 남아 있습니다.',
+  'chat.conversationRewindAction': '대화 되돌리기',
+  'chat.conversationRewindConfirmBody': '대화를 이 턴 이전으로 되감습니다. 디스크의 파일은 변경되지 않습니다.',
   'chat.turnChangesTitle': '{count}개의 파일이 변경됨',
   'chat.turnChangesLatestCardLabel': '턴에서 변경된 파일',
   'chat.turnChangesHistoricalCardLabel': '턴에서 변경된 파일',

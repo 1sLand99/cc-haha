@@ -869,7 +869,10 @@ function buildTranscriptTurnContexts(
     const parentTurnMessages = rawTurnMessages.filter((message) => !message.parentToolUseId)
     return {
       activeMessageIndex,
-      completed: rawTurnMessages.some((message) =>
+      // Child-agent transcript entries can be physically interleaved after a
+      // later root prompt. They belong to the parent tool's turn and must not
+      // make that later, still-unanswered prompt look safely rewindable.
+      completed: parentTurnMessages.some((message) =>
         message.type === 'assistant' ||
         message.type === 'tool_use' ||
         message.type === 'tool_result' ||
@@ -1839,7 +1842,6 @@ export async function listSessionTurnCheckpoints(
       signal,
     )
 
-    if (!checkpoint.code.available) continue
     checkpoints.push(checkpoint)
   }
 

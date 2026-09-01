@@ -6170,6 +6170,105 @@ describe('Sessions API', () => {
     ])
   })
 
+  it('should expose authoritative conversation targets for text, provider errors, and repeated continues', async () => {
+    const sessionId = '99999999-bbbb-cccc-dddd-000000001273'
+    const workDir = path.join(tmpDir, 'conversation-only-turn-targets')
+    const untouchedFile = path.join(workDir, 'untouched.txt')
+    const firstUserId = crypto.randomUUID()
+    const failedContinueUserId = crypto.randomUUID()
+    const recoveredContinueUserId = crypto.randomUUID()
+    const incompleteUserId = crypto.randomUUID()
+
+    await fs.mkdir(workDir, { recursive: true })
+    await fs.writeFile(untouchedFile, 'keep me\n', 'utf-8')
+    await writeSessionFile('-tmp-conversation-only-turn-targets', sessionId, [
+      makeSessionMetaEntry(workDir),
+      { ...makeUserEntry('Explain the current behavior', firstUserId), cwd: workDir, sessionId },
+      makeAssistantEntry('Plain text answer.', firstUserId),
+      { ...makeUserEntry('continue', failedContinueUserId), cwd: workDir, sessionId },
+      {
+        ...makeAssistantEntry('Provider request failed.', failedContinueUserId),
+        isApiErrorMessage: true,
+        error: 'API Error',
+        errorDetails: 'upstream provider returned an error',
+      },
+      { ...makeUserEntry('continue', recoveredContinueUserId), cwd: workDir, sessionId },
+      makeAssistantEntry('Recovered on the next attempt.', recoveredContinueUserId),
+      { ...makeUserEntry('still running', incompleteUserId), cwd: workDir, sessionId },
+    ])
+
+    const listRes = await fetch(`${baseUrl}/api/sessions/${sessionId}/turn-checkpoints`)
+    expect(listRes.status).toBe(200)
+    const listBody = await listRes.json() as {
+      checkpoints: Array<{
+        target: {
+          targetUserMessageId: string
+          userMessageIndex: number
+          userMessageCount: number
+        }
+        code: { available: boolean; filesChanged: string[] }
+      }>
+    }
+
+    expect(listBody.checkpoints.map((checkpoint) => ({
+      target: checkpoint.target,
+      code: checkpoint.code,
+    }))).toEqual([
+      {
+        target: {
+          targetUserMessageId: firstUserId,
+          userMessageIndex: 0,
+          userMessageCount: 4,
+        },
+        code: expect.objectContaining({ available: false, filesChanged: [] }),
+      },
+      {
+        target: {
+          targetUserMessageId: failedContinueUserId,
+          userMessageIndex: 1,
+          userMessageCount: 4,
+        },
+        code: expect.objectContaining({ available: false, filesChanged: [] }),
+      },
+      {
+        target: {
+          targetUserMessageId: recoveredContinueUserId,
+          userMessageIndex: 2,
+          userMessageCount: 4,
+        },
+        code: expect.objectContaining({ available: false, filesChanged: [] }),
+      },
+    ])
+
+    const rewindRes = await fetch(`${baseUrl}/api/sessions/${sessionId}/rewind`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetUserMessageId: failedContinueUserId,
+        expectedContent: 'continue',
+        mode: 'conversation',
+      }),
+    })
+    expect(rewindRes.status).toBe(200)
+    expect(await rewindRes.json()).toMatchObject({
+      target: {
+        targetUserMessageId: failedContinueUserId,
+        userMessageIndex: 1,
+      },
+      mode: 'conversation',
+    })
+    expect(await fs.readFile(untouchedFile, 'utf-8')).toBe('keep me\n')
+
+    const remainingMessages = await service.getSessionMessages(sessionId)
+    expect(remainingMessages.map((message) => message.id)).toEqual([
+      firstUserId,
+      expect.any(String),
+    ])
+    expect(remainingMessages.some((message) => message.id === failedContinueUserId)).toBe(false)
+    expect(remainingMessages.some((message) => message.id === recoveredContinueUserId)).toBe(false)
+    expect(remainingMessages.some((message) => message.id === incompleteUserId)).toBe(false)
+  })
+
   it('GET /api/sessions/:id/turn-checkpoints should reuse the loaded transcript cwd for every turn', async () => {
     const sessionId = '99999999-bbbb-cccc-dddd-000000000021'
     const projectDir = '-tmp-long-turn-checkpoint-session'
@@ -7314,9 +7413,18 @@ describe('Sessions API', () => {
 
     const res = await fetch(`${baseUrl}/api/sessions/${sessionId}/turn-checkpoints`)
     expect(res.status).toBe(200)
-    const body = await res.json() as { checkpoints: unknown[] }
+    const body = await res.json() as {
+      checkpoints: Array<{
+        target: { targetUserMessageId: string }
+        code: { available: boolean; filesChanged: string[] }
+      }>
+    }
 
-    expect(body.checkpoints).toEqual([])
+    expect(body.checkpoints).toHaveLength(1)
+    expect(body.checkpoints[0]).toMatchObject({
+      target: { targetUserMessageId: userId },
+      code: { available: false, filesChanged: [] },
+    })
     await expect(fs.stat(path.join(workDir, 'permission-denial-test.txt')))
       .rejects.toMatchObject({ code: 'ENOENT' })
   })

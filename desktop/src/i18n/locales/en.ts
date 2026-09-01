@@ -1969,6 +1969,8 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'chat.rewindSuccessWithCode': 'Rewound {count} messages and restored tracked files.',
   'chat.rewindSuccessConversationOnly': 'Rewound {count} messages. No file checkpoint was available for this turn.',
   'chat.rewindSuccessPartialCoverage': 'Rewound {count} messages and restored the checkpointed files; changes from {sources} were not checkpointed and remain on disk.',
+  'chat.conversationRewindAction': 'Roll back conversation',
+  'chat.conversationRewindConfirmBody': 'This will rewind the conversation to before this turn. Files on disk will not be changed.',
   'chat.turnChangesTitle': '{count} files changed',
   'chat.turnChangesLatestCardLabel': 'Turn changed files',
   'chat.turnChangesHistoricalCardLabel': 'Turn changed files',

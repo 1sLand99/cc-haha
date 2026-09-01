@@ -1971,6 +1971,8 @@ export const jp: Record<TranslationKey, string> = {
   'chat.rewindSuccessWithCode': '{count} 件のメッセージを巻き戻し、追跡対象のファイルを復元しました。',
   'chat.rewindSuccessConversationOnly': '{count} 件のメッセージを巻き戻しました。このターンには利用できるファイルチェックポイントがありませんでした。',
   'chat.rewindSuccessPartialCoverage': '{count} 件のメッセージを巻き戻し、記録済みのファイルを復元しました。{sources} による変更は記録されておらず、ディスク上に残っています。',
+  'chat.conversationRewindAction': '会話を巻き戻す',
+  'chat.conversationRewindConfirmBody': '会話をこのターンの前まで巻き戻します。ディスク上のファイルは変更されません。',
   'chat.turnChangesTitle': '{count} 個のファイルが変更されました',
   'chat.turnChangesLatestCardLabel': 'ターンで変更されたファイル',
   'chat.turnChangesHistoricalCardLabel': 'ターンで変更されたファイル',

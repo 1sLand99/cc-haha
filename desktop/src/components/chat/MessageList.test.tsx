@@ -6867,6 +6867,209 @@ describe('MessageList nested tool calls', () => {
     })
   })
 
+  it('rewinds a failed continue through the authoritative conversation-only target', async () => {
+    const initialChatStore = useChatStore.getInitialState()
+    useChatStore.setState({
+      reloadHistory: initialChatStore.reloadHistory,
+      queueComposerPrefill: initialChatStore.queueComposerPrefill,
+    })
+    vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
+      checkpoints: [
+        {
+          target: {
+            targetUserMessageId: 'transcript-user-first',
+            userMessageIndex: 0,
+            userMessageCount: 2,
+          },
+          code: {
+            available: true,
+            filesChanged: ['src/kept.ts'],
+            insertions: 2,
+            deletions: 0,
+          },
+        },
+        {
+          target: {
+            targetUserMessageId: 'transcript-user-failed-continue',
+            userMessageIndex: 1,
+            userMessageCount: 2,
+          },
+          code: {
+            available: false,
+            filesChanged: [],
+            insertions: 0,
+            deletions: 0,
+          },
+          restoreAvailable: true,
+        },
+      ],
+    })
+    const rewind = vi.spyOn(sessionsApi, 'rewind').mockResolvedValue({
+      target: {
+        targetUserMessageId: 'transcript-user-failed-continue',
+        userMessageIndex: 1,
+        userMessageCount: 2,
+      },
+      conversation: {
+        messagesRemoved: 2,
+        removedMessageIds: ['transcript-user-failed-continue', 'provider-error'],
+      },
+      code: {
+        available: false,
+        filesChanged: [],
+        insertions: 0,
+        deletions: 0,
+      },
+      restoreAvailable: true,
+      unverifiedChangeSources: [],
+      mode: 'conversation',
+    })
+    vi.spyOn(sessionsApi, 'getMessages').mockResolvedValue({
+      messages: [
+        {
+          id: 'transcript-user-first',
+          type: 'user',
+          content: 'make a file',
+          timestamp: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'transcript-assistant-first',
+          type: 'assistant',
+          content: 'created src/kept.ts',
+          timestamp: '2026-01-01T00:00:01.000Z',
+        },
+      ],
+    })
+
+    render(<MessageList />)
+    const store = useChatStore.getState()
+    act(() => {
+      store.sendMessage(ACTIVE_TAB, 'make a file')
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_delta',
+        text: 'created src/kept.ts',
+      })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+
+      store.sendMessage(ACTIVE_TAB, 'continue')
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'error',
+        code: 'PROVIDER_ERROR',
+        message: 'Provider request failed',
+      })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+    })
+
+    expect(await screen.findByText('kept.ts')).toBeTruthy()
+    const conversationUndo = await screen.findByRole('button', { name: 'Roll back conversation' })
+    expect(screen.getByText('Provider request failed')).toBeTruthy()
+    fireEvent.click(conversationUndo)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Undo current turn?' })
+    expect(within(dialog).getByText(
+      'This will rewind the conversation to before this turn. Files on disk will not be changed.',
+    )).toBeTruthy()
+    expect(within(dialog).queryByRole('button', { name: 'Undo current turn' })).toBeNull()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Roll back conversation only' }))
+
+    await waitFor(() => {
+      expect(rewind).toHaveBeenCalledWith(ACTIVE_TAB, {
+        targetUserMessageId: 'transcript-user-failed-continue',
+        userMessageIndex: 1,
+        expectedContent: 'continue',
+        mode: 'conversation',
+      })
+    })
+    await waitFor(() => {
+      const messages = useChatStore.getState().sessions[ACTIVE_TAB]?.messages ?? []
+      expect(messages.some((message) => message.type === 'user_text' && message.content === 'continue')).toBe(false)
+      expect(messages.some((message) => message.type === 'error')).toBe(false)
+    })
+    expect(screen.getByText('kept.ts')).toBeTruthy()
+    expect(useChatStore.getState().sessions[ACTIVE_TAB]?.composerPrefill).toMatchObject({
+      text: 'continue',
+    })
+  })
+
+  it('offers the lightweight conversation action for an ordinary text-only turn', async () => {
+    vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
+      checkpoints: [
+        {
+          target: {
+            targetUserMessageId: 'transcript-user-text-only',
+            userMessageIndex: 0,
+            userMessageCount: 1,
+          },
+          code: {
+            available: false,
+            filesChanged: [],
+            insertions: 0,
+            deletions: 0,
+          },
+          restoreAvailable: true,
+        },
+      ],
+    })
+
+    render(<MessageList />)
+    const store = useChatStore.getState()
+    act(() => {
+      store.sendMessage(ACTIVE_TAB, 'explain this code')
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_delta',
+        text: 'Here is the explanation.',
+      })
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+    })
+
+    expect(await screen.findByRole('button', { name: 'Roll back conversation' })).toBeTruthy()
+    expect(screen.queryByLabelText('Turn changed files')).toBeNull()
+  })
+
+  it('waits for the active text-only turn to settle before loading its rewind target', async () => {
+    const getTurnCheckpoints = vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
+      checkpoints: [
+        {
+          target: {
+            targetUserMessageId: 'transcript-user-running',
+            userMessageIndex: 0,
+            userMessageCount: 1,
+          },
+          code: {
+            available: false,
+            filesChanged: [],
+            insertions: 0,
+            deletions: 0,
+          },
+        },
+      ],
+    })
+
+    render(<MessageList />)
+    const store = useChatStore.getState()
+    act(() => {
+      store.sendMessage(ACTIVE_TAB, 'explain while running')
+      store.handleServerMessage(ACTIVE_TAB, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(ACTIVE_TAB, {
+        type: 'content_delta',
+        text: 'Partial explanation',
+      })
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(getTurnCheckpoints).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Roll back conversation' })).toBeNull()
+
+    act(() => {
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+    })
+    expect(await screen.findByRole('button', { name: 'Roll back conversation' })).toBeTruthy()
+  })
+
   it('does not render cards for turns without file changes', async () => {
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
       checkpoints: [
@@ -6938,6 +7141,7 @@ describe('MessageList nested tool calls', () => {
     expect(cards).toHaveLength(1)
     expect(screen.getByText('first.ts')).toBeTruthy()
     expect(screen.queryByText('second.ts')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Roll back conversation' })).toBeNull()
     await waitFor(() => {
       expect(screen.queryByText('Markdown')).toBeNull()
     })
