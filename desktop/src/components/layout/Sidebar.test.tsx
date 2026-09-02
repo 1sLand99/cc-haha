@@ -16,12 +16,27 @@ vi.mock('../../api/desktopUiPreferences', () => ({
   desktopUiPreferencesApi: desktopUiPreferencesApiMock,
 }))
 
-const repositoryContextMock = vi.hoisted(() => vi.fn())
+const sessionsApiMock = vi.hoisted(() => ({
+  create: vi.fn(),
+  list: vi.fn(),
+  getGitInfo: vi.fn(),
+  getRepositoryContext: vi.fn(),
+  getRecentProjects: vi.fn(),
+  createRepositoryBranch: vi.fn(),
+}))
+
+const repositoryContextMock = sessionsApiMock.getRepositoryContext
 
 vi.mock('../../api/sessions', () => ({
-  sessionsApi: {
-    getRepositoryContext: repositoryContextMock,
-  },
+  sessionsApi: sessionsApiMock,
+}))
+
+const agentsApiMock = vi.hoisted(() => ({
+  list: vi.fn(),
+}))
+
+vi.mock('../../api/agents', () => ({
+  agentsApi: agentsApiMock,
 }))
 
 const openTargetStoreMock = vi.hoisted(() => ({
@@ -215,6 +230,7 @@ vi.mock('./ProjectEditorModal', () => ({
 }))
 
 import { Sidebar } from './Sidebar'
+import { ChatInput } from '../chat/ChatInput'
 import { useChatStore } from '../../stores/chatStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useTabStore } from '../../stores/tabStore'
@@ -231,6 +247,8 @@ const PROJECT_PINNED_STORAGE_KEY = 'cc-haha-sidebar-pinned-projects'
 const PROJECT_HIDDEN_STORAGE_KEY = 'cc-haha-sidebar-hidden-projects'
 const PROJECT_ORGANIZATION_STORAGE_KEY = 'cc-haha-sidebar-project-organization'
 const PROJECT_SORT_STORAGE_KEY = 'cc-haha-sidebar-project-sort'
+const realCreateSession = useSessionStore.getInitialState().createSession
+const realFetchSessions = useSessionStore.getInitialState().fetchSessions
 
 function makeSession(
   id: string,
@@ -400,6 +418,13 @@ describe('Sidebar', () => {
     }))
     repositoryContextMock.mockReset()
     repositoryContextMock.mockImplementation(async (workDir: string) => ({ repoRoot: null, workDir }))
+    sessionsApiMock.create.mockReset()
+    sessionsApiMock.list.mockReset()
+    sessionsApiMock.getGitInfo.mockReset()
+    sessionsApiMock.getRecentProjects.mockReset()
+    sessionsApiMock.createRepositoryBranch.mockReset()
+    agentsApiMock.list.mockReset()
+    agentsApiMock.list.mockResolvedValue({ activeAgents: [], allAgents: [] })
     act(() => {
       hydrateProjectDisplayNames({}, Number.MAX_SAFE_INTEGER)
     })
@@ -707,6 +732,45 @@ describe('Sidebar', () => {
       expect(createSession).toHaveBeenCalledWith('/workspace/alpha')
       expect(connectToSession).toHaveBeenCalledWith('session-alpha-new')
     })
+  })
+
+  it('keeps the project cwd in the composer when the post-create session refresh is stale', async () => {
+    const existingSession = makeSession(
+      'tmp-existing',
+      'Existing tmp session',
+      '/private/tmp',
+      new Date().toISOString(),
+    )
+    sessionsApiMock.create.mockResolvedValue({
+      sessionId: 'tmp-project-new',
+      workDir: '/private/tmp',
+    })
+    sessionsApiMock.list.mockResolvedValue({
+      sessions: [existingSession],
+      total: 1,
+    })
+    sessionsApiMock.getGitInfo.mockImplementation(() => new Promise(() => {}))
+    useSessionStore.setState({
+      sessions: [existingSession],
+      createSession: realCreateSession,
+      fetchSessions: realFetchSessions,
+    })
+
+    render(
+      <>
+        <Sidebar />
+        <ChatInput variant="hero" />
+      </>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'New session in tmp' }))
+
+    expect(await screen.findByRole('button', { name: 'repoLaunch.launchLocation: tmp' }))
+      .toBeInTheDocument()
+    expect(sessionsApiMock.create).toHaveBeenCalledWith({ workDir: '/private/tmp' })
+    expect(useSessionStore.getState().sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'tmp-project-new', workDir: '/private/tmp' }),
+    ]))
   })
 
   it('shows project header menus and starts a blank project session', async () => {
