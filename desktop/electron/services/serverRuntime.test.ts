@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -229,6 +230,83 @@ describe('ElectronServerRuntime', () => {
     await expect(starting).rejects.toThrow('server startup stopped')
     expect(sidecarMocks.spawnSidecar).not.toHaveBeenCalled()
     expect(bridge.stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits for real server shutdown cleanup before the first restart attempt', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'cc-haha-electron-restart-'))
+    const activeTurn = path.join(root, 'active-turn')
+    const children: ChildProcess[] = []
+    const readyFiles: string[] = []
+    let serverStarts = 0
+    const fixture = String.raw`
+      const fs = require('node:fs')
+      const activeTurn = process.argv[1]
+      const readyFile = process.argv[2]
+      let owned = false
+      process.on('SIGTERM', () => {
+        setTimeout(() => {
+          if (owned) fs.rmSync(activeTurn, { force: true })
+          process.exit(0)
+        }, 150)
+      })
+      try {
+        const fd = fs.openSync(activeTurn, 'wx')
+        fs.closeSync(fd)
+        owned = true
+        fs.writeFileSync(readyFile, 'ready')
+      } catch {
+        process.exit(17)
+      }
+      setInterval(() => {}, 1_000)
+    `
+
+    const runtime = new ElectronServerRuntime({
+      desktopRoot: '/isolated/desktop',
+      env: { CLAUDE_CONFIG_DIR: root },
+      deps: {
+        appendHostDiagnostic: () => undefined,
+        preferredServerPorts: () => [],
+        reserveServerPort: async () => 49321 + serverStarts,
+        spawnSidecar: plan => {
+          if (plan.args[0] !== 'server') {
+            return new FakeSidecarChild() as unknown as SidecarChild
+          }
+          const readyFile = path.join(root, `ready-${++serverStarts}`)
+          readyFiles.push(readyFile)
+          const child = spawn(process.execPath, ['-e', fixture, activeTurn, readyFile], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+          })
+          children.push(child)
+          return child as SidecarChild
+        },
+        waitForServer: async () => {
+          const readyFile = readyFiles.at(-1)!
+          for (let attempt = 0; attempt < 100 && !existsSync(readyFile); attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 10))
+          }
+          if (!existsSync(readyFile)) throw new Error('fixture server did not become ready')
+        },
+        writeLastServerPort: () => undefined,
+      },
+    })
+
+    try {
+      await runtime.startServer()
+      expect(existsSync(activeTurn)).toBe(true)
+
+      await runtime.stopAllAndWait(2_000)
+
+      expect(existsSync(activeTurn)).toBe(false)
+      await runtime.startServer()
+      expect(serverStarts).toBe(2)
+      expect(children[1]!.exitCode).toBeNull()
+    } finally {
+      await runtime.stopAllAndWait(2_000).catch(() => undefined)
+      for (const child of children) {
+        if (child.exitCode === null) child.kill('SIGKILL')
+      }
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('passes a sanitized bridge startup failure to the server without silently using direct mode', async () => {

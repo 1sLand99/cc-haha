@@ -95,6 +95,8 @@ let previewService: ElectronPreviewService | null = null
 let petWindowController: PetWindowController | null = null
 const traceWindows = new Map<string, BrowserWindow>()
 let isQuitting = false
+let quitCleanupStarted = false
+let quitCleanupFinished = false
 let trayController: TrayController | null = null
 
 // Must run before anything logs: a Finder/Dock launch inherits unreadable
@@ -824,8 +826,12 @@ app.on('window-all-closed', () => {
   if (isQuitting && process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', event => {
   isQuitting = true
+  if (quitCleanupFinished) return
+  event.preventDefault()
+  if (quitCleanupStarted) return
+  quitCleanupStarted = true
   if (mainWindow) saveWindowState(app, mainWindow)
   trayController?.dispose()
   trayController = null
@@ -833,7 +839,14 @@ app.on('before-quit', () => {
   previewService?.close()
   petWindowController?.dispose()
   petWindowController = null
-  // Synchronous on quit so the Windows taskkill completes before the process
-  // exits, otherwise the fire-and-forget kill can leave orphaned sidecars.
-  getServerRuntime().stopAll(true)
+  // Keep Electron (and the server's stdout/stderr pipes) alive until the server
+  // has waited for its CLI children to finish their graceful cleanup. The CLI
+  // owns the launchd-reparented Computer Use helper, so exiting the host first
+  // can strand its active turn across an immediate app restart.
+  void getServerRuntime().stopAllAndWait().catch(error => {
+    console.error('[desktop] graceful server shutdown failed', error)
+  }).finally(() => {
+    quitCleanupFinished = true
+    app.quit()
+  })
 })
