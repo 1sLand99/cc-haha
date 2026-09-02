@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DESKTOP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${DESKTOP_DIR}/.." && pwd)"
+ADAPTERS_DIR="${REPO_ROOT}/adapters"
 
 TARGET_TRIPLE="aarch64-apple-darwin"
 CANONICAL_OUTPUT_DIR="${DESKTOP_DIR}/build-artifacts/macos-arm64"
@@ -19,7 +20,7 @@ Usage:
   ./desktop/scripts/build-macos-arm64.sh [extra electron-builder args...]
 
 Environment:
-  SKIP_INSTALL=1   Skip `bun install` in the repo root and desktop app.
+  SKIP_INSTALL=1   Skip `bun install` in the repo root, desktop app, and adapters package.
   SIGN_BUILD=0     Force an unsigned (ad-hoc) build. Signing is ON by default
                    when a stable identity exists in the keychain, because
                    Computer Use requires host + sidecar + helper to share one
@@ -92,6 +93,9 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
 
   echo "[build-macos-arm64] Installing desktop dependencies..."
   (cd "${DESKTOP_DIR}" && bun install)
+
+  echo "[build-macos-arm64] Installing adapter dependencies..."
+  (cd "${ADAPTERS_DIR}" && bun install)
 fi
 
 echo "[build-macos-arm64] Cleaning stale Electron outputs..."
