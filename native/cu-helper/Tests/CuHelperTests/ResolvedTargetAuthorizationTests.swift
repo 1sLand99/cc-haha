@@ -54,6 +54,46 @@ final class ResolvedTargetAuthorizationTests: XCTestCase {
         }
     }
 
+    func testWorktreePathResolutionStillReachesIntrinsicSelfControlDenial() throws {
+        let installed = AppTargetCandidate(
+            pid: 100,
+            bundleIdentifier: "com.claude-code-haha.desktop",
+            bundleURL: URL(fileURLWithPath: "/Applications/Claude Code Haha.app"),
+            localizedName: "Claude Code Haha",
+            executableName: "Claude Code Haha"
+        )
+        let worktree = AppTargetCandidate(
+            pid: 200,
+            bundleIdentifier: installed.bundleIdentifier,
+            bundleURL: URL(fileURLWithPath: "/Users/test/worktree/desktop/build-artifacts/macos-arm64/Claude Code Haha.app"),
+            localizedName: installed.localizedName,
+            executableName: installed.executableName
+        )
+        let resolved = try AppTargetResolver.match(
+            identifier: worktree.bundleURL!.path,
+            candidates: [installed, worktree]
+        )
+        let identity = AXTreeProcessIdentity(
+            bundleID: worktree.bundleIdentifier,
+            executablePath: worktree.bundleURL!.appendingPathComponent("Contents/MacOS/Claude Code Haha").path,
+            launchTime: 300
+        )
+
+        XCTAssertEqual(resolved.pid, worktree.pid)
+        XCTAssertThrowsError(
+            try ResolvedTargetAuthorization.authorize(
+                resolved: resolved,
+                currentIdentity: identity
+            )
+        ) {
+            XCTAssertEqual(($0 as? CUError)?.code, "app_denied")
+            XCTAssertEqual(
+                ($0 as? CUError)?.message,
+                "Computer Use is not allowed to use the app 'com.claude-code-haha.desktop' for safety reasons."
+            )
+        }
+    }
+
     func testOmittedFrontmostAndLaunchedTargetsUseSameActualBundlePolicy() {
         // Both paths ultimately produce this same resolved target shape. The
         // authorizer intentionally has no selector-specific bypass.

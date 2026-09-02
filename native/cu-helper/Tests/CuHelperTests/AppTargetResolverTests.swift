@@ -26,6 +26,64 @@ final class AppTargetResolverTests: XCTestCase {
         XCTAssertEqual(try AppTargetResolver.match(identifier: "/System/Applications/Calculator.app", candidates: [calculator]).pid, 42)
     }
 
+    func testFullPathSelectsOnlyThatBundleWhenRunningCopiesShareAName() throws {
+        let installed = AppTargetCandidate(
+            pid: 100,
+            bundleIdentifier: "com.claude-code-haha.desktop",
+            bundleURL: URL(fileURLWithPath: "/Applications/Claude Code Haha.app"),
+            localizedName: "Claude Code Haha",
+            executableName: "Claude Code Haha"
+        )
+        let worktree = AppTargetCandidate(
+            pid: 200,
+            bundleIdentifier: "com.claude-code-haha.desktop",
+            bundleURL: URL(fileURLWithPath: "/Users/test/worktree/desktop/build-artifacts/macos-arm64/Claude Code Haha.app"),
+            localizedName: "Claude Code Haha",
+            executableName: "Claude Code Haha"
+        )
+
+        let result = try AppTargetResolver.match(
+            identifier: "/Users/test/worktree/desktop/build-artifacts/macos-arm64/Claude Code Haha.app",
+            candidates: [installed, worktree]
+        )
+
+        XCTAssertEqual(result.pid, 200)
+        XCTAssertEqual(result.bundleURL, worktree.bundleURL)
+        XCTAssertThrowsError(
+            try AppTargetResolver.match(
+                identifier: "Claude Code Haha",
+                candidates: [installed, worktree]
+            )
+        ) {
+            XCTAssertEqual(($0 as? CUError)?.code, "ambiguous_target")
+        }
+    }
+
+    func testFullPathCollapsesHelperProcessesIntoTheirMainBundleInstance() throws {
+        let path = "/Users/test/worktree/desktop/build-artifacts/macos-arm64/Claude Code Haha.app"
+        let main = AppTargetCandidate(
+            pid: 200,
+            bundleIdentifier: "com.claude-code-haha.desktop",
+            bundleURL: URL(fileURLWithPath: path),
+            localizedName: "Claude Code Haha",
+            executableName: "Claude Code Haha"
+        )
+        let renderer = AppTargetCandidate(
+            pid: 201,
+            bundleIdentifier: main.bundleIdentifier,
+            bundleURL: main.bundleURL,
+            localizedName: "Claude Code Haha Helper (Renderer)",
+            executableName: "Claude Code Haha Helper (Renderer)"
+        )
+
+        let result = try AppTargetResolver.match(
+            identifier: path,
+            candidates: [renderer, main]
+        )
+
+        XCTAssertEqual(result.pid, main.pid)
+    }
+
     func testAmbiguousNameFailsClosed() {
         let duplicate = AppTargetCandidate(
             pid: 43,
@@ -36,6 +94,18 @@ final class AppTargetResolverTests: XCTestCase {
         )
         XCTAssertThrowsError(try AppTargetResolver.match(identifier: "Calculator", candidates: [calculator, duplicate])) {
             XCTAssertEqual(($0 as? CUError)?.code, "ambiguous_target")
+        }
+        XCTAssertThrowsError(
+            try AppTargetResolver.match(
+                identifier: calculator.bundleURL!.path,
+                candidates: [calculator, duplicate]
+            )
+        ) {
+            XCTAssertEqual(($0 as? CUError)?.code, "ambiguous_target")
+            XCTAssertEqual(
+                ($0 as? CUError)?.message,
+                "App identifier '/System/Applications/Calculator.app' matches multiple running instances; use a PID"
+            )
         }
     }
 
@@ -75,6 +145,24 @@ final class AppTargetResolverTests: XCTestCase {
         ) {
             XCTAssertEqual(($0 as? CUError)?.code, "target_not_running")
         }
+    }
+
+    func testExplicitPIDSelectsOnlyThatProcessAcrossSameBundleCandidates() throws {
+        let sibling = AppTargetCandidate(
+            pid: 43,
+            bundleIdentifier: calculator.bundleIdentifier,
+            bundleURL: calculator.bundleURL,
+            localizedName: calculator.localizedName,
+            executableName: "Calculator Helper"
+        )
+
+        XCTAssertEqual(
+            try AppTargetResolver.resolve(
+                selector: .pid(sibling.pid),
+                candidates: [calculator, sibling]
+            )?.pid,
+            sibling.pid
+        )
     }
 
     func testSelectorPrecedenceIsPIDThenBundleIDThenApp() throws {
@@ -154,6 +242,30 @@ final class AppTargetResolverTests: XCTestCase {
                 selector: .app("Calculator"),
                 runningCandidates: [],
                 installedCandidates: [installedCalculator, duplicateName]
+            )
+        ) {
+            XCTAssertEqual(($0 as? CUError)?.code, "ambiguous_target")
+        }
+    }
+
+    func testInstalledFullPathDoesNotAlsoMatchAnotherBundleWithTheSameName() throws {
+        let otherCopy = InstalledAppTarget(
+            bundleIdentifier: installedCalculator.bundleIdentifier,
+            displayName: installedCalculator.displayName,
+            bundleURL: URL(fileURLWithPath: "/Applications/Calculator.app")
+        )
+
+        XCTAssertEqual(
+            try AppTargetResolver.matchInstalled(
+                identifier: installedCalculator.bundleURL.path,
+                candidates: [otherCopy, installedCalculator]
+            ),
+            installedCalculator
+        )
+        XCTAssertThrowsError(
+            try AppTargetResolver.matchInstalled(
+                identifier: installedCalculator.displayName,
+                candidates: [otherCopy, installedCalculator]
             )
         ) {
             XCTAssertEqual(($0 as? CUError)?.code, "ambiguous_target")

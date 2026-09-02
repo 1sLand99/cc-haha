@@ -7,6 +7,40 @@ struct AppTargetCandidate: Sendable, Equatable {
     let bundleURL: URL?
     let localizedName: String?
     let executableName: String?
+    let isMainApplicationProcess: Bool
+
+    init(
+        pid: pid_t,
+        bundleIdentifier: String,
+        bundleURL: URL?,
+        localizedName: String?,
+        executableName: String?,
+        isMainApplicationProcess: Bool? = nil
+    ) {
+        self.pid = pid
+        self.bundleIdentifier = bundleIdentifier
+        self.bundleURL = bundleURL
+        self.localizedName = localizedName
+        self.executableName = executableName
+        self.isMainApplicationProcess = isMainApplicationProcess ?? Self.inferMainApplicationProcess(
+            bundleURL: bundleURL,
+            executableName: executableName
+        )
+    }
+
+    private static func inferMainApplicationProcess(
+        bundleURL: URL?,
+        executableName: String?
+    ) -> Bool {
+        guard let bundleURL, let executableName else { return false }
+        let bundleName = bundleURL.deletingPathExtension().lastPathComponent
+        return executableName.caseInsensitiveCompare(bundleName) == .orderedSame
+    }
+}
+
+private enum RunningAppInstanceKey: Hashable {
+    case bundle(identifier: String, path: String)
+    case process(pid_t)
 }
 
 struct ResolvedAppTarget: Sendable, Equatable {
@@ -52,12 +86,17 @@ enum AppTargetResolver {
                   app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
                   let bundleIdentifier = app.bundleIdentifier,
                   !bundleIdentifier.isEmpty else { return nil }
+            let bundleURL = app.bundleURL?.standardizedFileURL
+            let executableURL = app.executableURL?.standardizedFileURL
             return AppTargetCandidate(
                 pid: app.processIdentifier,
                 bundleIdentifier: bundleIdentifier,
-                bundleURL: app.bundleURL?.standardizedFileURL,
+                bundleURL: bundleURL,
                 localizedName: app.localizedName,
-                executableName: app.executableURL?.deletingPathExtension().lastPathComponent
+                executableName: executableURL?.deletingPathExtension().lastPathComponent,
+                isMainApplicationProcess: bundleURL
+                    .flatMap { Bundle(url: $0)?.executableURL?.standardizedFileURL }
+                    .map { $0 == executableURL }
             )
         }
     }
@@ -73,36 +112,71 @@ enum AppTargetResolver {
         let normalizedPath = value.hasPrefix("/")
             ? URL(fileURLWithPath: value).standardizedFileURL.path
             : nil
-        let name = URL(fileURLWithPath: value).deletingPathExtension().lastPathComponent
-        let matches = candidates.filter { candidate in
-            if candidate.bundleIdentifier.caseInsensitiveCompare(value) == .orderedSame {
-                return true
+        let matches: [AppTargetCandidate]
+        if let normalizedPath {
+            matches = candidates.filter {
+                $0.bundleURL?.standardizedFileURL.path == normalizedPath
             }
-            if let normalizedPath,
-               candidate.bundleURL?.standardizedFileURL.path == normalizedPath {
-                return true
+        } else {
+            let name = URL(fileURLWithPath: value).deletingPathExtension().lastPathComponent
+            matches = candidates.filter { candidate in
+                if candidate.bundleIdentifier.caseInsensitiveCompare(value) == .orderedSame {
+                    return true
+                }
+                return [
+                    candidate.localizedName,
+                    candidate.executableName,
+                    candidate.bundleURL?.deletingPathExtension().lastPathComponent,
+                ]
+                .compactMap { $0 }
+                .contains { $0.caseInsensitiveCompare(name) == .orderedSame }
             }
-            return [
-                candidate.localizedName,
-                candidate.executableName,
-                candidate.bundleURL?.deletingPathExtension().lastPathComponent,
-            ]
-            .compactMap { $0 }
-            .contains { $0.caseInsensitiveCompare(name) == .orderedSame }
         }
-        guard matches.count == 1, let match = matches.first else {
-            if matches.count > 1 {
-                throw CUError(
-                    "ambiguous_target",
-                    "App identifier '\(raw)' matches multiple running instances; use a PID or full path"
-                )
-            }
+        guard !matches.isEmpty else {
             throw CUError("target_not_running", "No running app matches '\(raw)'")
         }
+        let match = try selectApplicationProcess(
+            from: matches,
+            identifier: raw,
+            fullPathWasProvided: normalizedPath != nil
+        )
         return ResolvedAppTarget(
             pid: match.pid,
             bundleIdentifier: match.bundleIdentifier,
             bundleURL: match.bundleURL
+        )
+    }
+
+    private nonisolated static func selectApplicationProcess(
+        from matches: [AppTargetCandidate],
+        identifier: String,
+        fullPathWasProvided: Bool
+    ) throws -> AppTargetCandidate {
+        if matches.count == 1, let match = matches.first {
+            return match
+        }
+
+        let instances = Dictionary(grouping: matches) { candidate in
+            guard let path = candidate.bundleURL?.standardizedFileURL.path else {
+                return RunningAppInstanceKey.process(candidate.pid)
+            }
+            return RunningAppInstanceKey.bundle(
+                identifier: candidate.bundleIdentifier.lowercased(),
+                path: path
+            )
+        }
+        if instances.count == 1,
+           let processes = instances.values.first {
+            let mainProcesses = processes.filter(\.isMainApplicationProcess)
+            if mainProcesses.count == 1, let main = mainProcesses.first {
+                return main
+            }
+        }
+
+        let guidance = fullPathWasProvided ? "use a PID" : "use a PID or full path"
+        throw CUError(
+            "ambiguous_target",
+            "App identifier '\(identifier)' matches multiple running instances; \(guidance)"
         )
     }
 
@@ -223,21 +297,24 @@ enum AppTargetResolver {
         let normalizedPath = value.hasPrefix("/")
             ? URL(fileURLWithPath: value).standardizedFileURL.path
             : nil
-        let name = URL(fileURLWithPath: value)
-            .deletingPathExtension()
-            .lastPathComponent
-        let matches = candidates.filter { candidate in
-            if candidate.bundleIdentifier.caseInsensitiveCompare(value) == .orderedSame {
-                return true
+        let matches: [InstalledAppTarget]
+        if let normalizedPath {
+            matches = candidates.filter {
+                $0.bundleURL.standardizedFileURL.path == normalizedPath
             }
-            if let normalizedPath,
-               candidate.bundleURL.standardizedFileURL.path == normalizedPath {
-                return true
+        } else {
+            let name = URL(fileURLWithPath: value)
+                .deletingPathExtension()
+                .lastPathComponent
+            matches = candidates.filter { candidate in
+                if candidate.bundleIdentifier.caseInsensitiveCompare(value) == .orderedSame {
+                    return true
+                }
+                return [
+                    candidate.displayName,
+                    candidate.bundleURL.deletingPathExtension().lastPathComponent,
+                ].contains { $0.caseInsensitiveCompare(name) == .orderedSame }
             }
-            return [
-                candidate.displayName,
-                candidate.bundleURL.deletingPathExtension().lastPathComponent,
-            ].contains { $0.caseInsensitiveCompare(name) == .orderedSame }
         }
         guard matches.count == 1, let match = matches.first else {
             if matches.count > 1 {
