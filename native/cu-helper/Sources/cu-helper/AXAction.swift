@@ -605,9 +605,8 @@ public enum AXAction {
                 """
                 The target app has no window on screen, so no click or keystroke \
                 can reach it. It is minimized, hidden, or on another Space. \
-                Screenshots still work for such a window, so the state you were \
-                shown is real — it just cannot be acted on. Ask the user to \
-                bring the app back on screen.
+                Call get_app_state so Computer Use can restore the explicitly \
+                selected app before retrying the action.
                 """
             )
         case .failure(.pointOutsideWindows):
