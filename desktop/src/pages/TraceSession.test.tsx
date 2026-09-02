@@ -680,6 +680,34 @@ describe('TraceSession', () => {
     expect(screen.queryByTestId('trace-split-layout')).not.toBeInTheDocument()
   })
 
+  it('separates provider input/output tokens from cache read/write tokens', async () => {
+    vi.mocked(sessionsApi.getTrace).mockResolvedValue({
+      ...baseTrace,
+      summary: {
+        ...baseTrace.summary,
+        totalInputTokens: 107_600,
+        totalOutputTokens: 11_400,
+      },
+      calls: [makeCall({
+        usage: {
+          inputTokens: 107_600,
+          outputTokens: 11_400,
+          cacheReadInputTokens: 4_971_000,
+          cacheCreationInputTokens: 10_000,
+        },
+      })],
+    })
+
+    await renderReady()
+
+    const overview = within(screen.getByTestId('trace-overview'))
+    expect(overview.getByText('Input → output')).toBeInTheDocument()
+    expect(overview.getByText('107.6k → 11.4k')).toBeInTheDocument()
+    expect(overview.getByText('Cache read → write')).toBeInTheDocument()
+    expect(overview.getByText('5m → 10k')).toBeInTheDocument()
+    expect(screen.getByText('Input + output')).toBeInTheDocument()
+  })
+
   it('uses trace session metadata when the sidebar store has not loaded the session', async () => {
     useSessionStore.setState({ sessions: [], activeSessionId: null, isLoading: false, error: null })
 

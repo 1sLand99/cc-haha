@@ -109,6 +109,8 @@ type OverviewStats = {
   toolDurationMs?: number
   inputTokens: number
   outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
   models: string[]
 }
 
@@ -141,9 +143,15 @@ export function SessionOverview({
         <Stat label={t('trace.modelTime')} value={formatDurationMs(stats.modelDurationMs)} />
         <Stat label={t('trace.toolTime')} value={formatDurationMs(stats.toolDurationMs)} />
         <Stat
-          label={t('trace.tokens')}
+          label={t('trace.inputOutputTokens')}
           value={`${formatTokenCount(stats.inputTokens)} → ${formatTokenCount(stats.outputTokens)}`}
         />
+        {stats.cacheReadTokens > 0 || stats.cacheCreationTokens > 0 ? (
+          <Stat
+            label={t('trace.cacheTokens')}
+            value={`${formatTokenCount(stats.cacheReadTokens)} → ${formatTokenCount(stats.cacheCreationTokens)}`}
+          />
+        ) : null}
         <Stat label={t('trace.models')} value={stats.models.length > 0 ? stats.models.join(', ') : '--'} />
       </div>
 
@@ -202,6 +210,8 @@ function computeStats(span: TraceSpan, viewModel: TraceViewModel): OverviewStats
     errors: 0,
     inputTokens: 0,
     outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
     models: [],
   }
   const models = new Set<string>()
@@ -215,6 +225,8 @@ function computeStats(span: TraceSpan, viewModel: TraceViewModel): OverviewStats
       if (item.tokenUsage) {
         stats.inputTokens += item.tokenUsage.inputTokens
         stats.outputTokens += item.tokenUsage.outputTokens
+        stats.cacheReadTokens += item.tokenUsage.cacheReadInputTokens ?? 0
+        stats.cacheCreationTokens += item.tokenUsage.cacheCreationInputTokens ?? 0
       }
     }
     if (item.kind === 'tool') {

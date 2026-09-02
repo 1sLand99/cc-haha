@@ -517,8 +517,9 @@ export function ActiveSession() {
 
   const isActive = isPreparingTurn || chatState !== 'idle' || hasRunningBackgroundTasks
   const totalTokens = getTokenUsageTotal(tokenUsage)
-  const cachedTokens = (tokenUsage.cache_read_tokens ?? 0) +
-    (tokenUsage.cache_creation_tokens ?? 0)
+  const cacheReadTokens = tokenUsage.cache_read_tokens ?? 0
+  const cacheCreationTokens = tokenUsage.cache_creation_tokens ?? 0
+  const cachedTokens = cacheReadTokens + cacheCreationTokens
   useEffect(() => {
     if (!activeTabId) return
     pruneDismissedBackgroundTaskKeys(
@@ -706,10 +707,13 @@ export function ActiveSession() {
                 total: totalTokens.toLocaleString(),
                 input: tokenUsage.input_tokens.toLocaleString(),
                 output: tokenUsage.output_tokens.toLocaleString(),
-                cache: cachedTokens.toLocaleString(),
+                cacheRead: cacheReadTokens.toLocaleString(),
+                cacheWrite: cacheCreationTokens.toLocaleString(),
               })}
             >
-              {t('session.apiTokens', { count: formatTokenCount(totalTokens) })}
+              {t(cachedTokens > 0 ? 'session.apiTokensWithCache' : 'session.apiTokens', {
+                count: formatTokenCount(totalTokens),
+              })}
             </span>
           ),
         }
