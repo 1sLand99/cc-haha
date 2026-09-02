@@ -74,6 +74,7 @@ exit 0
       const result = spawnSync('/bin/bash', [buildScript], {
         cwd: desktopDir,
         encoding: 'utf8',
+        stdio: ['ignore', 'ignore', 'pipe'],
         env: {
           ...process.env,
           PATH: `${fakeBinDir}:${process.env.PATH ?? ''}`,
@@ -83,7 +84,12 @@ exit 0
         },
       })
 
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(86)
+      expect(result.status, [
+        `status: ${String(result.status)}`,
+        `signal: ${String(result.signal)}`,
+        `spawn error: ${result.error?.stack ?? 'none'}`,
+        `stderr: ${result.stderr || '<empty>'}`,
+      ].join('\n')).toBe(86)
       expect(await Promise.all([
         exists(path.join(fixtureRoot, 'node_modules')),
         exists(path.join(desktopDir, 'node_modules')),
