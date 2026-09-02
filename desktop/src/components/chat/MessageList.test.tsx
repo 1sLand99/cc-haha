@@ -2350,6 +2350,88 @@ describe('MessageList nested tool calls', () => {
     expect(group.querySelector('.thinking-dots')).toBeNull()
   })
 
+  it('summarizes repeated Edit events for one path as one changed file', () => {
+    render(<MessageList sessionId={ACTIVE_TAB} />)
+    const store = useChatStore.getState()
+    const filePath = '/tmp/cc-haha-manual-qa/live-run.json'
+
+    act(() => {
+      for (let index = 0; index < 4; index += 1) {
+        const toolUseId = `edit-live-run-${index}`
+        store.handleServerMessage(ACTIVE_TAB, {
+          type: 'content_start',
+          blockType: 'tool_use',
+          toolName: 'Edit',
+          toolUseId,
+        })
+        store.handleServerMessage(ACTIVE_TAB, {
+          type: 'tool_use_complete',
+          toolName: 'Edit',
+          toolUseId,
+          input: {
+            file_path: filePath,
+            old_string: `before ${index}`,
+            new_string: `after ${index}`,
+          },
+        })
+        store.handleServerMessage(ACTIVE_TAB, {
+          type: 'tool_result',
+          toolUseId,
+          content: 'The file was updated successfully.',
+          isError: false,
+        })
+      }
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+    })
+
+    const group = screen.getByTestId('activity-group')
+    expect(group.getAttribute('data-expanded')).toBe('false')
+    const summary = group.querySelector('[data-chat-disclosure="true"]')
+    expect(summary?.textContent).toContain('edited a file')
+    expect(summary?.textContent).not.toContain('edited 4 files')
+  })
+
+  it('still counts Edit events for different paths as different files', () => {
+    render(<MessageList sessionId={ACTIVE_TAB} />)
+    const store = useChatStore.getState()
+
+    act(() => {
+      for (const [index, filePath] of [
+        '/tmp/cc-haha-manual-qa/live-run.json',
+        '/tmp/cc-haha-manual-qa/summary.json',
+      ].entries()) {
+        const toolUseId = `edit-distinct-${index}`
+        store.handleServerMessage(ACTIVE_TAB, {
+          type: 'content_start',
+          blockType: 'tool_use',
+          toolName: 'Edit',
+          toolUseId,
+        })
+        store.handleServerMessage(ACTIVE_TAB, {
+          type: 'tool_use_complete',
+          toolName: 'Edit',
+          toolUseId,
+          input: {
+            file_path: filePath,
+            old_string: `before ${index}`,
+            new_string: `after ${index}`,
+          },
+        })
+        store.handleServerMessage(ACTIVE_TAB, {
+          type: 'tool_result',
+          toolUseId,
+          content: 'The file was updated successfully.',
+          isError: false,
+        })
+      }
+      store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
+    })
+
+    const summary = screen.getByTestId('activity-group')
+      .querySelector('[data-chat-disclosure="true"]')
+    expect(summary?.textContent).toContain('edited 2 files')
+  })
+
   it('spaces turns without drawing a rail', () => {
     const { container } = render(<MessageList sessionId={ACTIVE_TAB} />)
     const store = useChatStore.getState()
