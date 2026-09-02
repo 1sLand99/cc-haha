@@ -53,6 +53,7 @@ type SnapshotTurnCodePreview = {
   preview: RewindCodePreview
   coveredPathIdentities: Set<string>
   restorablePathIdentities: Set<string>
+  unrestorablePathIdentities: Set<string>
   restoreAvailable: boolean
 }
 
@@ -1027,9 +1028,14 @@ function mergeTurnCodePreviews(
 ): MergedTurnCodePreview {
   const transcriptChanges = transcriptEvidence.confirmedChanges
   const transcriptPreview = buildTranscriptTurnCodePreview(transcriptChanges)
-  const checkpointPreview = snapshotPreview?.preview ?? null
+  const scopedSnapshotPreview = scopeSnapshotPreviewToTurn(
+    snapshotPreview,
+    transcriptEvidence,
+    transcriptIntact,
+  )
+  const checkpointPreview = scopedSnapshotPreview?.preview ?? null
   const hasUncoveredUncertainChange = transcriptEvidence.uncertainChanges.some((change) =>
-    !snapshotPreview?.coveredPathIdentities.has(change.identityPath)
+    !scopedSnapshotPreview?.coveredPathIdentities.has(change.identityPath)
   )
   const unverifiedChangeSources = transcriptEvidence.unverifiedChangeSources
   const evidenceIncomplete = !transcriptIntact
@@ -1046,20 +1052,20 @@ function mergeTurnCodePreviews(
     return {
       preview: checkpointPreview,
       unverifiedChangeSources,
-      restoreAvailable: (snapshotPreview?.restoreAvailable ?? false) &&
+      restoreAvailable: (scopedSnapshotPreview?.restoreAvailable ?? false) &&
         !hasUncoveredUncertainChange &&
         !evidenceIncomplete,
     }
   }
 
   const missingTranscriptChanges = transcriptChanges.filter((change) =>
-    !snapshotPreview?.coveredPathIdentities.has(change.identityPath)
+    !scopedSnapshotPreview?.coveredPathIdentities.has(change.identityPath)
   )
   if (missingTranscriptChanges.length === 0) {
     return {
       preview: checkpointPreview,
       unverifiedChangeSources,
-      restoreAvailable: (snapshotPreview?.restoreAvailable ?? false) &&
+      restoreAvailable: (scopedSnapshotPreview?.restoreAvailable ?? false) &&
         !hasUncoveredUncertainChange &&
         !evidenceIncomplete,
     }
@@ -1090,12 +1096,61 @@ function mergeTurnCodePreviews(
       fileStats: mergedFileStats,
     }),
     unverifiedChangeSources,
-    restoreAvailable: (snapshotPreview?.restoreAvailable ?? false) &&
+    restoreAvailable: (scopedSnapshotPreview?.restoreAvailable ?? false) &&
       missingTranscriptChanges.every((change) =>
-        snapshotPreview?.restorablePathIdentities.has(change.identityPath)
+        scopedSnapshotPreview?.restorablePathIdentities.has(change.identityPath)
       ) &&
       !hasUncoveredUncertainChange &&
       !evidenceIncomplete,
+  }
+}
+
+function scopeSnapshotPreviewToTurn(
+  snapshotPreview: SnapshotTurnCodePreview | null,
+  transcriptEvidence: TranscriptTurnFileEvidence,
+  transcriptIntact: boolean,
+): SnapshotTurnCodePreview | null {
+  if (
+    !snapshotPreview ||
+    !transcriptIntact ||
+    transcriptEvidence.unverifiedChangeSources.length > 0
+  ) {
+    return snapshotPreview
+  }
+
+  const attributedPathIdentities = new Set([
+    ...transcriptEvidence.confirmedChanges,
+    ...transcriptEvidence.uncertainChanges,
+  ].map((change) => change.identityPath))
+  // Snapshot-only turns remain supported: without a structured mutation tool,
+  // the snapshot is the only evidence available. Once the transcript names the
+  // files this turn attempted to mutate, however, it is also the authoritative
+  // turn boundary. Cumulative providers can otherwise carry a pre-rewind backup
+  // forward and make an old file look newly created in the replacement turn.
+  if (attributedPathIdentities.size === 0) return snapshotPreview
+
+  const checkpointFileStats = snapshotPreview.preview[fileChangeStats] ?? new Map()
+  const scopedFileStats = new Map<string, FileChangeStats>()
+  const filesChanged = snapshotPreview.preview.filesChanged.filter((filePath) => {
+    const identityPath = toFileIdentityPath(filePath)
+    if (!attributedPathIdentities.has(identityPath)) return false
+    const stats = checkpointFileStats.get(identityPath)
+    if (stats) scopedFileStats.set(identityPath, stats)
+    return true
+  })
+  const scopedStats = [...scopedFileStats.values()]
+
+  return {
+    ...snapshotPreview,
+    preview: normalizeDiffStats({
+      filesChanged,
+      insertions: scopedStats.reduce((total, stats) => total + stats.insertions, 0),
+      deletions: scopedStats.reduce((total, stats) => total + stats.deletions, 0),
+      fileStats: scopedFileStats,
+    }),
+    restoreAvailable: [...attributedPathIdentities].every((identityPath) =>
+      !snapshotPreview.unrestorablePathIdentities.has(identityPath)
+    ),
   }
 }
 
@@ -1135,7 +1190,7 @@ async function getTurnBoundaryContents(
     targetBackup?.backupFileName,
   )
   const restorePointAvailable = targetBackup?.backupFileName === null ||
-    (typeof targetBackup?.backupFileName === 'string' && beforeContent !== null)
+    (typeof targetBackup?.backupFileName === 'string' && beforeContent !== undefined)
 
   if (!nextSnapshot) {
     return {
@@ -1177,6 +1232,7 @@ async function buildTurnCodePreview(
   const trackedPaths = Object.keys(targetSnapshot.trackedFileBackups)
   const coveredPathIdentities = new Set<string>()
   const restorablePathIdentities = new Set<string>()
+  const unrestorablePathIdentities = new Set<string>()
   const processedPathIdentities = new Set<string>()
   const backupByIdentity = new Map<string, string | null>()
   const statsByIdentity = new Map<string, FileChangeStats>()
@@ -1193,11 +1249,13 @@ async function buildTurnCodePreview(
     const targetBackupFileName = targetSnapshot.trackedFileBackups[trackingPath]
       ?.backupFileName
     if (targetBackupFileName === undefined) {
+      unrestorablePathIdentities.add(identityPath)
       restoreAvailable = false
       continue
     }
     if (backupByIdentity.has(identityPath)) {
       if (backupByIdentity.get(identityPath) !== targetBackupFileName) {
+        unrestorablePathIdentities.add(identityPath)
         restoreAvailable = false
       }
       continue
@@ -1229,6 +1287,7 @@ async function buildTurnCodePreview(
 
     filesChanged.push(expandTrackingPath(checkpointBaseDir, trackingPath))
     if (!restorePointAvailable || !safeTrackedPath) {
+      unrestorablePathIdentities.add(identityPath)
       restoreAvailable = false
     }
     const stats = countTurnDiffStats(beforeContent, afterContent)
@@ -1246,6 +1305,7 @@ async function buildTurnCodePreview(
     }),
     coveredPathIdentities,
     restorablePathIdentities,
+    unrestorablePathIdentities,
     restoreAvailable,
   }
 }
@@ -1379,11 +1439,19 @@ async function buildRestorePlan(
   checkpointBaseDir: string,
   snapshots: FileHistorySnapshot[],
   targetSnapshot: FileHistorySnapshot,
+  filesToRestore: string[],
 ): Promise<RestorePlanEntry[]> {
   const plan: RestorePlanEntry[] = []
   const backupByIdentity = new Map<string, string | null>()
+  const restorePathIdentities = new Set(
+    filesToRestore.map((filePath) => toFileIdentityPath(filePath)),
+  )
 
   for (const trackingPath of collectTrackedPaths(snapshots)) {
+    const absolutePath = expandTrackingPath(checkpointBaseDir, trackingPath)
+    const identityPath = toFileIdentityPath(absolutePath)
+    if (!restorePathIdentities.has(identityPath)) continue
+
     const backupFileName = getBackupFileNameForTarget(
       trackingPath,
       snapshots,
@@ -1391,8 +1459,6 @@ async function buildRestorePlan(
     )
     if (backupFileName === undefined) continue
 
-    const absolutePath = expandTrackingPath(checkpointBaseDir, trackingPath)
-    const identityPath = toFileIdentityPath(absolutePath)
     if (backupByIdentity.has(identityPath)) {
       if (backupByIdentity.get(identityPath) !== backupFileName) {
         throw ApiError.badRequest(`Conflicting checkpoints for tracked path: ${trackingPath}`)
@@ -1780,6 +1846,7 @@ export async function previewSessionRewind(
     target,
   )
 
+  const hasTurnScopedPreview = turnCheckpoint.code.available
   return {
     target: {
       targetUserMessageId: target.targetUserMessageId,
@@ -1789,8 +1856,10 @@ export async function previewSessionRewind(
     conversation: {
       messagesRemoved: target.messagesRemoved,
     },
-    code: mergeRewindCodePreview(codePreview.preview, turnCheckpoint.code),
-    restoreAvailable: codePreview.restoreAvailable && turnCheckpoint.restoreAvailable,
+    code: hasTurnScopedPreview ? turnCheckpoint.code : codePreview.preview,
+    restoreAvailable: hasTurnScopedPreview
+      ? turnCheckpoint.restoreAvailable
+      : codePreview.restoreAvailable,
     unverifiedChangeSources: turnCheckpoint.unverifiedChangeSources,
   }
 }
@@ -2016,12 +2085,13 @@ export async function executeSessionRewind(
     checkpointBaseDir,
     target.targetUserMessageId,
   )
-  if (restoreFiles && !codePreview.restoreAvailable) {
+  const hasTurnScopedPreview = turnCheckpoint.code.available
+  if (restoreFiles && !hasTurnScopedPreview && !codePreview.restoreAvailable) {
     throw ApiError.badRequest(
       'One or more tracked files cannot be safely restored from this checkpoint. No messages or files were changed.',
     )
   }
-  const preview = mergeRewindCodePreview(codePreview.preview, turnCheckpoint.code)
+  const preview = hasTurnScopedPreview ? turnCheckpoint.code : codePreview.preview
 
   let appliedRestorePlan: RestorePlanEntry[] = []
   if (restoreFiles && preview.available && snapshots) {
@@ -2035,6 +2105,7 @@ export async function executeSessionRewind(
         checkpointBaseDir,
         snapshots,
         targetSnapshot,
+        preview.filesChanged,
       )
     } catch (error) {
       if (error instanceof ApiError) throw error
@@ -2079,7 +2150,9 @@ export async function executeSessionRewind(
     // For `both` this is necessarily true — we threw above otherwise. For
     // `conversation` it reports whether the files *could* have been restored,
     // so the caller can tell "user chose not to" from "we could not".
-    restoreAvailable: turnCheckpoint.restoreAvailable && codePreview.restoreAvailable,
+    restoreAvailable: hasTurnScopedPreview
+      ? turnCheckpoint.restoreAvailable
+      : codePreview.restoreAvailable,
     unverifiedChangeSources: turnCheckpoint.unverifiedChangeSources,
     mode,
   }

@@ -6269,6 +6269,192 @@ describe('Sessions API', () => {
     expect(remainingMessages.some((message) => message.id === incompleteUserId)).toBe(false)
   })
 
+  it('keeps a post-rewind Edit checkpoint scoped to the new turn', async () => {
+    const sessionId = '99999999-bbbb-cccc-dddd-000000001274'
+    const workDir = path.join(tmpDir, 'conversation-rewind-checkpoint-boundary')
+    const largeFile = path.join(workDir, 'large-200.json')
+    const liveFile = path.join(workDir, 'live-run.json')
+    const largeContent = `${Array.from(
+      { length: 206 },
+      (_, index) => JSON.stringify({ index }),
+    ).join('\n')}\n`
+    const liveBefore = '{\n  "status": "ready"\n}\n'
+    const liveAfter = '{\n  "rewind_probe": true,\n  "status": "ready"\n}\n'
+    const firstUserId = crypto.randomUUID()
+    const computerUserId = crypto.randomUUID()
+    const rewoundUserId = crypto.randomUUID()
+    const newUserId = crypto.randomUUID()
+    const liveBackup = 'post-rewind-live-before@v2'
+
+    await fs.mkdir(workDir, { recursive: true })
+    await fs.writeFile(largeFile, largeContent, 'utf-8')
+    await fs.writeFile(liveFile, liveBefore, 'utf-8')
+    await writeFileHistoryBackup(sessionId, liveBackup, liveBefore)
+    const transcriptPath = await writeSessionFile(
+      '-tmp-conversation-rewind-checkpoint-boundary',
+      sessionId,
+      [
+        makeSessionMetaEntry(workDir),
+        makeFileHistorySnapshotEntry(firstUserId, {
+          'large-200.json': {
+            backupFileName: null,
+            version: 1,
+            backupTime: '2026-01-01T00:00:00.000Z',
+          },
+          'live-run.json': {
+            backupFileName: null,
+            version: 1,
+            backupTime: '2026-01-01T00:00:00.000Z',
+          },
+        }),
+        { ...makeUserEntry('create both files', firstUserId), cwd: workDir, sessionId },
+        makeAssistantToolUseEntry([
+          {
+            id: 'Write:historical-large',
+            name: 'Write',
+            input: { file_path: largeFile, content: largeContent },
+          },
+          {
+            id: 'Write:historical-live',
+            name: 'Write',
+            input: { file_path: liveFile, content: liveBefore },
+          },
+        ], firstUserId),
+        makeToolResultUserEntry(
+          'Write:historical-large',
+          `The file ${largeFile} has been written successfully.`,
+          undefined,
+          undefined,
+          sessionId,
+        ),
+        makeToolResultUserEntry(
+          'Write:historical-live',
+          `The file ${liveFile} has been written successfully.`,
+          undefined,
+          undefined,
+          sessionId,
+        ),
+        makeAssistantEntry('Both files created.', firstUserId),
+        { ...makeUserEntry('inspect with computer use', computerUserId), cwd: workDir, sessionId },
+        makeAssistantToolUseEntry([{
+          id: 'Computer:inspect-only',
+          name: 'Computer',
+          input: { action: 'screenshot' },
+        }], computerUserId),
+        makeToolResultUserEntry(
+          'Computer:inspect-only',
+          'Screenshot captured.',
+          undefined,
+          undefined,
+          sessionId,
+        ),
+        makeAssistantEntry('Inspection complete.', computerUserId),
+        { ...makeUserEntry('summarize only', rewoundUserId), cwd: workDir, sessionId },
+        makeAssistantEntry('Summary only.', rewoundUserId),
+      ],
+    )
+
+    const conversationRewind = await fetch(`${baseUrl}/api/sessions/${sessionId}/rewind`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetUserMessageId: rewoundUserId,
+        expectedContent: 'summarize only',
+        mode: 'conversation',
+      }),
+    })
+    expect(conversationRewind.status).toBe(200)
+    expect(await conversationRewind.json()).toMatchObject({ mode: 'conversation' })
+
+    await fs.writeFile(liveFile, liveAfter, 'utf-8')
+    const nextEntries = [
+      // A resumed provider can carry a cumulative snapshot entry forward. The
+      // large-file backup belongs to the old Write turn; only live-run.json is
+      // the before-state for this new Edit turn.
+      makeFileHistorySnapshotEntry(newUserId, {
+        'large-200.json': {
+          backupFileName: null,
+          version: 1,
+          backupTime: '2026-01-01T00:03:00.000Z',
+        },
+        'live-run.json': {
+          backupFileName: liveBackup,
+          version: 2,
+          backupTime: '2026-01-01T00:03:00.000Z',
+        },
+      }),
+      {
+        ...makeUserEntry('add rewind_probe and read it back', newUserId),
+        cwd: workDir,
+        sessionId,
+      },
+      makeAssistantToolUseEntry([{
+        id: 'Edit:rewind-probe',
+        name: 'Edit',
+        input: {
+          file_path: liveFile,
+          old_string: '  "status": "ready"',
+          new_string: '  "rewind_probe": true,\n  "status": "ready"',
+        },
+      }], newUserId),
+      makeToolResultUserEntry(
+        'Edit:rewind-probe',
+        `The file ${liveFile} has been updated successfully.`,
+        undefined,
+        undefined,
+        sessionId,
+      ),
+      makeAssistantToolUseEntry([{
+        id: 'Read:rewind-probe',
+        name: 'Read',
+        input: { file_path: liveFile },
+      }], newUserId),
+      makeToolResultUserEntry(
+        'Read:rewind-probe',
+        liveAfter,
+        undefined,
+        undefined,
+        sessionId,
+      ),
+      makeAssistantEntry('Probe added and verified.', newUserId),
+    ]
+    await fs.appendFile(
+      transcriptPath,
+      `${nextEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+      'utf-8',
+    )
+
+    const listRes = await fetch(`${baseUrl}/api/sessions/${sessionId}/turn-checkpoints`)
+    expect(listRes.status).toBe(200)
+    const listBody = await listRes.json() as {
+      checkpoints: Array<{
+        target: { targetUserMessageId: string }
+        code: { filesChanged: string[] }
+        restoreAvailable: boolean
+      }>
+    }
+    const newTurnCheckpoint = listBody.checkpoints.find(
+      (checkpoint) => checkpoint.target.targetUserMessageId === newUserId,
+    )
+    expect(newTurnCheckpoint).toMatchObject({
+      code: { filesChanged: [liveFile] },
+      restoreAvailable: true,
+    })
+
+    const fileRewind = await fetch(`${baseUrl}/api/sessions/${sessionId}/rewind`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetUserMessageId: newUserId,
+        expectedContent: 'add rewind_probe and read it back',
+        mode: 'both',
+      }),
+    })
+    expect(fileRewind.status).toBe(200)
+    expect(await fs.readFile(liveFile, 'utf-8')).toBe(liveBefore)
+    expect(await fs.readFile(largeFile, 'utf-8')).toBe(largeContent)
+  })
+
   it('GET /api/sessions/:id/turn-checkpoints should reuse the loaded transcript cwd for every turn', async () => {
     const sessionId = '99999999-bbbb-cccc-dddd-000000000021'
     const projectDir = '-tmp-long-turn-checkpoint-session'
