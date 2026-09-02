@@ -600,13 +600,20 @@ public enum AXTree {
 
     /// Re-walk a freshly resolved current root through immutable topology
     /// evidence. Every hop compares the complete ordered sibling fingerprint
-    /// list before using its selected ordinal.
+    /// list; duplicate wrappers additionally require unique direct-child
+    /// topology before one candidate can be selected.
     private static func walk(root: AXUIElement, path: [SnapshotPathStep]) -> AXUIElement? {
         var current = root
         for step in path {
             let kids = walkChildren(of: current)
             let currentFingerprints = kids.map(fingerprint(of:))
-            guard let childIndex = step.selectedIndex(in: currentFingerprints) else {
+            guard let childIndex = step.selectedIndex(
+                in: currentFingerprints,
+                childTopologyAt: { index in
+                    guard kids.indices.contains(index) else { return nil }
+                    return walkChildren(of: kids[index]).map(fingerprint(of:))
+                }
+            ) else {
                 return nil
             }
             current = kids[childIndex]
@@ -1035,6 +1042,7 @@ public enum AXTree {
                         snapshotPath: appendingPathStep(
                             to: snapshotPath,
                             selectedIndex: i,
+                            childElements: childElements,
                             childFingerprints: childFingerprints
                         ),
                         depth: depth,
@@ -1172,6 +1180,7 @@ public enum AXTree {
                     snapshotPath: appendingPathStep(
                         to: snapshotPath,
                         selectedIndex: i,
+                        childElements: childElements,
                         childFingerprints: childFingerprints
                     ),
                     depth: depth + 1,
@@ -1267,12 +1276,18 @@ public enum AXTree {
         private func appendingPathStep(
             to path: [SnapshotPathStep]?,
             selectedIndex: Int,
+            childElements: [AXUIElement],
             childFingerprints: [ElementFingerprint]
         ) -> [SnapshotPathStep]? {
             guard let path,
                   let step = SnapshotPathStep(
                       selectedIndex: selectedIndex,
-                      childFingerprints: childFingerprints
+                      childFingerprints: childFingerprints,
+                      childTopologyAt: { index in
+                          guard childElements.indices.contains(index) else { return nil }
+                          return AXTree.walkChildren(of: childElements[index])
+                              .map(AXTree.fingerprint(of:))
+                      }
                   )
             else { return nil }
             return path + [step]

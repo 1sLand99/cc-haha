@@ -13,7 +13,7 @@ final class AXTreePublicationIntegrationTests: XCTestCase {
     private static let fixtureStopPath = "CC_HAHA_AX_PUBLICATION_STOP"
     private static let fixtureTitle = "CC_HAHA_AX_PUBLICATION_TITLE"
 
-    func testPublishedDescriptionOnlyControlClicksImmediatelyAndRejectsOldGeneration() async throws {
+    func testPublishedControlBelowDuplicateAncestorClicksImmediatelyAndRejectsOldGeneration() async throws {
         if ProcessInfo.processInfo.environment[Self.fixtureFlag] == "1" {
             try await runFixtureProcess()
             return
@@ -129,19 +129,35 @@ final class AXTreePublicationIntegrationTests: XCTestCase {
             defer: false
         )
         window.title = title
-        // TextEdit exposes these toolbar checkboxes with nil title/identifier;
-        // their AX descriptions are the only immutable semantic distinction.
-        let controls = ["Bold", "Italic", "Underline"].map { label -> NSButton in
+        // TextEdit exposes formatting and alignment segments as two sibling
+        // AXGroups whose own fingerprints are identical. Their description-only
+        // children are the first semantic evidence that distinguishes the paths.
+        let formattingControls = ["Bold", "Italic", "Underline"].map { label -> NSButton in
             let button = NSButton(checkboxWithTitle: "", target: nil, action: nil)
             button.setAccessibilityLabel(label)
             return button
         }
-        let stack = NSStackView(views: controls)
-        stack.frame = NSRect(x: 20, y: 60, width: 380, height: 60)
-        stack.orientation = .horizontal
-        stack.spacing = 12
+        let alignmentControls = ["Align Left", "Align Center", "Align Right"].map {
+            label -> NSButton in
+            let button = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+            button.setAccessibilityLabel(label)
+            return button
+        }
+        let formattingGroup = NSStackView(views: formattingControls)
+        formattingGroup.frame = NSRect(x: 20, y: 60, width: 180, height: 60)
+        formattingGroup.orientation = .horizontal
+        formattingGroup.spacing = 12
+        formattingGroup.setAccessibilityElement(true)
+        formattingGroup.setAccessibilityRole(.group)
+        let alignmentGroup = NSStackView(views: alignmentControls)
+        alignmentGroup.frame = NSRect(x: 220, y: 60, width: 180, height: 60)
+        alignmentGroup.orientation = .horizontal
+        alignmentGroup.spacing = 12
+        alignmentGroup.setAccessibilityElement(true)
+        alignmentGroup.setAccessibilityRole(.group)
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 180))
-        content.addSubview(stack)
+        content.addSubview(formattingGroup)
+        content.addSubview(alignmentGroup)
         window.contentView = content
         window.makeKeyAndOrderFront(nil)
         app.activate()

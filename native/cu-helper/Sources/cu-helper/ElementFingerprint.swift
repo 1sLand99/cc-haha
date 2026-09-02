@@ -72,31 +72,69 @@ struct SnapshotElementHandle: Sendable, Equatable {
 }
 
 /// Immutable topology evidence for one parent→child hop. An ordinal alone is
-/// never enough: every sibling fingerprint and their order must still match,
-/// and the selected fingerprint must be unique among those siblings.
+/// never enough: every sibling fingerprint and their order must still match.
+/// A duplicate featureless wrapper may be selected only when its ordered direct
+/// child topology is unique among the otherwise-identical siblings.
 struct SnapshotPathStep: Sendable, Hashable {
     let selectedIndex: Int
     let childFingerprints: [ElementFingerprint]
+    private let selectedChildTopology: [ElementFingerprint]?
 
-    init?(selectedIndex: Int, childFingerprints: [ElementFingerprint]) {
+    init?(
+        selectedIndex: Int,
+        childFingerprints: [ElementFingerprint],
+        childTopologyAt: ((Int) -> [ElementFingerprint]?)? = nil
+    ) {
         guard childFingerprints.indices.contains(selectedIndex) else { return nil }
         let selected = childFingerprints[selectedIndex]
-        guard childFingerprints.filter({ selected.matches($0) }).count == 1 else {
-            return nil
+        let matchingIndices = childFingerprints.indices.filter {
+            selected.matches(childFingerprints[$0])
+        }
+        if matchingIndices.count == 1 {
+            selectedChildTopology = nil
+        } else {
+            guard let childTopologyAt,
+                  let selectedTopology = childTopologyAt(selectedIndex)
+            else { return nil }
+            var topologyMatches = 0
+            for index in matchingIndices {
+                let topology: [ElementFingerprint]?
+                if index == selectedIndex {
+                    topology = selectedTopology
+                } else {
+                    topology = childTopologyAt(index)
+                }
+                guard let topology else { return nil }
+                if topology == selectedTopology { topologyMatches += 1 }
+            }
+            guard topologyMatches == 1 else { return nil }
+            selectedChildTopology = selectedTopology
         }
         self.selectedIndex = selectedIndex
         self.childFingerprints = childFingerprints
     }
 
-    func selectedIndex(in currentFingerprints: [ElementFingerprint]) -> Int? {
-        guard childFingerprints == currentFingerprints,
-              currentFingerprints.indices.contains(selectedIndex)
-        else { return nil }
-        let selected = currentFingerprints[selectedIndex]
-        guard currentFingerprints.filter({ selected.matches($0) }).count == 1 else {
-            return nil
+    func selectedIndex(
+        in currentFingerprints: [ElementFingerprint],
+        childTopologyAt: ((Int) -> [ElementFingerprint]?)? = nil
+    ) -> Int? {
+        guard childFingerprints == currentFingerprints else { return nil }
+        let selected = childFingerprints[selectedIndex]
+        let matchingIndices = currentFingerprints.indices.filter {
+            selected.matches(currentFingerprints[$0])
         }
-        return selectedIndex
+        guard let selectedChildTopology else {
+            return matchingIndices.count == 1 ? matchingIndices[0] : nil
+        }
+        guard let childTopologyAt else { return nil }
+        var topologyMatches: [Int] = []
+        for index in matchingIndices {
+            guard let topology = childTopologyAt(index) else { return nil }
+            if topology == selectedChildTopology {
+                topologyMatches.append(index)
+            }
+        }
+        return topologyMatches.count == 1 ? topologyMatches[0] : nil
     }
 }
 

@@ -108,6 +108,77 @@ final class ElementFingerprintTests: XCTestCase {
         )
     }
 
+    func testPathStepUsesUniqueChildTopologyForDuplicateAncestor() throws {
+        let group = ElementFingerprint(
+            role: "AXGroup",
+            subrole: nil,
+            identifier: nil,
+            title: nil,
+            valueKind: nil
+        )
+        let formatting = ["Bold", "Italic", "Underline"].map { label in
+            ElementFingerprint(
+                role: "AXCheckBox",
+                subrole: "AXSegment",
+                identifier: nil,
+                title: nil,
+                label: label,
+                valueKind: "boolean"
+            )
+        }
+        let alignment = ["Align Left", "Align Center", "Align Right"].map { label in
+            ElementFingerprint(
+                role: "AXCheckBox",
+                subrole: "AXSegment",
+                identifier: nil,
+                title: nil,
+                label: label,
+                valueKind: "boolean"
+            )
+        }
+        let publishedTopologies = [formatting, alignment]
+        let step = try XCTUnwrap(
+            SnapshotPathStep(
+                selectedIndex: 0,
+                childFingerprints: [group, group],
+                childTopologyAt: { publishedTopologies[$0] }
+            )
+        )
+
+        XCTAssertEqual(
+            step.selectedIndex(
+                in: [group, group],
+                childTopologyAt: { [alignment, formatting][$0] }
+            ),
+            1
+        )
+        XCTAssertNil(
+            step.selectedIndex(
+                in: [group, group],
+                childTopologyAt: { _ in formatting }
+            )
+        )
+    }
+
+    func testPathStepRejectsDuplicateAncestorWithIdenticalChildTopology() {
+        let group = ElementFingerprint(
+            role: "AXGroup",
+            subrole: nil,
+            identifier: nil,
+            title: nil,
+            valueKind: nil
+        )
+        let formatting = [button("bold"), button("italic")]
+
+        XCTAssertNil(
+            SnapshotPathStep(
+                selectedIndex: 0,
+                childFingerprints: [group, group],
+                childTopologyAt: { _ in formatting }
+            )
+        )
+    }
+
     func testDescriptionOnlySiblingControlsRemainUniquelyAddressable() throws {
         let controls = ["Bold", "Italic", "Underline"].map { label in
             ElementFingerprint(
