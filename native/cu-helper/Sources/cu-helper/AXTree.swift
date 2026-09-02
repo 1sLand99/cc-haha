@@ -751,6 +751,7 @@ public enum AXTree {
             subrole: stringValue(element, kAXSubroleAttribute),
             identifier: stringValue(element, kAXIdentifierAttribute),
             title: stringValue(element, kAXTitleAttribute),
+            label: stringValue(element, kAXDescriptionAttribute),
             valueKind: valueKind(element)
         )
     }

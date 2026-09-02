@@ -108,6 +108,24 @@ final class ElementFingerprintTests: XCTestCase {
         )
     }
 
+    func testDescriptionOnlySiblingControlsRemainUniquelyAddressable() throws {
+        let controls = ["Bold", "Italic", "Underline"].map { label in
+            ElementFingerprint(
+                role: "AXCheckBox",
+                subrole: nil,
+                identifier: nil,
+                title: nil,
+                label: label,
+                valueKind: "boolean"
+            )
+        }
+
+        let bold = try XCTUnwrap(
+            SnapshotPathStep(selectedIndex: 0, childFingerprints: controls)
+        )
+        XCTAssertEqual(bold.selectedIndex(in: controls), 0)
+    }
+
     func testWindowTitlesRequireSymmetricEvidence() {
         XCTAssertTrue(SnapshotWindowIdentityEvidence.titlesMatch(axTitle: " Docs ", cgTitle: "Docs"))
         XCTAssertTrue(SnapshotWindowIdentityEvidence.titlesMatch(axTitle: nil, cgTitle: nil))

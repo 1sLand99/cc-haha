@@ -14,7 +14,24 @@ struct ElementFingerprint: Sendable, Hashable {
     let subrole: String?
     let identifier: String?
     let title: String?
+    let label: String?
     let valueKind: String?
+
+    init(
+        role: String,
+        subrole: String?,
+        identifier: String?,
+        title: String?,
+        label: String? = nil,
+        valueKind: String?
+    ) {
+        self.role = role
+        self.subrole = subrole
+        self.identifier = identifier
+        self.title = title
+        self.label = label
+        self.valueKind = valueKind
+    }
 
     func matches(_ other: ElementFingerprint) -> Bool {
         self == other
