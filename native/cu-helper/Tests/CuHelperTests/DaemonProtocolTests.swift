@@ -113,4 +113,22 @@ final class DaemonProtocolTests: XCTestCase {
 
         XCTAssertNil(gate.active)
     }
+
+    func testStartupAppEnumerationDoesNotPoisonResumedSessionTurn() throws {
+        let bootstrap = ComputerUseDaemonProtocol.Metadata(
+            sessionId: "bootstrap-session",
+            turnId: "connection-1"
+        )
+        let resumed = ComputerUseDaemonProtocol.Metadata(
+            sessionId: "resumed-session",
+            turnId: "turn-a"
+        )
+        var gate = DaemonTurnGate()
+
+        try gate.admit(bootstrap, command: "list_installed_apps")
+        XCTAssertNil(gate.active)
+
+        try gate.admit(resumed, command: "get_app_state")
+        XCTAssertEqual(gate.active, resumed)
+    }
 }

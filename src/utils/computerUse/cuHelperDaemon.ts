@@ -36,6 +36,12 @@ const REQUEST_TIMEOUT_MS = 20_000
 const READINESS_TIMEOUT_MS = 8_000
 const SHUTDOWN_GRACE_MS = 1_000
 export const CU_HELPER_PROTOCOL_VERSION = 'CCHahaComputerUseIPC-2'
+const CONNECTION_SCOPED_COMMANDS = new Set([
+  'ping',
+  'check_permissions',
+  'list_installed_apps',
+  'shutdown',
+])
 
 /**
  * Thrown ONLY for daemon INFRASTRUCTURE failures known to happen before the
@@ -615,7 +621,7 @@ function dispatchDaemonCommand<T>(
     ))
   }
   const id = String(++state.nextId)
-  const isTurnScoped = !['ping', 'check_permissions', 'shutdown'].includes(command)
+  const isTurnScoped = !CONNECTION_SCOPED_COMMANDS.has(command)
   const turnId = activeTurnId
     ?? (isTurnScoped ? (activeTurnId = randomUUID()) : `connection-${state.generation}`)
   const request = {

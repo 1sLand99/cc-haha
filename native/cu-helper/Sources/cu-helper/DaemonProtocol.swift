@@ -10,7 +10,7 @@ enum ComputerUseDaemonProtocol {
     static let version = "CCHahaComputerUseIPC-2"
     static let maxFrameBytes = 8 * 1024 * 1024
     private static let connectionScopedCommands: Set<String> = [
-        "ping", "check_permissions", "shutdown",
+        "ping", "check_permissions", "list_installed_apps", "shutdown",
     ]
 
     static func isTurnScoped(command: String) -> Bool {
@@ -62,7 +62,7 @@ enum ComputerUseDaemonProtocol {
 }
 
 /// Enforces one explicit turn at a time on the single authenticated connection.
-/// `ping` negotiates the protocol without opening a turn. Every other request
+/// Connection setup and diagnostics do not open a turn. Every semantic request
 /// must keep the same identity until `turn_end` releases all turn-owned state.
 struct DaemonTurnGate {
     private(set) var active: ComputerUseDaemonProtocol.Metadata?

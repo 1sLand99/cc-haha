@@ -28,7 +28,7 @@ enum HelperClientPolicy {
     private static let daemonCommands: Set<String> = [
         // Codex semantic tool contract. `resolve_app_target` is the mandatory
         // read-only authorization preflight used before the ten public tools.
-        "list_apps", "resolve_app_target", "get_app_state", "click",
+        "list_apps", "list_installed_apps", "resolve_app_target", "get_app_state", "click",
         "set_value", "select_text", "perform_secondary_action", "scroll",
         "drag", "press_key", "type_text", "paste",
         // Private lifecycle / visible-overlay / permission and input diagnostics.

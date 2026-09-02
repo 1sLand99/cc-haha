@@ -363,7 +363,7 @@ struct ClientAttestationTests {
     @Test("daemon exposes only the semantic contract and required control diagnostics")
     func daemonCommandAllowlist() {
         let allowed = [
-            "list_apps", "resolve_app_target", "get_app_state", "click",
+            "list_apps", "list_installed_apps", "resolve_app_target", "get_app_state", "click",
             "set_value", "select_text", "perform_secondary_action", "scroll",
             "drag", "press_key", "type_text", "paste", "ping", "shutdown",
             "overlay_show", "overlay_hide", "turn_end", "check_permissions",
@@ -377,7 +377,7 @@ struct ClientAttestationTests {
             "screenshot", "resolve_prepare_capture", "zoom", "key", "type",
             "hold_key", "paste_clipboard", "read_clipboard", "write_clipboard",
             "move_mouse", "mouse_down", "mouse_up", "cursor_position",
-            "open_app", "list_installed_apps", "list_running_apps",
+            "open_app", "list_running_apps",
         ] {
             #expect(!HelperClientPolicy.isDaemonCommandAllowed(command))
         }
