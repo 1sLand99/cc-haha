@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
 import { getSessionId } from '../../bootstrap/state.js'
+import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
 import { ensureInstalledHelper } from './cuHelperInstall.js'
 import { attestDaemonSocketPeer } from './cuHelperPeerAttestation.js'
@@ -33,6 +34,7 @@ import { getRuntimePaths } from './pythonBridge.js'
 
 const REQUEST_TIMEOUT_MS = 20_000
 const READINESS_TIMEOUT_MS = 8_000
+const SHUTDOWN_GRACE_MS = 1_000
 export const CU_HELPER_PROTOCOL_VERSION = 'CCHahaComputerUseIPC-2'
 
 /**
@@ -110,7 +112,9 @@ let overlayActualKey: string | undefined
 let overlayRevision = 0
 let overlayReconcilePromise: Promise<void> | undefined
 let requestTimeoutMs = REQUEST_TIMEOUT_MS
+let shutdownGraceMs = SHUTDOWN_GRACE_MS
 let activeTurnId: string | undefined
+let unregisterDaemonCleanup: (() => void) | undefined
 
 function socketPath(generation: number): string {
   const { runtimeStateRoot } = getRuntimePaths()
@@ -384,6 +388,8 @@ function resetState(reason: string, expectedGeneration?: number): void {
   overlayActualKey = undefined
   overlayRevision++
   activeTurnId = undefined
+  unregisterDaemonCleanup?.()
+  unregisterDaemonCleanup = undefined
   const p = statePromise
   statePromise = undefined
   activeDaemonGeneration = undefined
@@ -591,7 +597,11 @@ async function ensureDaemon(): Promise<DaemonState> {
     })
     statePromise = starting
   }
-  return statePromise
+  const state = await statePromise
+  // LaunchServices reparents the helper to launchd, so CLI exit must retire it
+  // explicitly; the sidecar process tree cannot own this descendant for us.
+  unregisterDaemonCleanup ??= registerCleanup(shutdownDaemon)
+  return state
 }
 
 function dispatchDaemonCommand<T>(
@@ -774,16 +784,25 @@ export function isOverlayShown(): boolean {
   return overlayDesiredVisible
 }
 
-/** Gracefully stop the daemon (turn/session cleanup). Best-effort. */
+/** Stop the daemon at client/process teardown. Best-effort and bounded. */
 export async function shutdownDaemon(): Promise<void> {
-  const p = statePromise
-  if (!p) return
+  if (!statePromise) return
+  const generation = activeDaemonGeneration
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    await callDaemon('shutdown', {})
+    await Promise.race([
+      callExistingDaemon('shutdown', {}),
+      new Promise<void>(resolve => {
+        timer = setTimeout(resolve, shutdownGraceMs)
+      }),
+    ])
   } catch {
-    // ignore — resetState below force-kills
+    // Ignore — resetState below closes the socket and force-kills only a PID
+    // that still passes the cu-helper executable identity check.
+  } finally {
+    if (timer) clearTimeout(timer)
+    resetState('explicit shutdown', generation)
   }
-  resetState('explicit shutdown', activeDaemonGeneration)
 }
 
 /** Test hook. */
@@ -799,7 +818,10 @@ export function __resetDaemonClientForTests(): void {
   overlayReconcilePromise = undefined
   daemonStartCount = 0
   requestTimeoutMs = REQUEST_TIMEOUT_MS
+  shutdownGraceMs = SHUTDOWN_GRACE_MS
   activeTurnId = undefined
+  unregisterDaemonCleanup?.()
+  unregisterDaemonCleanup = undefined
 }
 
 /** Focused proof that a no-daemon cleanup did not enter the startup path. */
@@ -815,9 +837,11 @@ export function __setDaemonSocketForTests(
     daemonPid?: number
     verifyDaemonPid?: (pid: number) => boolean
     killDaemonPid?: (pid: number) => void
+    shutdownGraceMs?: number
   } = {},
 ): void {
   requestTimeoutMs = timeoutMs
+  shutdownGraceMs = options.shutdownGraceMs ?? SHUTDOWN_GRACE_MS
   const generation = ++daemonGeneration
   activeDaemonGeneration = generation
   const state: DaemonState = {

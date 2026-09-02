@@ -21,6 +21,7 @@ import {
 } from './cuHelperDaemon.js'
 import { __resetCuHelperCache } from './cuHelperBridge.js'
 import { __resetInstalledHelperCache } from './cuHelperInstall.js'
+import { runCleanupFunctions } from '../cleanupRegistry.js'
 
 class FakeSocket extends EventEmitter {
   writes: string[] = []
@@ -319,6 +320,51 @@ describe('cu-helper daemon failure classification', () => {
 
     expect(await ping).toBe('pong')
     expect(replacement.destroyed).toBe(false)
+  })
+})
+
+describe('cu-helper daemon process lifecycle', () => {
+  test('graceful process cleanup shuts down an active turn before app restart', async () => {
+    const socket = new FakeSocket()
+    __setDaemonSocketForTests(socket as never, 100)
+
+    const state = callDaemon('get_app_state', { app: 'TextEdit' })
+    await waitForWriteCount(socket, 1)
+    reply(socket, 0, { ok: true, result: {} })
+    await state
+
+    const cleanup = runCleanupFunctions()
+    await waitForWriteCount(socket, 2)
+    expect(JSON.parse(socket.writes[1]!)).toMatchObject({ cmd: 'shutdown' })
+    reply(socket, 1, { ok: true, result: true })
+    await cleanup
+
+    expect(socket.destroyed).toBe(true)
+  })
+
+  test('process cleanup force-retires only a verified helper when shutdown does not answer', async () => {
+    const socket = new FakeSocket()
+    const killed: number[] = []
+    __setDaemonSocketForTests(socket as never, 100, {
+      daemonPid: 4242,
+      verifyDaemonPid: () => true,
+      killDaemonPid: pid => { killed.push(pid) },
+      shutdownGraceMs: 5,
+    })
+
+    const state = callDaemon('get_app_state', { app: 'TextEdit' })
+    await waitForWriteCount(socket, 1)
+    reply(socket, 0, { ok: true, result: {} })
+    await state
+
+    const cleanup = runCleanupFunctions()
+    await waitForWriteCount(socket, 2)
+    expect(JSON.parse(socket.writes[1]!)).toMatchObject({ cmd: 'shutdown' })
+    await cleanup
+    for (let i = 0; i < 5 && killed.length === 0; i++) await Promise.resolve()
+
+    expect(socket.destroyed).toBe(true)
+    expect(killed).toEqual([4242])
   })
 })
 
