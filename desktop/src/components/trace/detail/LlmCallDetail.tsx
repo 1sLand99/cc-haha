@@ -59,9 +59,13 @@ export function LlmCallDetail({
   const effectiveCall = detail && detail.id === callId ? detail : call
   const parsed = useMemo(() => {
     if (!effectiveCall) return { request: null, response: null }
+    const semantic = effectiveCall.request.semantic
+    const requestBody = semantic
+      ? JSON.stringify(semantic.request)
+      : effectiveCall.request.body.preview
     return {
-      request: effectiveCall.request.body.preview
-        ? parseTraceRequestBody(effectiveCall.request.body.preview, effectiveCall.source)
+      request: requestBody
+        ? parseTraceRequestBody(requestBody, semantic ? 'anthropic' : effectiveCall.source)
         : null,
       response: effectiveCall.response?.body.preview
         ? parseTraceResponseBody(effectiveCall.response.body.preview, effectiveCall.source)

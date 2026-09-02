@@ -400,6 +400,89 @@ describe('TraceSession', () => {
     expect(detail.queryByRole('button', { name: /^Messages/ })).not.toBeInTheDocument()
   })
 
+  it('renders saved DeepSeek request semantics when the raw body is truncated', async () => {
+    const semanticCall = makeCall({
+      source: 'proxy',
+      model: 'deepseek-v4-flash-vision-exp',
+      request: {
+        method: 'POST',
+        url: 'https://opencode.ai/zen/v1/chat/completions',
+        headers: {},
+        body: {
+          contentType: 'json',
+          bytes: 265_000,
+          sha256: 'd'.repeat(64),
+          preview: '{"anthropic":{"model":"deepseek-v4-flash-vision-exp","messages":[',
+          truncated: true,
+        },
+        semantic: {
+          version: 1,
+          request: {
+            model: 'deepseek-v4-flash-vision-exp',
+            system: [{ type: 'text', text: 'You are Claude Code.' }],
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'text',
+                    text: '<system-reminder>\n# Project rules\nUse AGENTS.md.\n</system-reminder>',
+                  },
+                  { type: 'text', text: '创建并校验 large-200.json 文件' },
+                ],
+              },
+              {
+                role: 'user',
+                content: [{
+                  type: 'tool_result',
+                  tool_use_id: 'computer_1',
+                  content: [{
+                    type: 'image',
+                    source: {
+                      type: 'base64',
+                      media_type: 'image/jpeg',
+                      bytes: 240_000,
+                      sha256: 'e'.repeat(64),
+                    },
+                  }],
+                }],
+              },
+            ],
+            stream: true,
+          },
+        },
+      },
+    })
+    vi.mocked(sessionsApi.getTrace).mockResolvedValue({
+      ...baseTrace,
+      summary: {
+        ...baseTrace.summary,
+        models: [{ model: 'deepseek-v4-flash-vision-exp', calls: 1 }],
+      },
+      calls: [{
+        ...semanticCall,
+        request: {
+          method: semanticCall.request.method,
+          url: semanticCall.request.url,
+          headers: semanticCall.request.headers,
+          body: semanticCall.request.body,
+        },
+      }],
+    })
+    vi.mocked(sessionsApi.getTraceCall).mockResolvedValue({ call: semanticCall })
+    await renderReady()
+
+    fireEvent.click(within(screen.getByTestId('trace-tree')).getByText('deepseek-v4-flash-vision-exp'))
+
+    const detail = within(screen.getByTestId('trace-detail'))
+    expect(await detail.findByText('Injected context')).toBeInTheDocument()
+    expect(detail.getByText('Project rules')).toBeInTheDocument()
+    expect(detail.getByText('创建并校验 large-200.json 文件')).toBeInTheDocument()
+    expect(detail.getByText('computer_1')).toBeInTheDocument()
+    expect(screen.getByTestId('trace-detail')).toHaveTextContent('image/jpeg')
+    expect(detail.queryByText('Legacy truncated record; the semantic view is unavailable. See Raw below.')).not.toBeInTheDocument()
+  })
+
   it('applies poll updates and short-circuits identical snapshots', async () => {
     vi.mocked(tracesApi.getRevision)
       .mockResolvedValueOnce({ sessionId: SESSION_ID, revision: 1, changed: true, reset: false })

@@ -48,9 +48,12 @@ function SessionRequestHeader({
     let cancelled = false
     void fetchTraceCallDetail(sessionId, firstCallId, revisionKey).then((call) => {
       if (cancelled) return
-      const preview = call?.request.body.preview
-      if (!preview || !call) return
-      const parsed = parseTraceRequestBody(preview, call.source)
+      if (!call) return
+      const semantic = call.request.semantic
+      const requestBody = semantic ? JSON.stringify(semantic.request) : call.request.body.preview
+      const parsed = requestBody
+        ? parseTraceRequestBody(requestBody, semantic ? 'anthropic' : call.source)
+        : null
       if (!parsed) return
       setHeader({
         ...(parsed.system !== undefined ? { system: parsed.system } : {}),

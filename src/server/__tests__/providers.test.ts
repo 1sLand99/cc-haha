@@ -1563,6 +1563,147 @@ describe('ProviderService', () => {
       }
     })
 
+    test('records DeepSeek Computer Use request semantics independently of the truncated raw body', async () => {
+      const originalFetch = globalThis.fetch
+      globalThis.fetch = mock(async () => new Response(JSON.stringify({
+        id: 'chatcmpl-trace-deepseek-computer-use',
+        object: 'chat.completion',
+        created: 0,
+        model: 'deepseek-v4-flash-vision-exp',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'validated' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 119_000, completion_tokens: 12, total_tokens: 119_012 },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })) as typeof fetch
+
+      const screenshotData = 'AQID'.repeat(80_000)
+      const injectedContext = '<system-reminder>\n# Project rules\nUse the repository instructions.\n</system-reminder>'
+
+      try {
+        const svc = new ProviderService()
+        const provider = await svc.addProvider(sampleInput({
+          apiFormat: 'openai_chat',
+          baseUrl: 'https://opencode.ai/zen',
+          name: 'DeepSeek V4 Flash',
+          models: {
+            main: 'deepseek-v4-flash-vision-exp',
+            haiku: 'deepseek-v4-flash-vision-exp',
+            sonnet: 'deepseek-v4-flash-vision-exp',
+            opus: 'deepseek-v4-flash-vision-exp',
+          },
+        }))
+        await svc.activateProvider(provider.id)
+
+        const req = new Request('http://localhost:3456/proxy/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Claude-Code-Session-Id': 'session-deepseek-computer-use-trace',
+          },
+          body: JSON.stringify({
+            model: 'deepseek-v4-flash-vision-exp',
+            max_tokens: 64,
+            system: [{ type: 'text', text: 'You are Claude Code.' }],
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: injectedContext },
+                  { type: 'text', text: '创建并校验 large-200.json 文件' },
+                ],
+              },
+              {
+                role: 'assistant',
+                content: [{
+                  type: 'tool_use',
+                  id: 'computer_1',
+                  name: 'computer',
+                  input: { action: 'screenshot' },
+                }],
+              },
+              {
+                role: 'user',
+                content: [{
+                  type: 'tool_result',
+                  tool_use_id: 'computer_1',
+                  content: [
+                    { type: 'text', text: 'Computer Use state' },
+                    {
+                      type: 'image',
+                      source: { type: 'base64', media_type: 'image/jpeg', data: screenshotData },
+                    },
+                  ],
+                }],
+              },
+            ],
+          }),
+        })
+
+        const response = await handleProxyRequest(req, new URL(req.url))
+        const trace = await waitForCompletedProxyTrace('session-deepseek-computer-use-trace')
+        const call = trace.calls[0]
+
+        expect(response.status).toBe(200)
+        expect(call.request.body.truncated).toBe(true)
+        expect(() => JSON.parse(call.request.body.preview)).toThrow()
+        expect(call.request.semantic).toMatchObject({
+          version: 1,
+          request: {
+            model: 'deepseek-v4-flash-vision-exp',
+            system: [{ type: 'text', text: 'You are Claude Code.' }],
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: injectedContext },
+                  { type: 'text', text: '创建并校验 large-200.json 文件' },
+                ],
+              },
+              {
+                role: 'assistant',
+                content: [{
+                  type: 'tool_use',
+                  id: 'computer_1',
+                  name: 'computer',
+                  input: { action: 'screenshot' },
+                }],
+              },
+              {
+                role: 'user',
+                content: [{
+                  type: 'tool_result',
+                  tool_use_id: 'computer_1',
+                  content: [
+                    { type: 'text', text: 'Computer Use state' },
+                    {
+                      type: 'image',
+                      source: {
+                        type: 'base64',
+                        media_type: 'image/jpeg',
+                        bytes: 240_000,
+                        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+                      },
+                    },
+                  ],
+                }],
+              },
+            ],
+          },
+        })
+        const semanticMessages = call.request.semantic?.request.messages as Array<{
+          content: Array<Record<string, unknown>>
+        }>
+        expect(semanticMessages[2]?.content[0]).toMatchObject({
+          type: 'tool_result',
+          tool_use_id: 'computer_1',
+        })
+        expect(JSON.stringify(call.request.semantic)).not.toContain(screenshotData.slice(0, 64))
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+
     test('returns a non-streaming proxy response before trace persistence finishes', async () => {
       const originalFetch = globalThis.fetch
       globalThis.fetch = mock(async () => new Response(JSON.stringify({
