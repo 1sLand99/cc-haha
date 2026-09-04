@@ -28,18 +28,50 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ctypes
 import json
 import os
 import subprocess
 import sys
 import threading
 import time
+from ctypes import wintypes
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import mss
 from PIL import Image
+
+
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
+
+
+def _enable_per_monitor_dpi_awareness() -> None:
+    """Keep capture, SendInput, and overlay coordinates in physical pixels."""
+    try:
+        setter = ctypes.windll.user32.SetProcessDpiAwarenessContext
+        setter.argtypes = [wintypes.HANDLE]
+        setter.restype = wintypes.BOOL
+        if setter(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2):
+            return
+    except (AttributeError, OSError):
+        pass
+    try:
+        shcore = ctypes.windll.shcore
+        shcore.SetProcessDpiAwareness.argtypes = [ctypes.c_int]
+        shcore.SetProcessDpiAwareness.restype = ctypes.c_long
+        if shcore.SetProcessDpiAwareness(2) in (0, 0x80070005):
+            return
+    except (AttributeError, OSError):
+        pass
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except (AttributeError, OSError):
+        pass
+
+
+_enable_per_monitor_dpi_awareness()
 
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 os.environ.setdefault("PYAUTOGUI_HIDE_SUPPORT_PROMPT", "1")
@@ -169,18 +201,33 @@ def get_displays() -> list[dict[str, Any]]:
 
 
 def _get_monitor_scale(monitor: Any) -> float:
-    """Get the DPI scale factor for a monitor. Returns 1.0 on failure."""
+    """Get one monitor's effective DPI scale. Returns 1.0 on failure."""
     try:
-        import ctypes
-        # SetProcessDPIAware so we get real pixel values
-        ctypes.windll.user32.SetProcessDPIAware()
-        # Get DPI for the primary — simplified; per-monitor DPI is complex
-        hdc = ctypes.windll.user32.GetDC(0)
-        dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
-        ctypes.windll.user32.ReleaseDC(0, hdc)
-        return dpi / 96.0
+        user = ctypes.windll.user32
+        shcore = ctypes.windll.shcore
+        user.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+        user.MonitorFromPoint.restype = wintypes.HMONITOR
+        shcore.GetDpiForMonitor.argtypes = [
+            wintypes.HMONITOR,
+            ctypes.c_int,
+            ctypes.POINTER(wintypes.UINT),
+            ctypes.POINTER(wintypes.UINT),
+        ]
+        shcore.GetDpiForMonitor.restype = ctypes.c_long
+        point = wintypes.POINT(
+            int(monitor.x + monitor.width / 2),
+            int(monitor.y + monitor.height / 2),
+        )
+        handle = user.MonitorFromPoint(point, 2)  # MONITOR_DEFAULTTONEAREST
+        dpi_x = wintypes.UINT(96)
+        dpi_y = wintypes.UINT(96)
+        if handle and shcore.GetDpiForMonitor(
+            handle, 0, ctypes.byref(dpi_x), ctypes.byref(dpi_y)
+        ) == 0:
+            return max(1.0, float(dpi_x.value) / 96.0)
     except Exception:
-        return 1.0
+        pass
+    return 1.0
 
 
 def choose_display(display_id: int | None) -> dict[str, Any]:
@@ -724,10 +771,6 @@ def paste_clipboard() -> None:
 # actions. The hook callback does constant-time bookkeeping only; all policy
 # decisions stay on the command thread.
 
-import ctypes
-from ctypes import wintypes
-
-
 WH_KEYBOARD_LL = 13
 WH_MOUSE_LL = 14
 HC_ACTION = 0
@@ -763,7 +806,12 @@ SM_CYVIRTUALSCREEN = 79
 # Mouse low-level hooks preserve only the low 32 bits of dwExtraInfo on some
 # 64-bit Windows builds, while keyboard hooks preserve the full ULONG_PTR.
 # A random non-zero 32-bit tag therefore compares identically in both paths.
-_INPUT_TAG = int.from_bytes(os.urandom(4), "little") or 0x43434841
+# The TypeScript parent shares one tag with the virtual-cursor process so that
+# it follows our SendInput stream, not injected input from unrelated software.
+try:
+    _INPUT_TAG = int(os.environ["CC_HAHA_COMPUTER_USE_INPUT_TAG"]) & 0xFFFFFFFF
+except (KeyError, TypeError, ValueError):
+    _INPUT_TAG = int.from_bytes(os.urandom(4), "little") or 0x43434841
 
 _LRESULT = ctypes.c_ssize_t
 _HOOKPROC = ctypes.WINFUNCTYPE(
@@ -867,6 +915,8 @@ _user32.SendInput.argtypes = [
     wintypes.UINT, ctypes.POINTER(_INPUT), ctypes.c_int,
 ]
 _user32.SendInput.restype = wintypes.UINT
+_user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+_user32.GetCursorPos.restype = wintypes.BOOL
 _user32.GetSystemMetrics.argtypes = [ctypes.c_int]
 _user32.GetSystemMetrics.restype = ctypes.c_int
 _user32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
@@ -1144,6 +1194,32 @@ def _absolute_mouse_move(x: int, y: int) -> _INPUT:
         dx=dx,
         dy=dy,
     )
+
+
+def _move_cursor_to(x: int, y: int, animate: bool) -> None:
+    """Move the shared pointer along a short eased path for overlay parity."""
+    current = wintypes.POINT()
+    if not _user32.GetCursorPos(ctypes.byref(current)):
+        _send_inputs([_absolute_mouse_move(x, y)])
+        return
+
+    start_x, start_y = int(current.x), int(current.y)
+    distance = ((x - start_x) ** 2 + (y - start_y) ** 2) ** 0.5
+    if not animate or distance < 2:
+        _send_inputs([_absolute_mouse_move(x, y)])
+        return
+
+    # 100-260ms is long enough to read as motion without slowing the agent.
+    duration = min(0.26, max(0.10, distance / 4000.0))
+    steps = max(6, min(18, round(duration * 60)))
+    for step in range(1, steps + 1):
+        progress = step / steps
+        eased = 1 - (1 - progress) ** 3
+        next_x = round(start_x + (x - start_x) * eased)
+        next_y = round(start_y + (y - start_y) * eased)
+        _send_inputs([_absolute_mouse_move(next_x, next_y)])
+        if step < steps:
+            time.sleep(duration / steps)
 
 
 _VIRTUAL_KEYS = {
@@ -1542,7 +1618,14 @@ def ensure_target_window_reachable(bundle_id: str | None) -> None:
 # Input actions (tagged, atomic SendInput batches)
 # ---------------------------------------------------------------------------
 
-def click(x: int, y: int, button: str, count: int, modifiers: list[str] | None) -> None:
+def click(
+    x: int,
+    y: int,
+    button: str,
+    count: int,
+    modifiers: list[str] | None,
+    animate: bool = True,
+) -> None:
     buttons = {
         "left": (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
         "right": (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
@@ -1552,7 +1635,8 @@ def click(x: int, y: int, button: str, count: int, modifiers: list[str] | None) 
         raise ValueError(f"Unsupported mouse button: {button}")
     normalized = [normalize_key(m) for m in (modifiers or [])]
     down_flag, up_flag = buttons[button]
-    events = [_absolute_mouse_move(x, y)]
+    _move_cursor_to(x, y, animate)
+    events = []
     events.extend(_named_key_input(key) for key in normalized)
     for _ in range(max(1, count)):
         events.append(_mouse_input(down_flag))
@@ -1563,8 +1647,15 @@ def click(x: int, y: int, button: str, count: int, modifiers: list[str] | None) 
     _send_inputs(events)
 
 
-def scroll(x: int, y: int, delta_x: int, delta_y: int) -> None:
-    events = [_absolute_mouse_move(x, y)]
+def scroll(
+    x: int,
+    y: int,
+    delta_x: int,
+    delta_y: int,
+    animate: bool = True,
+) -> None:
+    _move_cursor_to(x, y, animate)
+    events = []
     if delta_y:
         events.append(_mouse_input(
             MOUSEEVENTF_WHEEL, data=int(delta_y) * WHEEL_DELTA
@@ -1753,7 +1844,7 @@ def main() -> int:
             type_text(str(payload.get("text") or ""))
             return _finish(lease, True)
         if command == "click":
-            click(int(payload["x"]), int(payload["y"]), str(payload.get("button") or "left"), int(payload.get("count") or 1), payload.get("modifiers"))
+            click(int(payload["x"]), int(payload["y"]), str(payload.get("button") or "left"), int(payload.get("count") or 1), payload.get("modifiers"), bool(payload.get("animate", True)))
             return _finish(lease, True)
         if command == "drag":
             from_point = payload.get("from")
@@ -1765,25 +1856,27 @@ def main() -> int:
                 start_y = int(from_point["y"])
             target_x = int(payload["to"]["x"])
             target_y = int(payload["to"]["y"])
-            events = [
-                _absolute_mouse_move(start_x, start_y),
-                _mouse_input(MOUSEEVENTF_LEFTDOWN),
-            ]
+            animate = bool(payload.get("animate", True))
+            _move_cursor_to(start_x, start_y, animate)
+            _send_inputs([_mouse_input(MOUSEEVENTF_LEFTDOWN)])
+            duration = 0.18 if animate else 0
             for step in range(1, 13):
-                events.append(_absolute_mouse_move(
+                _send_inputs([_absolute_mouse_move(
                     round(start_x + (target_x - start_x) * step / 12),
                     round(start_y + (target_y - start_y) * step / 12),
-                ))
-            events.append(_mouse_input(MOUSEEVENTF_LEFTUP))
-            _send_inputs(events)
+                )])
+                if duration and step < 12:
+                    time.sleep(duration / 12)
+            _send_inputs([_mouse_input(MOUSEEVENTF_LEFTUP)])
             return _finish(lease, True)
         if command == "move_mouse":
-            _send_inputs([_absolute_mouse_move(
-                int(payload["x"]), int(payload["y"])
-            )])
+            _move_cursor_to(
+                int(payload["x"]), int(payload["y"]),
+                bool(payload.get("animate", True)),
+            )
             return _finish(lease, True)
         if command == "scroll":
-            scroll(int(payload["x"]), int(payload["y"]), int(payload.get("deltaX") or 0), int(payload.get("deltaY") or 0))
+            scroll(int(payload["x"]), int(payload["y"]), int(payload.get("deltaX") or 0), int(payload.get("deltaY") or 0), bool(payload.get("animate", True)))
             return _finish(lease, True)
         if command == "mouse_down":
             _send_inputs([_mouse_input(MOUSEEVENTF_LEFTDOWN)])

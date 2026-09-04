@@ -332,7 +332,7 @@ async function typeViaClipboard(text: string): Promise<void> {
   }
 }
 
-export function createCliExecutor(_opts: {
+export function createCliExecutor(opts: {
   getMouseAnimationEnabled: () => boolean
   getHideBeforeActionEnabled: () => boolean
 }): ComputerExecutor {
@@ -436,7 +436,14 @@ export function createCliExecutor(_opts: {
     writeClipboard,
 
     async click(x, y, button, count, modifiers): Promise<void> {
-      await callHelper('click', { x, y, button, count, modifiers })
+      await callHelper('click', {
+        x,
+        y,
+        button,
+        count,
+        modifiers,
+        animate: opts.getMouseAnimationEnabled(),
+      })
       await sleep(MOVE_SETTLE_MS)
     },
 
@@ -453,17 +460,31 @@ export function createCliExecutor(_opts: {
     },
 
     async drag(from, to): Promise<void> {
-      await callHelper('drag', { from, to })
+      await callHelper('drag', {
+        from,
+        to,
+        animate: opts.getMouseAnimationEnabled(),
+      })
       await sleep(MOVE_SETTLE_MS)
     },
 
     async moveMouse(x, y): Promise<void> {
-      await callHelper('move_mouse', { x, y })
+      await callHelper('move_mouse', {
+        x,
+        y,
+        animate: opts.getMouseAnimationEnabled(),
+      })
       await sleep(MOVE_SETTLE_MS)
     },
 
     async scroll(x, y, dx, dy): Promise<void> {
-      await callHelper('scroll', { x, y, deltaX: dx, deltaY: dy })
+      await callHelper('scroll', {
+        x,
+        y,
+        deltaX: dx,
+        deltaY: dy,
+        animate: opts.getMouseAnimationEnabled(),
+      })
     },
 
     async getFrontmostApp(): Promise<FrontmostApp | null> {
