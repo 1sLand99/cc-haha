@@ -107,9 +107,10 @@ describe('computer-use skill registration', () => {
     expect(skill!.allowedTools).toEqual(getComputerUseToolAllowlist(platform))
     expect(skill!.allowedTools).toContain(
       process.platform === 'win32'
-        ? 'mcp__computer-use__request_access'
+        ? 'mcp__computer-use__screenshot'
         : 'mcp__computer-use__get_app_state',
     )
+    expect(skill!.allowedTools).not.toContain('mcp__computer-use__request_access')
     expect(
       skill!.allowedTools!.every(t => t.startsWith('mcp__computer-use__')),
     ).toBe(true)
@@ -123,9 +124,10 @@ describe('computer-use skill registration', () => {
 })
 
 describe('computer-use Windows guidance', () => {
-  test('matches the unfiltered, permission-gated pixel tool face', () => {
+  test('matches the unfiltered, feature-authorized pixel tool face', () => {
     const prompt = getComputerUsePrompt('win32')
-    expect(prompt).toContain('request_access')
+    expect(prompt).not.toContain('request_access')
+    expect(prompt).toContain('without an app-by-app approval prompt')
     expect(prompt).toContain('screenshots are NOT filtered')
     expect(prompt).toContain('most recent full screenshot')
     expect(prompt).toContain('UNKNOWN result')

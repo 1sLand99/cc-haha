@@ -28,7 +28,6 @@ const DARWIN_TOOL_NAMES = [
 ].sort()
 
 const WINDOWS_LEGACY_TOOL_NAMES = [
-  'request_access',
   'screenshot',
   'zoom',
   'left_click',
@@ -43,7 +42,6 @@ const WINDOWS_LEGACY_TOOL_NAMES = [
   'mouse_move',
   'open_application',
   'switch_display',
-  'list_granted_applications',
   'read_clipboard',
   'write_clipboard',
   'wait',
@@ -69,14 +67,7 @@ function makeSessionContext(
   overrides: Partial<ComputerUseSessionContext> = {},
 ): ComputerUseSessionContext {
   return {
-    getAllowedApps: () => [
-      {
-        bundleId: 'com.example.allowed',
-        displayName: 'Allowed App',
-        tier: 'full',
-        grantedAt: 1,
-      },
-    ],
+    getAllowedApps: () => [],
     getGrantFlags: () => ({
       clipboardRead: false,
       clipboardWrite: false,
@@ -84,15 +75,9 @@ function makeSessionContext(
     }),
     getUserDeniedBundleIds: () => [],
     getSelectedDisplayId: () => undefined,
-    onPermissionRequest: async () => ({
-      granted: [],
-      denied: [],
-      flags: {
-        clipboardRead: false,
-        clipboardWrite: false,
-        systemKeyCombos: false,
-      },
-    }),
+    onPermissionRequest: async () => {
+      throw new Error('per-app permission prompts must not run')
+    },
     ...overrides,
   }
 }
@@ -266,7 +251,9 @@ function makeWindowsAdapter(calls: string[]): ComputerUseHostAdapter {
         },
       ]
     },
-    async openApp() {},
+    async openApp(bundleId: string) {
+      calls.push(`openApp:${bundleId}`)
+    },
   } as unknown as ComputerExecutor
 
   return {
@@ -341,7 +328,7 @@ describe('Computer Use platform routing', () => {
     }
   })
 
-  test('win32 ListTools advertises the complete legacy pixel face', async () => {
+  test('win32 ListTools advertises pixel controls without app-authorization tools', async () => {
     const connection = await connect(makeWindowsAdapter([]))
     try {
       const result = await connection.client.listTools()
@@ -349,6 +336,8 @@ describe('Computer Use platform routing', () => {
         WINDOWS_LEGACY_TOOL_NAMES,
       )
       expect(result.tools.some(tool => tool.name === 'get_app_state')).toBe(false)
+      expect(result.tools.some(tool => tool.name === 'request_access')).toBe(false)
+      expect(result.tools.some(tool => tool.name === 'list_granted_applications')).toBe(false)
     } finally {
       await connection.close()
     }
@@ -361,8 +350,6 @@ describe('Computer Use platform routing', () => {
       makeSessionContext(),
     )
     try {
-      // Two captures make the second hidden-app note exercise
-      // executor.listRunningApps (the Python `list_running_apps` handler).
       expect((await connection.client.callTool({ name: 'screenshot' })).isError).toBeFalsy()
       expect((await connection.client.callTool({ name: 'screenshot' })).isError).toBeFalsy()
       expect(
@@ -391,7 +378,7 @@ describe('Computer Use platform routing', () => {
       ).toBeFalsy()
 
       expect(calls).toContain('screenshot')
-      expect(calls).toContain('listRunningApps')
+      expect(calls).not.toContain('listRunningApps')
       expect(calls).toContain('click:10,20,left,1')
       expect(calls).toContain('key:ctrl+a')
       expect(calls).toContain('type:ok')
@@ -410,6 +397,13 @@ describe('Computer Use platform routing', () => {
       expect(blockedHold.isError).toBe(true)
       expect(calls).not.toContain('key:ctrl+alt+delete')
       expect(calls).not.toContain('holdKey:alt+f4')
+
+      const opened = await connection.client.callTool({
+        name: 'open_application',
+        arguments: { app: 'Allowed App' },
+      })
+      expect(opened.isError).toBeFalsy()
+      expect(calls).toContain('openApp:com.example.allowed')
     } finally {
       await connection.close()
     }
@@ -448,20 +442,6 @@ describe('Computer Use platform routing', () => {
       }),
     )
     try {
-      const access = await connection.client.callTool({
-        name: 'request_access',
-        arguments: {
-          apps: ['Allowed App'],
-          reason: 'Exercise Windows lock routing.',
-        },
-      })
-      const list = await connection.client.callTool({
-        name: 'list_granted_applications',
-      })
-      expect(access.isError).toBeFalsy()
-      expect(list.isError).toBeFalsy()
-      expect(acquireCount).toBe(0)
-
       // The first action takes the lock and must clear the prior session's
       // module-level mouseButtonHeld flag before dispatching.
       const screenshot = await connection.client.callTool({ name: 'screenshot' })

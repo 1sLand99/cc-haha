@@ -569,14 +569,18 @@ class VirtualCursorOverlay:
 
         with self._lock:
             if point is not None:
-                # Hide for the target lookup. A click-through layered window can
-                # still be returned by WindowFromPoint on some Windows builds.
-                if self.hwnd and self._shown:
-                    user32.ShowWindow(self.hwnd, SW_HIDE)
-                    self._shown = False
+                # Keep the cursor visible between related actions. Hiding here
+                # made every movement reappear only after the first injected
+                # frame, which looked like a jump into the middle of the path.
+                # `_pid_at_point` already skips this transparent overlay.
                 self._destination = point
                 self._target_pid = target_pid or self._pid_at_point(point)
-                self._requested_visible = False  # reveal on injected motion
+                if self._agent_position is None:
+                    current = POINT()
+                    if user32.GetCursorPos(ctypes.byref(current)):
+                        self._agent_position = (int(current.x), int(current.y))
+                self._requested_visible = self._target_pid is not None
+                self._hidden_for_user = False
             elif target_pid is not None:
                 self._target_pid = target_pid
 

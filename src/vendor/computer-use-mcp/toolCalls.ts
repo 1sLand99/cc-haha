@@ -17,7 +17,7 @@
  * before any mutation, because a bare pid can be recycled between the moment
  * we resolved it and the moment we act on it.
  *
- * **2. Authorization happens after resolution, on the resolved identity.**
+ * **2. Safety checks happen after resolution, on the resolved identity.**
  * The model names an app loosely ("Notes", a path, a pid). `resolveTarget` is
  * the single seam that turns that into one real running process; every policy
  * check then runs against *that* process's bundle id, not against the string
@@ -39,10 +39,9 @@
  *   4. Global CU lock (`overrides.checkCuLock`).
  *   5. Engine presence.
  *   6. `resolveTarget` → one running process + its lifetime identity.
- *   7. Denylists against the RESOLVED identity (policy, intrinsic, user).
- *   8. Per-app grant (allowlist, else the host's approval dialog).
- *   9. Proven process lifetime — mutating tools only.
- *  10. Engine dispatch.
+ *   7. Product/intrinsic denylists against the RESOLVED identity.
+ *   8. Proven process lifetime — mutating tools only.
+ *   9. Engine dispatch.
  *
  * The Codex `<app_state>` envelope is framed HERE, in TS, not in Swift
  * (blueprint §7). Swift renders the inner tree text (the format authority);
@@ -54,7 +53,6 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import {
-  getDefaultTierForApp,
   getDeniedCategoryForApp,
   isIntrinsicAppDenied,
   isPolicyDenied,
@@ -69,12 +67,10 @@ import type {
   ScreenshotResult,
 } from "./executor.js";
 import { isSystemKeyCombo } from "./keyBlocklist.js";
-import { SENTINEL_BUNDLE_IDS } from "./sentinelApps.js";
 import type {
   ComputerUseHostAdapter,
   ComputerUseOverrides,
   CuGrantFlags,
-  CuPermissionRequest,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -903,35 +899,6 @@ function dispatchTarget(
   return identity ? { pid, expectedProcessIdentity: identity } : { pid };
 }
 
-/** Build the approval-dialog request for a single resolved target. */
-function buildPermissionRequest(
-  resolved: ResolvedAppTarget,
-  requestedApp: string,
-  screenshotFiltering: "native" | "none",
-): CuPermissionRequest {
-  const bundleId = resolved.bundleId ?? "";
-  const displayName = resolved.displayName ?? requestedApp;
-  return {
-    requestId: `cu-${bundleId || requestedApp}`,
-    reason: `Computer Use needs access to ${displayName}.`,
-    apps: [
-      {
-        requestedName: requestedApp,
-        resolved: {
-          bundleId,
-          displayName,
-          path: resolved.path ?? "",
-        },
-        isSentinel: SENTINEL_BUNDLE_IDS.has(bundleId),
-        alreadyGranted: false,
-        proposedTier: getDefaultTierForApp(bundleId, displayName),
-      },
-    ],
-    requestedFlags: {},
-    screenshotFiltering,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Top-level dispatch
 // ---------------------------------------------------------------------------
@@ -1049,33 +1016,7 @@ export async function handleToolCall(
     );
     if (denied) return errorResult(denied, "app_denied");
 
-    if (
-      resolved.bundleId !== undefined &&
-      overrides.userDeniedBundleIds?.includes(resolved.bundleId)
-    ) {
-      return errorResult(
-        `Computer Use is not allowed to use the app '${requestedApp}' — it is ` +
-          "on your deny list. Remove it in Settings if access is needed.",
-        "app_denied",
-      );
-    }
-
-    // ─── Gate 8: per-app grant ─────────────────────────────────────────
-    const authorized = await authorizeResolvedTarget(
-      resolved,
-      requestedApp,
-      overrides,
-      adapter,
-    );
-    if (!authorized) {
-      return errorResult(
-        `Computer Use is not authorized to control '${requestedApp}'. Ask the ` +
-          "user to grant access, then retry.",
-        "app_not_granted",
-      );
-    }
-
-    // ─── Gate 9: proven process lifetime (mutations only) ──────────────
+    // ─── Gate 8: proven process lifetime (mutations only) ──────────────
     if (request.mutating && !provenIdentity(resolved)) {
       return errorResult(
         `Resolving '${requestedApp}' did not prove the running process ` +
@@ -1097,39 +1038,6 @@ export async function handleToolCall(
     logger.error(`[${serverName}] tool=${name} failed: ${msg}`, err);
     return errorResult(msg, "executor_threw");
   }
-}
-
-/**
- * True when the resolved process is allowed to be driven — already granted, or
- * granted by the user in response to the approval dialog.
- *
- * Fails closed in both no-answer cases: no handler wired, or a handler whose
- * response doesn't name this exact bundle id.
- */
-async function authorizeResolvedTarget(
-  resolved: ResolvedAppTarget,
-  requestedApp: string,
-  overrides: ComputerUseOverrides,
-  adapter: ComputerUseHostAdapter,
-): Promise<boolean> {
-  const bundleId = resolved.bundleId;
-  if (bundleId === undefined) return false;
-
-  if (overrides.allowedApps?.some(app => app.bundleId === bundleId)) {
-    return true;
-  }
-
-  const request = overrides.onPermissionRequest;
-  if (!request) return false;
-
-  const response = await request(
-    buildPermissionRequest(
-      resolved,
-      requestedApp,
-      adapter.executor.capabilities.screenshotFiltering,
-    ),
-  );
-  return response.granted.some(grant => grant.bundleId === bundleId);
 }
 
 // ---------------------------------------------------------------------------

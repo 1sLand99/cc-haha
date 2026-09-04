@@ -4,31 +4,15 @@
  *
  * Enforcement order, every call:
  *   1. Kill switch (`adapter.isDisabled()`).
- *   2. TCC gate (`adapter.ensureOsPermissions()`). `request_access` is
- *      exempted — it threads the ungranted state to the renderer so the
- *      user can grant TCC perms from inside the approval dialog.
+ *   2. OS permission gate (`adapter.ensureOsPermissions()`).
  *   3. Tool-specific gates (see dispatch table) — ANY exception in a gate
  *      returns a tool error, executor never called.
  *   4. Executor call.
  *
  * For input actions (click/type/key/scroll/drag/move_mouse) the tool-specific
  * gates are, in order:
- *   a. `prepareForAction` — hide every non-allowlisted app, then defocus us
- *      (battle-tested pre-action sequence from the Vercept acquisition).
- *      Sub-gated via `hideBeforeAction`. After this runs the screenshot is
- *      TRUE (what the
- *      model sees IS what's at each pixel) and we are not keyboard-focused.
- *   b. Frontmost gate — branched by actionKind:
- *        mouse:    frontmost ∈ allowlist ∪ {hostBundleId, Finder} → pass.
- *                  hostBundleId passes because the executor's
- *                  `withClickThrough` bracket makes us click-through.
- *        keyboard: frontmost ∈ allowlist ∪ {Finder} → pass.
- *                  hostBundleId → ERROR (safety net — defocus should have
- *                  moved us off; if it didn't, typing would go into our
- *                  own chat box).
- *      After step (a) this gate fires RARELY — only when something popped
- *      up between prepare and action, or the 5-try hide loop gave up.
- *      Checked FRESH on every call, not cached across calls.
+ *   a. `prepareForAction` — platform preparation and host defocus.
+ *   b. Resolve the frontmost app and apply product/intrinsic safety tiers.
  *
  * For click variants only, AFTER the above gates but BEFORE the executor call:
  *   c. Pixel-validation staleness check (sub-gated).
@@ -334,6 +318,10 @@ function tierSatisfies(
   return tier === "click" || tier === "full";
 }
 
+function automaticTier(bundleId: string | undefined, displayName: string): CuAppPermTier {
+  return getDefaultTierForApp(bundleId, displayName);
+}
+
 // Appended to every tier_insufficient error. The model may try to route
 // around the gate (osascript, System Events, cliclick via Bash) — this
 // closes that door explicitly. Leading space so it concatenates cleanly.
@@ -418,44 +406,14 @@ async function runInputActionGates(
   subGates: CuSubGates,
   actionKind: CuActionKind,
 ): Promise<CuCallToolResult | null> {
-  // Step A+B — hide non-allowlisted apps + defocus us. Sub-gated. After this
-  // runs, the frontmost gate below becomes a rare edge-case detector (something
-  // popped up between prepare and action) rather than a normal-path blocker.
-  // ALL grant tiers stay visible — visibility is the baseline (tier "read").
+  // Windows shows the full desktop. Preparation gets an empty filter so it may
+  // perform platform bookkeeping without hiding apps based on an allowlist.
   if (subGates.hideBeforeAction) {
-    const hidden = await adapter.executor.prepareForAction(
-      overrides.allowedApps.map((a) => a.bundleId),
-      overrides.selectedDisplayId,
-    );
-    // Empty-check so we don't spam the callback on every action when nothing
-    // was hidden (the common case after the first action of a turn).
-    if (hidden.length > 0) {
-      overrides.onAppsHidden?.(hidden);
-    }
+    await adapter.executor.prepareForAction([], overrides.selectedDisplayId);
   }
 
   // Frontmost gate. Check FRESH on every call.
   const frontmost = await adapter.executor.getFrontmostApp();
-
-  const tierByBundleId = new Map(
-    overrides.allowedApps.map((a) => [a.bundleId, a.tier] as const),
-  );
-
-  // After handleToolCall's tier backfill, every grant has a concrete tier —
-  // .get() returning undefined means the app is not in the allowlist at all.
-  const frontmostTier = frontmost
-    ? tierByBundleId.get(frontmost.bundleId)
-    : undefined;
-
-  // Clipboard guard. Per-action, not per-tool-call — runs for every sub-action
-  // inside computer_batch and teach_step/teach_batch, so clicking into a
-  // click-tier app mid-batch stashes+clears before the next click lands.
-  // Lives here (not in handleToolCall) so deferAcquire tools (request_access,
-  // list_granted_applications), `wait`, and the teach_step blocking-dialog
-  // phase don't trigger a sync — only input actions do.
-  if (subGates.clipboardGuard) {
-    await syncClipboardStash(adapter, overrides, frontmostTier === "click");
-  }
 
   if (!frontmost) {
     // Refuse rather than let it through. This path derives its target from
@@ -469,19 +427,36 @@ async function runInputActionGates(
     // it silently applies to nothing.
     return errorResult(
       "The foreground application could not be identified. Refusing input " +
-        "until a granted application is brought to the front.",
+        "until a supported application is brought to the front.",
       "state_conflict",
     );
   }
 
   const { hostBundleId } = adapter.executor.capabilities;
 
-  if (frontmostTier !== undefined) {
-    if (tierSatisfies(frontmostTier, actionKind)) return null;
-    // In the allowlist but tier doesn't cover this action. Tailor the
-    // guidance to the actual tier — at "read", suggesting left_click or Bash
-    // is wrong (nothing is allowed; use Chrome MCP). At "click", the
-    // mouse_full/keyboard-specific messages apply.
+  if (frontmost.bundleId === hostBundleId) {
+    if (actionKind !== "keyboard") return null;
+    return errorResult(
+      "Claude's own window still has keyboard focus. Click on the target " +
+        "application first so typing cannot land in the chat box.",
+      "state_conflict",
+    );
+  }
+
+  if (isPolicyDenied(frontmost.bundleId, frontmost.displayName)) {
+    return errorResult(
+      `"${frontmost.displayName}" is not supported by Computer Use for product-safety reasons.`,
+      "app_denied",
+    );
+  }
+
+  const frontmostTier = automaticTier(frontmost.bundleId, frontmost.displayName);
+
+  if (subGates.clipboardGuard) {
+    await syncClipboardStash(adapter, overrides, frontmostTier === "click");
+  }
+
+  if (!tierSatisfies(frontmostTier, actionKind)) {
     if (frontmostTier === "read") {
       // tier "read" is not category-unique (browser AND trading map to it) —
       // re-look-up so the CiC hint only shows for actual browsers.
@@ -489,7 +464,7 @@ async function runInputActionGates(
         getDeniedCategoryForApp(frontmost.bundleId, frontmost.displayName) ===
         "browser";
       return errorResult(
-        `"${frontmost.displayName}" is granted at tier "read" — ` +
+        `"${frontmost.displayName}" is restricted to tier "read" — ` +
           `visible in screenshots only, no clicks or typing.` +
           (isBrowser
             ? " Use the Claude-in-Chrome MCP for browser interaction (tools " +
@@ -501,10 +476,9 @@ async function runInputActionGates(
         "tier_insufficient",
       );
     }
-    // frontmostTier === "click" (tier === "full" would have passed tierSatisfies)
     if (actionKind === "keyboard") {
       return errorResult(
-        `"${frontmost.displayName}" is granted at tier "click" — ` +
+        `"${frontmost.displayName}" is restricted to tier "click" — ` +
           `typing, key presses, and paste require tier "full". The keys ` +
           `would go to this app's text fields or integrated terminal. To ` +
           `type into a different app, click it first to bring it forward. ` +
@@ -514,7 +488,7 @@ async function runInputActionGates(
     }
     // actionKind === "mouse_full" ("mouse" and "mouse_position" pass at "click")
     return errorResult(
-      `"${frontmost.displayName}" is granted at tier "click" — ` +
+      `"${frontmost.displayName}" is restricted to tier "click" — ` +
         `right-click, middle-click, and clicks with modifier keys require ` +
         `tier "full". Right-click opens a context menu with Paste/Cut, and ` +
         `modifier chords fire as keystrokes before the click. Plain ` +
@@ -522,32 +496,8 @@ async function runInputActionGates(
       "tier_insufficient",
     );
   }
-  // Finder is never-hide, always allowed.
-  if (frontmost.bundleId === FINDER_BUNDLE_ID) return null;
 
-  if (frontmost.bundleId === hostBundleId) {
-    if (actionKind !== "keyboard") {
-      // mouse and mouse_full are both click events — click-through works.
-      // We're click-through (executor's withClickThrough). Pass.
-      return null;
-    }
-    // Keyboard safety net — defocus (prepareForAction step B) should have
-    // moved us off. If we're still here, typing would go to our chat box.
-    return errorResult(
-      "Claude's own window still has keyboard focus. This should not happen " +
-        "after the pre-action defocus. Click on the target application first.",
-      "state_conflict",
-    );
-  }
-
-  // Non-allowlisted, non-us, non-Finder. RARE after the hide loop — means
-  // something popped up between prepare and action, or the 5-try loop gave up.
-  return errorResult(
-    `"${frontmost.displayName}" is not in the allowed applications and is ` +
-      `currently in front. Take a new screenshot — it may have appeared ` +
-      `since your last one.`,
-    "app_not_granted",
-  );
+  return null;
 }
 
 /**
@@ -575,28 +525,18 @@ async function runHitTestGate(
   const target = await adapter.executor.appUnderPoint(x, y);
   if (!target) return null; // desktop / nothing under point / platform no-op
 
-  // Finder (desktop, file dialogs) is always clickable — same exemption as
-  // runInputActionGates. Our own overlay is filtered by Swift (pid != self).
+  // Finder (desktop, file dialogs) and our click-through overlay are valid.
   if (target.bundleId === FINDER_BUNDLE_ID) return null;
-
-  const tierByBundleId = new Map(
-    overrides.allowedApps.map((a) => [a.bundleId, a.tier] as const),
-  );
-
-  if (!tierByBundleId.has(target.bundleId)) {
-    // Not in the allowlist at all. The frontmost check would catch this if
-    // the target were frontmost, but here a different app is in front. This
-    // is the "something popped up" edge case — a new window appeared between
-    // screenshot and click, or a background app's window overlaps the target.
+  if (target.bundleId === adapter.executor.capabilities.hostBundleId) return null;
+  if (isPolicyDenied(target.bundleId, target.displayName)) {
     return errorResult(
       `Click at these coordinates would land on "${target.displayName}", ` +
-        `which is not in the allowed applications. Take a fresh screenshot ` +
-        `to see the current window layout.`,
-      "app_not_granted",
+        "which Computer Use does not support for product-safety reasons.",
+      "app_denied",
     );
   }
 
-  const targetTier = tierByBundleId.get(target.bundleId);
+  const targetTier = automaticTier(target.bundleId, target.displayName);
 
   // Frontmost-based sync (runInputActionGates) misses the case where
   // the click lands on a NON-FRONTMOST click-tier window. Re-sync by
@@ -615,7 +555,7 @@ async function runHitTestGate(
   if (actionKind === "mouse_full" && targetTier === "click") {
     return errorResult(
       `Click at these coordinates would land on "${target.displayName}", ` +
-        `which is granted at tier "click" — right-click, middle-click, and ` +
+      `which is restricted to tier "click" — right-click, middle-click, and ` +
         `clicks with modifier keys require tier "full" (they can Paste via ` +
         `the context menu or fire modifier-chord keystrokes). Plain ` +
         `left_click is allowed here.` + TIER_ANTI_SUBVERSION,
@@ -626,7 +566,7 @@ async function runHitTestGate(
     getDeniedCategoryForApp(target.bundleId, target.displayName) === "browser";
   return errorResult(
     `Click at these coordinates would land on "${target.displayName}", ` +
-      `which is granted at tier "read" (screenshots only, no interaction). ` +
+      `which is restricted to tier "read" (screenshots only, no interaction). ` +
       (isBrowser
         ? "Use the Claude-in-Chrome MCP for browser interaction."
         : "Ask the user to take any actions in this app themselves.") +
@@ -1686,13 +1626,7 @@ async function executeTeachStep(
   }
 
   if (subGates.hideBeforeAction) {
-    const hidden = await adapter.executor.prepareForAction(
-      overrides.allowedApps.map((a) => a.bundleId),
-      overrides.selectedDisplayId,
-    );
-    if (hidden.length > 0) {
-      overrides.onAppsHidden?.(hidden);
-    }
+    await adapter.executor.prepareForAction([], overrides.selectedDisplayId);
   }
 
   const stepSubGates: CuSubGates = {
@@ -1922,29 +1856,6 @@ async function handleTeachBatch(
 }
 
 /**
- * Build the hidden-apps note that accompanies a screenshot. Tells the model
- * which apps got hidden (not in allowlist) and how to add them. Returns
- * undefined when nothing was hidden since the last screenshot.
- */
-async function buildHiddenNote(
-  adapter: ComputerUseHostAdapter,
-  hiddenSinceLastSeen: string[],
-): Promise<string | undefined> {
-  if (hiddenSinceLastSeen.length === 0) return undefined;
-  const running = await adapter.executor.listRunningApps();
-  const nameOf = new Map(running.map((a) => [a.bundleId, a.displayName]));
-  const names = hiddenSinceLastSeen.map((id) => nameOf.get(id) ?? id);
-  const list = names.map((n) => `"${n}"`).join(", ");
-  const one = names.length === 1;
-  return (
-    `${list} ${one ? "was" : "were"} open and got hidden before this screenshot ` +
-    `(not in the session allowlist). If a previous action was meant to open ` +
-    `${one ? "it" : "one of them"}, that's why you don't see it — call ` +
-    `request_access to add ${one ? "it" : "them"} to the allowlist.`
-  );
-}
-
-/**
  * Assign a human-readable label to each display. Falls back to `display N`
  * when NSScreen.localizedName is undefined; disambiguates identical labels
  * (matched-pair external monitors) with a `(2)` suffix. Used by both
@@ -2033,14 +1944,6 @@ async function handleScreenshot(
   overrides: ComputerUseOverrides,
   subGates: CuSubGates,
 ): Promise<CuCallToolResult> {
-  // §2 — empty allowlist → tool error, no screenshot.
-  if (overrides.allowedApps.length === 0) {
-    return errorResult(
-      "No applications are granted for this session. Call request_access first.",
-      "allowlist_empty",
-    );
-  }
-
   // Atomic resolve→prepare→capture (one Swift call, no scheduler gap).
   // Off → fall through to separate-calls path below.
   if (subGates.autoTargetDisplay) {
@@ -2049,8 +1952,8 @@ async function handleScreenshot(
     // Otherwise sticky display: only auto-resolve when the allowed-app
     // set has changed since the display was last resolved. Prevents the
     // resolver yanking the display on every screenshot.
-    const allowedBundleIds = overrides.allowedApps.map((a) => a.bundleId);
-    const currentAppSetKey = allowedBundleIds.slice().sort().join(",");
+    const allowedBundleIds: string[] = [];
+    const currentAppSetKey = "all-supported-apps";
     const appSetChanged = currentAppSetKey !== overrides.displayResolvedForApps;
     const autoResolve = !overrides.displayPinnedByModel && appSetChanged;
 
@@ -2096,23 +1999,10 @@ async function handleScreenshot(
       overrides.onDisplayResolvedForApps?.(currentAppSetKey);
     }
 
-    // Report hidden apps only when the model has already seen the screen.
-    let hiddenSinceLastSeen: string[] = [];
-    if (overrides.lastScreenshot !== undefined) {
-      hiddenSinceLastSeen = result.hidden;
-    }
-    if (result.hidden.length > 0) {
-      overrides.onAppsHidden?.(result.hidden);
-    }
-
-    // Partial-success case: hide succeeded, capture failed (SCK perm
-    // revoked mid-session). onAppsHidden fired above so auto-unhide will
-    // restore hidden apps at turn end. Now surface the error to the model.
+    // Partial-success case: capture failed after preparation.
     if (result.captureError !== undefined) {
       return errorResult(result.captureError, "capture_failed");
     }
-
-    const hiddenNote = await buildHiddenNote(adapter, hiddenSinceLastSeen);
 
     // Cherry-pick — don't spread `result` (would leak resolver fields into lastScreenshot).
     const shot: ScreenshotResult = {
@@ -2136,7 +2026,6 @@ async function handleScreenshot(
     return {
       content: [
         ...(monitorNote ? [{ type: "text" as const, text: monitorNote }] : []),
-        ...(hiddenNote ? [{ type: "text" as const, text: hiddenNote }] : []),
         {
           type: "image",
           data: shot.base64,
@@ -2147,51 +2036,17 @@ async function handleScreenshot(
     };
   }
 
-  // Same hide+defocus sequence as input actions. Screenshot needs hide too
-  // — if a non-allowlisted app is on top, SCContentFilter would composite it
-  // out, but the pixels BELOW it are what the model would see, and those are
-  // NOT what's actually there. Hiding first makes the screenshot TRUE.
-  let hiddenSinceLastSeen: string[] = [];
+  // Keep the platform preparation hook, but do not filter or hide applications.
   if (subGates.hideBeforeAction) {
-    const hidden = await adapter.executor.prepareForAction(
-      overrides.allowedApps.map((a) => a.bundleId),
-      overrides.selectedDisplayId,
-    );
-    // "Something appeared since the model last looked." Report whenever:
-    //   (a) prepare hid something AND
-    //   (b) the model has ALREADY SEEN the screen (lastScreenshot is set).
-    //
-    // (b) is the discriminator that silences the first screenshot's
-    // expected-noise hide. NOT a delta against a cumulative set — that was
-    // the earlier bug: cuHiddenDuringTurn only grows, so once Preview is in
-    // it (from the first screenshot's hide), subsequent re-hides of Preview
-    // delta to zero. The double-click → Preview opens → re-hide → silent
-    // loop never breaks.
-    //
-    // With this check: every re-hide fires. If the model loops "click → file
-    // opens in Preview → screenshot → Preview hidden", it gets told EVERY
-    // time. Eventually it'll request_access for Preview (or give up).
-    //
-    // False positive: user alt-tabs mid-turn → Safari re-hidden → reported.
-    // Rare, and "Safari appeared" is at worst mild noise — far better than
-    // the false-negative of never explaining why the file vanished.
-    if (overrides.lastScreenshot !== undefined) {
-      hiddenSinceLastSeen = hidden;
-    }
-    if (hidden.length > 0) {
-      overrides.onAppsHidden?.(hidden);
-    }
+    await adapter.executor.prepareForAction([], overrides.selectedDisplayId);
   }
 
-  const allowedBundleIds = overrides.allowedApps.map((g) => g.bundleId);
   const shot = await takeScreenshotWithRetry(
     adapter.executor,
-    allowedBundleIds,
+    [],
     adapter.logger,
     overrides.selectedDisplayId,
   );
-
-  const hiddenNote = await buildHiddenNote(adapter, hiddenSinceLastSeen);
 
   const monitorNote = await buildMonitorNote(
     adapter,
@@ -2203,7 +2058,6 @@ async function handleScreenshot(
   return {
     content: [
       ...(monitorNote ? [{ type: "text" as const, text: monitorNote }] : []),
-      ...(hiddenNote ? [{ type: "text" as const, text: hiddenNote }] : []),
       {
         type: "image",
         data: shot.base64,
@@ -2275,12 +2129,11 @@ async function handleZoom(
     h: (y1 - y0) * ratioY,
   };
 
-  const allowedIds = overrides.allowedApps.map((g) => g.bundleId);
   // Crop from the same display as lastScreenshot so the zoom region
   // matches the image the model is reading coords from.
   const zoomed = await adapter.executor.zoom(
     regionLogical,
-    allowedIds,
+    [],
     last.displayId,
   );
 
@@ -2333,7 +2186,7 @@ async function handleClickVariant(
     ) {
       return errorResult(
         `The modifier chord "${args.text}" would fire a system shortcut. ` +
-          "Request the systemKeyCombos grant flag via request_access, or use " +
+          "Enable Computer Use again to accept system-shortcut access, or use " +
           "only modifier keys (shift, ctrl, alt, cmd) in the text parameter.",
         "grant_flag_required",
       );
@@ -2379,12 +2232,11 @@ async function handleClickVariant(
       async () => {
         // The fresh screenshot for validation uses the SAME allow-set as
         // the model's last screenshot did, so we compare like with like.
-        const allowedIds = overrides.allowedApps.map((g) => g.bundleId);
         try {
           // Fresh shot must match lastScreenshot's display, not the current
           // selection — pixel-compare is against the model's last image.
           return await adapter.executor.screenshot({
-            allowedBundleIds: allowedIds,
+            allowedBundleIds: [],
             displayId: overrides.lastScreenshot?.displayId,
           });
         } catch {
@@ -2549,7 +2401,7 @@ async function handleKey(
     !overrides.grantFlags.systemKeyCombos
   ) {
     return errorResult(
-      `"${keySequence}" is a system-level shortcut. Request the \`systemKeyCombos\` grant via request_access to use it.`,
+      `"${keySequence}" is a system-level shortcut. Re-enable Computer Use and accept the risk notice to use it.`,
       "grant_flag_required",
     );
   }
@@ -2789,27 +2641,27 @@ async function handleOpenApplication(
   const app = requireString(args, "app");
   if (app instanceof Error) return errorResult(app.message, "bad_args");
 
-  // Resolve display-name → bundle ID. Same logic as request_access.
-  const allowed = new Set(overrides.allowedApps.map((g) => g.bundleId));
-  let targetBundleId: string | undefined;
+  // Resolve only against the helper's installed-app inventory. Never pass an
+  // arbitrary model string to the Windows shell.
+  const installed = await adapter.executor.listInstalledApps();
+  const wanted = app.trim().toLowerCase();
+  const match = installed.find(
+    candidate =>
+      candidate.bundleId.toLowerCase() === wanted
+      || candidate.displayName.toLowerCase() === wanted,
+  );
 
-  if (looksLikeBundleId(app) && allowed.has(app)) {
-    targetBundleId = app;
-  } else {
-    // Try display name → bundle ID, but ONLY against the allowlist itself.
-    // Avoids paying the listInstalledApps() cost on the hot path and is
-    // arguably more correct: if the user granted "Slack", the model asking
-    // to open "Slack" should match THAT grant.
-    const match = overrides.allowedApps.find(
-      (g) => g.displayName.toLowerCase() === app.toLowerCase(),
+  if (!match) {
+    return errorResult(
+      `"${app}" was not found in the installed application inventory.`,
+      "bad_args",
     );
-    targetBundleId = match?.bundleId;
   }
 
-  if (!targetBundleId || !allowed.has(targetBundleId)) {
+  if (isPolicyDenied(match.bundleId, match.displayName)) {
     return errorResult(
-      `"${app}" is not granted for this session. Call request_access first.`,
-      "app_not_granted",
+      `"${match.displayName}" is not supported by Computer Use for product-safety reasons.`,
+      "app_denied",
     );
   }
 
@@ -2817,7 +2669,7 @@ async function handleOpenApplication(
   // what tier "read" enables (you need it on screen to screenshot it). The
   // tier gates on click/type catch any follow-up interaction.
 
-  await adapter.executor.openApp(targetBundleId);
+  await adapter.executor.openApp(match.bundleId);
 
   // On multi-monitor setups, macOS may place the opened window on a monitor
   // the resolver won't pick (e.g. Claude + another allowed app are co-located
@@ -2920,7 +2772,7 @@ async function handleReadClipboard(
 ): Promise<CuCallToolResult> {
   if (!overrides.grantFlags.clipboardRead) {
     return errorResult(
-      "Clipboard read is not granted. Request `clipboardRead` via request_access.",
+      "Clipboard read is disabled. Re-enable Computer Use and accept the risk notice.",
       "grant_flag_required",
     );
   }
@@ -2930,11 +2782,8 @@ async function handleReadClipboard(
   // (same as what the app's own Paste would see).
   if (subGates.clipboardGuard) {
     const frontmost = await adapter.executor.getFrontmostApp();
-    const tierByBundleId = new Map(
-      overrides.allowedApps.map((a) => [a.bundleId, a.tier] as const),
-    );
     const frontmostTier = frontmost
-      ? tierByBundleId.get(frontmost.bundleId)
+      ? automaticTier(frontmost.bundleId, frontmost.displayName)
       : undefined;
     await syncClipboardStash(adapter, overrides, frontmostTier === "click");
   }
@@ -2953,7 +2802,7 @@ async function handleWriteClipboard(
 ): Promise<CuCallToolResult> {
   if (!overrides.grantFlags.clipboardWrite) {
     return errorResult(
-      "Clipboard write is not granted. Request `clipboardWrite` via request_access.",
+      "Clipboard write is disabled. Re-enable Computer Use and accept the risk notice.",
       "grant_flag_required",
     );
   }
@@ -2962,11 +2811,8 @@ async function handleWriteClipboard(
 
   if (subGates.clipboardGuard) {
     const frontmost = await adapter.executor.getFrontmostApp();
-    const tierByBundleId = new Map(
-      overrides.allowedApps.map((a) => [a.bundleId, a.tier] as const),
-    );
     const frontmostTier = frontmost
-      ? tierByBundleId.get(frontmost.bundleId)
+      ? automaticTier(frontmost.bundleId, frontmost.displayName)
       : undefined;
 
     // Defense-in-depth for the clipboardGuard bypass: write_clipboard +
@@ -3107,7 +2953,7 @@ async function handleHoldKey(
     !overrides.grantFlags.systemKeyCombos
   ) {
     return errorResult(
-      `"${text}" is a system-level shortcut. Request the \`systemKeyCombos\` grant via request_access to use it.`,
+      `"${text}" is a system-level shortcut. Re-enable Computer Use and accept the risk notice to use it.`,
       "grant_flag_required",
     );
   }
@@ -3316,13 +3162,7 @@ async function handleComputerBatch(
   // prepareForAction ONCE. After this, inner dispatches skip it via
   // hideBeforeAction:false.
   if (subGates.hideBeforeAction) {
-    const hidden = await adapter.executor.prepareForAction(
-      overrides.allowedApps.map((a) => a.bundleId),
-      overrides.selectedDisplayId,
-    );
-    if (hidden.length > 0) {
-      overrides.onAppsHidden?.(hidden);
-    }
+    await adapter.executor.prepareForAction([], overrides.selectedDisplayId);
   }
 
   // Inner actions: skip prepare (already ran), skip pixelCompare (stale by
@@ -3642,16 +3482,37 @@ export async function handleToolCall(
   // ANY exception below → tool error, executor never left in a half-called
   // state. Explicit inversion of the prior `catch → return true` fail-open.
   try {
-    // request_access / request_teach_access: need tccState thread-through;
-    // dispatchAction never sees them (not batchable).
+    // Compatibility for a stale client that cached the removed app-permission
+    // tool. Enabling Computer Use is now the authorization boundary, so this
+    // call must never open an app-by-app approval dialog.
+    if (name === "request_access") {
+      return okJson({
+        enabled: true,
+        appAuthorization: "all_supported_apps",
+        screenshotFiltering: adapter.executor.capabilities.screenshotFiltering,
+      });
+    }
+
+    // Teach mode still needs an explicit tool transition because it hides the
+    // main window, but it no longer asks for per-app permission.
+    if (name === "request_teach_access") {
+      if (overrides.getTeachModeActive?.()) {
+        return errorResult("Teach mode is already active.", "teach_mode_conflict");
+      }
+      const reason = requireString(a, "reason");
+      if (reason instanceof Error) return errorResult(reason.message, "bad_args");
+      if (!Array.isArray(a.apps) || !a.apps.every(app => typeof app === "string")) {
+        return errorResult('"apps" must be an array of strings.', "bad_args");
+      }
+      if (!overrides.onTeachModeActivated || !overrides.onTeachStep) {
+        return errorResult("Teach mode is not available in this session.", "feature_unavailable");
+      }
+      overrides.onTeachModeActivated();
+      return okJson({ teachModeActive: true, reason });
+    }
+
     // teach_step: blocking UI tool, also not batchable; needs subGates for
     // its action-execution phase.
-    if (name === "request_access") {
-      return await handleRequestAccess(adapter, a, overrides, tccState);
-    }
-    if (name === "request_teach_access") {
-      return await handleRequestTeachAccess(adapter, a, overrides, tccState);
-    }
     if (name === "teach_step") {
       return await handleTeachStep(adapter, a, overrides, subGates);
     }

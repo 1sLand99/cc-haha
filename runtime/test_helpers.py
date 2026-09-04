@@ -250,7 +250,8 @@ class TestMutatingCommandsAreGuarded(unittest.TestCase):
         """Coordinate actions must not jump while mouse animation is enabled."""
         source = _win_source()
         self.assertIn("def _move_cursor_to", source)
-        self.assertIn("1 - (1 - progress) ** 3", source)
+        self.assertIn("def _spring_cursor_path", source)
+        self.assertNotIn("1 - (1 - progress) ** 3", source)
         dispatcher = source.index("def main()")
         for command in ("click", "drag", "move_mouse", "scroll"):
             marker = f'if command == "{command}":'
@@ -261,6 +262,28 @@ class TestMutatingCommandsAreGuarded(unittest.TestCase):
                 body,
                 f"{command} must honor the mouse-animation gate",
             )
+
+    @unittest.skipUnless(IS_WINDOWS, "requires the Windows helper module")
+    def test_spring_cursor_path_starts_smoothly_and_lands_exactly(self):
+        spec = importlib.util.spec_from_file_location("win_helper_motion", WIN_HELPER)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        points = module._spring_cursor_path(0, 0, 1000, 500)
+        self.assertGreater(len(points), 12)
+        self.assertEqual(points[-1], (1000, 500))
+        first_distance = (points[0][0] ** 2 + points[0][1] ** 2) ** 0.5
+        total_distance = (1000 ** 2 + 500 ** 2) ** 0.5
+        self.assertLess(first_distance / total_distance, 0.10)
+        self.assertTrue(all(a != b for a, b in zip(points, points[1:])))
+
+    def test_drag_reuses_the_shared_cursor_motion(self):
+        source = _win_source()
+        dispatcher = source.index('if command == "drag":')
+        body = source[dispatcher:source.index('if command == "move_mouse":', dispatcher)]
+        self.assertGreaterEqual(body.count("_move_cursor_to("), 2)
+        self.assertNotIn("for step in range", body)
 
     def test_helper_uses_per_monitor_dpi_coordinates(self):
         source = _win_source()
@@ -576,6 +599,15 @@ class TestCursorBadge(unittest.TestCase):
         self.assertIn("targetPid", source)
         self.assertIn("WindowFromPoint", source)
         self.assertIn("GetForegroundWindow", source)
+
+    def test_overlay_activity_does_not_hide_before_animated_motion(self):
+        source = CURSOR_BADGE.read_text(encoding="utf-8")
+        start = source.index("    def _on_activity")
+        end = source.index("    def _read_parent", start)
+        body = source[start:end]
+        self.assertNotIn("ShowWindow", body)
+        self.assertIn("GetCursorPos", body)
+        self.assertIn("self._requested_visible = self._target_pid is not None", body)
 
     def test_overlay_readiness_precedes_the_first_action(self):
         source = CURSOR_BADGE.read_text(encoding="utf-8")

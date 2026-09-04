@@ -96,8 +96,8 @@ never helps.
 
 If three genuinely different approaches fail, stop and tell the user what you
 tried and what you observed. Do not drive the UI with \`osascript\`, AppleScript,
-System Events, JXA, Python, or shell commands — those bypass the permission
-model the user granted, do not work on these apps, and burn the rest of the
+System Events, JXA, Python, or shell commands — those bypass Computer Use's
+target and interference safeguards, do not work on these apps, and burn the rest of the
 session.
 
 ## Tool notes
@@ -156,30 +156,26 @@ const WINDOWS_COMPUTER_USE_PROMPT = `# Operating Windows apps
 You are driving real applications on the user's Windows desktop through the
 Computer Use pixel tools. Work in this loop:
 
-1. \`request_access({ apps, reason })\` once, naming every app the task needs.
-   It must run before every other Computer Use tool. If another app becomes
-   necessary later, request access to add it.
-2. \`screenshot()\` and inspect the current display.
-3. Act using coordinates from that exact full-display screenshot.
-4. Take another \`screenshot()\` before deciding whether the action worked.
+1. \`screenshot()\` and inspect the current display.
+2. Act using coordinates from that exact full-display screenshot.
+3. Take another \`screenshot()\` before deciding whether the action worked.
 
 On Windows screenshots are NOT filtered: every visible window on the captured
-display can appear, including apps that were not granted. Permission limits
-input, not visibility. Never interact with an ungranted app; request access or
-ask the user first.
+display can appear. Enabling Computer Use authorizes control of supported apps
+without an app-by-app approval prompt. Product safety restrictions still apply.
 
 Use \`zoom\` to read small details, but never use coordinates from a zoom image
 for actions. Coordinates always refer to the most recent full screenshot. Use
-\`open_application\` to launch or foreground a granted app. Input actions are
-also checked against the frontmost app and the window under the target point;
-if either is ungranted, stop and refresh state instead of trying to bypass the
-gate.
+\`open_application\` to launch or foreground an installed app. Input actions
+are checked against the frontmost app and the window under the target point;
+if a target cannot be identified or is safety-restricted, stop and refresh
+state instead of trying to bypass the gate.
 
 Mutating tools return a dispatch receipt, not proof of the intended result.
 Only the next screenshot proves what happened. If two attempts leave the UI
 unchanged, change approach. Do not repeat an identical action a third time.
 Do not fall back to PowerShell, Python, AutoHotkey, or another UI automation
-path; those bypass the permission and interference safeguards the user granted.
+path; those bypass Computer Use's target, product-safety, and interference safeguards.
 
 The helper shares Windows' real mouse and keyboard stream. If it reports user
 interference or an UNKNOWN result, do not repeat the action. Take a screenshot
@@ -217,7 +213,7 @@ export function registerComputerUseSkill(): void {
     // competes with the Chrome extension and purpose-built MCP servers on web
     // tasks, where they are faster and more precise.
     description: isWindows
-      ? "Operate apps on the user's Windows desktop — click, type, scroll and inspect the display through permission-gated pixel tools. For native desktop apps and cross-app workflows. Prefer a purpose-built MCP server, browser integration, or CLI when one covers the task."
+      ? "Operate apps on the user's Windows desktop — click, type, scroll and inspect the display through safety-gated pixel tools. For native desktop apps and cross-app workflows. Prefer a purpose-built MCP server, browser integration, or CLI when one covers the task."
       : "Operate apps on the user's Mac — click, type, scroll and read app state through the accessibility engine. For native desktop apps and cross-app workflows. Prefer a purpose-built MCP server, the Chrome extension, or a CLI when one covers the task.",
     whenToUse: isWindows
       ? 'When the user wants something done inside a Windows application. Invoke this BEFORE the first mcp__computer-use__* call; it carries the approval, screenshot, and pixel-action workflow those tools assume.'

@@ -805,9 +805,9 @@ describe('handleToolCall — gates', () => {
     }
   })
 
-  test('resolves alias and PID targets before permission, then dispatches to the canonical running PID', async () => {
+  test('resolves alias and PID targets and dispatches without an app permission prompt', async () => {
     for (const requestedApp of ['Notes', '812']) {
-      let permissionRequest: any
+      let permissionCalls = 0
       const { engine, calls } = makeEngine({
         resolveTarget: async (target: AppTarget) => {
           expect(target).toEqual(requestedApp === '812' ? { pid: 812 } : { app: 'Notes' })
@@ -833,37 +833,15 @@ describe('handleToolCall — gates', () => {
         { app: requestedApp, element_index: 'g17:1' },
         baseOverrides({
           allowedApps: [],
-          onPermissionRequest: async req => {
-            permissionRequest = req
-            return {
-              granted: [{
-                bundleId: 'com.apple.Notes',
-                displayName: 'Notes',
-                grantedAt: 2,
-                tier: 'full',
-              }],
-              denied: [],
-              flags: {
-                clipboardRead: false,
-                clipboardWrite: false,
-                systemKeyCombos: false,
-              },
-            }
+          onPermissionRequest: async () => {
+            permissionCalls++
+            throw new Error('must not prompt')
           },
         }),
       )
 
       expect(r.isError).toBeFalsy()
-      expect(permissionRequest.apps).toHaveLength(1)
-      expect(permissionRequest.apps[0]).toMatchObject({
-        requestedName: requestedApp,
-        alreadyGranted: false,
-        resolved: {
-          bundleId: 'com.apple.Notes',
-          displayName: 'Notes',
-          path: '/System/Applications/Notes.app',
-        },
-      })
+      expect(permissionCalls).toBe(0)
       expect(calls.map(call => call.method)).toEqual(['resolveTarget', 'click'])
       expect(calls[1].args).toMatchObject({ target: { pid: 812 } })
     }
@@ -898,8 +876,9 @@ describe('handleToolCall — gates', () => {
     expect(calls.map(call => call.method)).toEqual(['resolveTarget'])
   })
 
-  test('authorizes an installed path without launching it and dispatches get_app_state by exact path', async () => {
+  test('dispatches get_app_state by exact installed path without an app prompt', async () => {
     const path = '/Applications/Acme Notes.app'
+    let permissionCalls = 0
     const { engine, calls } = makeEngine({
       resolveTarget: async () => ({
         bundleId: 'com.acme.notes',
@@ -913,67 +892,20 @@ describe('handleToolCall — gates', () => {
       { app: path },
       baseOverrides({
         allowedApps: [],
-        onPermissionRequest: async req => ({
-          granted: [{
-            bundleId: req.apps[0].resolved!.bundleId,
-            displayName: req.apps[0].resolved!.displayName,
-            grantedAt: 2,
-            tier: 'full',
-          }],
-          denied: [],
-          flags: {
-            clipboardRead: false,
-            clipboardWrite: false,
-            systemKeyCombos: false,
-          },
-        }),
+        onPermissionRequest: async () => {
+          permissionCalls++
+          throw new Error('must not prompt')
+        },
       }),
     )
 
     expect(r.isError).toBeFalsy()
+    expect(permissionCalls).toBe(0)
     expect(calls.map(call => call.method)).toEqual(['resolveTarget', 'getAppState'])
     expect(calls[1].args).toEqual({ app: path })
   })
 
-  test('a permission denial or mismatched grant never reaches the mutation engine', async () => {
-    for (const granted of [[], [{
-      bundleId: 'com.other.app',
-      displayName: 'Other',
-      grantedAt: 2,
-      tier: 'full' as const,
-    }]]) {
-      const { engine, calls } = makeEngine({
-        resolveTarget: async () => ({
-          pid: 812,
-          bundleId: 'com.apple.Notes',
-          displayName: 'Notes',
-        }),
-      })
-      const r = await handleToolCall(
-        makeAdapter({ engine }),
-        'type_text',
-        { app: 'Notes', text: 'secret' },
-        baseOverrides({
-          allowedApps: [],
-          onPermissionRequest: async () => ({
-            granted,
-            denied: [{ bundleId: 'com.apple.Notes', reason: 'user_denied' }],
-            flags: {
-              clipboardRead: false,
-              clipboardWrite: false,
-              systemKeyCombos: false,
-            },
-          }),
-        }),
-      )
-
-      expect(r.isError).toBe(true)
-      expect(r.telemetry?.error_kind).toBe('app_not_granted')
-      expect(calls.map(call => call.method)).toEqual(['resolveTarget'])
-    }
-  })
-
-  test('an ungranted target without a permission handler fails closed', async () => {
+  test('an empty legacy allowlist still permits a supported target without a permission handler', async () => {
     const { engine, calls } = makeEngine({
       resolveTarget: async () => ({
         pid: 812,
@@ -990,12 +922,11 @@ describe('handleToolCall — gates', () => {
       baseOverrides({ allowedApps: [], onPermissionRequest: undefined }),
     )
 
-    expect(r.isError).toBe(true)
-    expect(r.telemetry?.error_kind).toBe('app_not_granted')
-    expect(calls.map(call => call.method)).toEqual(['resolveTarget'])
+    expect(r.isError).toBeFalsy()
+    expect(calls.map(call => call.method)).toEqual(['resolveTarget', 'click'])
   })
 
-  test('an exact preauthorization bypasses the permission handler', async () => {
+  test('legacy preauthorization data is not consulted or prompted for', async () => {
     let permissionCalls = 0
     const { engine, calls } = makeEngine({
       resolveTarget: async () => ({
@@ -1024,42 +955,45 @@ describe('handleToolCall — gates', () => {
     expect(calls.map(call => call.method)).toEqual(['resolveTarget', 'typeText'])
   })
 
-  test('resolved user-denied and policy-denied aliases fail before mutation', async () => {
-    const cases = [
-      {
-        resolved: { pid: 812, bundleId: 'com.apple.Notes', displayName: 'Notes' },
-        overrides: { userDeniedBundleIds: ['com.apple.Notes'] },
-      },
-      {
-        resolved: { pid: 900, bundleId: 'com.googlecode.iterm2', displayName: 'iTerm2' },
-        overrides: {},
-      },
-    ]
-    for (const entry of cases) {
-      let permissionCalls = 0
-      const { engine, calls } = makeEngine({ resolveTarget: async () => entry.resolved })
-      const r = await handleToolCall(
-        makeAdapter({ engine }),
-        'type_text',
-        { app: 'friendly alias', text: 'blocked' },
-        baseOverrides({
-          allowedApps: [{
-            bundleId: entry.resolved.bundleId,
-            displayName: entry.resolved.displayName,
-            grantedAt: 1,
-          }],
-          ...entry.overrides,
-          onPermissionRequest: async () => {
-            permissionCalls++
-            throw new Error('must not prompt')
-          },
-        }),
-      )
-      expect(r.isError).toBe(true)
-      expect(r.telemetry?.error_kind).toBe('app_denied')
-      expect(permissionCalls).toBe(0)
-      expect(calls.map(call => call.method)).toEqual(['resolveTarget'])
-    }
+  test('legacy user-denied app state no longer blocks a supported app', async () => {
+    const { engine, calls } = makeEngine({
+      resolveTarget: async () => ({
+        pid: 812,
+        bundleId: 'com.apple.Notes',
+        displayName: 'Notes',
+        executablePath: '/System/Applications/Notes.app/Contents/MacOS/Notes',
+        launchTime: 1812,
+      }),
+    })
+    const r = await handleToolCall(
+      makeAdapter({ engine }),
+      'type_text',
+      { app: 'Notes', text: 'allowed' },
+      baseOverrides({ allowedApps: [], userDeniedBundleIds: ['com.apple.Notes'] }),
+    )
+
+    expect(r.isError).toBeFalsy()
+    expect(calls.map(call => call.method)).toEqual(['resolveTarget', 'typeText'])
+  })
+
+  test('the product denylist still blocks a resolved app before mutation', async () => {
+    const { engine, calls } = makeEngine({
+      resolveTarget: async () => ({
+        pid: 900,
+        bundleId: 'com.googlecode.iterm2',
+        displayName: 'iTerm2',
+      }),
+    })
+    const r = await handleToolCall(
+      makeAdapter({ engine }),
+      'type_text',
+      { app: 'iTerm2', text: 'blocked' },
+      baseOverrides({ allowedApps: [] }),
+    )
+
+    expect(r.isError).toBe(true)
+    expect(r.telemetry?.error_kind).toBe('app_denied')
+    expect(calls.map(call => call.method)).toEqual(['resolveTarget'])
   })
 
   test('invalid app values return bad_args without resolving a target', async () => {

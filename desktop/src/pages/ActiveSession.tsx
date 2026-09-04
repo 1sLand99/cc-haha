@@ -34,7 +34,6 @@ import {
   type SessionHeaderMetaItem,
 } from '@/components/chat/SessionChatSurface'
 import { getWorktreeDisplayName, WorktreeDetails } from '../components/chat/WorktreeDetails'
-import { ComputerUsePermissionModal } from '../components/chat/ComputerUsePermissionModal'
 import { WorkbenchPanel } from '../components/workbench/WorkbenchPanel'
 import { AgentTeamsStrip } from '../components/agentTeams/AgentTeamsSummary'
 import { snapshotWithHistoricalMembers } from '../components/agentTeams/agentTeamsModel'
@@ -321,7 +320,6 @@ export function ActiveSession() {
   const connectToSession = useChatStore((s) => s.connectToSession)
   const stopBackgroundTask = useChatStore((s) => s.stopBackgroundTask)
   const sessionState = useChatStore((s) => activeTabId ? s.sessions[activeTabId] : undefined)
-  const pendingComputerUsePermission = sessionState?.pendingComputerUsePermission ?? null
   const fetchSessionTasks = useCLITaskStore((s) => s.fetchSessionTasks)
   const trackedTaskSessionId = useCLITaskStore((s) => s.sessionId)
   const cliTasks = useCLITaskStore((s) => s.tasks)
@@ -769,12 +767,6 @@ export function ActiveSession() {
           </aside>
         </>
       ) : null}
-      overlay={(
-        <ComputerUsePermissionModal
-          sessionId={activeTabId}
-          request={pendingComputerUsePermission?.request ?? null}
-        />
-      )}
     >
           {isEmpty ? (
             <div

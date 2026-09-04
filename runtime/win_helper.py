@@ -1196,30 +1196,70 @@ def _absolute_mouse_move(x: int, y: int) -> _INPUT:
     )
 
 
+def _spring_cursor_path(
+    start_x: int,
+    start_y: int,
+    target_x: int,
+    target_y: int,
+) -> list[tuple[int, int]]:
+    """Sample the same damped-spring motion used by the macOS cursor."""
+    distance = ((target_x - start_x) ** 2 + (target_y - start_y) ** 2) ** 0.5
+    if distance < 2:
+        return [(target_x, target_y)]
+
+    # CursorMotionState.swift uses k=196 and a damping ratio of 0.85. A
+    # 60-Hz fixed step gives Windows the same zero-velocity start and gentle
+    # settle while keeping physical-pointer actions bounded.
+    frame_interval = 1.0 / 60.0
+    stiffness = 196.0
+    damping = 2.0 * 0.85 * stiffness ** 0.5
+    max_duration = min(0.45, max(0.20, distance / 3000.0))
+    sample_count = max(1, round(max_duration / frame_interval))
+
+    pos_x, pos_y = float(start_x), float(start_y)
+    vel_x = vel_y = 0.0
+    points: list[tuple[int, int]] = []
+    for _ in range(sample_count):
+        vel_x += (stiffness * (target_x - pos_x) - damping * vel_x) * frame_interval
+        vel_y += (stiffness * (target_y - pos_y) - damping * vel_y) * frame_interval
+        pos_x += vel_x * frame_interval
+        pos_y += vel_y * frame_interval
+        point = (round(pos_x), round(pos_y))
+        if not points or point != points[-1]:
+            points.append(point)
+
+        remaining = ((target_x - pos_x) ** 2 + (target_y - pos_y) ** 2) ** 0.5
+        speed = (vel_x ** 2 + vel_y ** 2) ** 0.5
+        if remaining < 0.5 and speed < 6.0:
+            break
+
+    target = (target_x, target_y)
+    if not points or points[-1] != target:
+        points.append(target)
+    return points
+
+
 def _move_cursor_to(x: int, y: int, animate: bool) -> None:
-    """Move the shared pointer along a short eased path for overlay parity."""
+    """Move the shared pointer with the macOS virtual-cursor spring."""
     current = wintypes.POINT()
     if not _user32.GetCursorPos(ctypes.byref(current)):
         _send_inputs([_absolute_mouse_move(x, y)])
         return
 
     start_x, start_y = int(current.x), int(current.y)
-    distance = ((x - start_x) ** 2 + (y - start_y) ** 2) ** 0.5
-    if not animate or distance < 2:
+    if not animate:
         _send_inputs([_absolute_mouse_move(x, y)])
         return
 
-    # 100-260ms is long enough to read as motion without slowing the agent.
-    duration = min(0.26, max(0.10, distance / 4000.0))
-    steps = max(6, min(18, round(duration * 60)))
-    for step in range(1, steps + 1):
-        progress = step / steps
-        eased = 1 - (1 - progress) ** 3
-        next_x = round(start_x + (x - start_x) * eased)
-        next_y = round(start_y + (y - start_y) * eased)
+    points = _spring_cursor_path(start_x, start_y, x, y)
+    started = time.perf_counter()
+    for index, (next_x, next_y) in enumerate(points):
         _send_inputs([_absolute_mouse_move(next_x, next_y)])
-        if step < steps:
-            time.sleep(duration / steps)
+        if index < len(points) - 1:
+            deadline = started + (index + 1) / 60.0
+            delay = deadline - time.perf_counter()
+            if delay > 0:
+                time.sleep(delay)
 
 
 _VIRTUAL_KEYS = {
@@ -1859,14 +1899,7 @@ def main() -> int:
             animate = bool(payload.get("animate", True))
             _move_cursor_to(start_x, start_y, animate)
             _send_inputs([_mouse_input(MOUSEEVENTF_LEFTDOWN)])
-            duration = 0.18 if animate else 0
-            for step in range(1, 13):
-                _send_inputs([_absolute_mouse_move(
-                    round(start_x + (target_x - start_x) * step / 12),
-                    round(start_y + (target_y - start_y) * step / 12),
-                )])
-                if duration and step < 12:
-                    time.sleep(duration / 12)
+            _move_cursor_to(target_x, target_y, animate)
             _send_inputs([_mouse_input(MOUSEEVENTF_LEFTUP)])
             return _finish(lease, True)
         if command == "move_mouse":
