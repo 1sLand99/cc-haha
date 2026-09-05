@@ -273,17 +273,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEBUG: 'electron-builder,electron-osx-sign,electron-notarize*'
-          # Signed macOS releases require all of these secrets. Keep this step
-          # separate from the unsigned fallback so empty secrets are never passed
-          # to electron-builder as CSC_LINK / APPLE_* env vars.
-          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          # Reuse the keychain prepared for native runtimes. Passing CSC_LINK
+          # would make electron-builder import the same certificate again.
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           MACOS_NOTARIZE: ${{ github.event_name != 'workflow_dispatch' || inputs.notarize_macos }}
         run: |
           set -euo pipefail
+          export CSC_KEYCHAIN="${CC_HAHA_CI_KEYCHAIN:?macOS signing keychain was not prepared}"
           echo "::group::macOS signing diagnostics"
           echo "UTC start: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           sw_vers

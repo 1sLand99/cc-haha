@@ -193,14 +193,15 @@ describe('release desktop workflow', () => {
 
   test('release workflow signs and notarizes macOS builds only when signing preflight succeeds', () => {
     const workflow = readReleaseWorkflow()
+    const importIdentityStep = extractStep(workflow, 'Import macOS signing identity for native runtimes')
     const signedBuildStep = extractStep(workflow, 'Build signed macOS Electron release artifacts')
     const unsignedBuildStep = extractStep(workflow, 'Build unsigned Electron release artifacts')
 
     expect(workflow).toContain('app_bundle_dir: mac-arm64')
     expect(workflow).toContain('app_bundle_dir: mac')
     expect(signedBuildStep).toContain("if: matrix.smoke_platform == 'macos' && needs.signing-preflight.outputs.macos_signed == 'true'")
-    expect(signedBuildStep).toContain('CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}')
-    expect(signedBuildStep).toContain('CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}')
+    expect(importIdentityStep).toContain('CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}')
+    expect(importIdentityStep).toContain('CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}')
     expect(signedBuildStep).toContain('APPLE_ID: ${{ secrets.APPLE_ID }}')
     expect(signedBuildStep).toContain('APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}')
     expect(signedBuildStep).toContain('APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}')
@@ -255,6 +256,25 @@ describe('release desktop workflow', () => {
     expect(unsignedBuildStep).toContain(electronBuilderCli)
     expect(workflow.indexOf('Build signed macOS Electron release artifacts')).toBeLessThan(workflow.indexOf('Verify packaged app structure'))
     expect(workflow.indexOf('Build unsigned Electron release artifacts')).toBeLessThan(workflow.indexOf('Verify packaged app structure'))
+  })
+
+  test('macOS packaging reuses the native runtime keychain instead of importing the certificate again', () => {
+    const workflow = readReleaseWorkflow()
+    const importIdentityStep = extractStep(workflow, 'Import macOS signing identity for native runtimes')
+    const signedBuildStep = extractStep(workflow, 'Build signed macOS Electron release artifacts')
+    const cleanupStep = extractStep(workflow, 'Remove temporary macOS signing keychain')
+
+    expect(importIdentityStep).toContain('echo "CC_HAHA_CI_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"')
+    expect(signedBuildStep).toContain('export CSC_KEYCHAIN="${CC_HAHA_CI_KEYCHAIN:?macOS signing keychain was not prepared}"')
+    expect(signedBuildStep).not.toContain('CSC_LINK:')
+    expect(signedBuildStep).not.toContain('CSC_KEY_PASSWORD:')
+    expect(cleanupStep).toContain('security delete-keychain "$CC_HAHA_CI_KEYCHAIN"')
+    expect(workflow.indexOf('Import macOS signing identity for native runtimes')).toBeLessThan(
+      workflow.indexOf('Build signed macOS Electron release artifacts'),
+    )
+    expect(workflow.indexOf('Remove temporary macOS signing keychain')).toBeGreaterThan(
+      workflow.indexOf('Verify macOS launch policy'),
+    )
   })
 
   test('release workflow requires signed macOS Computer Use and preserves SignPath draft policy', () => {
