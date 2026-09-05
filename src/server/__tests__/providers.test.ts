@@ -1287,6 +1287,50 @@ describe('ProviderService', () => {
       }
     })
 
+    test.each([
+      ['xuanshuapi', 'https://www.xuanshuapi.com', 'claude-sonnet-5'],
+      ['fennoai', 'https://api.fenno.ai', 'claude-sonnet-5'],
+      ['qiniuai', 'https://api.qnaigc.com', 'deepseek/deepseek-v4-pro'],
+    ])('keeps legacy %s providers editable and usable after retirement', async (presetId, baseUrl, model) => {
+      // This is an old on-disk record: auth/context fields were not always persisted.
+      const legacyProvider = {
+        id: `saved-${presetId}`,
+        ...sampleInput({ presetId, baseUrl, models: { main: model, haiku: model, sonnet: model, opus: model } }),
+      }
+      await fs.mkdir(path.join(tmpDir, 'cc-haha'), { recursive: true })
+      await fs.writeFile(path.join(tmpDir, 'cc-haha', 'providers.json'), JSON.stringify({
+        providers: [legacyProvider],
+        activeId: legacyProvider.id,
+      }))
+
+      const svc = new ProviderService()
+      expect((await svc.listProviders()).providers).toEqual([expect.objectContaining(legacyProvider)])
+
+      await svc.updateProvider(legacyProvider.id, { name: 'Renamed saved provider' })
+      await svc.activateProvider(legacyProvider.id)
+      const restarted = new ProviderService()
+      expect(await restarted.getProvider(legacyProvider.id)).toMatchObject({
+        ...legacyProvider,
+        name: 'Renamed saved provider',
+      })
+      expect((await restarted.listProviders()).activeId).toBe(legacyProvider.id)
+
+      const runtimeEnv = await restarted.getProviderRuntimeEnv(legacyProvider.id)
+      const settingsEnv = (await readSettings()).env as Record<string, string>
+      for (const env of [runtimeEnv, settingsEnv]) {
+        expect(env).toMatchObject({
+          ANTHROPIC_BASE_URL: baseUrl,
+          ANTHROPIC_AUTH_TOKEN: legacyProvider.apiKey,
+          ANTHROPIC_API_KEY: '',
+          ANTHROPIC_MODEL: model,
+        })
+        expect(JSON.parse(env.CLAUDE_CODE_MODEL_CONTEXT_WINDOWS)[model]).toBe(1000000)
+        if (presetId === 'xuanshuapi') {
+          expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe('claude-sonnet-5')
+        }
+      }
+    })
+
     test('should include preset default env on activation and runtime env', async () => {
       const svc = new ProviderService()
       const provider = await svc.addProvider(sampleInput({

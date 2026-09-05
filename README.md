@@ -65,36 +65,6 @@ This project is maintained in the author's spare time. Corporate or individual s
   <tbody>
     <tr>
       <td align="center" valign="middle">
-        <a href="https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA">
-          <img src="docs/images/sponsors/xuanshuapi-logo.svg" width="120" alt="XuanShu API">
-        </a>
-      </td>
-      <td valign="middle">
-        Thanks to <a href="https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA">XuanShu API</a> for sponsoring this project. XuanShu API is an all-in-one, enterprise-grade AI gateway that gives you access to leading global models through a single unified API, and works out of the box with popular AI coding tools such as Claude Code, Codex, and Gemini CLI. Stability comes first: multi-account pool scheduling and automatic failover smooth out upstream account fluctuations. Model calls are priced as low as 25% of official rates, and balance top-ups get roughly a 20% bonus with no expiry. New users who register through <a href="https://www.xuanshuapi.com/register?aff=CC-HAHA&promo=CC-HAHA">this link</a> receive a $5 credit.
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="middle">
-        <a href="https://api.fenno.ai/s/WD8c">
-          <img src="docs/images/sponsors/fennoai-logo.svg" width="180" alt="FennoAI">
-        </a>
-      </td>
-      <td valign="middle">
-        Thanks to <a href="https://api.fenno.ai/s/WD8c">FennoAI</a> for sponsoring this project. FennoAI is a high-stability, high-performance API relay service for enterprise engineering teams and individual developers. It speaks both the OpenAI and Anthropic protocols, so it drops straight into Codex, Claude Code, OpenCode, and other mainstream AI coding tools. The platform is built for enterprise-grade stability at hundreds of billions of tokens per day, and supports corporate settlement and invoicing for both domestic and overseas entities. As a cc-haha user perk, buying a subscription through <a href="https://api.fenno.ai/s/WD8c">this link</a> gets you $50 of Coding Plan credit for $1.99. Referrals earn up to 20% commission — the more you invite, the more you get.
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="middle">
-        <a href="https://s.qiniu.com/IZbyya">
-          <img src="docs/images/sponsors/qiniuai-logo.svg" width="180" alt="Qiniu Cloud AI">
-        </a>
-      </td>
-      <td valign="middle">
-        Thanks to <a href="https://s.qiniu.com/IZbyya">Qiniu Cloud AI</a> for sponsoring this project. Qiniu Cloud AI is the enterprise-grade LLM MaaS platform from Qiniu Cloud (02567.HK): one entry point to 150+ leading models worldwide, compatible with the major vendors' protocols, covering text, image, audio, video, and file processing across every modality, and serving more than 1.69 million enterprises and developers. As a cc-haha user perk, registering through <a href="https://s.qiniu.com/IZbyya">this link</a> gets enterprise users 12M free tokens and developers 3M free tokens.
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="middle">
         <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=cc-haha">
           <img src="docs/images/sponsors/atlascloud-logo-black.png#gh-light-mode-only" width="180" alt="Atlas Cloud">
           <img src="docs/images/sponsors/atlascloud-logo-white.png#gh-dark-mode-only" width="180" alt="Atlas Cloud">
