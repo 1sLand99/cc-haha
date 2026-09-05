@@ -1,13 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { getCwdState, setCwdState } from '../../bootstrap/state.js'
 import { enableConfigs } from '../../utils/config.js'
+import { invalidateComputerUseSkillGate } from '../../utils/computerUse/skillGate.js'
 import { clearInstalledPluginsCache } from '../../utils/plugins/installedPluginsManager.js'
 import { clearPluginCache } from '../../utils/plugins/pluginLoader.js'
 import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
 import { handlePluginsApi } from '../api/plugins.js'
+import { handleComputerUseApi } from '../api/computer-use.js'
 import { handleSkillsApi, listSkillSlashCommands } from '../api/skills.js'
 
 let tmpHome: string
@@ -62,12 +64,14 @@ describe('Skills API', () => {
     clearInstalledPluginsCache()
     clearPluginCache('skills-api-test-setup')
     resetSettingsCache()
+    invalidateComputerUseSkillGate()
   })
 
   afterEach(async () => {
     clearInstalledPluginsCache()
     clearPluginCache('skills-api-test-teardown')
     resetSettingsCache()
+    invalidateComputerUseSkillGate()
     if (originalHome === undefined) {
       delete process.env.HOME
     } else {
@@ -771,14 +775,34 @@ describe('Skills API', () => {
       expect(simplify?.description ?? '').not.toBe('')
     })
 
-    it('offers /computer-use so it can be picked before the first message', async () => {
-      // The native engine is macOS-only and the skill hides itself elsewhere.
-      if (process.platform !== 'darwin') return
-      const names = (await listSkillSlashCommands(await emptyRepo())).map(
-        (c) => c.name,
-      )
+    it('offers /computer-use before the first message only while enabled in settings', async () => {
+      if (process.platform !== 'darwin' && process.platform !== 'win32') return
+      const repo = await emptyRepo()
+      let now = Date.now()
+      const clock = spyOn(Date, 'now').mockImplementation(() => now)
+      const names = async () => (await listSkillSlashCommands(repo)).map(c => c.name)
+      const setEnabled = async (enabled: boolean) => {
+        const url = new URL('http://localhost:3456/api/computer-use/authorized-apps')
+        const response = await handleComputerUseApi(new Request(url, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled }),
+        }), url, url.pathname.split('/').filter(Boolean))
+        expect(response.status).toBe(200)
+        // The server and CLI read the same file in different processes; let
+        // the real gate expire its cache instead of forcing its value.
+        now += 3_001
+      }
 
-      expect(names).toContain('computer-use')
+      try {
+        expect(await names()).not.toContain('computer-use')
+        await setEnabled(true)
+        expect(await names()).toContain('computer-use')
+        await setEnabled(false)
+        expect(await names()).not.toContain('computer-use')
+      } finally {
+        clock.mockRestore()
+      }
     })
 
     it('can be asked to leave them out once the CLI has reported', async () => {
