@@ -128,10 +128,6 @@ final class ClipboardPasteReceipt: NSObject, NSPasteboardItemDataProvider, @unch
             try await sendPaste(validate)
             posted = true
             try await written.waitForRead(timeout: timeout, ownsClipboard: lease.temporaryWriteIsCurrent)
-            // CEF often exposes no AX text/selection evidence. As in the
-            // reference's no-AX branch, allow a short processing window after
-            // actual data delivery; this is not a claim of field acceptance.
-            await pause(for: .milliseconds(100))
             guard lease.temporaryWriteIsCurrent() else {
                 throw CUError("clipboard_changed", "The clipboard changed after paste data was supplied")
             }
@@ -144,8 +140,10 @@ final class ClipboardPasteReceipt: NSObject, NSPasteboardItemDataProvider, @unch
     }
 
     /// Once Command-V was sent, cancellation must not restore the previous
-    /// clipboard while the target can still be reading this one. Finish the
-    /// bounded read/settle window, then surface cancellation to the caller.
+    /// clipboard while the target can still be reading this one. A clipboard
+    /// observer may request the bytes before the target does, so an unidentified
+    /// read cannot shorten the bounded consumption window. The window starts
+    /// when sendPaste returns; after it ends, surface cancellation to the caller.
     @MainActor
     func waitForRead(timeout: Duration, ownsClipboard: @MainActor () -> Bool) async throws {
         let deadline = ContinuousClock.now.advanced(by: timeout)
@@ -153,10 +151,10 @@ final class ClipboardPasteReceipt: NSObject, NSPasteboardItemDataProvider, @unch
             guard ownsClipboard() else {
                 throw CUError("clipboard_changed", "The clipboard changed while waiting for paste consumption")
             }
-            if state.withLock({ $0.suppliedAt != nil }) { return }
             let remaining = ContinuousClock.now.duration(to: deadline)
             guard remaining > .zero else {
                 try Task.checkCancellation()
+                if state.withLock({ $0.suppliedAt != nil }) { return }
                 throw CUError("clipboard_read_timeout", "No pasteboard data read was observed within the paste deadline; inspect the target before retrying")
             }
             await Self.pause(for: min(.milliseconds(10), remaining))

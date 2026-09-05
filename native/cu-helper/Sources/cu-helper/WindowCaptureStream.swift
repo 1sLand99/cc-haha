@@ -19,9 +19,8 @@ struct WindowCaptureStreamKey: Equatable, Sendable {
 }
 
 /// Current geometry plus the stable identity/config key used by the stream.
-/// Origin is deliberately outside the key: moving an unchanged window does
-/// not require a new ScreenCaptureKit consumer, but every delivered shot uses
-/// freshly-read geometry so screenshot coordinates still invert correctly.
+/// The display-relative stream crop depends on origin as well as dimensions.
+/// Reuse requires this complete target, not only its process/window key.
 struct WindowCaptureStreamTarget: Equatable, Sendable {
     let key: WindowCaptureStreamKey
     let originX: Double
@@ -112,6 +111,7 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
     private struct Entry {
         let generation: UInt64
         let source: any WindowCaptureStreamSource
+        let target: WindowCaptureStreamTarget
     }
 
     private let factory: any WindowCaptureStreamSourceFactory
@@ -201,7 +201,7 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
                 invalidate()
                 return nil
             }
-            guard current.key == target.key else {
+            guard current == target else {
                 continue
             }
             return WindowShot(
@@ -338,7 +338,7 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
         for target: WindowCaptureStreamTarget
     ) async -> (any WindowCaptureStreamSource)? {
         if let active,
-           active.source.targetKey == target.key,
+           active.target == target,
            !active.source.hasFailed {
             return active.source
         }
@@ -350,7 +350,7 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
         generation &+= 1
         let operationGeneration = generation
         let source = factory.makeSource(for: target)
-        starting = Entry(generation: operationGeneration, source: source)
+        starting = Entry(generation: operationGeneration, source: source, target: target)
 
         do {
             try await source.start()
@@ -368,7 +368,7 @@ final class WindowCaptureStreamManager: WindowCaptureProviding {
             return nil
         }
         starting = nil
-        let installed = Entry(generation: operationGeneration, source: source)
+        let installed = Entry(generation: operationGeneration, source: source, target: target)
         active = installed
         return installed.source
     }
@@ -507,8 +507,19 @@ final class ScreenCaptureKitWindowStreamSource: WindowCaptureStreamSource {
             )
         }
 
-        let filter = SCContentFilter(desktopIndependentWindow: window)
-        let configuration = Self.makeConfiguration(for: target)
+        guard let region = Self.displayCaptureRegion(
+            windowFrame: window.frame, displayFrames: content.displays.map(\.frame)
+        ) else {
+            throw CUError("capture_failed", "The target window does not intersect a capture display")
+        }
+        // A desktop-independent stream can keep delivering compositor frames
+        // while an occluded CEF renderer stops responding. The reference's
+        // display/window filter keeps the renderer live. Include only the
+        // authorized window; model screenshots still use Capture.windowShot.
+        let filter = SCContentFilter(
+            display: content.displays[region.displayIndex], including: [window]
+        )
+        let configuration = Self.makeConfiguration(for: target, sourceRect: region.sourceRect)
         let stream = SCStream(
             filter: filter,
             configuration: configuration,
@@ -549,12 +560,35 @@ final class ScreenCaptureKitWindowStreamSource: WindowCaptureStreamSource {
         }
     }
 
+    static func displayCaptureRegion(
+        windowFrame: CGRect, displayFrames: [CGRect]
+    ) -> (displayIndex: Int, sourceRect: CGRect)? {
+        var selected: (displayIndex: Int, sourceRect: CGRect)?
+        var largestArea: CGFloat = 0
+        for (index, displayFrame) in displayFrames.enumerated() {
+            guard [displayFrame.minX, displayFrame.minY, displayFrame.maxX, displayFrame.maxY]
+                .allSatisfy(\.isFinite), !displayFrame.isInfinite else { continue }
+            let intersection = windowFrame.intersection(displayFrame)
+            guard !intersection.isNull, !intersection.isEmpty else { continue }
+            let area = intersection.width * intersection.height
+            guard area.isFinite, area > largestArea else { continue }
+            largestArea = area
+            selected = (
+                index,
+                intersection.offsetBy(dx: -displayFrame.minX, dy: -displayFrame.minY)
+            )
+        }
+        return selected
+    }
+
     static func makeConfiguration(
-        for target: WindowCaptureStreamTarget
+        for target: WindowCaptureStreamTarget, sourceRect: CGRect? = nil
     ) -> SCStreamConfiguration {
         let configuration = SCStreamConfiguration()
         configuration.width = max(1, target.key.pixelWidth)
         configuration.height = max(1, target.key.pixelHeight)
+        if let sourceRect { configuration.sourceRect = sourceRect }
+        configuration.shouldBeOpaque = false
         // Match Codex's long-lived window stream cadence and buffering. This
         // keeps a continuous WindowServer consumer for an occluded renderer;
         // it is not a polling screenshot throttle.

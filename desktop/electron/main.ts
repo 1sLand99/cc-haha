@@ -832,21 +832,36 @@ app.on('before-quit', event => {
   event.preventDefault()
   if (quitCleanupStarted) return
   quitCleanupStarted = true
-  if (mainWindow) saveWindowState(app, mainWindow)
-  trayController?.dispose()
+  const cleanupSteps = {
+    window: () => { if (mainWindow) saveWindowState(app, mainWindow) },
+    tray: () => { trayController?.dispose() },
+    terminal: () => { terminalService?.killAll() },
+    preview: () => { previewService?.close() },
+    pet: () => { petWindowController?.dispose() },
+  }
+  // A destroyed native view or PTY can throw during cleanup. Keep going so a
+  // failed resource cannot leave every later quit blocked by cleanupStarted.
+  for (const [resource, cleanup] of Object.entries(cleanupSteps)) {
+    try {
+      cleanup()
+    } catch (error) {
+      console.error(`[desktop] ${resource} cleanup failed during quit`, error)
+    }
+  }
   trayController = null
-  terminalService?.killAll()
-  previewService?.close()
-  petWindowController?.dispose()
   petWindowController = null
   // Keep Electron (and the server's stdout/stderr pipes) alive until the server
   // has waited for its CLI children to finish their graceful cleanup. The CLI
   // owns the launchd-reparented Computer Use helper, so exiting the host first
   // can strand its active turn across an immediate app restart.
-  void getServerRuntime().stopAllAndWait().catch(error => {
-    console.error('[desktop] graceful server shutdown failed', error)
-  }).finally(() => {
-    quitCleanupFinished = true
-    app.quit()
-  })
+  void (async () => {
+    try {
+      await getServerRuntime().stopAllAndWait()
+    } catch (error) {
+      console.error('[desktop] graceful server shutdown failed', error)
+    } finally {
+      quitCleanupFinished = true
+      app.quit()
+    }
+  })()
 })
