@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync, readdirSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { parse } from 'yaml'
 
 describe('release desktop workflow', () => {
   function readReleaseWorkflow() {
@@ -329,6 +332,63 @@ describe('release desktop workflow', () => {
     expect(buildJob).toContain('- signing-preflight')
     expect(workflow.indexOf('signing-preflight:')).toBeLessThan(workflow.indexOf('build:'))
     expect(workflow.indexOf('signing-preflight:')).toBeLessThan(workflow.indexOf('Upload release artifacts for final publish'))
+  })
+
+  test('an explicit manual Windows signing skip preserves macOS and default release requirements', async () => {
+    const workflow = parse(readReleaseWorkflow())
+    expect(workflow.on.workflow_dispatch.inputs.skip_windows_signing).toEqual({
+      description: 'Build unsigned Windows artifacts while SignPath onboarding is pending',
+      required: false,
+      default: false,
+      type: 'boolean',
+    })
+    const preflight = workflow.jobs['signing-preflight'].steps.find((step: { id?: string }) => step.id === 'validate')
+    expect(preflight.env.SKIP_WINDOWS_SIGNING).toBe("${{ github.event_name == 'workflow_dispatch' && inputs.skip_windows_signing == true }}")
+
+    const directory = mkdtempSync(join(tmpdir(), 'release-signing-preflight-'))
+    const configured = Object.fromEntries(Object.keys(preflight.env).map(key => [key, 'test-value']))
+    const cases = [
+      { name: 'configured release', env: {}, code: 0, outputs: 'macos_signed=true\nwindows_signed=true\n' },
+      { name: 'explicit skip with configured SignPath', env: { SKIP_WINDOWS_SIGNING: 'true' }, code: 0, outputs: 'macos_signed=true\nwindows_signed=false\n' },
+      { name: 'explicit skip without SignPath', env: { SKIP_WINDOWS_SIGNING: 'true', SIGNPATH_API_TOKEN: '' }, code: 0, outputs: 'macos_signed=true\nwindows_signed=false\n' },
+      { name: 'release missing SignPath without skip', env: { SIGNPATH_API_TOKEN: '' }, code: 1, outputs: 'macos_signed=true\nwindows_signed=false\n' },
+      { name: 'draft missing SignPath', env: { RELEASE_DRAFT: 'true', SIGNPATH_API_TOKEN: '' }, code: 0, outputs: 'macos_signed=true\nwindows_signed=false\n' },
+      { name: 'explicit skip still requires macOS credentials', env: { SKIP_WINDOWS_SIGNING: 'true', CSC_LINK: '' }, code: 1, outputs: 'macos_signed=false\n' },
+    ]
+    try {
+      for (const [index, scenario] of cases.entries()) {
+        const output = join(directory, `output-${index}`)
+        const logPath = join(directory, `log-${index}`)
+        // Capture inside the shell so Bun's test-output pipes cannot affect echo/printf exit codes.
+        const result = Bun.spawn(['bash', '-e', '-c', 'exec > "$PREFLIGHT_LOG" 2>&1\n' + preflight.run], {
+          env: {
+            ...configured,
+            RELEASE_DRAFT: 'false',
+            SKIP_WINDOWS_SIGNING: 'false',
+            ...scenario.env,
+            PATH: process.env.PATH,
+            HOME: directory,
+            GITHUB_OUTPUT: output,
+            PREFLIGHT_LOG: logPath,
+          },
+          stdout: 'ignore',
+          stderr: 'ignore',
+        })
+        const code = await result.exited
+        expect(code, `${scenario.name}: ${readFileSync(logPath, 'utf8')}`).toBe(scenario.code)
+        expect(readFileSync(output, 'utf8'), scenario.name).toBe(scenario.outputs)
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+
+    const unsignedBuild = extractStep(readReleaseWorkflow(), 'Build unsigned Electron release artifacts')
+    expect(unsignedBuild).toContain("matrix.smoke_platform == 'windows' && needs.signing-preflight.outputs.windows_signed != 'true'")
+    for (const name of ['Sign Windows application executables with SignPath', 'Sign Windows installer with SignPath']) {
+      expect(extractStep(readReleaseWorkflow(), name)).toContain("needs.signing-preflight.outputs.windows_signed == 'true'")
+    }
+    expect(extractStep(readReleaseWorkflow(), 'Verify Windows installer execution')).not.toContain('windows_signed')
+    expect(extractStep(readReleaseWorkflow(), 'Verify packaged app structure')).not.toContain('windows_signed')
   })
 
   test('release workflow signs project-owned Windows binaries before packaging and repairs updater metadata', () => {

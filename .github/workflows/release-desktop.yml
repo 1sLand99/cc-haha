@@ -15,6 +15,11 @@ on:
         required: false
         default: true
         type: boolean
+      skip_windows_signing:
+        description: 'Build unsigned Windows artifacts while SignPath onboarding is pending'
+        required: false
+        default: false
+        type: boolean
       publish_draft_release:
         description: 'Publish manual draft artifacts to GitHub Releases'
         required: false
@@ -52,6 +57,7 @@ jobs:
           SIGNPATH_APPLICATION_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_APPLICATION_ARTIFACT_CONFIGURATION_SLUG }}
           SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG }}
           RELEASE_DRAFT: ${{ github.event_name == 'workflow_dispatch' && inputs.draft == true }}
+          SKIP_WINDOWS_SIGNING: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_windows_signing == true }}
         run: |
           # macOS signing + notarization is preferred: Squirrel.Mac auto-update and
           # first-launch Gatekeeper approval and Computer Use client attestation
@@ -70,8 +76,15 @@ jobs:
           else
             echo "macos_signed=true" >> "$GITHUB_OUTPUT"
           fi
+          # A maintainer can explicitly release unsigned Windows builds while
+          # SignPath approval is pending, even when its configuration is present.
+          if [ "$SKIP_WINDOWS_SIGNING" = "true" ]; then
+            echo "::warning::Windows signing explicitly skipped for this manual release; Windows artifacts will be unsigned."
+            echo "windows_signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Drafts may remain unsigned while SignPath onboarding is being tested. Tags and
-          # non-draft releases must have the full GitHub connector configuration available.
+          # non-draft releases otherwise require the full GitHub connector configuration.
           win_missing=()
           [ -n "$SIGNPATH_API_TOKEN" ] || win_missing+=("SIGNPATH_API_TOKEN secret")
           [ -n "$SIGNPATH_ORGANIZATION_ID" ] || win_missing+=("SIGNPATH_ORGANIZATION_ID variable")
