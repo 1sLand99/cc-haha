@@ -1,12 +1,16 @@
 import { DARK_THEME_MODES, LIGHT_THEME_MODES, THEME_MODES } from '../types/settings'
 import {
+  WORKSPACE_STORAGE_KEY,
+  WORKSPACE_STORAGE_VERSION,
+} from './workspace/storageKey'
+import {
   APP_ZOOM_STORAGE_KEY,
   LEGACY_UI_ZOOM_STORAGE_KEY,
   isValidStoredAppZoomLevel,
   normalizeAppZoomLevel,
 } from './appZoom'
 
-export const CURRENT_DESKTOP_PERSISTENCE_SCHEMA_VERSION = 1
+export const CURRENT_DESKTOP_PERSISTENCE_SCHEMA_VERSION = 2
 export const DESKTOP_PERSISTENCE_VERSION_KEY = 'cc-haha.persistence.schemaVersion'
 
 type DesktopMigrationReport = {
@@ -31,6 +35,7 @@ const PERSISTED_SPECIAL_TAB_IDS: Record<(typeof PERSISTED_SPECIAL_TAB_TYPES)[num
   traces: '__traces__',
 }
 const SUPPORTED_LOCALES = ['en', 'zh', 'zh-TW', 'jp', 'kr']
+const WORKSPACE_PERSISTED_TAB_KINDS = ['file', 'browser', 'review', 'terminal']
 
 function readJson(storage: StorageLike, key: string): unknown {
   const raw = storage.getItem(key)
@@ -175,6 +180,73 @@ function migrateThemeKey(
   normalizeEnumKey(storage, key, [...allowedValues], report)
 }
 
+/**
+ * Schema 2 introduced the unified workspace store. There is nothing to carry
+ * forward — the panel/browser/terminal stores it replaces were never persisted
+ * — so the job here is purely defensive: an entry written by a future build, or
+ * a half-written one, must be dropped rather than fed to the hydrator.
+ *
+ * Terminal descriptors are the reason this cannot be left to the hydrator
+ * alone: a stale entry carrying a live-looking runtime id is exactly the shape
+ * that would make a restored shell look like a running process.
+ */
+function migrateWorkspaceState(storage: StorageLike, report: DesktopMigrationReport): void {
+  const raw = storage.getItem(WORKSPACE_STORAGE_KEY)
+  if (!raw) return
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (!isRecord(parsed) || !isRecord(parsed.sessions)) {
+      storage.removeItem(WORKSPACE_STORAGE_KEY)
+      report.migratedKeys.push(WORKSPACE_STORAGE_KEY)
+      return
+    }
+    if (parsed.version !== WORKSPACE_STORAGE_VERSION) {
+      // A newer build wrote this. The hydrator already refuses a version it
+      // does not know, so leave the entry alone — deleting it would mean that
+      // downgrading once, briefly, permanently discards the workspace the newer
+      // build is still using.
+      return
+    }
+
+    let changed = false
+    const sessions: Record<string, unknown> = {}
+    for (const [sessionId, value] of Object.entries(parsed.sessions)) {
+      if (!isRecord(value) || !Array.isArray(value.tabs)) {
+        changed = true
+        continue
+      }
+      const tabs = value.tabs.filter((tab) =>
+        isRecord(tab) &&
+        typeof tab.id === 'string' &&
+        // Anything naming a host resource is stale by definition once the
+        // process that owned it is gone.
+        !('runtimeId' in tab) &&
+        !('browserTabId' in tab) &&
+        WORKSPACE_PERSISTED_TAB_KINDS.includes(tab.kind as string))
+      if (tabs.length !== value.tabs.length) changed = true
+      if (tabs.length === 0) {
+        changed = true
+        continue
+      }
+      sessions[sessionId] = { ...value, tabs }
+    }
+
+    if (Object.keys(sessions).length === 0) {
+      storage.removeItem(WORKSPACE_STORAGE_KEY)
+      report.migratedKeys.push(WORKSPACE_STORAGE_KEY)
+      return
+    }
+    if (changed) {
+      writeJson(storage, WORKSPACE_STORAGE_KEY, { ...parsed, sessions })
+      report.migratedKeys.push(WORKSPACE_STORAGE_KEY)
+    }
+  } catch {
+    storage.removeItem(WORKSPACE_STORAGE_KEY)
+    report.migratedKeys.push(WORKSPACE_STORAGE_KEY)
+  }
+}
+
 function normalizeEnumKey(
   storage: StorageLike,
   key: string,
@@ -245,6 +317,7 @@ export function runDesktopPersistenceMigrations(storage: StorageLike | null = ge
     migrateThemeKey(storage, DARK_THEME_STORAGE_KEY, DARK_THEME_MODES, report))
   runMigrationStep(report, LOCALE_STORAGE_KEY, () => normalizeEnumKey(storage, LOCALE_STORAGE_KEY, SUPPORTED_LOCALES, report))
   runMigrationStep(report, APP_ZOOM_STORAGE_KEY, () => normalizeAppZoomKey(storage, report))
+  runMigrationStep(report, WORKSPACE_STORAGE_KEY, () => migrateWorkspaceState(storage, report))
   try {
     storage.setItem(DESKTOP_PERSISTENCE_VERSION_KEY, String(CURRENT_DESKTOP_PERSISTENCE_SCHEMA_VERSION))
   } catch {

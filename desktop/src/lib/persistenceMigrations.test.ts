@@ -253,4 +253,74 @@ describe('desktop persistence migrations', () => {
       DESKTOP_PERSISTENCE_VERSION_KEY,
     ]))
   })
+  test('keeps a schema-1 install usable: no workspace key means nothing to migrate', () => {
+    window.localStorage.setItem('cc-haha-open-tabs', JSON.stringify({
+      openTabs: [{ sessionId: 'session-1', title: 'Chat', type: 'session' }],
+      activeTabId: 'session-1',
+    }))
+    window.localStorage.setItem('cc-haha-theme', 'ink-blue')
+
+    const report = runDesktopPersistenceMigrations()
+
+    expect(report.migratedKeys).not.toContain('cc-haha.workspace')
+    expect(window.localStorage.getItem('cc-haha.workspace')).toBeNull()
+    // The schema-1 keys a v0.6.2 install carries must survive untouched.
+    expect(window.localStorage.getItem('cc-haha-theme')).toBe('ink-blue')
+    expect(JSON.parse(window.localStorage.getItem('cc-haha-open-tabs')!).openTabs).toHaveLength(1)
+    expect(window.localStorage.getItem(DESKTOP_PERSISTENCE_VERSION_KEY)).toBe('2')
+  })
+
+  test('leaves a workspace entry written by a newer schema untouched', () => {
+    const future = JSON.stringify({
+      version: 2,
+      sessions: { s1: { tabs: [{ kind: 'file', id: 'f1', path: 'a.ts' }] } },
+    })
+    window.localStorage.setItem('cc-haha.workspace', future)
+
+    const report = runDesktopPersistenceMigrations()
+
+    // The hydrator already refuses an unknown version. Deleting it here would
+    // mean a single downgrade launch permanently discards the workspace the
+    // newer build is still using.
+    expect(report.migratedKeys).not.toContain('cc-haha.workspace')
+    expect(window.localStorage.getItem('cc-haha.workspace')).toBe(future)
+  })
+
+  test('strips tab entries that name a host resource the previous run owned', () => {
+    window.localStorage.setItem('cc-haha.workspace', JSON.stringify({
+      version: 1,
+      sideWidth: 860,
+      bottomHeight: 420,
+      sessions: {
+        s1: {
+          layout: 'split',
+          bottomOpen: false,
+          activeSideTabId: 'f1',
+          activeBottomTabId: null,
+          nextTerminalOrdinal: 2,
+          tabs: [
+            { kind: 'file', id: 'f1', preview: false, path: 'a.ts' },
+            { kind: 'terminal', id: 't1', dock: 'side', cwd: '/repo', ordinal: 1, runtimeId: 'stale-pty' },
+            { kind: 'browser', id: 'b1', preview: false, storageId: 'p1', restoreUrl: null, title: null, browserTabId: 'stale-view' },
+          ],
+        },
+      },
+    }))
+
+    const report = runDesktopPersistenceMigrations()
+
+    expect(report.migratedKeys).toContain('cc-haha.workspace')
+    const stored = JSON.parse(window.localStorage.getItem('cc-haha.workspace')!)
+    expect(stored.sessions.s1.tabs.map((tab: { id: string }) => tab.id)).toEqual(['f1'])
+  })
+
+  test('removes a corrupt workspace entry rather than throwing at startup', () => {
+    window.localStorage.setItem('cc-haha.workspace', '{not json')
+
+    const report = runDesktopPersistenceMigrations()
+
+    expect(report.migratedKeys).toContain('cc-haha.workspace')
+    expect(window.localStorage.getItem('cc-haha.workspace')).toBeNull()
+  })
+
 })

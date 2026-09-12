@@ -3,6 +3,18 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const { openBrowser } = vi.hoisted(() => ({ openBrowser: vi.fn() }))
+// The unified open entry point replaced the per-store `open` / `openPreview`
+// pair: every caller now names a target and the controller decides the tab.
+vi.mock('../../lib/workspace/openTarget', () => ({
+  workspaceOpen: {
+    file: (...args: unknown[]) => openPreviewFn(...args),
+    browser: (...args: unknown[]) => openBrowser(...args),
+    review: (...args: unknown[]) => openPreviewFn(...args),
+    terminal: vi.fn(),
+  },
+  openWorkspaceTarget: vi.fn(),
+}))
+
 vi.mock('../../stores/browserPanelStore', () => ({
   useBrowserPanelStore: { getState: () => ({ open: openBrowser }) },
 }))
@@ -104,7 +116,7 @@ describe('AssistantOutputTargetCard', () => {
     fireEvent.click(screen.getByLabelText('assistantOutputs.open'))
     // The trailing args are openPreview's optional `origin` and `reveal` (#1146);
     // a card has no line number to reveal, hence undefined.
-    expect(openPreviewFn).toHaveBeenCalledWith('s1', 'docs/readme.md', 'file', undefined, undefined)
+    expect(openPreviewFn).toHaveBeenCalledWith('s1', 'docs/readme.md', {})
   })
 
   it('routes Open to the in-app browser for a localhost target', () => {

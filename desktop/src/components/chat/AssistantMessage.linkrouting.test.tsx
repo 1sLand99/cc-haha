@@ -3,6 +3,18 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const { openBrowser } = vi.hoisted(() => ({ openBrowser: vi.fn() }))
+// The unified open entry point replaced the per-store `open` / `openPreview`
+// pair: every caller now names a target and the controller decides the tab.
+vi.mock('../../lib/workspace/openTarget', () => ({
+  workspaceOpen: {
+    file: (...args: unknown[]) => openPreviewFn(...args),
+    browser: (...args: unknown[]) => openBrowser(...args),
+    review: (...args: unknown[]) => openPreviewFn(...args),
+    terminal: vi.fn(),
+  },
+  openWorkspaceTarget: vi.fn(),
+}))
+
 vi.mock('../../stores/browserPanelStore', () => ({
   useBrowserPanelStore: { getState: () => ({ open: openBrowser }) },
 }))

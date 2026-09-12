@@ -14,6 +14,7 @@ const browserCapabilities: DesktopHostCapabilities = {
   dialogs: false,
   notifications: false,
   previewWebview: false,
+  workspaceBrowser: false,
   shell: false,
   terminal: false,
   updates: false,
@@ -303,6 +304,30 @@ export const browserHost: DesktopHost = {
     async message() {
       unsupported('Native preview webview')
     },
+    async onEvent(): Promise<DesktopHostUnlisten> {
+      return noopUnlisten
+    },
+  },
+  browser: {
+    // Unlike `preview`, these resolve instead of throwing. Callers reach the
+    // browser through `workspaceBrowserHost`, which already reports the missing
+    // capability and offers "open externally"; an extra rejection here would
+    // only surface as an unhandled error behind that fallback.
+    async create() {},
+    async navigate() {},
+    async goBack() {},
+    async goForward() {},
+    async reload() {},
+    async stop() {},
+    async setBounds() {},
+    async setVisible() {},
+    async setZoom() {},
+    async find() {},
+    async stopFind() {},
+    async capture() {},
+    async message() {},
+    async printToPdf() {},
+    async close() {},
     async onEvent(): Promise<DesktopHostUnlisten> {
       return noopUnlisten
     },

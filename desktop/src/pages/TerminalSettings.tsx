@@ -61,6 +61,13 @@ type TerminalSettingsProps = {
   showPreferences?: boolean
   runtimeId?: string
   preserveOnUnmount?: boolean
+  /**
+   * Skip the implicit spawn on first mount, for a host that restores a terminal
+   * from disk. A restored shell must come back stopped and be started by the
+   * user — otherwise reopening the app silently spawns one process per terminal
+   * the user happened to have open when they quit.
+   */
+  autoStart?: boolean
 }
 
 export function TerminalSettings({
@@ -75,12 +82,17 @@ export function TerminalSettings({
   showPreferences = false,
   runtimeId,
   preserveOnUnmount = false,
+  autoStart = true,
 }: TerminalSettingsProps = {}) {
   const t = useTranslation()
   const theme = useUIStore((state) => state.theme)
   const desktopTerminal = useSettingsStore((state) => state.desktopTerminal)
   const setDesktopTerminal = useSettingsStore((state) => state.setDesktopTerminal)
   const hostRef = useRef<HTMLDivElement | null>(null)
+  // Read through a ref so flipping `autoStart` later (the user pressing Start)
+  // does not re-run the lifecycle effect and spawn a second shell.
+  const autoStartRef = useRef(autoStart)
+  autoStartRef.current = autoStart
   const lifecycleVersionRef = useRef(0)
   const localRuntimeIdRef = useRef<string | null>(null)
   if (!localRuntimeIdRef.current) {
@@ -147,6 +159,12 @@ export function TerminalSettings({
   ], [t])
 
   const resizeSession = useCallback(() => {
+    // A hidden host measures as 0x0, and fitting against that pushes a 2x1
+    // SIGWINCH to the PTY, reflowing whatever TUI is running inside it. The
+    // bottom dock stays mounted while hidden precisely so the terminal keeps
+    // its geometry, so this guard is what makes that safe.
+    const host = hostRef.current
+    if (host && (host.clientWidth === 0 || host.clientHeight === 0)) return
     const terminal = runtime.terminal
     const fit = runtime.fit
     const sessionId = runtime.nativeSessionId
@@ -334,7 +352,7 @@ export function TerminalSettings({
         attachTerminalRuntime(runtime, hostRef.current)
         resizeSession()
       })
-    } else {
+    } else if (autoStartRef.current) {
       void startTerminal()
     }
 

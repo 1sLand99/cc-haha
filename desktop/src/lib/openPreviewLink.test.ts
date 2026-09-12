@@ -17,16 +17,14 @@ vi.mock('./desktopRuntime', async (original) => ({
   getServerBaseUrl: () => 'http://127.0.0.1:4321',
 }))
 
-vi.mock('../stores/browserPanelStore', () => ({
-  useBrowserPanelStore: { getState: () => ({ open: vi.fn() }) },
+vi.mock('./workspace/openTarget', () => ({
+  workspaceOpen: { file: vi.fn(), browser: vi.fn(), review: vi.fn(), terminal: vi.fn() },
+  openWorkspaceTarget: vi.fn(),
 }))
 
-vi.mock('../stores/workspacePanelStore', () => ({
-  useWorkspacePanelStore: {
-    getState: () => ({
-      statusBySession: { s1: { workDir: '/work' } },
-      openPreview: vi.fn(),
-    }),
+vi.mock('../stores/workspaceContentStore', () => ({
+  useWorkspaceContentStore: {
+    getState: () => ({ statusBySession: { s1: { workDir: '/work' } } }),
   },
 }))
 

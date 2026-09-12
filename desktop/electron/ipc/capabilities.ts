@@ -154,12 +154,15 @@ const terminalSessionId: Validator = value =>
   && hasOnlyKeys(value, ['sessionId'])
   && isTerminalSessionId(value.sessionId)
 
+// `Number.isFinite`, not `typeof === 'number'`: `NaN` and `Infinity` are
+// numbers, and they reach `normalizePreviewBounds`, which throws — turning a
+// malformed message into an unhandled rejection in the renderer.
 const boundsPayload: Validator = value =>
   isRecord(value)
-  && typeof value.x === 'number'
-  && typeof value.y === 'number'
-  && typeof value.width === 'number'
-  && typeof value.height === 'number'
+  && Number.isFinite(value.x)
+  && Number.isFinite(value.y)
+  && Number.isFinite(value.width)
+  && Number.isFinite(value.height)
 
 const petInteractiveRegions: Validator = value =>
   Array.isArray(value)
@@ -180,6 +183,83 @@ const urlWithOptionalBounds: Validator = value =>
   && (value.bounds === undefined || boundsPayload(value.bounds))
 
 const zoomPayload: Validator = value => typeof value === 'number' && Number.isFinite(value)
+
+const MAX_WORKSPACE_BROWSER_FIND_LENGTH = 2_048
+
+const isWorkspaceBrowserId = (value: unknown) =>
+  typeof value === 'string'
+  && value.length > 0
+  && value.length <= 200
+  && /^[A-Za-z0-9._:-]+$/.test(value)
+
+const workspaceBrowserTab: Validator = value =>
+  isRecord(value)
+  && hasOnlyKeys(value, ['tabId'])
+  && isWorkspaceBrowserId(value.tabId)
+
+const workspaceBrowserCreate: Validator = value =>
+  isRecord(value)
+  && hasOnlyKeys(value, ['tabId', 'storageId', 'url', 'bounds'])
+  && isWorkspaceBrowserId(value.tabId)
+  && isWorkspaceBrowserId(value.storageId)
+  && (value.url === undefined || (typeof value.url === 'string' && value.url.length <= 8_192))
+  && (value.bounds === undefined || boundsPayload(value.bounds))
+
+const workspaceBrowserNavigate: Validator = value =>
+  isRecord(value)
+  && hasOnlyKeys(value, ['tabId', 'url'])
+  && isWorkspaceBrowserId(value.tabId)
+  && typeof value.url === 'string'
+  && value.url.length > 0
+  && value.url.length <= 8_192
+
+const workspaceBrowserReload: Validator = value =>
+  isRecord(value)
+  && hasOnlyKeys(value, ['tabId', 'ignoreCache'])
+  && isWorkspaceBrowserId(value.tabId)
+  && (value.ignoreCache === undefined || typeof value.ignoreCache === 'boolean')
+
+const workspaceBrowserSetBounds: Validator = value =>
+  isRecord(value)
+  && hasOnlyKeys(value, ['tabId', 'bounds'])
+  && isWorkspaceBrowserId(value.tabId)
+  && boundsPayload(value.bounds)
+
+const workspaceBrowserSetVisible: Validator = value =>
+  isRecord(value)
+  && hasOnlyKeys(value, ['tabId', 'visible'])
+  && isWorkspaceBrowserId(value.tabId)
+  && typeof value.visible === 'boolean'
+
+const workspaceBrowserSetZoom: Validator = value =>
+  isRecord(value)
+  && hasOnlyKeys(value, ['tabId', 'factor'])
+  && isWorkspaceBrowserId(value.tabId)
+  && zoomPayload(value.factor)
+
+const workspaceBrowserFind: Validator = value => {
+  if (!isRecord(value) || !hasOnlyKeys(value, ['tabId', 'text', 'options'])) return false
+  if (!isWorkspaceBrowserId(value.tabId)) return false
+  if (typeof value.text !== 'string' || value.text.length > MAX_WORKSPACE_BROWSER_FIND_LENGTH) return false
+  const options = value.options
+  if (options === undefined) return true
+  if (!isRecord(options) || !hasOnlyKeys(options, ['forward', 'findNext', 'matchCase'])) return false
+  return ['forward', 'findNext', 'matchCase'].every(key =>
+    options[key] === undefined || typeof options[key] === 'boolean')
+}
+
+const workspaceBrowserCapture: Validator = value =>
+  isRecord(value)
+  && hasOnlyKeys(value, ['tabId', 'kind'])
+  && isWorkspaceBrowserId(value.tabId)
+  && (value.kind === 'full' || value.kind === 'viewport')
+
+// The payload itself is the preview-agent protocol, re-validated in the main
+// process before it reaches a page; only the addressing is checked here.
+const workspaceBrowserMessage: Validator = value =>
+  isRecord(value)
+  && hasOnlyKeys(value, ['tabId', 'payload'])
+  && isWorkspaceBrowserId(value.tabId)
 
 // The colors reach BrowserWindow.setBackgroundColor, so they are pinned to a
 // literal 6-digit #RRGGBB. This is load-bearing, not tidiness: that API also
@@ -270,6 +350,21 @@ export const ELECTRON_IPC_VALIDATORS = {
   [ELECTRON_IPC_CHANNELS.previewSetZoom]: zoomPayload,
   [ELECTRON_IPC_CHANNELS.previewClose]: noPayload,
   [ELECTRON_IPC_CHANNELS.previewMessage]: () => true,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserCreate]: workspaceBrowserCreate,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserNavigate]: workspaceBrowserNavigate,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserGoBack]: workspaceBrowserTab,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserGoForward]: workspaceBrowserTab,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserReload]: workspaceBrowserReload,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserStop]: workspaceBrowserTab,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserSetBounds]: workspaceBrowserSetBounds,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserSetVisible]: workspaceBrowserSetVisible,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserSetZoom]: workspaceBrowserSetZoom,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserFind]: workspaceBrowserFind,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserStopFind]: workspaceBrowserTab,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserCapture]: workspaceBrowserCapture,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserMessage]: workspaceBrowserMessage,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserPrintToPdf]: workspaceBrowserTab,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserClose]: workspaceBrowserTab,
   [ELECTRON_IPC_CHANNELS.appModeGet]: noPayload,
   [ELECTRON_IPC_CHANNELS.appModeSet]: optionalRecord,
   [ELECTRON_IPC_CHANNELS.appModePrepareRestart]: noPayload,

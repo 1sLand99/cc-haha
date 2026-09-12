@@ -39,6 +39,18 @@ vi.mock('../../i18n', () => ({
     v?.target ? `${k}:${v.target}` : k,
 }))
 
+// The unified open entry point replaced the per-store `open` / `openPreview`
+// pair: every caller now names a target and the controller decides the tab.
+vi.mock('../../lib/workspace/openTarget', () => ({
+  workspaceOpen: {
+    file: (...args: unknown[]) => openPreview(...args),
+    browser: (...args: unknown[]) => browserOpen(...args),
+    review: (...args: unknown[]) => openPreview(...args),
+    terminal: vi.fn(),
+  },
+  openWorkspaceTarget: vi.fn(),
+}))
+
 vi.mock('../../stores/browserPanelStore', () => ({
   useBrowserPanelStore: {
     getState: () => ({ open: browserOpen }),
@@ -174,6 +186,6 @@ describe('WorkspaceFileOpenWith', () => {
 
     fireEvent.click(previewItem)
 
-    expect(openPreview).toHaveBeenCalledWith('s1', 'report.md', 'file')
+    expect(openPreview).toHaveBeenCalledWith('s1', 'report.md')
   })
 })

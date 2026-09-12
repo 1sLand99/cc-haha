@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { Bell, Check, ChevronDown, Clock, Folder, FolderOpen, FolderPlus, GitBranch, MoreHorizontal, Pin, PinOff, RefreshCw, RotateCcw, SquarePen, X } from 'lucide-react'
+import { releaseWorkspaceSession } from '../../lib/workspace/releaseSession'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useTranslation, type TranslationKey } from '../../i18n'
@@ -770,6 +771,7 @@ export function Sidebar({
     if (!pendingDeleteSessionId) return
     await deleteSession(pendingDeleteSessionId)
     disconnectSession(pendingDeleteSessionId)
+    releaseWorkspaceSession(pendingDeleteSessionId)
     closeTab(pendingDeleteSessionId)
     setPendingDeleteSessionId(null)
   }, [closeTab, deleteSession, disconnectSession, pendingDeleteSessionId])
@@ -821,6 +823,7 @@ export function Sidebar({
       const result = await deleteSessions(ids)
       for (const sessionId of result.successes) {
         disconnectSession(sessionId)
+        releaseWorkspaceSession(sessionId)
         closeTab(sessionId)
       }
 

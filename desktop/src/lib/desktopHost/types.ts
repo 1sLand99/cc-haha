@@ -12,6 +12,7 @@ export type DesktopHostCapability =
   | 'dialogs'
   | 'notifications'
   | 'previewWebview'
+  | 'workspaceBrowser'
   | 'shell'
   | 'terminal'
   | 'updates'
@@ -169,6 +170,70 @@ export type PreviewPickerMessage = {
 )
 
 export type PreviewHostMessage = PreviewCaptureMessage | PreviewPickerMessage
+
+/**
+ * Multi-page browser host. Every method names its page, so a second page never
+ * navigates the first and unmounting a React surface never destroys a page.
+ */
+export type WorkspaceBrowserBounds = PreviewBounds
+
+export type WorkspaceBrowserCaptureKind = 'full' | 'viewport'
+
+export type WorkspaceBrowserFindOptions = {
+  forward?: boolean
+  findNext?: boolean
+  matchCase?: boolean
+}
+
+export type WorkspaceBrowserDownload = {
+  id: string
+  filename: string
+  savePath: string | null
+  receivedBytes: number
+  totalBytes: number
+  state: 'progressing' | 'completed' | 'cancelled' | 'interrupted'
+}
+
+export type WorkspaceBrowserHistoryEntry = {
+  url: string
+  title: string
+  visitedAt: number
+}
+
+/**
+ * Everything the host reports back, always carrying `tabId`.
+ *
+ * A late event for a page that has already been closed is dropped by the
+ * controller rather than applied to whatever took its slot — the id is what
+ * makes that check possible.
+ */
+export type WorkspaceBrowserEvent =
+  | {
+      type: 'state'
+      tabId: string
+      url: string
+      title: string
+      canGoBack: boolean
+      canGoForward: boolean
+      loading: boolean
+    }
+  | {
+      type: 'failed'
+      tabId: string
+      url: string
+      errorCode: number
+      errorDescription: string
+    }
+  /** `window.open`, `target=_blank` and popups all land here as a new tab. */
+  | { type: 'new-window'; tabId: string; url: string }
+  | { type: 'found'; tabId: string; activeMatchOrdinal: number; matches: number }
+  | { type: 'screenshot'; tabId: string; dataUrl: string; kind: WorkspaceBrowserCaptureKind }
+  | { type: 'download'; tabId: string; download: WorkspaceBrowserDownload }
+  | { type: 'history'; tabId: string; entries: WorkspaceBrowserHistoryEntry[] }
+  /** The in-page selection agent speaking; payload shape is the legacy one. */
+  | { type: 'agent'; tabId: string; message: unknown }
+  /** The page died (crash, host teardown). The tab shows a retry entry point. */
+  | { type: 'destroyed'; tabId: string; reason: 'crashed' | 'closed' }
 
 type DesktopPetBase = {
   id: string
@@ -376,6 +441,27 @@ export type DesktopHost = {
     close(): Promise<void>
     message(payload: PreviewHostMessage): Promise<void>
     onEvent(handler: (event: unknown) => void): Promise<DesktopHostUnlisten>
+  }
+  browser: {
+    create(
+      tabId: string,
+      options: { storageId: string; url?: string; bounds?: WorkspaceBrowserBounds },
+    ): Promise<void>
+    navigate(tabId: string, url: string): Promise<void>
+    goBack(tabId: string): Promise<void>
+    goForward(tabId: string): Promise<void>
+    reload(tabId: string, options?: { ignoreCache?: boolean }): Promise<void>
+    stop(tabId: string): Promise<void>
+    setBounds(tabId: string, bounds: WorkspaceBrowserBounds): Promise<void>
+    setVisible(tabId: string, visible: boolean): Promise<void>
+    setZoom(tabId: string, factor: number): Promise<void>
+    find(tabId: string, text: string, options?: WorkspaceBrowserFindOptions): Promise<void>
+    stopFind(tabId: string): Promise<void>
+    capture(tabId: string, kind: WorkspaceBrowserCaptureKind): Promise<void>
+    message(tabId: string, payload: PreviewHostMessage): Promise<void>
+    printToPdf(tabId: string): Promise<void>
+    close(tabId: string): Promise<void>
+    onEvent(handler: (event: WorkspaceBrowserEvent) => void): Promise<DesktopHostUnlisten>
   }
   appMode: {
     get(): Promise<AppModeConfig>

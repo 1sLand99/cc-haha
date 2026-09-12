@@ -20,6 +20,13 @@ const mainWindowSource = mainSource.slice(
   mainSource.indexOf('async function createMainWindow()'),
   mainSource.indexOf('if (!acquireSingleInstanceLock'),
 )
+// The workspace browser is the app's *second* host for arbitrary remote pages,
+// and it sits after the pet controller, so neither slice above covers it. It
+// needs its own, or the boundary it relies on could be undone silently.
+const workspaceBrowserServiceSource = mainSource.slice(
+  mainSource.indexOf('function getWorkspaceBrowserService()'),
+  mainSource.indexOf('function registerIpcHandlers('),
+)
 
 describe('Electron preview security boundary', () => {
   it('does not give the pet preload the desktop master access token', () => {
@@ -47,6 +54,43 @@ describe('Electron preview security boundary', () => {
     expect(mainWindowSource).toContain('isAllowlistedMainRendererMediaRequest')
   })
 
+  it('keeps the local access token away from the workspace browser', () => {
+    // These pages load whatever the user types into an address bar. Attaching
+    // the desktop's local token to their loopback requests would hand the local
+    // API to any site they visit.
+    // Matched as a *call*, not as a word: the source deliberately names the
+    // helper in a comment explaining why it is absent, and a bare substring
+    // check would read that explanation as the thing it forbids.
+    expect(workspaceBrowserServiceSource).not.toMatch(/configureLocalServerRequestAuth\s*\(/)
+    expect(workspaceBrowserServiceSource).not.toMatch(/resolveLocalServerAccess\s*\(/)
+  })
+
+  it('isolates the workspace browser from the renderer session', () => {
+    // A shared *persistent* partition is deliberate — one browsing profile for
+    // the user — but it must never be the renderer's own session, which is
+    // where the local token is injected.
+    expect(workspaceBrowserServiceSource).toContain('WORKSPACE_BROWSER_PARTITION')
+    expect(workspaceBrowserServiceSource).not.toContain('defaultSession')
+    expect(workspaceBrowserServiceSource).toContain('configurePreviewSessionPermissions')
+  })
+
+  it('locks workspace browser sandboxing on', () => {
+    expect(workspaceBrowserServiceSource).toContain('sandbox: true')
+    expect(workspaceBrowserServiceSource).toContain('contextIsolation: true')
+    expect(workspaceBrowserServiceSource).toContain('nodeIntegration: false')
+  })
+
+  it('lets only the main window host workspace browser pages', () => {
+    // The service keeps one parent window. Trace and pet windows load the same
+    // preload, so without this a secondary window could adopt every page and
+    // strand it as an unremovable child of the main window.
+    const createHandler = mainSource.slice(
+      mainSource.indexOf('ELECTRON_IPC_CHANNELS.workspaceBrowserCreate'),
+      mainSource.indexOf('ELECTRON_IPC_CHANNELS.workspaceBrowserNavigate'),
+    )
+    expect(createHandler).toContain('currentWindow(event) !== mainWindow')
+  })
+
   it.each([
     ['open-target icon', 'GET', 'image', 'http://127.0.0.1:49321/api/open-targets/icons/cursor'],
     ['profile avatar', 'GET', 'image', 'http://127.0.0.1:49321/api/desktop-ui/preferences/profile/avatar?v=1'],
@@ -60,6 +104,43 @@ describe('Electron preview security boundary', () => {
       url,
       webContentsId: 42,
     }, 42)).toBe(true)
+  })
+
+  it('keeps the local access token away from the workspace browser', () => {
+    // These pages load whatever the user types into an address bar. Attaching
+    // the desktop's local token to their loopback requests would hand the local
+    // API to any site they visit.
+    // Matched as a *call*, not as a word: the source deliberately names the
+    // helper in a comment explaining why it is absent, and a bare substring
+    // check would read that explanation as the thing it forbids.
+    expect(workspaceBrowserServiceSource).not.toMatch(/configureLocalServerRequestAuth\s*\(/)
+    expect(workspaceBrowserServiceSource).not.toMatch(/resolveLocalServerAccess\s*\(/)
+  })
+
+  it('isolates the workspace browser from the renderer session', () => {
+    // A shared *persistent* partition is deliberate — one browsing profile for
+    // the user — but it must never be the renderer's own session, which is
+    // where the local token is injected.
+    expect(workspaceBrowserServiceSource).toContain('WORKSPACE_BROWSER_PARTITION')
+    expect(workspaceBrowserServiceSource).not.toContain('defaultSession')
+    expect(workspaceBrowserServiceSource).toContain('configurePreviewSessionPermissions')
+  })
+
+  it('locks workspace browser sandboxing on', () => {
+    expect(workspaceBrowserServiceSource).toContain('sandbox: true')
+    expect(workspaceBrowserServiceSource).toContain('contextIsolation: true')
+    expect(workspaceBrowserServiceSource).toContain('nodeIntegration: false')
+  })
+
+  it('lets only the main window host workspace browser pages', () => {
+    // The service keeps one parent window. Trace and pet windows load the same
+    // preload, so without this a secondary window could adopt every page and
+    // strand it as an unremovable child of the main window.
+    const createHandler = mainSource.slice(
+      mainSource.indexOf('ELECTRON_IPC_CHANNELS.workspaceBrowserCreate'),
+      mainSource.indexOf('ELECTRON_IPC_CHANNELS.workspaceBrowserNavigate'),
+    )
+    expect(createHandler).toContain('currentWindow(event) !== mainWindow')
   })
 
   it.each([

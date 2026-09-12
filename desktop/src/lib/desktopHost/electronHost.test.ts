@@ -143,6 +143,77 @@ describe('electron desktop host', () => {
     expect(invoke).toHaveBeenCalledWith(ELECTRON_IPC_CHANNELS.previewSetZoom, 0.8)
   })
 
+  it('addresses every multi-page browser call by tab id', async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined)
+    const subscribe = vi.fn().mockResolvedValue(vi.fn())
+    const host = createElectronHost({ invoke, subscribe })
+    const handler = vi.fn()
+
+    await host.browser.create('wb-1', {
+      storageId: 'wsb-1',
+      url: 'https://example.com',
+      bounds: { x: 0, y: 40, width: 800, height: 600 },
+    })
+    await host.browser.navigate('wb-1', 'https://example.com/next')
+    await host.browser.goBack('wb-1')
+    await host.browser.goForward('wb-1')
+    await host.browser.reload('wb-1', { ignoreCache: true })
+    await host.browser.stop('wb-1')
+    await host.browser.setBounds('wb-1', { x: 1, y: 2, width: 3, height: 4 })
+    await host.browser.setVisible('wb-1', false)
+    await host.browser.setZoom('wb-1', 1.25)
+    await host.browser.find('wb-1', 'invoice', { matchCase: true })
+    await host.browser.stopFind('wb-1')
+    await host.browser.capture('wb-1', 'full')
+    await host.browser.message('wb-1', { v: 1, type: 'exit-picker' })
+    await host.browser.printToPdf('wb-1')
+    await host.browser.close('wb-1')
+    await host.browser.onEvent(handler)
+
+    expect(invoke.mock.calls).toEqual([
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserCreate, {
+        tabId: 'wb-1',
+        storageId: 'wsb-1',
+        url: 'https://example.com',
+        bounds: { x: 0, y: 40, width: 800, height: 600 },
+      }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserNavigate, { tabId: 'wb-1', url: 'https://example.com/next' }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserGoBack, { tabId: 'wb-1' }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserGoForward, { tabId: 'wb-1' }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserReload, { tabId: 'wb-1', ignoreCache: true }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserStop, { tabId: 'wb-1' }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserSetBounds, { tabId: 'wb-1', bounds: { x: 1, y: 2, width: 3, height: 4 } }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserSetVisible, { tabId: 'wb-1', visible: false }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserSetZoom, { tabId: 'wb-1', factor: 1.25 }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserFind, { tabId: 'wb-1', text: 'invoice', options: { matchCase: true } }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserStopFind, { tabId: 'wb-1' }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserCapture, { tabId: 'wb-1', kind: 'full' }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserMessage, { tabId: 'wb-1', payload: { v: 1, type: 'exit-picker' } }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserPrintToPdf, { tabId: 'wb-1' }],
+      [ELECTRON_IPC_CHANNELS.workspaceBrowserClose, { tabId: 'wb-1' }],
+    ])
+    expect(subscribe).toHaveBeenCalledWith(ELECTRON_EVENT_CHANNELS.workspaceBrowserEvent, handler)
+  })
+
+  it('advertises the multi-page browser only where a native host implements it', () => {
+    const host = createElectronHost({ invoke: vi.fn(), subscribe: vi.fn() })
+
+    expect(host.capabilities.workspaceBrowser).toBe(true)
+  })
+
+  it('rejects an unaddressed browser call before it reaches Electron IPC', async () => {
+    const invoke = vi.fn()
+    const host = createElectronHost({ invoke, subscribe: vi.fn() })
+
+    await expect(host.browser.navigate('', 'https://example.com')).rejects.toThrow(
+      'Invalid Electron IPC payload',
+    )
+    await expect(host.browser.capture('wb-1', 'element' as 'full')).rejects.toThrow(
+      'Invalid Electron IPC payload',
+    )
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
   it('keeps event subscriptions behind named event channels', async () => {
     const unlisten = vi.fn()
     const subscribe = vi.fn().mockResolvedValue(unlisten)

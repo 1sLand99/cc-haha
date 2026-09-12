@@ -1,11 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type RefObject } from 'react'
 import { CircleAlert, Code2, File as FileIcon, FileText, FolderOpen, Image as ImageIcon, MessageCircle, PanelRightClose, PanelRightOpen, RefreshCw, Search, Settings2, X, type LucideIcon } from 'lucide-react'
-import { Highlight } from 'prism-react-renderer'
 import {
   sessionsApi,
   type WorkspaceSearchResult,
   type WorkspaceChangedFile,
-  type WorkspaceFileStatus,
   type WorkspaceTreeEntry,
   type WorkspaceTreeResult,
 } from '../../api/sessions'
@@ -15,7 +13,6 @@ import {
   useWorkspacePanelStore,
   type WorkspacePreviewCloseScope,
   type WorkspacePreviewKind,
-  type WorkspacePreviewReveal,
   type WorkspacePreviewTab,
 } from '../../stores/workspacePanelStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -25,21 +22,20 @@ import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { useDismissable } from '@/hooks/useDismissable'
 import { copyTextToClipboard } from '@/lib/clipboard'
-import { clearWindowSelection, getSelectionPopoverPosition, useSelectionPopoverDismiss } from '../../hooks/useSelectionPopoverDismiss'
-import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
-import { createWorkspaceMarkdownImageResolver } from '../../lib/markdownImages'
-import { getServerBaseUrl } from '../../lib/desktopRuntime'
 import {
   getFileExtension,
-  normalizePrismLanguage,
-  WORKSPACE_PREVIEW_LINE_LIMIT,
   WorkspaceDiffSurface,
-  workspacePrismTheme,
   type WorkspaceDiffCommentSelection,
 } from './WorkspaceCodeSurface'
 import { WorkspaceFileOpenWith } from './WorkspaceFileOpenWith'
-import { getFileIdentity, getWorkspaceStatusLabel, type WorkspaceFileIdentity } from './fileIdentity'
-import type { WorkspaceDiffHighlightToken } from './workspaceDiffHighlighter'
+import { getFileIdentity, type WorkspaceFileIdentity } from './fileIdentity'
+import { CodeSurface } from './surfaces/CodeSurface'
+import { FileStatusBadge } from './surfaces/FileStatusBadge'
+import { FileTypeBadge } from './surfaces/FileTypeBadge'
+import { ImagePreview } from './surfaces/ImagePreview'
+import { MarkdownSurface } from './surfaces/MarkdownSurface'
+import { PanelMessage } from './surfaces/PanelMessage'
+import type { WorkspaceTextSelection } from './surfaces/textSelection'
 
 type WorkspacePanelProps = {
   sessionId: string
@@ -78,41 +74,6 @@ type FileContextMenuState = {
   y: number
 }
 
-const FILE_STATUS_META: Record<WorkspaceFileStatus, { label: string; className: string }> = {
-  modified: {
-    label: 'M',
-    className: 'text-[var(--color-warning)]',
-  },
-  added: {
-    label: 'A',
-    className: 'text-[var(--color-success)]',
-  },
-  deleted: {
-    label: 'D',
-    className: 'text-[var(--color-error)]',
-  },
-  renamed: {
-    label: 'R',
-    className: 'text-[var(--color-info)]',
-  },
-  untracked: {
-    label: 'U',
-    className: 'text-[var(--color-info)]',
-  },
-  copied: {
-    label: 'C',
-    className: 'text-[var(--color-info)]',
-  },
-  type_changed: {
-    label: 'T',
-    className: 'text-[var(--color-text-secondary)]',
-  },
-  unknown: {
-    label: '?',
-    className: 'text-[var(--color-text-secondary)]',
-  },
-}
-
 const FILE_IDENTITY_ICONS: Record<WorkspaceFileIdentity['icon'], LucideIcon> = {
   code: Code2,
   config: Settings2,
@@ -124,25 +85,7 @@ const FILE_IDENTITY_ICONS: Record<WorkspaceFileIdentity['icon'], LucideIcon> = {
 const EMPTY_TREE_BY_PATH: Record<string, WorkspaceTreeResult | undefined> = {}
 const EMPTY_PREVIEW_TABS: WorkspacePreviewTab[] = []
 const EMPTY_EXPANDED_PATHS: string[] = []
-const SELECTION_MENU_OFFSET = 10
-const SELECTION_MENU_WIDTH = 158
-const SELECTION_MENU_HEIGHT = 44
 const WORKSPACE_SEARCH_DEBOUNCE_MS = 250
-const FILE_BADGE_META: Record<string, { label: string; className: string }> = {
-  ts: { label: 'TS', className: 'bg-[var(--color-info-container)] text-[var(--color-on-info-container)]' },
-  tsx: { label: 'TSX', className: 'bg-[var(--color-info-container)] text-[var(--color-on-info-container)]' },
-  js: { label: 'JS', className: 'bg-[var(--color-warning-container)] text-[var(--color-on-warning-container)]' },
-  jsx: { label: 'JSX', className: 'bg-[var(--color-warning-container)] text-[var(--color-on-warning-container)]' },
-  json: { label: '{}', className: 'bg-[var(--color-surface-container-high)] text-[var(--color-text-secondary)]' },
-  md: { label: 'MD', className: 'bg-[var(--color-surface-container-high)] text-[var(--color-text-secondary)]' },
-  css: { label: 'CSS', className: 'bg-[var(--color-info-container)] text-[var(--color-on-info-container)]' },
-  html: { label: 'H', className: 'bg-[var(--color-brand-soft)] text-[var(--color-on-brand-soft)]' },
-  png: { label: 'IMG', className: 'bg-[var(--color-success-container)] text-[var(--color-on-success-container)]' },
-  jpg: { label: 'IMG', className: 'bg-[var(--color-success-container)] text-[var(--color-on-success-container)]' },
-  jpeg: { label: 'IMG', className: 'bg-[var(--color-success-container)] text-[var(--color-on-success-container)]' },
-  gif: { label: 'IMG', className: 'bg-[var(--color-success-container)] text-[var(--color-on-success-container)]' },
-  svg: { label: 'SVG', className: 'bg-[var(--color-success-container)] text-[var(--color-on-success-container)]' },
-}
 
 function makeTreeStateKey(sessionId: string, path: string) {
   return `${sessionId}::${path}`
@@ -169,14 +112,6 @@ function getPreviewKindLabel(
   return kind === 'diff' ? t('workspace.previewKind.diff') : t('workspace.previewKind.file')
 }
 
-function getFileBadgeMeta(name: string) {
-  const extension = getFileExtension(name)
-  return FILE_BADGE_META[extension] ?? {
-    label: extension ? extension.slice(0, 3).toUpperCase() : 'TXT',
-    className: 'bg-[var(--color-surface-container-high)] text-[var(--color-text-secondary)]',
-  }
-}
-
 function resolveWorkspaceAttachmentPath(workDir: string | undefined, filePath: string) {
   if (!workDir || filePath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(filePath)) return filePath
   return `${workDir.replace(/[\\/]+$/, '')}/${filePath.replace(/^[/\\]+/, '')}`
@@ -192,18 +127,6 @@ function isMarkdownPreview(tab: WorkspacePreviewTab) {
   const language = (tab.language ?? '').toLowerCase()
   const extension = getFileExtension(tab.path)
   return language === 'markdown' || language === 'md' || extension === 'md' || extension === 'markdown'
-}
-
-function FileTypeBadge({ name, subtle = false }: { name: string; subtle?: boolean }) {
-  const meta = getFileBadgeMeta(name)
-  return (
-    <span
-      className={`inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-[var(--radius-sm)] px-1 font-[var(--font-label)] text-[9px] font-semibold leading-none ${meta.className} ${subtle ? 'opacity-55 grayscale' : ''}`}
-      aria-hidden="true"
-    >
-      {meta.label}
-    </span>
-  )
 }
 
 function getInlineStateMessage(
@@ -270,156 +193,6 @@ function treeEntryMatchesFilter(
   const childTree = treeByPath[entry.path]
   if (childTree?.state !== 'ok') return false
   return childTree.entries.some((child) => treeEntryMatchesFilter(child, query, treeByPath))
-}
-
-type WorkspaceTextSelection = {
-  text: string
-  startLine?: number
-  endLine?: number
-}
-
-type FloatingSelectionMenuState = WorkspaceTextSelection & {
-  x: number
-  y: number
-}
-
-type SelectionPointer = {
-  clientX: number
-  clientY: number
-}
-
-function getElementForNode(node: Node | null): Element | null {
-  if (!node) return null
-  return node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement
-}
-
-function getLineNumberFromNode(node: Node | null, root: HTMLElement) {
-  const element = getElementForNode(node)
-  const row = element?.closest('[data-workspace-line-number]')
-  if (!row || !root.contains(row)) return undefined
-  const line = Number(row.getAttribute('data-workspace-line-number'))
-  return Number.isFinite(line) ? line : undefined
-}
-
-function getSelectionPosition(
-  range: Range,
-  root: HTMLElement,
-  selection: Selection,
-  pointer?: SelectionPointer,
-) {
-  return getSelectionPopoverPosition(range, root, {
-    menuWidth: SELECTION_MENU_WIDTH,
-    menuHeight: SELECTION_MENU_HEIGHT,
-    offset: SELECTION_MENU_OFFSET,
-    fallbackPointer: pointer,
-    selectionFocus: { node: selection.focusNode, offset: selection.focusOffset },
-  })
-}
-
-function getTextSelectionFromContainer(
-  root: HTMLElement | null,
-  resolveLines?: (text: string, range: Range) => { startLine?: number; endLine?: number },
-  pointer?: SelectionPointer,
-): FloatingSelectionMenuState | null {
-  if (!root) return null
-
-  const selection = window.getSelection()
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null
-
-  const range = selection.getRangeAt(0)
-  const startElement = getElementForNode(range.startContainer)
-  const endElement = getElementForNode(range.endContainer)
-  if (!startElement || !endElement || !root.contains(startElement) || !root.contains(endElement)) {
-    return null
-  }
-
-  const text = selection.toString().trim()
-  if (!text) return null
-
-  const nodeLines = {
-    startLine: getLineNumberFromNode(range.startContainer, root),
-    endLine: getLineNumberFromNode(range.endContainer, root),
-  }
-  const resolvedLines = resolveLines?.(text, range) ?? nodeLines
-  const startLine = resolvedLines.startLine ?? nodeLines.startLine
-  const endLine = resolvedLines.endLine ?? nodeLines.endLine ?? startLine
-  const orderedStart = startLine && endLine ? Math.min(startLine, endLine) : startLine
-  const orderedEnd = startLine && endLine ? Math.max(startLine, endLine) : endLine
-
-  return {
-    ...getSelectionPosition(range, root, selection, pointer),
-    text,
-    ...(orderedStart ? { startLine: orderedStart } : {}),
-    ...(orderedEnd ? { endLine: orderedEnd } : {}),
-  }
-}
-
-function getLineRangeForText(value: string, text: string) {
-  const index = value.indexOf(text)
-  if (index < 0) return {}
-  const startLine = value.slice(0, index).split('\n').length
-  const endLine = startLine + text.split('\n').length - 1
-  return { startLine, endLine }
-}
-
-function FloatingSelectionMenu({
-  selection,
-  onAdd,
-  popoverRef,
-}: {
-  selection: FloatingSelectionMenuState | null
-  onAdd: () => void
-  popoverRef: { current: HTMLButtonElement | null }
-}) {
-  const t = useTranslation()
-  if (!selection) return null
-
-  return (
-    <button
-      ref={popoverRef}
-      type="button"
-      onMouseDown={(event) => {
-        if (event.button === 0 && !event.ctrlKey) event.preventDefault()
-      }}
-      onClick={onAdd}
-      className="glass-panel fixed z-[var(--z-popover)] inline-flex h-11 items-center gap-2 rounded-full px-5 text-[15px] font-semibold text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-      style={{ left: selection.x, top: selection.y }}
-    >
-      <MessageCircle size={21} strokeWidth={2.15} className="shrink-0 text-[var(--color-text-primary)]" aria-hidden="true" />
-      <span>{t('workspace.addSelectionToChat')}</span>
-    </button>
-  )
-}
-
-function PanelMessage({
-  icon,
-  message,
-  tone = 'muted',
-  compact = false,
-  announce = true,
-}: {
-  icon: string
-  message: string
-  tone?: 'muted' | 'error'
-  compact?: boolean
-  announce?: boolean
-}) {
-  const toneClass =
-    tone === 'error'
-      ? 'text-[var(--color-error)]'
-      : 'text-[var(--color-text-tertiary)]'
-
-  return (
-    <div
-      className={`flex items-center gap-2 px-4 ${compact ? 'py-2 text-[11px]' : 'py-8 text-xs'} ${toneClass}`}
-      role={announce ? tone === 'error' ? 'alert' : 'status' : undefined}
-    >
-      <span className={`material-symbols-outlined shrink-0 text-[16px] ${icon === 'progress_activity' ? 'animate-spin' : ''}`}>
-        {icon}
-      </span>
-      <span className="min-w-0 leading-relaxed">{message}</span>
-    </div>
-  )
 }
 
 function WorkspaceFilterInput({
@@ -491,498 +264,6 @@ function WorkspaceFilterInput({
           {summary}
         </div>
       )}
-    </div>
-  )
-}
-
-function FileStatusBadge({ status }: { status: WorkspaceFileStatus }) {
-  const t = useTranslation()
-  const meta = FILE_STATUS_META[status]
-  return (
-    <span
-      className={`inline-flex h-5 w-4 shrink-0 items-center justify-center font-mono text-[10px] font-semibold ${meta.className}`}
-      aria-label={getWorkspaceStatusLabel(status, t)}
-    >
-      {meta.label}
-    </span>
-  )
-}
-
-function workspaceCodeTokenStyle(token: WorkspaceDiffHighlightToken): CSSProperties {
-  const fontStyle = token.fontStyle ?? 0
-  return {
-    color: token.color,
-    fontStyle: fontStyle & 1 ? 'italic' : undefined,
-    fontWeight: fontStyle & 2 ? 700 : undefined,
-  }
-}
-
-function CodeSurface({
-  value,
-  language,
-  reveal,
-  onAddLineComment,
-  onAddSelection,
-}: {
-  value: string
-  language: string
-  reveal?: WorkspacePreviewReveal
-  onAddLineComment: (lineStart: number, lineEnd: number, note: string, quote: string) => void
-  onAddSelection: (selection: WorkspaceTextSelection) => void
-}) {
-  const t = useTranslation()
-  const surfaceRef = useRef<HTMLDivElement>(null)
-  const selectionMenuRef = useRef<HTMLButtonElement>(null)
-  const [commentRange, setCommentRange] = useState<{ anchorLine: number; focusLine: number } | null>(null)
-  const [commentDraft, setCommentDraft] = useState('')
-  const [showAllLines, setShowAllLines] = useState(false)
-  const [selectionMenu, setSelectionMenu] = useState<FloatingSelectionMenuState | null>(null)
-  const [shikiTokensByLine, setShikiTokensByLine] = useState<WorkspaceDiffHighlightToken[][] | null>(null)
-  const lines = value.split('\n')
-  const visibleLines = showAllLines ? lines : lines.slice(0, WORKSPACE_PREVIEW_LINE_LIMIT)
-  const commentLineStart = commentRange ? Math.min(commentRange.anchorLine, commentRange.focusLine) : null
-  const commentLineEnd = commentRange ? Math.max(commentRange.anchorLine, commentRange.focusLine) : null
-  const activeQuote = commentLineStart && commentLineEnd
-    ? visibleLines.slice(commentLineStart - 1, commentLineEnd).join('\n')
-    : ''
-  const usePlainLargePreview = showAllLines && lines.length > WORKSPACE_PREVIEW_LINE_LIMIT
-  const visibleCode = usePlainLargePreview ? '' : visibleLines.join('\n')
-
-  useEffect(() => {
-    setShowAllLines(false)
-    setCommentRange(null)
-    setCommentDraft('')
-    setSelectionMenu(null)
-  }, [language, value])
-
-  const revealLine = reveal?.line
-  const revealNonce = reveal?.nonce
-
-  // A reference past the fold (`foo.ts:900`) is unreachable while the preview is
-  // truncated, so expand first. Declared AFTER the reset effect above on purpose:
-  // effects run in declaration order, so when a reload changes `value` the reset
-  // collapses and this re-expands, rather than the other way round.
-  useEffect(() => {
-    if (revealLine && revealLine > WORKSPACE_PREVIEW_LINE_LIMIT) setShowAllLines(true)
-  }, [revealLine, revealNonce, value])
-
-  // Scroll the marked line into view. `shikiTokensByLine` and `showAllLines` are
-  // dependencies because both rebuild the line rows underneath us — highlighting
-  // resolves asynchronously, so the row may not exist on the first pass.
-  useEffect(() => {
-    if (!revealLine) return
-    const surface = surfaceRef.current
-    const row = surface?.querySelector<HTMLElement>(`[data-workspace-line-number="${revealLine}"]`)
-    if (!surface || !row) return
-
-    // Deliberately not scrollIntoView: that also scrolls every ancestor, which
-    // drags the whole chat column when the workbench is a side panel.
-    const rowRect = row.getBoundingClientRect()
-    const surfaceRect = surface.getBoundingClientRect()
-    const delta = rowRect.top - surfaceRect.top - surface.clientHeight / 2 + rowRect.height / 2
-    surface.scrollTop = Math.max(0, surface.scrollTop + delta)
-  }, [revealLine, revealNonce, value, shikiTokensByLine, showAllLines])
-
-  useEffect(() => {
-    if (usePlainLargePreview) {
-      setShikiTokensByLine(null)
-      return
-    }
-
-    let cancelled = false
-    setShikiTokensByLine(null)
-    void import('./workspaceDiffHighlighter')
-      .then(({ highlightWorkspaceCode }) => highlightWorkspaceCode({ value: visibleCode, language }))
-      .then((result) => {
-        if (!cancelled && result.engine === 'shiki') setShikiTokensByLine(result.tokensByLine)
-      })
-      .catch(() => {
-        if (!cancelled) setShikiTokensByLine(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [language, usePlainLargePreview, visibleCode])
-
-  const dismissSelectionMenu = useCallback(() => {
-    setSelectionMenu(null)
-  }, [])
-
-  useSelectionPopoverDismiss({
-    active: Boolean(selectionMenu),
-    popoverRef: selectionMenuRef,
-    onDismiss: dismissSelectionMenu,
-  })
-
-  const submitLineComment = () => {
-    if (!commentLineStart || !commentLineEnd || !commentDraft.trim()) return
-    onAddLineComment(commentLineStart, commentLineEnd, commentDraft.trim(), activeQuote)
-    setCommentRange(null)
-    setCommentDraft('')
-  }
-
-  const handleSelectionMouseUp = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || event.ctrlKey) {
-      setSelectionMenu(null)
-      return
-    }
-    const selection = getTextSelectionFromContainer(surfaceRef.current, undefined, event)
-    if (!selection?.startLine || !selection.endLine || selection.startLine === selection.endLine) {
-      setSelectionMenu(selection)
-      return
-    }
-
-    setSelectionMenu({
-      ...selection,
-      text: visibleLines.slice(selection.startLine - 1, selection.endLine).join('\n').trim(),
-    })
-  }
-
-  const addCurrentSelectionToChat = () => {
-    if (!selectionMenu) return
-    onAddSelection({
-      text: selectionMenu.text,
-      startLine: selectionMenu.startLine,
-      endLine: selectionMenu.endLine,
-    })
-    setSelectionMenu(null)
-    clearWindowSelection()
-  }
-
-  const renderLineCommentEditor = (lineNumber: number) => {
-    if (!commentLineStart || commentLineEnd !== lineNumber) return null
-
-    return (
-      <div className="grid grid-cols-[48px_minmax(0,720px)] gap-3 bg-[var(--color-brand-soft)] px-3 py-2">
-        <span aria-hidden="true" />
-        <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-card)]">
-          <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2">
-            <span className="material-symbols-outlined text-[15px] text-[var(--color-text-tertiary)]">chat_bubble</span>
-            <span className="text-[12px] font-semibold text-[var(--color-text-primary)]">{t('workspace.localComment')}</span>
-            <span className="ml-auto text-[11px] text-[var(--color-text-tertiary)]">
-              {commentLineStart === commentLineEnd
-                ? t('workspace.commentLineTarget', { line: commentLineStart })
-                : t('workspace.commentLineRangeTarget', { start: commentLineStart, end: commentLineEnd })}
-            </span>
-          </div>
-          <textarea
-            value={commentDraft}
-            onChange={(event) => setCommentDraft(event.target.value)}
-            autoFocus
-            rows={3}
-            placeholder={t('workspace.commentPlaceholder')}
-            className="block w-full resize-none bg-transparent px-3 py-3 text-[13px] leading-6 text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-          />
-          <div className="flex justify-end gap-2 px-3 pb-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setCommentRange(null)
-                setCommentDraft('')
-              }}
-            >
-              {t('common.cancel')}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={submitLineComment}
-              disabled={!commentDraft.trim()}
-            >
-              {t('workspace.addCommentToChat')}
-            </Button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  const isCommentLineSelected = (lineNumber: number) => (
-    commentLineStart !== null
-    && commentLineEnd !== null
-    && lineNumber >= commentLineStart
-    && lineNumber <= commentLineEnd
-  )
-
-  const lineRowClassName = (lineNumber: number) => {
-    // A comment selection is something the user just did by hand, so it outranks
-    // the reveal mark left over from the reference they clicked to get here.
-    if (isCommentLineSelected(lineNumber)) {
-      return 'group grid grid-cols-[48px_minmax(0,1fr)] gap-3 px-3 bg-[var(--color-info-container)]'
-    }
-    if (revealLine === lineNumber) {
-      return 'group grid grid-cols-[48px_minmax(0,1fr)] gap-3 px-3 bg-[var(--color-brand-soft)] shadow-[inset_2px_0_0_var(--color-brand)]'
-    }
-    return 'group grid grid-cols-[48px_minmax(0,1fr)] gap-3 px-3 hover:bg-[var(--color-surface-hover)]'
-  }
-
-  const renderLineNumberButton = (lineNumber: number) => {
-    const selected = isCommentLineSelected(lineNumber)
-    return (
-      <button
-        type="button"
-        aria-label={t('workspace.commentLine', { line: lineNumber })}
-        aria-pressed={selected}
-        onClick={(event) => {
-          const extendRange = event.shiftKey && commentRange !== null
-          setCommentRange(extendRange
-            ? { ...commentRange, focusLine: lineNumber }
-            : { anchorLine: lineNumber, focusLine: lineNumber })
-          if (!extendRange) setCommentDraft('')
-        }}
-        className={`select-none text-right text-[11px] transition-colors focus-visible:outline-none ${
-          selected
-            ? 'font-semibold text-[var(--color-info)]'
-            : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-brand)] focus-visible:text-[var(--color-brand)]'
-        }`}
-      >
-        {lineNumber}
-      </button>
-    )
-  }
-
-  return (
-    <div
-      ref={surfaceRef}
-      className="min-h-0 flex-1 overflow-auto bg-[var(--color-code-bg)]"
-      onMouseUp={handleSelectionMouseUp}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') setSelectionMenu(null)
-      }}
-    >
-      <div className="relative min-w-max py-2">
-        {usePlainLargePreview ? (
-          <pre
-            data-workspace-code=""
-            data-testid="workspace-code"
-            className="m-0 font-mono text-[12px] leading-[1.55]"
-            style={{ color: 'var(--color-code-fg)', background: 'transparent' }}
-          >
-            {visibleLines.map((line, index) => {
-              const lineNumber = index + 1
-              return (
-                <div key={lineNumber}>
-                  <div
-                    className={lineRowClassName(lineNumber)}
-                    data-workspace-line-number={lineNumber}
-                  >
-                    {renderLineNumberButton(lineNumber)}
-                    <span className="whitespace-pre pr-6">{line || ' '}</span>
-                  </div>
-                  {renderLineCommentEditor(lineNumber)}
-                </div>
-              )
-            })}
-          </pre>
-        ) : shikiTokensByLine ? (
-          <pre
-            data-workspace-code=""
-            data-testid="workspace-code"
-            data-highlight-engine="shiki"
-            className="m-0 font-mono text-[12px] leading-[1.55]"
-            style={{ color: 'var(--color-code-fg)', background: 'transparent' }}
-          >
-            {shikiTokensByLine.map((line, index) => {
-              const lineNumber = index + 1
-              return (
-                <div key={lineNumber}>
-                  <div
-                    data-workspace-line-number={lineNumber}
-                    className={lineRowClassName(lineNumber)}
-                  >
-                    {renderLineNumberButton(lineNumber)}
-                    <span className="whitespace-pre pr-6">
-                      {line.length === 0 ? ' ' : line.map((token, tokenIndex) => (
-                        <span
-                          key={`${tokenIndex}:${token.content}`}
-                          data-workspace-token=""
-                          style={workspaceCodeTokenStyle(token)}
-                        >
-                          {token.content}
-                        </span>
-                      ))}
-                    </span>
-                  </div>
-                  {renderLineCommentEditor(lineNumber)}
-                </div>
-              )
-            })}
-          </pre>
-        ) : (
-          <Highlight
-            theme={workspacePrismTheme}
-            code={visibleCode}
-            language={normalizePrismLanguage(language)}
-          >
-            {({ tokens, getLineProps, getTokenProps }) => (
-              <pre
-                data-workspace-code=""
-                data-testid="workspace-code"
-                data-highlight-engine="prism"
-                className="m-0 font-mono text-[12px] leading-[1.55]"
-                style={{ color: 'var(--color-code-fg)', background: 'transparent' }}
-              >
-                {tokens.map((line, index) => {
-                  const { key: lineKey, ...lineProps } = getLineProps({ line, key: index })
-                  const lineNumber = index + 1
-                  return (
-                    <div key={String(lineKey)}>
-                      <div
-                        {...lineProps}
-                        data-workspace-line-number={lineNumber}
-                        className={lineRowClassName(lineNumber)}
-                      >
-                        {renderLineNumberButton(lineNumber)}
-                        <span className="whitespace-pre pr-6">
-                          {line.length === 1 && line[0]?.empty ? ' ' : line.map((token, tokenIndex) => {
-                            const { key: tokenKey, ...tokenProps } = getTokenProps({ token, key: tokenIndex })
-                            return <span key={String(tokenKey)} {...tokenProps} />
-                          })}
-                        </span>
-                      </div>
-                      {renderLineCommentEditor(lineNumber)}
-                    </div>
-                  )
-                })}
-              </pre>
-            )}
-          </Highlight>
-        )}
-        {lines.length > WORKSPACE_PREVIEW_LINE_LIMIT && (
-          <div className="sticky bottom-0 flex items-center gap-3 border-t border-[var(--color-border)] bg-[var(--color-surface-glass)] px-3 py-2 text-xs text-[var(--color-text-tertiary)] backdrop-blur">
-            <span>
-              {showAllLines
-                ? t('workspace.previewAllLines', { total: lines.length })
-                : t('workspace.previewLineLimit', { count: visibleLines.length, total: lines.length })}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowAllLines((current) => !current)}
-              className="ml-auto"
-            >
-              {showAllLines ? t('workspace.collapsePreview') : t('workspace.showAllLoadedLines')}
-            </Button>
-          </div>
-        )}
-      </div>
-      <FloatingSelectionMenu selection={selectionMenu} onAdd={addCurrentSelectionToChat} popoverRef={selectionMenuRef} />
-    </div>
-  )
-}
-
-function MarkdownSurface({
-  value,
-  path,
-  sessionId,
-  workDir,
-  onAddSelection,
-}: {
-  value: string
-  path: string
-  sessionId: string
-  workDir?: string | null
-  onAddSelection: (selection: WorkspaceTextSelection) => void
-}) {
-  const surfaceRef = useRef<HTMLDivElement>(null)
-  const selectionMenuRef = useRef<HTMLButtonElement>(null)
-  const [selectionMenu, setSelectionMenu] = useState<FloatingSelectionMenuState | null>(null)
-
-  // The document is user-owned local content, so its images are trusted:
-  // relative paths resolve against the file's directory (served sandboxed via
-  // /preview-fs or /local-file) and remote URLs are left to CSP. Untrusted
-  // assistant Markdown gets no resolver and keeps the blob:/data:-only policy.
-  const resolveImageSrc = useMemo(
-    () => createWorkspaceMarkdownImageResolver({
-      baseUrl: getServerBaseUrl(),
-      sessionId,
-      filePath: path,
-      workDir,
-    }),
-    [path, sessionId, workDir],
-  )
-
-  useEffect(() => {
-    setSelectionMenu(null)
-  }, [value])
-
-  const dismissSelectionMenu = useCallback(() => {
-    setSelectionMenu(null)
-  }, [])
-
-  useSelectionPopoverDismiss({
-    active: Boolean(selectionMenu),
-    popoverRef: selectionMenuRef,
-    onDismiss: dismissSelectionMenu,
-  })
-
-  const handleSelectionMouseUp = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || event.ctrlKey) {
-      setSelectionMenu(null)
-      return
-    }
-    setSelectionMenu(getTextSelectionFromContainer(
-      surfaceRef.current,
-      (text) => getLineRangeForText(value, text),
-      event,
-    ))
-  }
-
-  const addCurrentSelectionToChat = () => {
-    if (!selectionMenu) return
-    onAddSelection({
-      text: selectionMenu.text,
-      startLine: selectionMenu.startLine,
-      endLine: selectionMenu.endLine,
-    })
-    setSelectionMenu(null)
-    clearWindowSelection()
-  }
-
-  return (
-    <div
-      ref={surfaceRef}
-      className="min-h-0 flex-1 overflow-auto bg-[var(--color-surface)]"
-      onMouseUp={handleSelectionMouseUp}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') setSelectionMenu(null)
-      }}
-    >
-      <div className="mx-auto w-full max-w-[860px] px-6 py-5">
-        <MarkdownRenderer
-          content={value}
-          variant="document"
-          resolveImageSrc={resolveImageSrc}
-          className="workspace-markdown-preview prose-p:text-[14px] prose-p:leading-7 prose-h1:text-[24px] prose-h2:text-[18px] prose-h3:text-[15px] prose-code:text-[12px] prose-pre:my-4"
-        />
-      </div>
-      <FloatingSelectionMenu selection={selectionMenu} onAdd={addCurrentSelectionToChat} popoverRef={selectionMenuRef} />
-    </div>
-  )
-}
-
-function ImagePreview({ tab }: { tab: WorkspacePreviewTab }) {
-  const t = useTranslation()
-
-  if (!tab.dataUrl) {
-    return (
-      <PanelMessage
-        icon="image_not_supported"
-        message={tab.error || t('workspace.imagePreviewUnavailable')}
-      />
-    )
-  }
-
-  return (
-    <div className="min-h-0 flex-1 overflow-auto bg-[var(--color-surface)] p-4">
-      <div className="flex min-h-full items-center justify-center">
-        <img
-          src={tab.dataUrl}
-          alt={tab.path}
-          className="max-h-full max-w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] object-contain shadow-[var(--shadow-card)]"
-        />
-      </div>
     </div>
   )
 }
@@ -1894,7 +1175,11 @@ export function WorkspacePanel({ sessionId, embedded = false, forceVisible = fal
         {state === 'loading' || (activePreviewLoading && state !== 'ok') ? (
           <PanelMessage icon="progress_activity" message={t('workspace.previewState.loading')} />
         ) : state === 'ok' && activePreviewTab.previewType === 'image' ? (
-          <ImagePreview tab={activePreviewTab} />
+          <ImagePreview
+            dataUrl={activePreviewTab.dataUrl}
+            path={activePreviewTab.path}
+            error={activePreviewTab.error}
+          />
         ) : state === 'ok' && activePreviewTab.kind === 'diff' ? (
           <WorkspaceDiffSurface
             value={activePreviewTab.diff ?? ''}

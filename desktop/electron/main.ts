@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, WebContentsView } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'node:path'
+import { writeFile } from 'node:fs/promises'
 import { ELECTRON_EVENT_CHANNELS, ELECTRON_INTERNAL_CHANNELS, ELECTRON_IPC_CHANNELS, type ElectronIpcChannel } from './ipc/channels'
 import {
   isElectronIpcChannel,
@@ -23,6 +24,14 @@ import { ElectronUpdaterService, updaterSessionProxyConfig } from './services/up
 import { createUpdateSmokeUpdaterFromEnv } from './services/updateSmoke'
 import { ElectronTerminalService, type TerminalSpawnInput } from './services/terminal'
 import { ElectronPreviewService, type PreviewBounds } from './services/preview'
+import {
+  ElectronWorkspaceBrowserService,
+  WORKSPACE_BROWSER_PARTITION,
+  type WorkspaceBrowserBounds,
+  type WorkspaceBrowserCaptureKind,
+  type WorkspaceBrowserCreateOptions,
+  type WorkspaceBrowserFindOptions,
+} from './services/workspaceBrowser'
 import {
   configureLocalServerRequestAuth,
   configurePreviewSessionPermissions,
@@ -92,6 +101,7 @@ let serverRuntime: ElectronServerRuntime | null = null
 let updaterService: ElectronUpdaterService | null = null
 let terminalService: ElectronTerminalService | null = null
 let previewService: ElectronPreviewService | null = null
+let workspaceBrowserService: ElectronWorkspaceBrowserService | null = null
 let petWindowController: PetWindowController | null = null
 const traceWindows = new Map<string, BrowserWindow>()
 let isQuitting = false
@@ -342,6 +352,50 @@ const loadCustomPetCatalog = createCustomPetCatalogLoader(() => loadCustomPets({
     inspectImageSize: ({ data }) => nativeImage.createFromBuffer(data).getSize(),
   }))
 
+function workspaceBrowserDownloadsDir() {
+  return app.getPath('downloads')
+}
+
+function getWorkspaceBrowserService() {
+  workspaceBrowserService ??= new ElectronWorkspaceBrowserService({
+    previewScriptPath: previewAgentPath(),
+    emit: event => {
+      mainWindow?.webContents.send(ELECTRON_EVENT_CHANNELS.workspaceBrowserEvent, event)
+    },
+    resolveScaleFactor: parent => {
+      const bounds = parent.getBounds?.()
+      return bounds ? screen.getDisplayMatching(bounds).scaleFactor : 1
+    },
+    writePdf: async ({ data, filename }) => {
+      const savePath = path.join(workspaceBrowserDownloadsDir(), filename)
+      await writeFile(savePath, data)
+      return savePath
+    },
+    createView: () => {
+      const view = new WebContentsView({
+        webPreferences: {
+          preload: previewPreloadPath(),
+          // One shared persistent partition for every workspace page: a login in
+          // one tab has to still be there in the next one. Per-tab partitions
+          // would turn every new tab into a fresh, logged-out browser.
+          partition: WORKSPACE_BROWSER_PARTITION,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      })
+      // Same boundary as the singleton preview: OS permissions are denied, and
+      // `configureLocalServerRequestAuth` is deliberately NOT installed here.
+      // These pages render arbitrary remote sites, so attaching the desktop's
+      // local access token to their loopback requests would hand any visited
+      // site the local API.
+      configurePreviewSessionPermissions(view.webContents.session)
+      return view
+    },
+  })
+  return workspaceBrowserService
+}
+
 async function listCustomPets() {
   const { pets, errors } = await loadCustomPetCatalog()
   return { pets, errors }
@@ -421,6 +475,9 @@ async function handleCommandInvoke(payload: unknown): Promise<unknown> {
 
 function registerIpcHandlers() {
   ipcMain.on(ELECTRON_INTERNAL_CHANNELS.previewMessageFromView, (event, raw) => {
+    // Workspace pages and the legacy singleton preview share one preload, so the
+    // owner of the sender decides which service receives the message.
+    if (getWorkspaceBrowserService().handleMessageFromView(event.sender, raw)) return
     void getPreviewService().sendMessageToRenderer(event.sender, raw, mainWindow?.webContents)
   })
   registerHandler(ELECTRON_IPC_CHANNELS.appGetVersion, () => app.getVersion())
@@ -665,6 +722,66 @@ function registerIpcHandlers() {
   registerHandler(ELECTRON_IPC_CHANNELS.previewSetZoom, (_event, payload) => getPreviewService().setZoomFactor(payload))
   registerHandler(ELECTRON_IPC_CHANNELS.previewClose, () => getPreviewService().close())
   registerHandler(ELECTRON_IPC_CHANNELS.previewMessage, (event, payload) => getPreviewService().message(payload, event.sender))
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserCreate, (event, payload) => {
+    // The service keeps a single parent window, so whichever renderer calls
+    // `create` last owns where every page is attached and detached. Trace and
+    // pet windows load the same preload, so without this a secondary window
+    // could adopt the pages and strand them as unremovable children of the main
+    // window. Same guard shape as `appSetLocalePreference`.
+    if (!mainWindow || currentWindow(event) !== mainWindow) {
+      throw new Error('Only the main window can host workspace browser pages')
+    }
+    const { tabId, ...options } = payload as { tabId: string } & WorkspaceBrowserCreateOptions
+    return getWorkspaceBrowserService().create(mainWindow, tabId, options)
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserNavigate, (_event, payload) => {
+    const { tabId, url } = payload as { tabId: string, url: string }
+    return getWorkspaceBrowserService().navigate(tabId, url)
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserGoBack, (_event, payload) =>
+    getWorkspaceBrowserService().goBack((payload as { tabId: string }).tabId))
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserGoForward, (_event, payload) =>
+    getWorkspaceBrowserService().goForward((payload as { tabId: string }).tabId))
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserReload, (_event, payload) => {
+    const { tabId, ignoreCache } = payload as { tabId: string, ignoreCache?: boolean }
+    return getWorkspaceBrowserService().reload(tabId, { ignoreCache })
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserStop, (_event, payload) =>
+    getWorkspaceBrowserService().stop((payload as { tabId: string }).tabId))
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserSetBounds, (_event, payload) => {
+    const { tabId, bounds } = payload as { tabId: string, bounds: WorkspaceBrowserBounds }
+    return getWorkspaceBrowserService().setBounds(tabId, bounds)
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserSetVisible, (_event, payload) => {
+    const { tabId, visible } = payload as { tabId: string, visible: boolean }
+    return getWorkspaceBrowserService().setVisible(tabId, visible)
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserSetZoom, (_event, payload) => {
+    const { tabId, factor } = payload as { tabId: string, factor: number }
+    return getWorkspaceBrowserService().setZoom(tabId, factor)
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserFind, (_event, payload) => {
+    const { tabId, text, options } = payload as {
+      tabId: string
+      text: string
+      options?: WorkspaceBrowserFindOptions
+    }
+    return getWorkspaceBrowserService().find(tabId, text, options)
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserStopFind, (_event, payload) =>
+    getWorkspaceBrowserService().stopFind((payload as { tabId: string }).tabId))
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserCapture, (_event, payload) => {
+    const { tabId, kind } = payload as { tabId: string, kind: WorkspaceBrowserCaptureKind }
+    return getWorkspaceBrowserService().capture(tabId, kind)
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserMessage, (_event, payload) => {
+    const { tabId, payload: message } = payload as { tabId: string, payload: unknown }
+    return getWorkspaceBrowserService().message(tabId, message)
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserPrintToPdf, (_event, payload) =>
+    getWorkspaceBrowserService().printToPdf((payload as { tabId: string }).tabId))
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserClose, (_event, payload) =>
+    getWorkspaceBrowserService().close((payload as { tabId: string }).tabId))
   registerHandler(ELECTRON_IPC_CHANNELS.appModeGet, () => getAppMode(app))
   registerHandler(ELECTRON_IPC_CHANNELS.appModeSet, (_event, payload) => setAppMode(app, payload as Parameters<typeof setAppMode>[1]))
   registerHandler(ELECTRON_IPC_CHANNELS.appModePrepareRestart, () => getServerRuntime().stopAll(true))
@@ -717,6 +834,9 @@ async function createMainWindow() {
   await installRendererContextMenu(mainWindow)
   installPreviewCleanupOnRendererNavigation(mainWindow.webContents, () => {
     previewService?.close()
+    // A renderer reload discards every workspace tab, so the pages behind them
+    // have to go too rather than linger as orphaned webContents.
+    workspaceBrowserService?.closeAll()
   })
 
   installWindowLifecycle({
@@ -786,6 +906,7 @@ app.whenReady().then(async () => {
   screen.on('display-metrics-changed', (_event, _display, changedMetrics) => {
     if (changedMetrics.includes('scaleFactor') || changedMetrics.includes('bounds')) {
       previewService?.refreshBounds()
+      workspaceBrowserService?.refreshBounds()
     }
   })
   await getServerRuntime().startServer().catch(error => {
@@ -837,6 +958,7 @@ app.on('before-quit', event => {
     tray: () => { trayController?.dispose() },
     terminal: () => { terminalService?.killAll() },
     preview: () => { previewService?.close() },
+    workspaceBrowser: () => { workspaceBrowserService?.closeAll() },
     pet: () => { petWindowController?.dispose() },
   }
   // A destroyed native view or PTY can throw during cleanup. Keep going so a

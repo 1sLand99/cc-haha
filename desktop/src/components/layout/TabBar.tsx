@@ -18,8 +18,9 @@ import {
 import { useChatStore } from '../../stores/chatStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { isPlaceholderSessionTitle } from '../../lib/sessionTitle'
-import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
-import { useTerminalPanelStore } from '../../stores/terminalPanelStore'
+import { useWorkspaceStore } from '../../stores/workspaceStore'
+import { releaseWorkspaceSession } from '../../lib/workspace/releaseSession'
+import { getSessionBrowsablePath as getSessionCwd } from '../../lib/sessionWorkspace'
 import { useCLITaskStore } from '../../stores/cliTaskStore'
 import { teamTaskWindowsForSnapshot, useTeamStore } from '../../stores/teamStore'
 import { StatusDot } from '@/components/ui/Badge'
@@ -129,18 +130,17 @@ export function TabBar() {
   const openProjectPath = isActiveSessionTab
     ? getSessionBrowsablePath(activeSession) ?? null
     : null
-  // The right-side panel is now a single unified "workbench" with a per-session
-  // mode (file ↔ browser). The folder/browser toolbar buttons reflect whether
-  // the panel is open in their respective mode.
-  const isWorkbenchOpen = useWorkspacePanelStore((state) =>
-    activeTabId && isActiveSessionTab ? state.isPanelOpen(activeTabId) : false,
+  // Both toolbar buttons report only whether their own panel is showing. Tying
+  // the workspace button to a content mode is what made it offer "show
+  // workspace" while the workspace was already open on a browser page.
+  const isWorkbenchOpen = useWorkspaceStore((state) =>
+    activeTabId && isActiveSessionTab
+      ? (state.bySession[activeTabId]?.layout ?? 'hidden') !== 'hidden'
+      : false,
   )
-  const workbenchMode = useWorkspacePanelStore((state) =>
-    activeTabId && isActiveSessionTab ? state.getMode(activeTabId) : 'workspace',
-  )
-  const isWorkspacePanelOpen = isWorkbenchOpen && workbenchMode === 'workspace'
-  const isTerminalPanelOpen = useTerminalPanelStore((state) =>
-    activeTabId && isActiveSessionTab ? state.isPanelOpen(activeTabId) : false,
+  const isWorkspacePanelOpen = isWorkbenchOpen
+  const isTerminalPanelOpen = useWorkspaceStore((state) =>
+    activeTabId && isActiveSessionTab ? state.bySession[activeTabId]?.bottomOpen ?? false : false,
   )
   const cliTasks = useCLITaskStore((state) => state.tasks)
   const cliTasksSessionId = useCLITaskStore((state) => state.sessionId)
@@ -338,9 +338,7 @@ export function TabBar() {
 
   const closeTabWithCleanup = useCallback((tab: Tab) => {
     if (isSessionTab(tab)) {
-      useWorkspacePanelStore.getState().clearSession(tab.sessionId)
-      useTerminalPanelStore.getState().clearSession(tab.sessionId)
-      useActivityPanelStore.getState().close(tab.sessionId)
+      releaseWorkspaceSession(tab.sessionId)
     }
     closeTab(tab.sessionId)
   }, [closeTab])
@@ -625,7 +623,12 @@ export function TabBar() {
           label={t('tabs.openTerminal')}
           onClick={() => {
             if (activeTabId && isActiveSessionTab) {
-              useTerminalPanelStore.getState().togglePanel(activeTabId)
+              // Show or activate an existing bottom terminal; only an explicit
+              // "new terminal" ever spawns a second shell.
+              useWorkspaceStore.getState().toggleBottomPanel(
+                activeTabId,
+                getSessionCwd(activeSession) ?? '',
+              )
               return
             }
             useTabStore.getState().openTerminalTab()
@@ -633,24 +636,20 @@ export function TabBar() {
           size="md"
           tone={isTerminalPanelOpen ? 'default' : 'muted'}
           pressed={isTerminalPanelOpen}
+          data-workspace-focus="bottom-toggle"
           data-active={isTerminalPanelOpen ? 'true' : 'false'}
         />
         {isActiveSessionTab && activeTabId && (
           <IconButton
             icon={isWorkspacePanelOpen ? <FolderOpen size={18} strokeWidth={1.9} /> : <Folder size={18} strokeWidth={1.9} />}
             label={t(isWorkspacePanelOpen ? 'tabs.hideWorkspace' : 'tabs.showWorkspace')}
-            onClick={() => {
-              const workbench = useWorkspacePanelStore.getState()
-              if (workbench.isPanelOpen(activeTabId) && workbench.getMode(activeTabId) === 'workspace') {
-                workbench.closePanel(activeTabId)
-              } else {
-                workbench.setMode(activeTabId, 'workspace')
-                workbench.openPanel(activeTabId)
-              }
-            }}
+            // Re-opening an empty workspace lands on the four-entry launcher;
+            // one that already has tabs comes back to exactly what was there.
+            onClick={() => useWorkspaceStore.getState().toggleWorkspace(activeTabId)}
             size="md"
             tone={isWorkspacePanelOpen ? 'default' : 'muted'}
             pressed={isWorkspacePanelOpen}
+            data-workspace-focus="side-toggle"
             data-active={isWorkspacePanelOpen ? 'true' : 'false'}
           />
         )}

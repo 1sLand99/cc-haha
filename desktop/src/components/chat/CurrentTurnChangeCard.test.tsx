@@ -43,6 +43,20 @@ vi.mock('../../stores/openTargetStore', () => ({
   ),
 }))
 
+// The unified open entry point replaced the per-store `open` / `openPreview`
+// pair: every caller now names a target and the controller decides the tab.
+vi.mock('../../lib/workspace/openTarget', () => ({
+  workspaceOpen: {
+    file: (sessionId: string, path: string, options?: Record<string, unknown>) =>
+      openPreviewSpy(sessionId, path, 'file', options?.origin),
+    browser: (sessionId: string, url?: string) => browserOpenSpy(sessionId, url),
+    review: (sessionId: string, options?: Record<string, unknown>) =>
+      openPreviewSpy(sessionId, options?.path, 'diff', options?.origin),
+    terminal: vi.fn(),
+  },
+  openWorkspaceTarget: vi.fn(),
+}))
+
 // Mock browserPanelStore
 vi.mock('../../stores/browserPanelStore', () => ({
   useBrowserPanelStore: Object.assign(
@@ -467,7 +481,7 @@ describe('CurrentTurnChangeCard – open-with buttons', () => {
       fireEvent.click(previewItem)
     })
 
-    expect(openPreviewSpy).toHaveBeenCalledWith('s1', 'README.md', 'file')
+    expect(openPreviewSpy).toHaveBeenCalledWith('s1', 'README.md', 'file', undefined)
   })
 
   it('clicking a standalone index.html (no manifest in change-set) offers both workspace preview and in-app browser', async () => {

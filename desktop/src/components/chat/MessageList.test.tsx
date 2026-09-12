@@ -24,7 +24,7 @@ import { sessionsApi } from '../../api/sessions'
 import { teamsApi } from '../../api/teams'
 import { useChatStore } from '../../stores/chatStore'
 import { useWorkspaceChatContextStore } from '../../stores/workspaceChatContextStore'
-import { useWorkspacePanelStore } from '../../stores/workspacePanelStore'
+import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useTabStore } from '../../stores/tabStore'
@@ -317,7 +317,7 @@ describe('MessageList nested tool calls', () => {
     useWorkspaceChatContextStore.setState(useWorkspaceChatContextStore.getInitialState(), true)
     // The workspace panel store is a shared singleton; reset it so preview tabs opened by
     // one test (clicking a change-card row) don't dedupe/leak into the next test.
-    useWorkspacePanelStore.setState(useWorkspacePanelStore.getInitialState(), true)
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState(), true)
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockImplementation(
       () => new Promise(() => {}),
     )
@@ -6062,18 +6062,18 @@ describe('MessageList nested tool calls', () => {
     Object.defineProperty(renderItem, 'scrollIntoView', { configurable: true, value: scrollIntoView })
 
     fireEvent.click(opener)
-    await waitFor(() => expect(useWorkspacePanelStore.getState().getOrigin(ACTIVE_TAB))
+    await waitFor(() => expect(useWorkspaceStore.getState().getSession(ACTIVE_TAB).origin)
       .toEqual({ sourceTurnKey: 'assistant-origin-file', sourceElementId: opener.id }))
     fireEvent.click(screen.getByRole('button', { name: 'Hide changed files' }))
     expect(screen.queryByRole('button', { name: 'Open src/origin.ts in workspace' })).toBeNull()
     const summary = screen.getByRole('button', { name: 'Show 1 changed files' })
     // The user can focus another surface while the original file opener is gone.
     screen.getByRole('button', { name: 'Copy reply' }).focus()
-    act(() => useWorkspacePanelStore.getState().closePanel(ACTIVE_TAB))
+    act(() => useWorkspaceStore.getState().setLayout(ACTIVE_TAB, 'hidden'))
 
     await waitFor(() => expect(document.activeElement).toBe(summary))
     expect(summary.getAttribute('aria-expanded')).toBe('false')
-    expect(useWorkspacePanelStore.getState().getOrigin(ACTIVE_TAB)).toBeNull()
+    expect(useWorkspaceStore.getState().getSession(ACTIVE_TAB).origin).toBeNull()
     fireEvent.click(summary)
     expect(screen.getByRole('button', { name: 'Open src/origin.ts in workspace' })).toBeTruthy()
   })
@@ -6106,20 +6106,20 @@ describe('MessageList nested tool calls', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Show 1 changed files' }))
     const opener = screen.getByRole('button', { name: 'Open src/virtual.ts in workspace' })
     fireEvent.click(opener)
-    await waitFor(() => expect(useWorkspacePanelStore.getState().getOrigin(ACTIVE_TAB))
+    await waitFor(() => expect(useWorkspaceStore.getState().getSession(ACTIVE_TAB).origin)
       .toEqual({ sourceTurnKey: 'assistant-virtual-file', sourceElementId: opener.id }))
 
     await waitForProgrammaticScrollReset()
     scrollArea.scrollTop = 222 * 112 - 500
     fireEvent.scroll(scrollArea)
     await waitFor(() => expect(container.querySelector('[data-chat-render-item-key="assistant-virtual-file"]')).toBeNull())
-    act(() => useWorkspacePanelStore.getState().closePanel(ACTIVE_TAB))
+    act(() => useWorkspaceStore.getState().setLayout(ACTIVE_TAB, 'hidden'))
 
     const remountedOpener = await screen.findByRole('button', { name: 'Open src/virtual.ts in workspace' })
     expect(remountedOpener).not.toBe(opener)
     await waitFor(() => expect(document.activeElement).toBe(remountedOpener))
     expect(screen.getByRole('button', { name: 'Hide changed files' }).getAttribute('aria-expanded')).toBe('true')
-    expect(useWorkspacePanelStore.getState().getOrigin(ACTIVE_TAB)).toBeNull()
+    expect(useWorkspaceStore.getState().getSession(ACTIVE_TAB).origin).toBeNull()
   })
 
   it('opens the workspace diff (working-tree) when a historical turn change row is clicked', async () => {
@@ -6153,7 +6153,7 @@ describe('MessageList nested tool calls', () => {
         },
       ],
     })
-    const getWorkspaceDiff = vi.spyOn(sessionsApi, 'getWorkspaceDiff').mockResolvedValue({
+    vi.spyOn(sessionsApi, 'getWorkspaceDiff').mockResolvedValue({
       state: 'ok',
       path: 'src/first.ts',
       diff: 'diff --session a/src/first.ts b/src/first.ts\n-old\n+new',
@@ -6196,13 +6196,20 @@ describe('MessageList nested tool calls', () => {
     render(<MessageList />)
 
     // Clicking the row no longer expands an inline diff inside the card — it jumps to
-    // the right-side workspace and opens a diff tab (via workspacePanelStore.openPreview,
-    // which fetches the *current working-tree* diff through getWorkspaceDiff).
+    // the right-side workspace and opens a review tab scoped to that file, with
+    // the `turn` comparison. The diff itself is fetched when the tab renders, so
+    // what the click has to guarantee is the *target*, not a network call.
     await expandChangedFileCards()
     fireEvent.click(await screen.findByRole('button', { name: 'Open src/first.ts in workspace' }))
 
     await waitFor(() => {
-      expect(getWorkspaceDiff).toHaveBeenCalledWith(ACTIVE_TAB, 'src/first.ts')
+      const reviewTab = useWorkspaceStore.getState()
+        .getTabs(ACTIVE_TAB, 'side')
+        .find((tab) => tab.kind === 'review')
+      expect(reviewTab).toMatchObject({
+        source: { kind: 'turn' },
+        selectedPath: 'src/first.ts',
+      })
     })
     // The turn-snapshot diff endpoint is no longer used by the card.
     expect(getTurnCheckpointDiff).not.toHaveBeenCalled()
@@ -6237,7 +6244,7 @@ describe('MessageList nested tool calls', () => {
         },
       ],
     })
-    const getWorkspaceDiff = vi.spyOn(sessionsApi, 'getWorkspaceDiff').mockResolvedValue({
+    vi.spyOn(sessionsApi, 'getWorkspaceDiff').mockResolvedValue({
       state: 'ok',
       path: 'src/first.ts',
       diff: 'diff --git a/src/first.ts b/src/first.ts\n-old\n+new',
@@ -6276,7 +6283,13 @@ describe('MessageList nested tool calls', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open src/first.ts in workspace' }))
 
     await waitFor(() => {
-      expect(getWorkspaceDiff).toHaveBeenCalledWith(ACTIVE_TAB, 'src/first.ts')
+      const reviewTab = useWorkspaceStore.getState()
+        .getTabs(ACTIVE_TAB, 'side')
+        .find((tab) => tab.kind === 'review')
+      expect(reviewTab).toMatchObject({
+        source: { kind: 'turn' },
+        selectedPath: 'src/first.ts',
+      })
     })
     expect(getTurnCheckpointDiff).not.toHaveBeenCalled()
   })
@@ -6306,7 +6319,7 @@ describe('MessageList nested tool calls', () => {
         },
       ],
     })
-    const getWorkspaceDiff = vi.spyOn(sessionsApi, 'getWorkspaceDiff').mockResolvedValue({
+    vi.spyOn(sessionsApi, 'getWorkspaceDiff').mockResolvedValue({
       state: 'ok',
       path: 'src/live.ts',
       diff: 'diff --session a/src/live.ts b/src/live.ts\n+live',
@@ -6342,7 +6355,13 @@ describe('MessageList nested tool calls', () => {
     // Clicking the row jumps to the right-side workspace diff for the relativized path.
     fireEvent.click(screen.getByRole('button', { name: 'Open src/live.ts in workspace' }))
     await waitFor(() => {
-      expect(getWorkspaceDiff).toHaveBeenCalledWith(ACTIVE_TAB, 'src/live.ts')
+      const reviewTab = useWorkspaceStore.getState()
+        .getTabs(ACTIVE_TAB, 'side')
+        .find((tab) => tab.kind === 'review')
+      expect(reviewTab).toMatchObject({
+        source: { kind: 'turn' },
+        selectedPath: 'src/live.ts',
+      })
     })
   })
 
@@ -7703,16 +7722,15 @@ describe('MessageList nested tool calls', () => {
     vi.spyOn(renderItem, 'getBoundingClientRect').mockReturnValue({ top: 120, bottom: 480, left: 60, right: 620 } as DOMRect)
 
     await act(async () => {
-      useWorkspacePanelStore.getState().openPanel(ACTIVE_TAB)
-      useWorkspacePanelStore.setState({
-        originBySession: {
-          [ACTIVE_TAB]: { sourceTurnKey: 'assistant-origin', sourceElementId: 'origin-opener' },
-        },
+      useWorkspaceStore.getState().openTarget(ACTIVE_TAB, { kind: 'file', path: 'a.ts' })
+      useWorkspaceStore.getState().setOrigin(ACTIVE_TAB, {
+        sourceTurnKey: 'assistant-origin',
+        sourceElementId: 'origin-opener',
       })
       await Promise.resolve()
     })
     await act(async () => {
-      useWorkspacePanelStore.getState().closePanel(ACTIVE_TAB)
+      useWorkspaceStore.getState().setLayout(ACTIVE_TAB, 'hidden')
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
     })
 
@@ -7742,16 +7760,15 @@ describe('MessageList nested tool calls', () => {
     vi.spyOn(renderItem, 'getBoundingClientRect').mockReturnValue({ top: 80, bottom: 460, left: 60, right: 620 } as DOMRect)
 
     await act(async () => {
-      useWorkspacePanelStore.getState().openPanel(ACTIVE_TAB)
-      useWorkspacePanelStore.setState({
-        originBySession: {
-          [ACTIVE_TAB]: { sourceTurnKey: 'assistant-clipped', sourceElementId: 'clipped-origin-opener' },
-        },
+      useWorkspaceStore.getState().openTarget(ACTIVE_TAB, { kind: 'file', path: 'a.ts' })
+      useWorkspaceStore.getState().setOrigin(ACTIVE_TAB, {
+        sourceTurnKey: 'assistant-clipped',
+        sourceElementId: 'clipped-origin-opener',
       })
       await Promise.resolve()
     })
     await act(async () => {
-      useWorkspacePanelStore.getState().closePanel(ACTIVE_TAB)
+      useWorkspaceStore.getState().setLayout(ACTIVE_TAB, 'hidden')
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
     })
 
@@ -7786,16 +7803,15 @@ describe('MessageList nested tool calls', () => {
     }))
 
     await act(async () => {
-      useWorkspacePanelStore.getState().openPanel(ACTIVE_TAB)
-      useWorkspacePanelStore.setState({
-        originBySession: {
-          [ACTIVE_TAB]: { sourceTurnKey: 'virtual-origin-0', sourceElementId: 'virtual-origin-opener' },
-        },
+      useWorkspaceStore.getState().openTarget(ACTIVE_TAB, { kind: 'file', path: 'a.ts' })
+      useWorkspaceStore.getState().setOrigin(ACTIVE_TAB, {
+        sourceTurnKey: 'virtual-origin-0',
+        sourceElementId: 'virtual-origin-opener',
       })
       await Promise.resolve()
     })
     await act(async () => {
-      useWorkspacePanelStore.getState().closePanel(ACTIVE_TAB)
+      useWorkspaceStore.getState().setLayout(ACTIVE_TAB, 'hidden')
       await Promise.resolve()
     })
 
@@ -7814,7 +7830,7 @@ describe('MessageList nested tool calls', () => {
     })
 
     expect(document.activeElement).toBe(opener)
-    expect(useWorkspacePanelStore.getState().getOrigin(ACTIVE_TAB)).toBeNull()
+    expect(useWorkspaceStore.getState().getSession(ACTIVE_TAB).origin).toBeNull()
     vi.unstubAllGlobals()
   })
 
@@ -7829,13 +7845,9 @@ describe('MessageList nested tool calls', () => {
         }),
       },
     })
-    useWorkspacePanelStore.setState({
-      panelBySession: {
-        [ACTIVE_TAB]: { isOpen: false, activeView: 'changed' },
-      },
-      originBySession: {
-        [ACTIVE_TAB]: { sourceTurnKey: 'assistant-return', sourceElementId: 'return-origin-opener' },
-      },
+    useWorkspaceStore.getState().setOrigin(ACTIVE_TAB, {
+      sourceTurnKey: 'assistant-return',
+      sourceElementId: 'return-origin-opener',
     })
     const frames: FrameRequestCallback[] = []
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
@@ -7864,7 +7876,7 @@ describe('MessageList nested tool calls', () => {
 
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
     expect(document.activeElement).toBe(opener)
-    expect(useWorkspacePanelStore.getState().getOrigin(ACTIVE_TAB)).toBeNull()
+    expect(useWorkspaceStore.getState().getSession(ACTIVE_TAB).origin).toBeNull()
     vi.unstubAllGlobals()
   })
 })
