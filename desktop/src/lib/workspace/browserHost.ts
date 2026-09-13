@@ -5,6 +5,8 @@ import type {
   WorkspaceBrowserCaptureKind,
   WorkspaceBrowserEvent,
   WorkspaceBrowserFindOptions,
+  WorkspaceBrowserMenuAction,
+  WorkspaceBrowserMenuOptions,
 } from '../desktopHost/types'
 import type { PreviewHostMessage } from '../desktopHost'
 
@@ -46,6 +48,10 @@ async function call(
 }
 
 export const workspaceBrowserHost = {
+  showMenu: (tabId: string, options: WorkspaceBrowserMenuOptions): Promise<WorkspaceBrowserMenuAction | null> => {
+    const api = host()
+    return api ? api.showMenu(tabId, options) : Promise.resolve(null)
+  },
   create: (
     tabId: string,
     options: { storageId: string; url?: string; bounds?: WorkspaceBrowserBounds; visible?: boolean },

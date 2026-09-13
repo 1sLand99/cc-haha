@@ -328,6 +328,7 @@ export const browserHost: DesktopHost = {
     async snapshot() { return null },
     async message() {},
     async printToPdf() {},
+    async showMenu() { return null },
     async close() {},
     async onEvent(): Promise<DesktopHostUnlisten> {
       return noopUnlisten

@@ -8,6 +8,21 @@ import {
 } from './capabilities'
 
 describe('Electron IPC capabilities', () => {
+  it('accepts only the typed browser-menu fields and keeps the channel unavailable to pets', () => {
+    const channel = ELECTRON_IPC_CHANNELS.workspaceBrowserShowMenu
+    const labels = Object.fromEntries(['find', 'print', 'zoom', 'zoomIn', 'zoomOut', 'zoomReset', 'capture', 'pickElement', 'downloads', 'history', 'openExternal'].map(key => [key, key]))
+    const payload = { tabId: 'wb-1', x: 20, y: 44, labels, zoomFactor: 1, hasPage: true, canOpenExternal: true }
+    expect(validateElectronIpcPayload(channel, payload)).toBe(true)
+    expect(isElectronIpcChannelAllowedForPetWindow(channel)).toBe(false)
+    for (const patch of [
+      { tabId: '' }, { tabId: '../bad' }, { x: NaN }, { y: Infinity }, { x: '20' },
+      { zoomFactor: 0 }, { zoomFactor: NaN }, { canOpenExternal: 'true' }, { hasPage: undefined }, { hasPage: 'true' },
+      { action: 'quit' }, { labels: { ...labels, role: 'quit' } },
+      { labels: { ...labels, find: undefined } }, { labels: { ...labels, find: '' } },
+      { labels: { ...labels, find: 'x'.repeat(201) } }, { labels: { ...labels, find: 'bad\nlabel' } },
+    ]) expect(validateElectronIpcPayload(channel, { ...payload, ...patch })).toBe(false)
+  })
+
   it('accepts optional initial browser visibility without widening the create payload', () => {
     const channel = ELECTRON_IPC_CHANNELS.workspaceBrowserCreate
     const identity = { tabId: 'wb-1', storageId: 'store-1' }

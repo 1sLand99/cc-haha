@@ -195,6 +195,20 @@ export type WorkspaceBrowserBounds = PreviewBounds
 
 export type WorkspaceBrowserCaptureKind = 'full' | 'viewport'
 
+export type WorkspaceBrowserMenuAction =
+  | 'find' | 'print' | 'zoomIn' | 'zoomOut' | 'zoomReset'
+  | 'capture' | 'pickElement' | 'downloads' | 'history' | 'openExternal'
+
+export type WorkspaceBrowserMenuOptions = {
+  /** Anchor in renderer CSS pixels; the main process converts it using host zoom. */
+  x: number
+  y: number
+  labels: Record<WorkspaceBrowserMenuAction | 'zoom', string>
+  zoomFactor: number
+  hasPage: boolean
+  canOpenExternal: boolean
+}
+
 export type WorkspaceBrowserFindOptions = {
   forward?: boolean
   findNext?: boolean
@@ -467,6 +481,7 @@ export type DesktopHost = {
     onEvent(handler: (event: unknown) => void): Promise<DesktopHostUnlisten>
   }
   browser: {
+    showMenu(tabId: string, options: WorkspaceBrowserMenuOptions): Promise<WorkspaceBrowserMenuAction | null>
     create(
       tabId: string,
       options: { storageId: string; url?: string; bounds?: WorkspaceBrowserBounds; visible?: boolean },

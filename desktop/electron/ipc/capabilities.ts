@@ -207,6 +207,24 @@ const workspaceBrowserCreate: Validator = value =>
   && (value.bounds === undefined || boundsPayload(value.bounds))
   && (value.visible === undefined || typeof value.visible === 'boolean')
 
+const workspaceBrowserMenuLabelKeys = ['find', 'print', 'zoom', 'zoomIn', 'zoomOut', 'zoomReset', 'capture', 'pickElement', 'downloads', 'history', 'openExternal']
+
+const workspaceBrowserShowMenu: Validator = value =>
+  isRecord(value)
+  && hasOnlyKeys(value, ['tabId', 'x', 'y', 'labels', 'zoomFactor', 'hasPage', 'canOpenExternal'])
+  && isWorkspaceBrowserId(value.tabId)
+  && Number.isFinite(value.x)
+  && Number.isFinite(value.y)
+  && typeof value.zoomFactor === 'number' && Number.isFinite(value.zoomFactor) && value.zoomFactor > 0
+  && typeof value.hasPage === 'boolean'
+  && typeof value.canOpenExternal === 'boolean'
+  && isRecord(value.labels)
+  && hasOnlyKeys(value.labels, workspaceBrowserMenuLabelKeys)
+  && workspaceBrowserMenuLabelKeys.every((key) => {
+    const label = (value.labels as Record<string, unknown>)[key]
+    return typeof label === 'string' && label.length > 0 && label.length <= 200 && !/[\r\n\0]/.test(label)
+  })
+
 const workspaceBrowserNavigate: Validator = value =>
   isRecord(value)
   && hasOnlyKeys(value, ['tabId', 'url'])
@@ -353,6 +371,7 @@ export const ELECTRON_IPC_VALIDATORS = {
   [ELECTRON_IPC_CHANNELS.previewClose]: noPayload,
   [ELECTRON_IPC_CHANNELS.previewMessage]: () => true,
   [ELECTRON_IPC_CHANNELS.workspaceBrowserCreate]: workspaceBrowserCreate,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserShowMenu]: workspaceBrowserShowMenu,
   [ELECTRON_IPC_CHANNELS.workspaceBrowserNavigate]: workspaceBrowserNavigate,
   [ELECTRON_IPC_CHANNELS.workspaceBrowserGoBack]: workspaceBrowserTab,
   [ELECTRON_IPC_CHANNELS.workspaceBrowserGoForward]: workspaceBrowserTab,

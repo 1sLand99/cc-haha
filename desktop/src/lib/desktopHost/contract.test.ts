@@ -82,6 +82,19 @@ describe('desktop host contract', () => {
     await expect(browserHost.browser.snapshot('wb-1')).resolves.toBeNull()
     await expect(browserHost.browser.message('wb-1', { v: 1, type: 'exit-picker' })).resolves.toBeUndefined()
     await expect(browserHost.browser.printToPdf('wb-1')).resolves.toBeUndefined()
+    await expect(browserHost.browser.showMenu('wb-1', {
+      x: 100,
+      y: 50,
+      zoomFactor: 1,
+      hasPage: false,
+      canOpenExternal: false,
+      labels: {
+        find: 'Find', print: 'Print', zoom: 'Zoom', zoomIn: 'Zoom in',
+        zoomOut: 'Zoom out', zoomReset: 'Reset zoom', capture: 'Capture',
+        pickElement: 'Pick element', downloads: 'Downloads', history: 'History',
+        openExternal: 'Open externally',
+      },
+    })).resolves.toBeNull()
     await expect(browserHost.browser.close('wb-1')).resolves.toBeUndefined()
 
     const handler = vi.fn()

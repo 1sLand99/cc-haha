@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ELECTRON_EVENT_CHANNELS, ELECTRON_IPC_CHANNELS, type ElectronIpcChannel } from '../../../electron/ipc/channels'
 import { validateElectronIpcPayload } from '../../../electron/ipc/capabilities'
 import { createElectronHost } from './electronHost'
+import type { WorkspaceBrowserMenuOptions } from './types'
 
 describe('electron desktop host', () => {
   it('carries a terminal startup identity through the production IPC validator and early events', async () => {
@@ -26,6 +27,21 @@ describe('electron desktop host', () => {
     await host.terminal.spawn({ cols: 80, rows: 24, requestId: 'fixture-start' })
     expect(output).toHaveBeenCalledWith({ session_id: 9, requestId: 'fixture-start', data: 'prompt' })
     expect(exit).toHaveBeenCalledWith({ session_id: 9, requestId: 'fixture-start', code: 0 })
+  })
+
+  it('preserves native browser menu selection, cancellation and errors through the narrow IPC contract', async () => {
+    const options: WorkspaceBrowserMenuOptions = {
+      x: 20, y: 44, zoomFactor: 1.2, hasPage: true, canOpenExternal: true,
+      labels: { find: 'Find', print: 'Print', zoom: 'Zoom', zoomIn: 'Larger', zoomOut: 'Smaller', zoomReset: 'Reset', capture: 'Capture', pickElement: 'Pick', downloads: 'Downloads', history: 'History', openExternal: 'External' },
+    }
+    const invoke = vi.fn().mockResolvedValueOnce('find').mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('popup failed'))
+    const host = createElectronHost({ invoke, subscribe: vi.fn() })
+    await expect(host.browser.showMenu('wb-1', options)).resolves.toBe('find')
+    expect(invoke).toHaveBeenLastCalledWith(ELECTRON_IPC_CHANNELS.workspaceBrowserShowMenu, { tabId: 'wb-1', ...options })
+    await expect(host.browser.showMenu('wb-1', options)).resolves.toBeNull()
+    await expect(host.browser.showMenu('wb-1', options)).rejects.toThrow('popup failed')
+    await expect(host.browser.showMenu('wb-1', { ...options, x: NaN })).rejects.toThrow('Invalid Electron IPC payload')
+    expect(invoke).toHaveBeenCalledTimes(3)
   })
 
   it('synchronizes locale preferences through narrow app IPC boundaries', async () => {

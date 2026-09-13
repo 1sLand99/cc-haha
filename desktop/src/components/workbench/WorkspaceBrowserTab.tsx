@@ -6,9 +6,7 @@ import {
   ExternalLink,
   Globe,
   MessageSquarePlus,
-  Minus,
   MoreVertical,
-  Plus,
   RotateCw,
   Search,
   X,
@@ -82,11 +80,13 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
   const addressRef = useRef<HTMLInputElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [menuError, setMenuError] = useState<string | null>(null)
+  const menuRequestRef = useRef<object | null>(null)
+  const menuAllowedRef = useRef(false)
   const [panel, setPanel] = useState<BrowserPanel>(null)
   const [pendingNavigation, setPendingNavigation] = useState<{ run: () => void } | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const [findText, setFindText] = useState('')
-  const menuRef = useRef<HTMLDivElement>(null)
   const menuTriggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const appZoom = useSettingsStore((state) => state.uiZoom)
@@ -116,6 +116,7 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
   const visits = useMemo(() => Object.values(historyByTabId).flatMap((entries) => entries ?? []), [historyByTabId])
   const downloads = useWorkspaceBrowserStore((state) => state.downloads)
   const loading = page?.loading ?? false
+  menuAllowedRef.current = active && overlayCount === 0 && !pendingNavigation
 
   const currentAddress = page?.url || tab.url || ''
   const annotationActive = page?.annotationActive ?? false
@@ -143,12 +144,14 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
     return () => document.removeEventListener('focusin', onFocus)
   }, [active, available, browserTabId, ready, tab.url])
 
-  useDismissable({
-    open: menuOpen,
-    refs: [menuRef, menuTriggerRef],
-    onDismiss: () => setMenuOpen(false),
-  })
   useDismissable({ open: panel !== null, refs: [panelRef], onDismiss: () => setPanel(null) })
+
+  useEffect(() => {
+    if (!menuAllowedRef.current) {
+      menuRequestRef.current = null
+      setMenuOpen(false)
+    }
+  }, [active, overlayCount, pendingNavigation])
 
   const stillOwned = useCallback(() => useWorkspaceStore.getState().findBrowserTabOwner(browserTabId)?.sessionId === sessionId, [browserTabId, sessionId])
   const canCommand = useCallback(() => {
@@ -191,6 +194,9 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
   // tab reopens the same page rather than a blank one.
   useEffect(() => {
     if (!available || !stillOwned()) return
+    menuRequestRef.current = null
+    setMenuOpen(false)
+    setMenuError(null)
     const lifetime = { id: browserTabId, ready: false, cancelled: false }
     lifetimeRef.current = lifetime
     const request = ++navigationRequestRef.current
@@ -244,13 +250,12 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
     it. The surface renders only the active tab, so unmount is the *normal* way
     a browser tab goes off screen, not an edge case.
 
-    `menuOpen` and `loadError` are in the condition for the same reason `panel`
-    is: the browser's own dropdown and its retry overlay are DOM siblings drawn
-    inside the page's rectangle, and no z-index can lift them above it.
+    Full-page panels and the retry overlay still replace the guest. The toolbar
+    menu uses the host's native popup layer, so opening it must not detach or
+    hide the live page.
   */
   const pageCanBePresented = active &&
     panel === null &&
-    !menuOpen &&
     !pendingNavigation &&
     !tab.loadError &&
     Boolean(tab.url)
@@ -369,7 +374,7 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
   }
 
   const pickElement = () => {
-    if (annotationActive) {
+    if (useWorkspaceBrowserStore.getState().pageByTabId[browserTabId]?.annotationActive) {
       runCommand(() => workspaceBrowserHost.message(browserTabId, { v: 1, type: 'exit-picker' }))
       return
     }
@@ -386,6 +391,87 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
       return
     }
     runCommand(() => workspaceBrowserHost.find(browserTabId, text, { findNext, forward: true }))
+  }
+
+  const openMenu = async () => {
+    if (!canCommand() || !menuAllowedRef.current || menuRequestRef.current) return
+    const anchor = menuTriggerRef.current?.getBoundingClientRect()
+    if (!anchor) return
+    const lifetime = lifetimeRef.current
+    const request = {}
+    menuRequestRef.current = request
+    setMenuError(null)
+    setMenuOpen(true)
+    const isCurrent = () => menuRequestRef.current === request && lifetimeRef.current === lifetime && canCommand()
+    try {
+      const action = await workspaceBrowserHost.showMenu(browserTabId, {
+        x: anchor.left,
+        y: anchor.bottom,
+        zoomFactor: zoom,
+        hasPage: Boolean(tab.url),
+        canOpenExternal: Boolean(page?.url || tab.url),
+        labels: {
+          find: t('workspace.browser.findInPage'),
+          print: t('workspace.browser.print'),
+          zoom: t('workspace.browser.zoom'),
+          zoomIn: t('workspace.browser.zoomIn'),
+          zoomOut: t('workspace.browser.zoomOut'),
+          zoomReset: t('workspace.browser.zoomReset'),
+          capture: t('workspace.browser.capture'),
+          pickElement: t('workspace.browser.pickElement'),
+          downloads: t('workspace.browser.downloads'),
+          history: t('workspace.browser.history'),
+          openExternal: t('workspace.browser.openExternal'),
+        },
+      })
+      // A native popup can finish after a tab switch or unmount. It must never
+      // send a late command to the page that has since replaced its owner.
+      if (!isCurrent() || !menuAllowedRef.current) return
+      const currentPage = useWorkspaceBrowserStore.getState().pageByTabId[browserTabId]
+      const currentZoom = currentPage?.zoomFactor ?? zoom
+      if (!tab.url && (action === 'find' || action === 'print' || action === 'capture' || action === 'pickElement')) return
+      switch (action) {
+        case 'find':
+          setFindOpen(true)
+          break
+        case 'print':
+          runCommand(() => workspaceBrowserHost.printToPdf(browserTabId))
+          break
+        case 'zoomIn':
+          applyZoom(currentZoom + ZOOM_STEP)
+          break
+        case 'zoomOut':
+          applyZoom(currentZoom - ZOOM_STEP)
+          break
+        case 'zoomReset':
+          applyZoom(1)
+          break
+        case 'capture':
+          runCommand(() => workspaceBrowserHost.capture(browserTabId, 'full'))
+          break
+        case 'pickElement':
+          pickElement()
+          break
+        case 'downloads':
+          setPanel('downloads')
+          break
+        case 'history':
+          setPanel('history')
+          break
+        case 'openExternal': {
+          const url = currentPage?.url || tab.url
+          if (url) await getDesktopHost().shell.open(url)
+          break
+        }
+      }
+    } catch (error) {
+      // A menu failure does not mean the website failed to load. Keep the guest
+      // visible and expose the command error in the app chrome.
+      if (isCurrent()) setMenuError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (isCurrent()) setMenuOpen(false)
+      if (menuRequestRef.current === request) menuRequestRef.current = null
+    }
   }
 
   if (!available) {
@@ -486,11 +572,19 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
           size="md"
           tone="muted"
           pressed={menuOpen}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          disabled={!ready}
           data-testid="workspace-browser-menu-trigger"
-          onClick={() => setMenuOpen((open) => !open)}
+          onClick={() => { void openMenu() }}
         />
       </div>
 
+      {menuError ? (
+        <div role="alert" className="shrink-0 px-3 py-1.5 text-[12px] text-[var(--color-error)]">
+          {menuError}
+        </div>
+      ) : null}
       {findOpen ? (
         <div
           data-testid="workspace-browser-find"
@@ -688,100 +782,6 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
           </div>
         </div>
       ) : null}
-
-      {menuOpen ? (
-        <div
-          ref={menuRef}
-          role="menu"
-          data-testid="workspace-browser-menu"
-          className="absolute right-2 top-[52px] z-[var(--z-dropdown)] w-[288px] max-w-[calc(100%_-_16px)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1.5 shadow-[var(--shadow-dropdown)]"
-        >
-          <BrowserMenuItem
-            label={t('workspace.browser.findInPage')}
-            disabled={!ready || !tab.url}
-            onSelect={() => { setFindOpen(true); setMenuOpen(false) }}
-          />
-          <BrowserMenuItem
-            label={t('workspace.browser.print')}
-            disabled={!ready || !tab.url}
-            onSelect={() => { runCommand(() => workspaceBrowserHost.printToPdf(browserTabId)); setMenuOpen(false) }}
-          />
-          <div className="mx-3.5 my-1 border-t border-[var(--color-border)]" />
-          <div className="flex h-11 items-center justify-between gap-2 px-3.5">
-            <span className="text-[13px] text-[var(--color-text-primary)]">
-              {t('workspace.browser.zoom')}
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="flex items-center overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-hover)]">
-                <IconButton
-                  icon={<Minus size={14} />}
-                  label={t('workspace.browser.zoomOut')}
-                  size="sm"
-                  tone="muted"
-                  disabled={!ready || zoom <= MIN_ZOOM}
-                  onClick={() => applyZoom(zoom - ZOOM_STEP)}
-                />
-                <span className="min-w-[46px] border-x border-[var(--color-border)] text-center text-[13px] tabular-nums text-[var(--color-text-primary)]">
-                  {Math.round(zoom * 100)}%
-                </span>
-                <IconButton
-                  icon={<Plus size={14} />}
-                  label={t('workspace.browser.zoomIn')}
-                  size="sm"
-                  tone="muted"
-                  disabled={!ready || zoom >= MAX_ZOOM}
-                  onClick={() => applyZoom(zoom + ZOOM_STEP)}
-                />
-              </span>
-              <IconButton
-                icon={<RotateCw size={15} />}
-                label={t('workspace.browser.zoomReset')}
-                size="sm"
-                tone="muted"
-                disabled={!ready || zoom === 1}
-                onClick={() => applyZoom(1)}
-              />
-            </span>
-          </div>
-          <div className="my-1 border-t border-[var(--color-border)]" />
-          <BrowserMenuItem
-            label={t('workspace.browser.capture')}
-            disabled={!ready || !tab.url}
-            onSelect={() => { runCommand(() => workspaceBrowserHost.capture(browserTabId, 'full')); setMenuOpen(false) }}
-          />
-          <div className="my-1 border-t border-[var(--color-border)]" />
-          <BrowserMenuItem
-            label={t('workspace.browser.downloads')}
-            onSelect={() => { setPanel('downloads'); setMenuOpen(false) }}
-          />
-          <BrowserMenuItem
-            label={t('workspace.browser.history')}
-            onSelect={() => { setPanel('history'); setMenuOpen(false) }}
-          />
-        </div>
-      ) : null}
     </div>
-  )
-}
-
-function BrowserMenuItem({
-  label,
-  onSelect,
-  disabled = false,
-}: {
-  label: string
-  onSelect: () => void
-  disabled?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      disabled={disabled}
-      onClick={onSelect}
-      className="flex h-9 w-full items-center px-3.5 text-left text-[13px] text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)] disabled:cursor-not-allowed disabled:text-[var(--color-text-tertiary)] disabled:hover:bg-transparent"
-    >
-      {label}
-    </button>
   )
 }

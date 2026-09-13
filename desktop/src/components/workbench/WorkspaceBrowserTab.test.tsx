@@ -29,6 +29,7 @@ const { host, isAvailable, releaseTab, openExternal, openPath } = vi.hoisted(() 
       message: resolved(),
       close: resolved(),
       printToPdf: resolved(),
+      showMenu: vi.fn().mockResolvedValue(null),
     },
     isAvailable: vi.fn(() => true),
     releaseTab: vi.fn(),
@@ -63,7 +64,7 @@ import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useChatStore } from '@/stores/chatStore'
 import { usePreviewSelectionStore } from '@/stores/previewSelectionStore'
 import { handleBrowserSelectionEvent } from '@/lib/workspace/browserSelections'
-import type { WorkspaceBrowserDownload, WorkspaceBrowserEvent } from '../../lib/desktopHost/types'
+import type { WorkspaceBrowserDownload, WorkspaceBrowserEvent, WorkspaceBrowserMenuAction } from '../../lib/desktopHost/types'
 import type { WorkspaceBrowserTab as WorkspaceBrowserTabModel } from '../../lib/workspace/types'
 
 const SESSION = 'session-a'
@@ -119,9 +120,9 @@ function download(overrides: Partial<WorkspaceBrowserDownload> = {}): WorkspaceB
   }
 }
 
-function openMenuItem(name: string) {
-  fireEvent.click(screen.getByTestId('workspace-browser-menu-trigger'))
-  fireEvent.click(screen.getByRole('menuitem', { name }))
+async function openMenuItem(action: WorkspaceBrowserMenuAction) {
+  host.showMenu.mockResolvedValueOnce(action)
+  await act(async () => { fireEvent.click(screen.getByTestId('workspace-browser-menu-trigger')) })
 }
 
 beforeEach(() => {
@@ -133,6 +134,7 @@ beforeEach(() => {
   isAvailable.mockReturnValue(true)
   for (const mock of Object.values(host)) mock.mockReset().mockResolvedValue({ ok: true })
   host.snapshot.mockResolvedValue('data:image/png;base64,BACKDROP')
+  host.showMenu.mockResolvedValue(null)
   releaseTab.mockClear()
   openExternal.mockClear()
   openPath.mockClear()
@@ -413,18 +415,136 @@ it('configures the native capsule without hiding the page and follows page zoom 
 it('retains zoom controls across remounts and accepts native zoom changes', async () => {
   const tab = openBrowserTab()
   const first = await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
-  fireEvent.click(screen.getByTestId('workspace-browser-menu-trigger'))
-  fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+  await openMenuItem('zoomIn')
   expect(host.setZoom).toHaveBeenLastCalledWith(tab.browserTabId, 1.1)
   first.unmount()
   await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
-  fireEvent.click(screen.getByTestId('workspace-browser-menu-trigger'))
-  expect(screen.getByText('110%')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Reset zoom' })).toBeEnabled()
+  await openMenuItem('zoomOut')
+  expect(host.showMenu).toHaveBeenLastCalledWith(tab.browserTabId, expect.objectContaining({ zoomFactor: 1.1 }))
+  expect(host.setZoom).toHaveBeenLastCalledWith(tab.browserTabId, 1)
   emit({ ...pageState(tab.browserTabId), zoomFactor: 1.3 } as WorkspaceBrowserEvent)
-  expect(screen.getByText('130%')).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+  await openMenuItem('zoomIn')
   expect(host.setZoom).toHaveBeenLastCalledWith(tab.browserTabId, 1.4)
+  await openMenuItem('zoomReset')
+  expect(host.setZoom).toHaveBeenLastCalledWith(tab.browserTabId, 1)
+})
+
+describe('native toolbar menu', () => {
+  it('anchors localized actions to the trigger in CSS coordinates', async () => {
+    useSettingsStore.setState({ locale: 'zh', uiZoom: 1.5 })
+    const tab = openBrowserTab()
+    await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
+    const trigger = screen.getByTestId('workspace-browser-menu-trigger')
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({ left: 750, bottom: 80 } as DOMRect)
+    await act(async () => { fireEvent.click(trigger) })
+    expect(host.showMenu).toHaveBeenCalledWith(tab.browserTabId, expect.objectContaining({
+      x: 750,
+      y: 80,
+      canOpenExternal: true,
+      labels: expect.objectContaining({ find: '在页面中查找', history: '历史记录' }),
+    }))
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('waits for registration and ignores repeated clicks while a popup is pending', async () => {
+    const create = deferredCreate()
+    host.create.mockReturnValueOnce(create.promise)
+    const tab = openBrowserTab()
+    render(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
+    const trigger = screen.getByTestId('workspace-browser-menu-trigger')
+    expect(trigger).toBeDisabled()
+    fireEvent.click(trigger)
+    expect(host.showMenu).not.toHaveBeenCalled()
+    await act(async () => { create.resolve({ ok: true }) })
+    let dismiss!: (action: null) => void
+    host.showMenu.mockReturnValueOnce(new Promise((resolve) => { dismiss = resolve }))
+    fireEvent.click(trigger)
+    fireEvent.click(trigger)
+    expect(host.showMenu).toHaveBeenCalledTimes(1)
+    await act(async () => { dismiss(null) })
+    await openMenuItem('find')
+    expect(screen.getByTestId('workspace-browser-find')).toBeInTheDocument()
+  })
+
+  it.each(['unmount', 'inactive', 'reactivate', 'close', 'replace', 'overlay'] as const)(
+    'ignores a late menu action after %s', async (transition) => {
+      const tab = openBrowserTab()
+      const view = await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
+      let select!: (action: WorkspaceBrowserMenuAction) => void
+      host.showMenu.mockReturnValueOnce(new Promise((resolve) => { select = resolve }))
+      fireEvent.click(screen.getByTestId('workspace-browser-menu-trigger'))
+      if (transition === 'unmount') view.unmount()
+      if (transition === 'inactive') view.rerender(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active={false} />)
+      if (transition === 'reactivate') {
+        view.rerender(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active={false} />)
+        view.rerender(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
+      }
+      if (transition === 'close') act(() => { useWorkspaceStore.getState().closeTab(SESSION, tab.id) })
+      if (transition === 'replace') {
+        const next = openBrowserTab('https://replacement.test/')
+        view.rerender(<WorkspaceBrowserTab sessionId={SESSION} tab={next} active />)
+      }
+      if (transition === 'overlay') act(() => { useOverlayStore.getState().push() })
+      await act(async () => { select('print') })
+      expect(host.printToPdf).not.toHaveBeenCalled()
+      if (transition === 'replace' || transition === 'reactivate') {
+        expect(screen.getByTestId('workspace-browser-menu-trigger')).toHaveAttribute('aria-expanded', 'false')
+        await openMenuItem('find')
+        expect(screen.getByTestId('workspace-browser-find')).toBeInTheDocument()
+      }
+    },
+  )
+
+  it('shows a popup failure without turning it into a page load failure, and can retry', async () => {
+    const tab = openBrowserTab()
+    await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
+    host.showMenu.mockRejectedValueOnce(new Error('Popup unavailable'))
+    host.setVisible.mockClear()
+    await act(async () => { fireEvent.click(screen.getByTestId('workspace-browser-menu-trigger')) })
+    expect(screen.getByRole('alert')).toHaveTextContent('Popup unavailable')
+    expect(currentTab(tab.id).loadError).toBeFalsy()
+    expect(host.setVisible).not.toHaveBeenCalledWith(tab.browserTabId, false)
+    expect(screen.getByTestId('workspace-browser-menu-trigger')).toHaveAttribute('aria-expanded', 'false')
+    await openMenuItem('find')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByTestId('workspace-browser-find')).toBeInTheDocument()
+  })
+
+  it('targets PDF, capture, picker and external actions at the originating tab', async () => {
+    const tab = openBrowserTab()
+    await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
+    await openMenuItem('print')
+    expect(host.printToPdf).toHaveBeenCalledWith(tab.browserTabId)
+    await openMenuItem('capture')
+    expect(host.capture).toHaveBeenCalledWith(tab.browserTabId, 'full')
+    await openMenuItem('pickElement')
+    expect(host.message).toHaveBeenCalledWith(tab.browserTabId, expect.objectContaining({ type: 'enter-picker' }))
+    emit(pageState(tab.browserTabId, { url: 'https://redirected.test/' }))
+    await openMenuItem('openExternal')
+    expect(openExternal).toHaveBeenCalledWith('https://redirected.test/')
+  })
+
+  it('keeps the guest visible if opening the system browser fails', async () => {
+    const tab = openBrowserTab()
+    await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
+    openExternal.mockRejectedValueOnce(new Error('External browser unavailable'))
+    host.setVisible.mockClear()
+    await openMenuItem('openExternal')
+    expect(screen.getByRole('alert')).toHaveTextContent('External browser unavailable')
+    expect(currentTab(tab.id).loadError).toBeFalsy()
+    expect(host.setVisible).not.toHaveBeenCalledWith(tab.browserTabId, false)
+  })
+
+  it('uses the latest guest zoom when it changes during the menu', async () => {
+    const tab = openBrowserTab()
+    await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
+    let select!: (action: WorkspaceBrowserMenuAction) => void
+    host.showMenu.mockReturnValueOnce(new Promise((resolve) => { select = resolve }))
+    fireEvent.click(screen.getByTestId('workspace-browser-menu-trigger'))
+    emit({ ...pageState(tab.browserTabId), zoomFactor: 1.7 } as WorkspaceBrowserEvent)
+    await act(async () => { select('zoomIn') })
+    expect(host.setZoom).toHaveBeenLastCalledWith(tab.browserTabId, 1.8)
+  })
 })
 
 describe('page lifetime', () => {
@@ -441,16 +561,28 @@ describe('page lifetime', () => {
     expect(host.setVisible).toHaveBeenCalledWith(expect.any(String), false)
   })
 
-  it('hides the page while its own dropdown menu is open', async () => {
+  it('keeps the live page visible while its native menu is open and dismissed', async () => {
     const tab = openBrowserTab()
     await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
+    let dismiss!: (action: null) => void
+    host.showMenu.mockReturnValueOnce(new Promise((resolve) => { dismiss = resolve }))
     host.setVisible.mockClear()
 
     fireEvent.click(screen.getByTestId('workspace-browser-menu-trigger'))
 
-    // The menu is a DOM sibling drawn inside the page's rectangle; a native view
-    // paints above the DOM, so no z-index can rescue it.
-    expect(host.setVisible).toHaveBeenLastCalledWith(expect.any(String), false)
+    // The old DOM dropdown explicitly detached the WebContentsView, blanking
+    // the entire page. Native menus can cover the live guest without hiding it.
+    expect(host.setVisible).not.toHaveBeenCalledWith(tab.browserTabId, false)
+    expect(host.showMenu).toHaveBeenCalledWith(tab.browserTabId, expect.any(Object))
+    expect(host.snapshot).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('workspace-browser-backdrop')).toBeNull()
+    expect(screen.getByTestId('workspace-browser-menu-trigger')).toHaveAttribute('aria-expanded', 'true')
+    await act(async () => { dismiss(null) })
+    expect(screen.getByTestId('workspace-browser-menu-trigger')).toHaveAttribute('aria-expanded', 'false')
+    expect(host.setVisible).not.toHaveBeenCalledWith(tab.browserTabId, false)
+    expect(host.create).toHaveBeenCalledTimes(1)
+    expect(host.reload).not.toHaveBeenCalled()
+    expect(host.close).not.toHaveBeenCalled()
   })
 
   it('does not close the page when the component unmounts', async () => {
@@ -655,7 +787,7 @@ describe('visibility', () => {
     const tab = openBrowserTab()
     await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
 
-    openMenuItem('Downloads')
+    await openMenuItem('downloads')
     expect(screen.getByTestId('workspace-browser-panel-downloads')).toBeInTheDocument()
     expect(host.setVisible).toHaveBeenLastCalledWith(tab.browserTabId, false)
 
@@ -776,7 +908,7 @@ describe('find in page', () => {
     const tab = openBrowserTab()
     await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
 
-    openMenuItem('Find in page')
+    await openMenuItem('find')
     const input = screen.getByRole('textbox', { name: 'Find in page' })
     fireEvent.change(input, { target: { value: 'needle' } })
 
@@ -793,7 +925,7 @@ describe('find in page', () => {
     const tab = openBrowserTab()
     await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
 
-    openMenuItem('Find in page')
+    await openMenuItem('find')
     const input = screen.getByRole('textbox', { name: 'Find in page' })
     fireEvent.change(input, { target: { value: 'needle' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -810,7 +942,7 @@ describe('find in page', () => {
     const tab = openBrowserTab()
     await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
 
-    openMenuItem('Find in page')
+    await openMenuItem('find')
     const input = screen.getByRole('textbox', { name: 'Find in page' })
     fireEvent.change(input, { target: { value: 'needle' } })
     fireEvent.change(input, { target: { value: '' } })
@@ -822,7 +954,7 @@ describe('find in page', () => {
     const tab = openBrowserTab()
     await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
 
-    openMenuItem('Find in page')
+    await openMenuItem('find')
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Find in page' }), { key: 'Escape' })
 
     expect(screen.queryByTestId('workspace-browser-find')).toBeNull()
@@ -836,7 +968,7 @@ describe('overlays', () => {
     await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
     emit({ type: 'download', tabId: tab.browserTabId, download: download() })
 
-    openMenuItem('Downloads')
+    await openMenuItem('downloads')
     expect(screen.getByText('report.pdf')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Open downloaded file' }))
@@ -849,7 +981,7 @@ describe('overlays', () => {
     emit(pageState(tab.browserTabId, { url: 'https://visited.test/', title: 'Visited' }))
     emit(pageState(tab.browserTabId, { url: 'https://current.test/', title: 'Current' }))
 
-    openMenuItem('History')
+    await openMenuItem('history')
     fireEvent.click(screen.getByRole('button', { name: /Visited/ }))
 
     expect(host.navigate).toHaveBeenCalledWith(tab.browserTabId, 'https://visited.test/')
@@ -860,7 +992,7 @@ describe('overlays', () => {
     const tab = openBrowserTab()
     await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
 
-    openMenuItem('History')
+    await openMenuItem('history')
     expect(screen.getByText('No pages visited yet')).toBeInTheDocument()
   })
 })
@@ -1042,12 +1174,29 @@ describe('browser address suggestions', () => {
   })
 })
 
-it('keeps the browser toolbar aligned with file content and disables page-only menu actions in a blank tab', async () => {
+it('keeps the browser toolbar aligned with file content and ignores page-only menu actions in a blank tab', async () => {
   const tab = openBrowserTab(null)
   await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
   expect(screen.getByTestId('workspace-browser-toolbar')).toHaveClass('h-[52px]')
+  act(() => screen.getByTestId('workspace-browser-menu-trigger').focus())
+  host.message.mockClear()
+  for (const action of ['find', 'print', 'capture', 'pickElement'] as const) await openMenuItem(action)
+  expect(host.showMenu).toHaveBeenCalledWith(tab.browserTabId, expect.objectContaining({ hasPage: false, canOpenExternal: false }))
+  expect(screen.queryByTestId('workspace-browser-find')).toBeNull()
+  expect(host.printToPdf).not.toHaveBeenCalled()
+  expect(host.capture).not.toHaveBeenCalled()
+  expect(host.message).not.toHaveBeenCalled()
+})
+
+it('uses persistent annotation for a native menu selection and the latest annotation state when the popup resolves', async () => {
+  const tab = openBrowserTab()
+  await renderReady(<WorkspaceBrowserTab sessionId={SESSION} tab={tab} active />)
+  await openMenuItem('pickElement')
+  expect(host.message).toHaveBeenLastCalledWith(tab.browserTabId, expect.objectContaining({ type: 'enter-picker', persistent: true }))
+  let choose!: (action: WorkspaceBrowserMenuAction) => void
+  host.showMenu.mockReturnValueOnce(new Promise(resolve => { choose = resolve }))
   fireEvent.click(screen.getByTestId('workspace-browser-menu-trigger'))
-  expect(screen.getByRole('menuitem', { name: 'Find in page' })).toBeDisabled()
-  expect(screen.getByRole('menuitem', { name: 'Print to PDF' })).toBeDisabled()
-  expect(screen.getByRole('menuitem', { name: 'Capture screenshot' })).toBeDisabled()
+  emit({ ...pageState(tab.browserTabId), annotationActive: true } as WorkspaceBrowserEvent)
+  await act(async () => { choose('pickElement') })
+  expect(host.message).toHaveBeenLastCalledWith(tab.browserTabId, { v: 1, type: 'exit-picker' })
 })

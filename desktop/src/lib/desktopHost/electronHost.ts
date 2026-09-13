@@ -190,6 +190,7 @@ export function createElectronHost(bridge: ElectronHostBridge): DesktopHost {
       onEvent: handler => subscribe(ELECTRON_EVENT_CHANNELS.previewEvent, handler),
     },
     browser: {
+      showMenu: (tabId, options) => invoke(ELECTRON_IPC_CHANNELS.workspaceBrowserShowMenu, { ...options, tabId }),
       create: (tabId, options) => invoke(ELECTRON_IPC_CHANNELS.workspaceBrowserCreate, {
         tabId,
         storageId: options.storageId,

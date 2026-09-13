@@ -2,7 +2,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { WorkspaceBrowserEvent } from '../../src/lib/desktopHost/types'
+import type { MenuItemConstructorOptions } from 'electron'
+import type { WorkspaceBrowserMenuFactory } from './workspaceBrowserMenu'
+import type { WorkspaceBrowserEvent, WorkspaceBrowserMenuOptions } from '../../src/lib/desktopHost/types'
 import {
   ElectronWorkspaceBrowserService,
   WORKSPACE_BROWSER_PARTITION,
@@ -259,7 +261,7 @@ type Harness = {
   pdfWrites: Array<{ data: Uint8Array, filename: string }>
 }
 
-function createHarness(options?: { scaleFactor?: number, platform?: NodeJS.Platform, cancelPdf?: boolean, loadResult?: Promise<unknown> }): Harness {
+function createHarness(options?: { scaleFactor?: number, platform?: NodeJS.Platform, cancelPdf?: boolean, loadResult?: Promise<unknown>, menuFactory?: WorkspaceBrowserMenuFactory }): Harness {
   const views: FakeView[] = []
   const events: WorkspaceBrowserEvent[] = []
   const partitions: string[] = []
@@ -271,6 +273,7 @@ function createHarness(options?: { scaleFactor?: number, platform?: NodeJS.Platf
     previewScriptPath: previewScript(),
     emit: event => events.push(event),
     platform: options?.platform,
+    menuFactory: options?.menuFactory,
     resolveScaleFactor: () => options?.scaleFactor ?? 1,
     writePdf: async input => {
       if (options?.cancelPdf) return null
@@ -1281,5 +1284,103 @@ describe('browser recovery boundaries', () => {
     a.zoomFactor = 2
     a.emit('zoom-changed', {}, 'in')
     expect(h.events.filter(event => event.type === 'state' && event.tabId === 'a').at(-1)).toMatchObject({ zoomFactor: 2 })
+  })
+})
+
+
+const menuOptions: WorkspaceBrowserMenuOptions = {
+  x: 20, y: 44, zoomFactor: 1, hasPage: true, canOpenExternal: true,
+  labels: { find: 'Find', print: 'Print', zoom: 'Zoom', zoomIn: 'Larger', zoomOut: 'Smaller', zoomReset: 'Reset', capture: 'Capture', pickElement: 'Pick', downloads: 'Downloads', history: 'History', openExternal: 'External' },
+}
+
+function menuHarness() {
+  const menus: Array<{ template: MenuItemConstructorOptions[]; popup: ReturnType<typeof vi.fn>; closePopup: ReturnType<typeof vi.fn> }> = []
+  const h = createHarness({ menuFactory: (template) => {
+    const menu = { template, popup: vi.fn(), closePopup: vi.fn() }
+    menus.push(menu)
+    return menu
+  } })
+  return { ...h, menus }
+}
+
+function chooseMenu(h: ReturnType<typeof menuHarness>, index: number, action: string) {
+  const item = h.menus[index]!.template.find(item => item.id === action)
+  const click = item?.click as (() => void) | undefined
+  click?.()
+}
+
+describe('native browser popup lifetime', () => {
+  it('opens a native menu without hiding, resizing, navigating or replacing its live view', async () => {
+    const h = menuHarness()
+    await h.service.create(h.parent, 'wb-menu', { storageId: 'menu', url: 'https://example.test/' })
+    const view = requireView(h, 0)
+    const visible = [...view.visible]
+    const bounds = [...view.bounds]
+    const pending = h.service.showMenu(h.parent, 'wb-menu', menuOptions)
+    expect(h.menus).toHaveLength(1)
+    expect(view.visible).toEqual(visible)
+    expect(view.bounds).toEqual(bounds)
+    expect(h.parent.contentView.removeChildView).not.toHaveBeenCalled()
+    expect(view.webContents.loadedUrls).toEqual(['https://example.test/'])
+    expect(h.views).toHaveLength(1)
+    chooseMenu(h, 0, 'find')
+    await expect(pending).resolves.toBe('find')
+  })
+
+  it.each(['hide', 'close', 'closeAll'] as const)('cancels a pending popup on %s and ignores late selection', async action => {
+    const h = menuHarness()
+    await h.service.create(h.parent, 'wb-menu', { storageId: 'menu' })
+    const pending = h.service.showMenu(h.parent, 'wb-menu', menuOptions)
+    if (action === 'hide') h.service.setVisible('wb-menu', false)
+    else if (action === 'close') h.service.close('wb-menu')
+    else h.service.closeAll()
+    await expect(pending).resolves.toBeNull()
+    expect(h.menus[0]!.closePopup).toHaveBeenCalledTimes(1)
+    chooseMenu(h, 0, 'print')
+    await expect(pending).resolves.toBeNull()
+  })
+
+  it('cancels the previous popup before opening another without letting its callback cancel the new popup', async () => {
+    const h = menuHarness()
+    await h.service.create(h.parent, 'wb-menu', { storageId: 'menu' })
+    const first = h.service.showMenu(h.parent, 'wb-menu', menuOptions)
+    const second = h.service.showMenu(h.parent, 'wb-menu', menuOptions)
+    await expect(first).resolves.toBeNull()
+    h.menus[0]!.popup.mock.calls[0]![0].callback()
+    chooseMenu(h, 0, 'capture')
+    chooseMenu(h, 1, 'history')
+    await expect(second).resolves.toBe('history')
+  })
+
+  it('allows a registered hidden page to open its menu without attaching it', async () => {
+    const h = menuHarness()
+    await h.service.create(h.parent, 'wb-menu', { storageId: 'menu', visible: false })
+    const pending = h.service.showMenu(h.parent, 'wb-menu', menuOptions)
+    expect(h.parent.contentView.addChildView).not.toHaveBeenCalled()
+    chooseMenu(h, 0, 'downloads')
+    await expect(pending).resolves.toBe('downloads')
+  })
+
+  it('uses the current native zoom for menu bounds and percentage instead of stale renderer state', async () => {
+    const h = menuHarness()
+    await h.service.create(h.parent, 'wb-menu', { storageId: 'menu' })
+    requireView(h, 0).webContents.zoomFactor = 2
+    h.events.length = 0
+    const pending = h.service.showMenu(h.parent, 'wb-menu', menuOptions)
+    expect(h.events).toEqual([expect.objectContaining({ type: 'state', tabId: 'wb-menu', zoomFactor: 2 })])
+    expect(h.menus[0]!.template.find(item => item.id === 'zoomIn')?.enabled).toBe(false)
+    expect(h.menus[0]!.template.find(item => item.id === 'zoom')?.label).toContain('200%')
+    h.menus[0]!.popup.mock.calls[0]![0].callback()
+    await expect(pending).resolves.toBeNull()
+  })
+
+  it('rejects missing pages, foreign owners and destroyed parents without constructing a menu', async () => {
+    const h = menuHarness()
+    await expect(h.service.showMenu(h.parent, 'missing', menuOptions)).rejects.toThrow('tab not open')
+    await h.service.create(h.parent, 'wb-menu', { storageId: 'menu' })
+    await expect(h.service.showMenu(fakeParent(), 'wb-menu', menuOptions)).rejects.toThrow('window')
+    h.parent.isDestroyed.mockReturnValue(true)
+    await expect(h.service.showMenu(h.parent, 'wb-menu', menuOptions)).rejects.toThrow('window')
+    expect(h.menus).toHaveLength(0)
   })
 })

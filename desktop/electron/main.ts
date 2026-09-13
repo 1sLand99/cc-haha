@@ -18,6 +18,8 @@ import {
 } from './services/notifications'
 import { installApplicationMenu, installRendererContextMenu } from './services/menu'
 import { saveWorkspaceBrowserPdf } from './services/workspaceBrowserPdf'
+import { workspaceBrowserMenuPosition } from './services/workspaceBrowserMenu'
+import type { WorkspaceBrowserMenuOptions } from '../src/lib/desktopHost/types'
 import { acquireSingleInstanceLock } from './services/singleInstance'
 import { installTray, shouldInstallTray, type TrayController } from './services/tray'
 import { ElectronUpdaterService, updaterSessionProxyConfig } from './services/updater'
@@ -359,6 +361,15 @@ function workspaceBrowserDownloadsDir() {
 function getWorkspaceBrowserService() {
   workspaceBrowserService ??= new ElectronWorkspaceBrowserService({
     previewScriptPath: previewAgentPath(),
+    menuFactory: template => {
+      const window = mainWindow
+      if (!window || window.isDestroyed()) throw new Error('Workspace browser menu requires a live main window')
+      const menu = Menu.buildFromTemplate(template)
+      return {
+        popup: options => menu.popup({ ...options, window }),
+        closePopup: () => { if (!window.isDestroyed()) menu.closePopup(window) },
+      }
+    },
     emit: event => {
       mainWindow?.webContents.send(ELECTRON_EVENT_CHANNELS.workspaceBrowserEvent, event)
     },
@@ -742,6 +753,15 @@ function registerIpcHandlers() {
   registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserNavigate, (_event, payload) => {
     const { tabId, url } = payload as { tabId: string, url: string }
     return getWorkspaceBrowserService().navigate(tabId, url)
+  })
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserShowMenu, (event, payload) => {
+    if (!mainWindow || currentWindow(event) !== mainWindow || mainWindow.isDestroyed()) {
+      throw new Error('Only the main window can open workspace browser menus')
+    }
+    const { tabId, ...options } = payload as { tabId: string } & WorkspaceBrowserMenuOptions
+    const { width, height } = mainWindow.getContentBounds()
+    const anchor = workspaceBrowserMenuPosition(options, mainWindow.webContents.getZoomFactor(), { width, height })
+    return getWorkspaceBrowserService().showMenu(mainWindow, tabId, { ...options, ...anchor })
   })
   registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserGoBack, (_event, payload) =>
     getWorkspaceBrowserService().goBack((payload as { tabId: string }).tabId))

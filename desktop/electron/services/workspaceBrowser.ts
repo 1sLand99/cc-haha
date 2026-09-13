@@ -7,6 +7,8 @@ import type {
   WorkspaceBrowserEvent,
   WorkspaceBrowserFindOptions,
   WorkspaceBrowserHistoryEntry,
+  WorkspaceBrowserMenuAction,
+  WorkspaceBrowserMenuOptions,
 } from '../../src/lib/desktopHost/types'
 import { parsePreviewAgentMessage, type PreviewAgentMessage } from '../ipc/previewMessage'
 import { parseHostMessage, type HostMessage } from '../../src/preview-agent/protocol'
@@ -19,6 +21,7 @@ import {
   type PreviewBounds,
 } from './preview'
 import { normalizeZoomFactor } from './zoom'
+import { WorkspaceBrowserMenuController, type WorkspaceBrowserMenuFactory } from './workspaceBrowserMenu'
 
 export type { WorkspaceBrowserCaptureKind, WorkspaceBrowserEvent, WorkspaceBrowserFindOptions }
 
@@ -171,6 +174,7 @@ export type ElectronWorkspaceBrowserServiceOptions = {
   /** Writes an exported PDF and resolves with the path it landed on. */
   writePdf?: (input: { data: Uint8Array, filename: string }) => Promise<string | null>
   platform?: NodeJS.Platform
+  menuFactory?: WorkspaceBrowserMenuFactory
 }
 
 type WorkspaceBrowserPage = {
@@ -247,6 +251,7 @@ export class ElectronWorkspaceBrowserService {
   private readonly hookedSessions = new Set<WorkspaceBrowserSessionLike>()
   private parent: WorkspaceBrowserParentWindowLike | null = null
   private downloadSequence = 0
+  private readonly menu?: WorkspaceBrowserMenuController
 
   constructor(options: ElectronWorkspaceBrowserServiceOptions) {
     this.createView = options.createView
@@ -255,6 +260,7 @@ export class ElectronWorkspaceBrowserService {
     this.resolveScaleFactor = options.resolveScaleFactor
     this.writePdf = options.writePdf
     this.platform = options.platform ?? process.platform
+    if (options.menuFactory) this.menu = new WorkspaceBrowserMenuController(options.menuFactory)
   }
 
   async create(
@@ -299,6 +305,26 @@ export class ElectronWorkspaceBrowserService {
     page.persistentPicker = null
     page.pickerGeneration += 1
     await page.view.webContents.loadURL(normalizePreviewUrl(url))
+  }
+
+  async showMenu(
+    parent: WorkspaceBrowserParentWindowLike,
+    tabId: string,
+    options: WorkspaceBrowserMenuOptions,
+  ): Promise<WorkspaceBrowserMenuAction | null> {
+    const page = this.requirePage(tabId)
+    if (parent !== this.parent || parent.isDestroyed?.() || parent.webContents?.isDestroyed?.()) {
+      throw new Error('Workspace browser menu requires its live owner window')
+    }
+    if (!this.menu) throw new Error('Workspace browser native menu unavailable')
+    const nativeZoom = page.view.webContents.getZoomFactor?.()
+    if (nativeZoom !== undefined && Number.isFinite(nativeZoom) && nativeZoom > 0 && nativeZoom !== page.zoomFactor) {
+      page.zoomFactor = nativeZoom
+      // Menu actions return to the renderer. Its next zoom step must start
+      // from the same current native value that the menu displays.
+      this.emitState(page)
+    }
+    return this.menu.show(tabId, { ...options, zoomFactor: page.zoomFactor })
   }
 
   goBack(tabId: string): void {
@@ -459,6 +485,7 @@ export class ElectronWorkspaceBrowserService {
   }
 
   closeAll(): void {
+    this.menu?.cancel()
     for (const tabId of [...this.pages.keys()]) this.close(tabId)
     this.parent = null
   }
@@ -865,6 +892,7 @@ export class ElectronWorkspaceBrowserService {
   }
 
   private detach(page: WorkspaceBrowserPage): void {
+    this.menu?.cancel(page.tabId)
     // A DOM focus request cannot move macOS's native responder out of a
     // WebContentsView. Capture ownership before hiding/removing the view drops
     // it, and do not steal focus when a newer page or a host input already owns it.

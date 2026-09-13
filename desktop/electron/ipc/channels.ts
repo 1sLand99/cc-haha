@@ -59,6 +59,7 @@ export const ELECTRON_IPC_CHANNELS = {
   previewClose: 'desktop:preview:close',
   previewMessage: 'desktop:preview:message',
   workspaceBrowserCreate: 'desktop:workspace-browser:create',
+  workspaceBrowserShowMenu: 'desktop:workspace-browser:show-menu',
   workspaceBrowserNavigate: 'desktop:workspace-browser:navigate',
   workspaceBrowserGoBack: 'desktop:workspace-browser:go-back',
   workspaceBrowserGoForward: 'desktop:workspace-browser:go-forward',
