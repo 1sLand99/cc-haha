@@ -2,6 +2,17 @@ import type {
  TranslationKey } from './en'
 
 export const zh: Record<TranslationKey, string> = {
+  "h5Settings.credentialRequired": "變更請求網址時，請重新填寫主模型或圖片模型的 API Key，不能將電腦已儲存的金鑰自動傳送至新網址。",
+  "h5Settings.scope": "模型及 Agent 設定會套用至連接的電腦。桌面管理及遠端存取控制仍需在桌面操作。",
+  "h5Settings.providerPrivacy": "不會顯示已儲存的 API Key。編輯時留空可保留原金鑰，或輸入新金鑰取代。官方帳戶登入及連線測試請在桌面完成。",
+  "h5Settings.browserOnly": "外觀和介面語言僅套用於目前瀏覽器。",
+  "h5Settings.agentPreferences": "Agent 偏好",
+  "h5Settings.agentPreferencesHint": "這些預設設定與桌面共用，現有對話可能需要重新啟動才會套用。",
+  "h5Settings.effort": "推理強度",
+  "h5Settings.sendBehavior": "鍵盤傳送方式",
+  "h5Settings.enter": "Enter 傳送 · Shift+Enter 換行",
+  "h5Settings.modifierEnter": "Ctrl/Cmd+Enter 傳送 · Enter 換行",
+
   "publicAccess.title": "公網存取 · ngrok",
   "publicAccess.intro": "連接一次你自己的 ngrok 帳戶，即可掃碼，在手機上遠端使用這台電腦。",
   "publicAccess.account": "取得 ngrok Authtoken",
@@ -40,7 +51,7 @@ export const zh: Record<TranslationKey, string> = {
   "publicAccess.phoneUnpaired": "請在桌面產生新的配對 QR 碼，並使用手機掃碼。",
   "publicAccess.deviceName": "裝置名稱",
   "publicAccess.requestPair": "請求配對",
-  "publicAccess.privacy": "開啟後，已配對的手機可透過網際網路查看對話、傳送指令及回應核准，相關操作會在這台電腦上執行。\n連線由你的 ngrok 帳戶提供。標準 HTTPS 通道會在 ngrok 伺服器解密，因此 ngrok 在技術上能接觸傳輸的對話、指令和檔案內容；這不是中繼無法讀取的端對端加密。\nAuthtoken 儲存在本機應用程式資料目錄，擁有本機帳戶或管理員權限的人可能讀取它。請妥善保管帳戶及配對資訊。\n電腦必須保持執行、連網且未休眠。免費方案的流量、請求額度和瀏覽器提示頁可能影響存取。你可以隨時關閉公網存取或撤銷手機。",
+  "publicAccess.privacy": "開啟後，已配對的手機可透過網際網路查看對話、傳送指令及回應核准，也能新增、修改、刪除與切換模型服務商設定及 API Key，並修改部分一般設定，相關操作會在這台電腦上執行。\n連線由你的 ngrok 帳戶提供。標準 HTTPS 通道會在 ngrok 伺服器解密，因此 ngrok 在技術上能接觸傳輸的對話、指令、檔案內容、模型設定及新提交的 API Key；這不是中繼無法讀取的端對端加密。\nAuthtoken 儲存在本機應用程式資料目錄，擁有本機帳戶或管理員權限的人可能讀取它。請妥善保管帳戶及配對資訊。\n電腦必須保持執行、連網且未休眠。免費方案的流量、請求額度和瀏覽器提示頁可能影響存取。你可以隨時關閉公網存取或撤銷手機。",
 
   'settings.providers.compatibilityJsonHint': 'requestCompatibility 僅儲存到目前供應商，不寫入全域設定。',
   'settings.providers.compatibilityBudget': '回覆輸出預算',

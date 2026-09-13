@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { PUBLIC_ACCESS_CONSENT_VERSION } from '@/lib/desktopHost/types'
 import { PublicAccessSettings } from './PublicAccessSettings'
 import { useSettingsStore } from '@/stores/settingsStore'
 const mocks = vi.hoisted(() => ({
@@ -28,7 +29,7 @@ it('requires privacy consent before saving a masked credential and starting', as
   expect(dialog.getByText(/Standard HTTPS tunnels decrypt/)).toBeInTheDocument()
   expect(mocks.saveCredential).not.toHaveBeenCalled()
   fireEvent.click(dialog.getByRole('button', { name: 'Agree and enable public access' }))
-  await waitFor(() => expect(mocks.start).toHaveBeenCalledWith(1))
+  await waitFor(() => expect(mocks.start).toHaveBeenCalledWith(PUBLIC_ACCESS_CONSENT_VERSION))
   expect(mocks.saveCredential).toHaveBeenCalledWith('private-token')
   expect(input).toHaveValue('')
 })
@@ -38,6 +39,18 @@ it('opens only the official account page', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Get ngrok Authtoken' }))
   await waitFor(() => expect(mocks.open).toHaveBeenCalledWith('https://dashboard.ngrok.com/get-started/your-authtoken'))
 })
+it('asks v1 users to confirm model configuration management before enabling again', async () => {
+  mocks.getStatus.mockResolvedValue({ ...mocks.status, state: 'disabled', hasCredential: true, autoStart: true, consentVersion: 1 })
+  render(<PublicAccessSettings />)
+  await screen.findByText('Off')
+  expect(screen.getByRole('checkbox')).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Enable public access' }))
+  const dialog = within(await screen.findByRole('dialog'))
+  expect(dialog.getByText(/add, edit, delete and switch model provider configurations and API keys/)).toBeInTheDocument()
+  expect(mocks.start).not.toHaveBeenCalled()
+  fireEvent.click(dialog.getByRole('button', { name: 'Agree and enable public access' }))
+  await waitFor(() => expect(mocks.start).toHaveBeenCalledWith(PUBLIC_ACCESS_CONSENT_VERSION))
+})
 it('renders no credential controls in a browser', () => {
   host.kind = 'browser'
   const { container } = render(<PublicAccessSettings />)
@@ -45,7 +58,7 @@ it('renders no credential controls in a browser', () => {
   host.kind = 'electron'
 })
 it('uses an expiring fragment QR and revokes only the selected device', async () => {
-  mocks.getStatus.mockResolvedValue({ state: 'online', hasCredential: true, publicUrl: 'https://test.ngrok-free.app', error: null, autoStart: false, consentVersion: 1 })
+  mocks.getStatus.mockResolvedValue({ state: 'online', hasCredential: true, publicUrl: 'https://test.ngrok-free.app', error: null, autoStart: false, consentVersion: PUBLIC_ACCESS_CONSENT_VERSION })
   mocks.get.mockResolvedValue({ enabled: true, port: 1234, publicUrl: 'https://test.ngrok-free.app', pending: [{ id: 'new-phone', name: 'New phone' }], devices: [{ id: 'old-phone', name: 'Old phone', createdAt: 1, expiresAt: Date.now() + 10000 }] })
   mocks.pairing.mockResolvedValue({ secret: 'one-time', expiresAt: Date.now() + 300000 })
   mocks.qr.mockResolvedValue('data:image/png;base64,fake')
@@ -71,7 +84,7 @@ it('shows a retryable error without leaking upstream details', async () => {
 })
 
 it('allows closing a tunnel while SDK start is pending', async () => {
-  const connecting = { state: 'connecting', hasCredential: true, publicUrl: null, error: null, autoStart: false, consentVersion: 1 }
+  const connecting = { state: 'connecting', hasCredential: true, publicUrl: null, error: null, autoStart: false, consentVersion: PUBLIC_ACCESS_CONSENT_VERSION }
   const disabled = { ...connecting, state: 'disabled' }
   mocks.getStatus.mockResolvedValue(disabled)
   let finishStart!: () => void

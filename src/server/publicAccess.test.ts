@@ -91,7 +91,7 @@ describe('public transport boundary', () => {
     const { cookie } = await f.pair()
     expect((await f.remote('/api/sessions', {}, cookie, 'https://attacker.example')).status).toBe(403)
     expect((await f.remote('/api/sessions', {}, cookie, '')).status).toBe(403)
-    for (const route of ['/api/providers/auth-status/extra', '/sdk/session', '/proxy/v1/messages', '/api/providers', '/api/settings', '/api//settings/session-cleanup/', '/api/diagnostics', '/api/h5-access']) {
+    for (const route of ['/api/providers/auth-status/extra', '/sdk/session', '/proxy/v1/messages', '/api/providers/settings', '/api/settings', '/api//settings/session-cleanup/', '/api/diagnostics', '/api/h5-access']) {
       expect((await f.remote(route, undefined, cookie)).status).toBe(403)
     }
     expect((await f.remote('/')).headers.get('location')).toBe('/remote')
@@ -159,7 +159,7 @@ describe('public transport boundary', () => {
 
   test('business allowlist normalizes routes like the router', () => {
     expect(isPublicBusinessPathAllowed(new URL('https://example.test/api//settings/user/'), 'GET')).toBe(true)
-    expect(isPublicBusinessPathAllowed(new URL('https://example.test/api//settings/user/'), 'PUT')).toBe(false)
+    expect(isPublicBusinessPathAllowed(new URL('https://example.test/api//settings/user/'), 'PUT')).toBe(true)
     expect(isPublicBusinessPathAllowed(new URL('https://example.test/api/permissions/mode'), 'PUT')).toBe(false)
     expect(isPublicBusinessPathAllowed(new URL('https://example.test/api/models/current'), 'PUT')).toBe(true)
     expect(isPublicBusinessPathAllowed(new URL('https://example.test/api/effort'), 'PUT')).toBe(true)

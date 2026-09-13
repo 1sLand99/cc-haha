@@ -2,6 +2,17 @@ import type {
  TranslationKey } from './en'
 
 export const jp: Record<TranslationKey, string> = {
+  "h5Settings.credentialRequired": "リクエスト先の URL を変更する場合は、モデルまたは画像モデルの API キーを再入力してください。パソコンに保存されたキーを新しい送信先へ自動送信することはできません。",
+  "h5Settings.scope": "モデルとエージェントの設定は接続先のパソコンに適用されます。デスクトップ管理とリモートアクセスの制御はデスクトップで行ってください。",
+  "h5Settings.providerPrivacy": "保存済み API キーは表示されません。編集時は空欄で既存のキーを保持するか、新しいキーを入力してください。公式アカウントのログインと接続テストはデスクトップで行ってください。",
+  "h5Settings.browserOnly": "外観と表示言語はこのブラウザーにのみ適用されます。",
+  "h5Settings.agentPreferences": "エージェントの設定",
+  "h5Settings.agentPreferencesHint": "これらの既定値はデスクトップと共有されます。既存のセッションへの適用には再起動が必要な場合があります。",
+  "h5Settings.effort": "推論の強度",
+  "h5Settings.sendBehavior": "キーボードの送信方法",
+  "h5Settings.enter": "Enter で送信 · Shift+Enter で改行",
+  "h5Settings.modifierEnter": "Ctrl/Cmd+Enter で送信 · Enter で改行",
+
   "publicAccess.title": "公開アクセス · ngrok",
   "publicAccess.intro": "自分の ngrok アカウントを一度設定すれば、スマートフォンから QR コードでこのパソコンに接続できます。",
   "publicAccess.account": "ngrok Authtoken を取得",
@@ -40,7 +51,7 @@ export const jp: Record<TranslationKey, string> = {
   "publicAccess.phoneUnpaired": "デスクトップで新しいペアリング QR コードを表示してスキャンしてください。",
   "publicAccess.deviceName": "端末名",
   "publicAccess.requestPair": "ペアリングを要求",
-  "publicAccess.privacy": "有効にすると、ペアリング済みのスマートフォンでインターネット経由の会話閲覧、指示の送信、承認への応答が可能になります。操作はこのパソコンで実行されます。\n接続には自分の ngrok アカウントを使用します。標準 HTTPS トンネルは ngrok 側で復号されるため、ngrok は技術的に会話、指示、ファイルの内容にアクセスできます。中継側に内容を隠すエンドツーエンド暗号化ではありません。\nAuthtoken はローカルのアプリデータフォルダーに保存されます。ローカルアカウントや管理者権限を持つ人が読み取れる可能性があります。アカウントとペアリング情報を保護してください。\nパソコンは起動、オンライン、スリープしていない状態が必要です。無料プランの転送量、リクエスト上限、ブラウザーの案内ページがアクセスに影響する場合があります。いつでも公開アクセスの停止や端末の解除ができます。",
+  "publicAccess.privacy": "有効にすると、ペアリング済みのスマートフォンでインターネット経由の会話閲覧、指示の送信、承認への応答が可能になります。モデルプロバイダー設定と API キーの追加・変更・削除・切り替え、および一部の一般設定の変更も可能です。操作はこのパソコンで実行されます。\n接続には自分の ngrok アカウントを使用します。標準 HTTPS トンネルは ngrok 側で復号されるため、ngrok は技術的に会話、指示、ファイルの内容、モデル設定、新しく送信した API キーにアクセスできます。中継側に内容を隠すエンドツーエンド暗号化ではありません。\nAuthtoken はローカルのアプリデータフォルダーに保存されます。ローカルアカウントや管理者権限を持つ人が読み取れる可能性があります。アカウントとペアリング情報を保護してください。\nパソコンは起動、オンライン、スリープしていない状態が必要です。無料プランの転送量、リクエスト上限、ブラウザーの案内ページがアクセスに影響する場合があります。いつでも公開アクセスの停止や端末の解除ができます。",
 
   'settings.providers.compatibilityJsonHint': 'requestCompatibility はこのプロバイダーにのみ保存され、グローバル設定には書き込まれません。',
   'settings.providers.compatibilityBudget': '応答の出力予算',

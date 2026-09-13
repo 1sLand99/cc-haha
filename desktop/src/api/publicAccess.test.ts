@@ -11,8 +11,9 @@ it('pairs at the current origin with cookies and no bearer or URL secret', async
   }))
 })
 it('does not expose an upstream response body in errors', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, text: async () => 'sensitive upstream body' }))
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, text: async () => 'sensitive upstream body' }))
   await expect(remoteAccessApi.session()).rejects.toThrow('Remote access request failed')
+  await expect(remoteAccessApi.claim('phone', 'expired')).rejects.toMatchObject({ status: 401 })
 })
 it('routes local device approval through authenticated local API', async () => {
   const post = vi.spyOn(api, 'post').mockResolvedValue({})

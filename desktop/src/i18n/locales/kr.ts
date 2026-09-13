@@ -2,6 +2,17 @@ import type {
  TranslationKey } from './en'
 
 export const kr: Record<TranslationKey, string> = {
+  "h5Settings.credentialRequired": "요청 주소를 변경할 때는 모델 또는 이미지 모델의 API 키를 다시 입력하세요. 컴퓨터에 저장된 키를 새 주소로 자동 전송할 수 없습니다.",
+  "h5Settings.scope": "모델 및 에이전트 설정은 연결된 컴퓨터에 적용됩니다. 데스크톱 관리 및 원격 접속 제어는 데스크톱에서 진행하세요.",
+  "h5Settings.providerPrivacy": "저장된 API 키는 표시되지 않습니다. 편집할 때 비워 두면 기존 키를 유지하고 새 키를 입력하면 교체됩니다. 공식 계정 로그인과 연결 테스트는 데스크톱에서 진행하세요.",
+  "h5Settings.browserOnly": "화면 모양과 인터페이스 언어는 이 브라우저에만 적용됩니다.",
+  "h5Settings.agentPreferences": "에이전트 기본 설정",
+  "h5Settings.agentPreferencesHint": "이 기본 설정은 데스크톱과 공유됩니다. 기존 세션에 적용하려면 다시 시작해야 할 수 있습니다.",
+  "h5Settings.effort": "추론 강도",
+  "h5Settings.sendBehavior": "키보드 전송 방식",
+  "h5Settings.enter": "Enter로 전송 · Shift+Enter로 줄 바꿈",
+  "h5Settings.modifierEnter": "Ctrl/Cmd+Enter로 전송 · Enter로 줄 바꿈",
+
   "publicAccess.title": "공개 접속 · ngrok",
   "publicAccess.intro": "본인의 ngrok 계정을 한 번 연결하면 휴대폰에서 QR 코드를 스캔해 이 컴퓨터를 원격으로 사용할 수 있습니다.",
   "publicAccess.account": "ngrok Authtoken 받기",
@@ -40,7 +51,7 @@ export const kr: Record<TranslationKey, string> = {
   "publicAccess.phoneUnpaired": "데스크톱에서 새 페어링 QR 코드를 생성한 후 스캔하세요.",
   "publicAccess.deviceName": "기기 이름",
   "publicAccess.requestPair": "페어링 요청",
-  "publicAccess.privacy": "활성화하면 페어링된 휴대폰에서 인터넷을 통해 대화를 보고 지시를 보내고 승인 요청에 응답할 수 있습니다. 작업은 이 컴퓨터에서 실행됩니다.\n연결은 본인의 ngrok 계정으로 제공됩니다. 표준 HTTPS 터널은 ngrok 서버에서 복호화되므로 ngrok은 기술적으로 전송되는 대화, 지시 및 파일 내용에 접근할 수 있습니다. 중계 서버가 내용을 읽을 수 없는 종단간 암호화가 아닙니다.\nAuthtoken은 로컬 앱 데이터 폴더에 저장됩니다. 로컬 계정이나 관리자 권한이 있는 사람이 읽을 수 있습니다. 계정과 페어링 정보를 안전하게 보관하세요.\n컴퓨터는 실행 중이고 인터넷에 연결되어 있으며 절전 상태가 아니어야 합니다. 무료 요금제의 트래픽, 요청 한도와 브라우저 안내 페이지가 접속에 영향을 줄 수 있습니다. 언제든 공개 접속을 끄거나 휴대폰을 해제할 수 있습니다.",
+  "publicAccess.privacy": "활성화하면 페어링된 휴대폰에서 인터넷을 통해 대화를 보고 지시를 보내고 승인 요청에 응답할 수 있습니다. 모델 공급자 설정과 API 키를 추가, 수정, 삭제하거나 전환하고 일부 일반 설정을 변경할 수도 있습니다. 작업은 이 컴퓨터에서 실행됩니다.\n연결은 본인의 ngrok 계정으로 제공됩니다. 표준 HTTPS 터널은 ngrok 서버에서 복호화되므로 ngrok은 기술적으로 전송되는 대화, 지시, 파일 내용, 모델 설정 및 새로 제출한 API 키에 접근할 수 있습니다. 중계 서버가 내용을 읽을 수 없는 종단간 암호화가 아닙니다.\nAuthtoken은 로컬 앱 데이터 폴더에 저장됩니다. 로컬 계정이나 관리자 권한이 있는 사람이 읽을 수 있습니다. 계정과 페어링 정보를 안전하게 보관하세요.\n컴퓨터는 실행 중이고 인터넷에 연결되어 있으며 절전 상태가 아니어야 합니다. 무료 요금제의 트래픽, 요청 한도와 브라우저 안내 페이지가 접속에 영향을 줄 수 있습니다. 언제든 공개 접속을 끄거나 휴대폰을 해제할 수 있습니다.",
 
   'settings.providers.compatibilityJsonHint': 'requestCompatibility는 이 공급자에만 저장되며 전역 설정에는 기록되지 않습니다.',
   'settings.providers.compatibilityBudget': '응답 출력 예산',

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { remoteAccessApi } from '@/api/publicAccess'
+import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useTranslation } from '@/i18n'
@@ -37,7 +38,13 @@ export function RemoteAccessGate({ children }: { children: ReactNode }) {
         if (result.status === 'approved') { setClaim(null); setState('ready') }
         else if (result.status === 'rejected') { setClaim(null); setState('unpaired') }
         else timer = setTimeout(() => void poll(), 1500)
-      } catch { if (active) setState('error') }
+      } catch (error) {
+        if (!active) return
+        if (error instanceof ApiError && error.status === 401) {
+          setClaim(null)
+          setState('unpaired')
+        } else setState('error')
+      }
     }
     void poll()
     return () => { active = false; clearTimeout(timer) }
@@ -85,7 +92,13 @@ export function RemoteAccessGate({ children }: { children: ReactNode }) {
       secret.current = null
       setClaim(result)
       setState('pending')
-    } catch { setState('error') }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        secret.current = null
+        setClaim(null)
+        setState('unpaired')
+      } else setState('error')
+    }
   }
   if (state === 'ready') return children
   return <main className="min-h-screen bg-[var(--color-surface)] p-6 text-[var(--color-text-primary)]">

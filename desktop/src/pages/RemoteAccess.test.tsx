@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { RemoteAccessGate } from './RemoteAccess'
 import { remoteAccessApi } from '@/api/publicAccess'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { ApiError } from '@/api/client'
 vi.mock('@/api/publicAccess', () => ({ remoteAccessApi: { session: vi.fn(), pair: vi.fn(), claim: vi.fn() } }))
 beforeEach(() => { useSettingsStore.setState({ locale: 'en' }); history.replaceState(null, '', '/remote#pair=once-only') })
 afterEach(() => { cleanup(); vi.resetAllMocks() })
@@ -29,6 +30,19 @@ it('unmounts private content when focus detects revoked authentication', async (
   fireEvent.focus(window)
   await waitFor(() => expect(screen.queryByText('Private conversations')).not.toBeInTheDocument())
   expect(screen.getByText(/Open a new pairing QR/)).toBeInTheDocument()
+})
+it('reuses a paired browser cookie when a camera opens an expired or fresh QR again', async () => {
+  vi.mocked(remoteAccessApi.session).mockResolvedValue({ authenticated: true })
+  for (const fragment of ['expired-code', 'new-unused-code']) {
+    history.replaceState(null, '', '/remote#pair=' + fragment)
+    const view = render(<RemoteAccessGate><div>Private conversations</div></RemoteAccessGate>)
+    await screen.findByText('Private conversations')
+    expect(location.hash).toBe('')
+    expect(screen.queryByLabelText('Device name')).not.toBeInTheDocument()
+    view.unmount()
+  }
+  expect(remoteAccessApi.pair).not.toHaveBeenCalled()
+  expect(remoteAccessApi.claim).not.toHaveBeenCalled()
 })
 it('handles a rejected pairing without mounting private content', async () => {
   vi.mocked(remoteAccessApi.session).mockResolvedValue({ authenticated: false })
@@ -64,4 +78,29 @@ it('retains the scrubbed one-use secret through StrictMode initial replay', asyn
   await screen.findByText('Private conversations')
   expect(remoteAccessApi.pair).toHaveBeenCalledTimes(1)
   expect(remoteAccessApi.pair).toHaveBeenCalledWith('once-only', 'Phone')
+})
+
+it.each(['pair', 'claim'] as const)('ends an expired %s with a fresh QR instruction instead of an endless retry', async (step) => {
+  vi.mocked(remoteAccessApi.session).mockResolvedValue({ authenticated: false })
+  vi.mocked(remoteAccessApi.pair).mockResolvedValue({ id: 'phone', claimSecret: 'claim' })
+  vi.mocked(remoteAccessApi[step]).mockRejectedValue(new ApiError(401, { error: 'Remote access request failed' }))
+  render(<RemoteAccessGate><div>Private conversations</div></RemoteAccessGate>)
+  fireEvent.change(await screen.findByLabelText('Device name'), { target: { value: 'Phone' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Request pairing' }))
+  await screen.findByText(/Open a new pairing QR/)
+  expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  expect(screen.queryByText('Private conversations')).not.toBeInTheDocument()
+})
+
+it('retries a transient claim failure using the retained claim when no cookie has arrived', async () => {
+  vi.mocked(remoteAccessApi.session).mockResolvedValue({ authenticated: false })
+  vi.mocked(remoteAccessApi.pair).mockResolvedValue({ id: 'phone', claimSecret: 'claim' })
+  vi.mocked(remoteAccessApi.claim).mockRejectedValueOnce(new TypeError('Network offline')).mockResolvedValue({ status: 'approved' })
+  render(<RemoteAccessGate><div>Private conversations</div></RemoteAccessGate>)
+  fireEvent.change(await screen.findByLabelText('Device name'), { target: { value: 'Phone' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Request pairing' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+  await screen.findByText('Private conversations')
+  expect(remoteAccessApi.claim).toHaveBeenCalledTimes(2)
+  expect(remoteAccessApi.pair).toHaveBeenCalledTimes(1)
 })

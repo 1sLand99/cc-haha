@@ -1,4 +1,15 @@
 export const en = {
+  "h5Settings.credentialRequired": "When changing a request URL, enter the model or image API key again. Keys saved on the computer cannot be sent automatically to a new address.",
+  "h5Settings.scope": "Model and agent settings apply to the connected computer. Desktop administration and remote-access controls remain on the desktop.",
+  "h5Settings.providerPrivacy": "Saved API keys are never shown here. Leave the key blank when editing to keep it, or enter a replacement. Official account sign-in and connection testing are available on the desktop.",
+  "h5Settings.browserOnly": "Appearance and interface language apply only to this browser.",
+  "h5Settings.agentPreferences": "Agent preferences",
+  "h5Settings.agentPreferencesHint": "These defaults are shared with the desktop. Existing sessions may keep their current behavior until restarted.",
+  "h5Settings.effort": "Reasoning effort",
+  "h5Settings.sendBehavior": "Keyboard send behavior",
+  "h5Settings.enter": "Enter sends · Shift+Enter inserts a line",
+  "h5Settings.modifierEnter": "Ctrl/Cmd+Enter sends · Enter inserts a line",
+
   "publicAccess.title": "Public access · ngrok",
   "publicAccess.intro": "Connect your own ngrok account once, then scan to use this computer from your phone.",
   "publicAccess.account": "Get ngrok Authtoken",
@@ -37,7 +48,7 @@ export const en = {
   "publicAccess.phoneUnpaired": "Open a new pairing QR code on your desktop and scan it.",
   "publicAccess.deviceName": "Device name",
   "publicAccess.requestPair": "Request pairing",
-  "publicAccess.privacy": "Once enabled, paired phones can view conversations, send instructions and respond to approvals over the internet. Operations run on this computer.\nYour ngrok account provides the connection. Standard HTTPS tunnels decrypt traffic at ngrok, so ngrok can technically access conversations, instructions and files sent through the tunnel. This is not end-to-end encryption that hides content from the relay.\nThe Authtoken is stored in this computer’s application data directory. Someone with access to your local account or administrator privileges may read it. Protect your account and pairing information.\nThe computer must stay running, online and awake. Free-plan traffic limits, request quotas and browser notice pages may affect access. You can turn off public access or revoke a phone at any time.",
+  "publicAccess.privacy": "Once enabled, paired phones can view conversations, send instructions and respond to approvals over the internet. They can also add, edit, delete and switch model provider configurations and API keys, and change selected General settings. Operations run on this computer.\nYour ngrok account provides the connection. Standard HTTPS tunnels decrypt traffic at ngrok, so ngrok can technically access conversations, instructions, files, model configurations and newly submitted API keys sent through the tunnel. This is not end-to-end encryption that hides content from the relay.\nThe Authtoken is stored in this computer’s application data directory. Someone with access to your local account or administrator privileges may read it. Protect your account and pairing information.\nThe computer must stay running, online and awake. Free-plan traffic limits, request quotas and browser notice pages may affect access. You can turn off public access or revoke a phone at any time.",
 
   'settings.providers.compatibilityJsonHint': 'requestCompatibility is saved only for this provider, separately from global settings.',
   'settings.providers.compatibilityBudget': 'Reply output budget',

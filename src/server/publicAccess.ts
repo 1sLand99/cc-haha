@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Server, ServerWebSocket, WebSocketHandler } from 'bun'
 import { isLocalAccessAuthorized } from './localAccessAuth.js'
+import { remoteProviderRouteAllowed, remoteSettingsRouteAllowed, type ApiRequestContext } from './remoteBrowserPolicy.js'
 import type { WebSocketData } from './ws/handler.js'
 
 const PREFIX = '/api/public-access'
@@ -35,6 +36,8 @@ export function isPublicBusinessPathAllowed(url: URL, method: string): boolean {
   const parts = url.pathname.split('/').filter(Boolean)
   if (parts[0] === 'ws') return parts.length === 2 && /^[\w-]{1,64}$/.test(parts[1]!)
   if (parts[0] !== 'api') return false
+  if (parts[1] === 'providers') return remoteProviderRouteAllowed(parts, method)
+  if (parts[1] === 'settings') return remoteSettingsRouteAllowed(parts, method)
   if (method === 'PUT' && ['/api/models/current', '/api/effort'].includes('/' + parts.join('/'))) return true
   if (method === 'GET' && ['/api/settings/user', '/api/permissions/mode', '/api/providers/auth-status'].includes('/' + parts.join('/'))) return true
   if (['sessions', 'conversations'].includes(parts[1] ?? '')) return true
@@ -53,7 +56,7 @@ function secure(response: Response): Response {
 const json = (value: unknown, status = 200) => secure(Response.json(value, { status }))
 
 type Dependencies = {
-  handleApiRequest: (request: Request, url: URL) => Promise<Response>
+  handleApiRequest: (request: Request, url: URL, context?: ApiRequestContext) => Promise<Response>
   handleStatic: (request: Request, url: URL) => Promise<Response | null>
   websocket: WebSocketHandler<WebSocketData>
   serverPort: () => number
@@ -291,7 +294,7 @@ export class PublicAccessServer {
           const upgraded = server.upgrade(request, { data: { sessionId: url.pathname.split('/').pop()!, connectedAt: this.now(), channel: 'client', clientKind: 'full', sdkToken: null, serverPort: this.deps.serverPort(), serverHost: '127.0.0.1', remoteDeviceId: device.id } })
           return upgraded ? undefined : json({ error: 'Upgrade failed' }, 400)
         }
-        const response = await this.deps.handleApiRequest(request, url)
+        const response = await this.deps.handleApiRequest(request, url, { remoteBrowser: true })
         if (route === 'api/providers/auth-status' && response.ok) {
           const status = await response.json() as Record<string, unknown>
           const sources = ['cc-haha-provider', 'claude-oauth', 'openai-oauth', 'grok-oauth', 'original-settings', 'env', 'none']
@@ -301,7 +304,7 @@ export class PublicAccessServer {
             ...(typeof status.activeProvider === 'string' ? { activeProvider: status.activeProvider } : {}),
           })
         }
-        if (route === 'api/settings/user' && response.ok) {
+        if (route === 'api/settings/user' && request.method === 'GET' && response.ok) {
           const settings = await response.json() as Record<string, unknown>
           const allowed = ['alwaysThinkingEnabled', 'workflowKeywordTriggerEnabled', 'autoDreamEnabled', 'skipAutoPermissionPrompt', 'chatSendBehavior', 'outputStyle', 'skipWebFetchPreflight', 'language']
           return json(Object.fromEntries(allowed.filter(key => ['string', 'boolean', 'number'].includes(typeof settings[key])).map(key => [key, settings[key]])))

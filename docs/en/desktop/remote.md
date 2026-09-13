@@ -25,7 +25,7 @@ Both require your computer to be on with the app running. Tasks execute on your 
 3. Click **Generate token**. A QR code and an H5 link appear.
 4. Scan it with your phone, or click **Copy launch URL** and send it to your own device.
 
-The scanned link carries the server address and the token. Once your phone's browser connects, it remembers the connection and later visits go straight in.
+The scanned link carries the server address and token. Scan with your phone camera and open it in your usual Safari, Chrome, or system browser. Successful verification stores the connection in that browser's localStorage and removes the token from the address bar. Scanning again or opening a bookmark reconnects automatically. Temporary network failures do not forget pairing; choose **Retry** to use the saved credential. A revoked or regenerated token requires a fresh QR code.
 
 ![The mobile conversation view with a file-changes card](../../images/app/en/h5-session.webp)
 
@@ -61,7 +61,9 @@ Only when a task is idle *and* nothing is connected does the CLI process stop, a
 
 Session list and project switching, sending messages, stopping, streaming replies, image and file attachments, permission buttons, questions from Claude, `@` file references, copy and fork — the whole conversation flow.
 
-The desktop workspace, embedded terminal, native "open with", Computer Use authorization, and the desktop pet are not part of H5.
+The **Settings** entry at the bottom of the sidebar provides **Model providers** and **General**. Add, edit, delete, reorder, or switch providers on your phone. Existing API keys are never returned; leave a key blank while editing to keep it. Changing a model or image request URL requires entering the corresponding API key again, so saved credentials are not automatically sent to a new address. General settings include theme, interface language, response language, output style, reasoning effort, send behavior, thinking, and workflow keywords. Theme and interface language affect this browser; Agent preferences are shared with the computer.
+
+Provider website login, configuration import, and desktop administration remain on the computer. The desktop workspace, embedded terminal, native "open with", Computer Use authorization, and the desktop pet are not part of H5. Remote terminal execution is deferred: the current terminal is owned by Electron and requires a separate device-authorized transport with reconnect and revocation support.
 
 ## Public access with ngrok
 
@@ -74,7 +76,9 @@ Open **Settings → H5 Access → Public access · ngrok** to connect your own n
 
 Pairing codes expire after 5 minutes and can only be used once. Phone credentials last 30 days by default. Keep QR codes private. Revoke individual phones or turn off public access to disconnect remote clients immediately; running tasks continue.
 
-The public entry supports conversations and approvals. Provider management, unrestricted local directory browsing, and path-based file previews remain desktop-only; session-scoped file and review APIs remain available.
+The public entry also supports the provider and General settings above. Unrestricted local directory browsing and path-based file previews remain desktop-only; session-scoped file and review APIs remain available.
+
+Once paired, public authorization persists in a secure browser cookie. Scanning again while it is valid opens the app without consuming another pairing code. Long-lived public credentials are not stored in localStorage. Camera scanning works in system browsers, but different browsers, private windows, and hostnames do not share authorization. If a scanner opens an embedded browser, switch to your preferred browser before pairing. Clearing browser data, expiration, or revocation requires pairing again.
 
 **Privacy:** Standard ngrok HTTPS tunnels terminate TLS at ngrok, which then forwards traffic through an encrypted tunnel to your computer. ngrok can technically access the conversations, commands, and files being transferred. This is not end-to-end encryption that prevents the relay from reading content. The Authtoken is stored in a separate private file in the active application data directory, without system keychain encryption. Your local account or an administrator may read it. Deleting the saved credential does not close your ngrok account; revoke the credential at ngrok if it may have leaked.
 

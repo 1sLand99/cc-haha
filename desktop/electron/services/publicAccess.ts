@@ -1,5 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { PUBLIC_ACCESS_CONSENT_VERSION } from '../../src/lib/desktopHost/types'
+export { PUBLIC_ACCESS_CONSENT_VERSION } from '../../src/lib/desktopHost/types'
 
 export type PublicAccessStatus = {
   state: 'unconfigured' | 'disabled' | 'connecting' | 'online' | 'reconnecting' | 'failed'
@@ -11,13 +13,56 @@ export type PublicAccessStatus = {
 }
 type Settings = Record<string, unknown> & { version: number, authtoken: string, autoStart: boolean, consentVersion: number }
 type Listener = { url(): string | null, close(): Promise<void> }
+type ForwardConfig = { addr: string, authtoken: string, onStatusChange: (status: string) => void }
+type NgrokSdk = Pick<typeof import('@ngrok/ngrok'), 'SessionBuilder'>
+export async function forwardPublicAccess(config: ForwardConfig, sdk: NgrokSdk): Promise<Listener> {
+  // forward() retains a process-global session, including its original token
+  // and callbacks. Own a session per attempt so stop and credential rotation
+  // also end authentication, without closing another generation's session.
+  let closed = false
+  const session = await new sdk.SessionBuilder()
+    .authtoken(config.authtoken)
+    .handleDisconnection(() => {
+      if (!closed) config.onStatusChange('closed')
+      return true
+    })
+    .handleHeartbeat(latency => {
+      // The native SDK can pass null when a heartbeat has no response.
+      if (!closed && typeof latency === 'number') config.onStatusChange('connected')
+    })
+    .connect()
+  try {
+    const listener = await session.httpEndpoint().listenAndForward(`http://${config.addr}`)
+    return {
+      url: () => listener.url(),
+      async close() {
+        closed = true
+        await Promise.all([closePublicAccessResource(listener), closePublicAccessResource(session)])
+      },
+    }
+  } catch (error) {
+    closed = true
+    await closePublicAccessResource(session)
+    throw error
+  }
+}
+
+async function closePublicAccessResource(resource: { close(): Promise<void> }) {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      resource.close(),
+      new Promise<void>(resolve => { timeout = setTimeout(resolve, 3_000) }),
+    ])
+  } catch { /* SDK errors can contain credentials; do not log them. */ }
+  finally { if (timeout) clearTimeout(timeout) }
+}
 type Backend = { request<T>(route: string, method: string, body?: unknown): Promise<T> }
 type Options = {
   directory: string
   backend: Backend
   forward?: (config: { addr: string, authtoken: string, onStatusChange: (status: string) => void }) => Promise<Listener>
 }
-export const PUBLIC_ACCESS_CONSENT_VERSION = 1
 
 /** Forward migration is additive and keeps unrecognized fields in this private file. */
 export function migratePublicAccessSettings(raw: unknown): Settings {
@@ -140,7 +185,7 @@ export class PublicAccessManager {
       const { port } = await this.options.backend.request<{ port: number }>('/enable', 'POST')
       if (generation !== this.generation) return this.getStatus()
       if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid listener port')
-      const forward = this.options.forward ?? (async config => (await import('@ngrok/ngrok')).forward(config))
+      const forward = this.options.forward ?? (async config => forwardPublicAccess(config, await import('@ngrok/ngrok')))
       let disconnected = false
       const onStatusChange = (state: string) => {
         if (generation !== this.generation) return
@@ -173,6 +218,7 @@ export class PublicAccessManager {
       await this.closeListener(listener)
       if (generation !== this.generation) return this.getStatus()
       await this.options.backend.request('/disable', 'POST').catch(() => {})
+      if (generation !== this.generation) return this.getStatus()
       this.status.error = classifyPublicAccessError(error)
       this.status.state = 'failed'
       if (this.status.error === 'network' && this.wanted) {
@@ -186,14 +232,7 @@ export class PublicAccessManager {
 
   private async closeListener(listener: Listener | null) {
     if (!listener) return
-    let timeout: ReturnType<typeof setTimeout> | undefined
-    try {
-      await Promise.race([
-        listener.close(),
-        new Promise<void>(resolve => { timeout = setTimeout(resolve, 3_000) }),
-      ])
-    } catch { /* SDK errors can contain credentials; do not log them. */ }
-    finally { if (timeout) clearTimeout(timeout) }
+    await closePublicAccessResource(listener)
   }
 
   private async reconnectDisconnected(generation: number) {

@@ -1,4 +1,4 @@
-import { api } from './client'
+import { api, ApiError } from './client'
 
 export type PublicAccessDevice = { id: string, name: string, createdAt: number, expiresAt: number }
 export type PublicAccessServerStatus = {
@@ -30,7 +30,7 @@ async function remoteRequest<T>(path: string, body?: unknown): Promise<T> {
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
-    if (!response.ok) throw new Error('Remote access request failed')
+    if (!response.ok) throw new ApiError(response.status, 'Remote access request failed')
     return await response.json() as T
   } finally {
     clearTimeout(timeout)

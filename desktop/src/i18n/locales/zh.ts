@@ -2,6 +2,17 @@ import type {
  TranslationKey } from './en'
 
 export const zh: Record<TranslationKey, string> = {
+  "h5Settings.credentialRequired": "更改请求地址时，请重新填写主模型或图片模型的 API Key，不能把电脑已保存的密钥自动发送到新地址。",
+  "h5Settings.scope": "模型和 Agent 设置会应用到连接的电脑。桌面管理及远程访问控制仍需在桌面操作。",
+  "h5Settings.providerPrivacy": "不会显示已保存的 API Key。编辑时留空可保留原密钥，或输入新密钥替换。官方账户登录和连接测试请在桌面完成。",
+  "h5Settings.browserOnly": "外观和界面语言仅应用于当前浏览器。",
+  "h5Settings.agentPreferences": "Agent 偏好",
+  "h5Settings.agentPreferencesHint": "这些默认设置与桌面共享，现有会话可能需要重启后才会应用。",
+  "h5Settings.effort": "推理强度",
+  "h5Settings.sendBehavior": "键盘发送方式",
+  "h5Settings.enter": "Enter 发送 · Shift+Enter 换行",
+  "h5Settings.modifierEnter": "Ctrl/Cmd+Enter 发送 · Enter 换行",
+
   "publicAccess.title": "公网访问 · ngrok",
   "publicAccess.intro": "连接一次你自己的 ngrok 账户，即可扫码，在手机上远程使用这台电脑。",
   "publicAccess.account": "获取 ngrok Authtoken",
@@ -40,7 +51,7 @@ export const zh: Record<TranslationKey, string> = {
   "publicAccess.phoneUnpaired": "请在桌面生成新的配对二维码，并使用手机扫码。",
   "publicAccess.deviceName": "设备名称",
   "publicAccess.requestPair": "请求配对",
-  "publicAccess.privacy": "开启后，已配对的手机可通过互联网查看会话、发送指令和响应审批，相关操作会在这台电脑上执行。\n连接由你的 ngrok 账户提供。标准 HTTPS 隧道会在 ngrok 服务端解密，因此 ngrok 在技术上可以接触经隧道传输的会话、指令和文件内容；这不是中转不可读的端到端加密。\nAuthtoken 保存在本机应用数据目录，拥有本机账户或管理员权限的人可能读取它。请妥善保管账户和配对信息。\n电脑需要保持运行、联网且未休眠。免费套餐存在流量、请求额度和浏览器提示页，可能影响访问。你可以随时关闭公网访问或撤销手机。",
+  "publicAccess.privacy": "开启后，已配对的手机可通过互联网查看会话、发送指令和响应审批，也可以新增、修改、删除和切换模型服务商配置及 API Key，并修改部分通用设置，相关操作会在这台电脑上执行。\n连接由你的 ngrok 账户提供。标准 HTTPS 隧道会在 ngrok 服务端解密，因此 ngrok 在技术上可以接触经隧道传输的会话、指令、文件内容、模型配置和新提交的 API Key；这不是中转不可读的端到端加密。\nAuthtoken 保存在本机应用数据目录，拥有本机账户或管理员权限的人可能读取它。请妥善保管账户和配对信息。\n电脑需要保持运行、联网且未休眠。免费套餐存在流量、请求额度和浏览器提示页，可能影响访问。你可以随时关闭公网访问或撤销手机。",
 
   'settings.providers.compatibilityJsonHint': 'requestCompatibility 仅保存到当前供应商，不写入全局设置。',
   'settings.providers.compatibilityBudget': '回复输出预算',

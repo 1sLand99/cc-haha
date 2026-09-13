@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { publicAccessApi, type PublicAccessServerStatus } from '@/api/publicAccess'
 import { getDesktopHost } from '@/lib/desktopHost'
+import { PUBLIC_ACCESS_CONSENT_VERSION } from '@/lib/desktopHost/types'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -76,7 +77,7 @@ export function PublicAccessSettings() {
   const start = () => run(async () => {
     if (token.trim()) { await bridge.saveCredential(token.trim()); setToken('') }
     setConsent(false)
-    await bridge.start(1)
+    await bridge.start(PUBLIC_ACCESS_CONSENT_VERSION)
   })
   const stateLabels = {
     unconfigured: t('publicAccess.unconfigured'), disabled: t('publicAccess.disabled'), connecting: t('publicAccess.connecting'),
@@ -93,11 +94,11 @@ export function PublicAccessSettings() {
       <Input aria-describedby="public-access-error" type="password" autoComplete="off" spellCheck={false} aria-label={t('publicAccess.token')} placeholder={status?.hasCredential ? t('publicAccess.tokenSaved') : t('publicAccess.token')} value={token} onChange={(event) => setToken(event.target.value)} />
       <p role="status" className="text-sm">{status ? stateLabels[status.state] : t('common.loading')}</p>
       <div className="flex flex-wrap gap-2">
-        <Button disabled={busy || (!token.trim() && !status?.hasCredential) || status?.state === 'online' || status?.state === 'connecting' || status?.state === 'reconnecting'} onClick={() => { if (status?.consentVersion === 1) void start(); else setConsent(true) }}>{t('publicAccess.enable')}</Button>
+        <Button disabled={busy || (!token.trim() && !status?.hasCredential) || status?.state === 'online' || status?.state === 'connecting' || status?.state === 'reconnecting'} onClick={() => { if (status?.consentVersion === PUBLIC_ACCESS_CONSENT_VERSION) void start(); else setConsent(true) }}>{t('publicAccess.enable')}</Button>
         <Button variant="secondary" disabled={stopping || (busy && status?.state !== 'connecting' && status?.state !== 'reconnecting') || !status || status.state === 'unconfigured' || status.state === 'disabled'} onClick={() => void stop()}>{t('publicAccess.disable')}</Button>
         {status?.hasCredential && <Button variant="danger" disabled={busy} onClick={() => void run(async () => { await bridge.deleteCredential(); setToken(''); setQr(null); setExpiresAt(null) })}>{t('publicAccess.deleteCredential')}</Button>}
       </div>
-      <Checkbox label={t('publicAccess.autoStart')} checked={status?.autoStart ?? false} disabled={busy || !status?.hasCredential || status.consentVersion !== 1} onChange={(event) => void run(() => bridge.setAutoStart(event.target.checked))} />
+      <Checkbox label={t('publicAccess.autoStart')} checked={status?.autoStart ?? false} disabled={busy || !status?.hasCredential || status.consentVersion !== PUBLIC_ACCESS_CONSENT_VERSION} onChange={(event) => void run(() => bridge.setAutoStart(event.target.checked))} />
       <p className="text-xs text-[var(--color-text-tertiary)]">{t('publicAccess.freeNotice')}</p>
       {(error || status?.error) && <p id="public-access-error" role="alert" className="text-sm text-[var(--color-error)]">{status?.error ? errorLabels[status.error] : t('publicAccess.genericError')}</p>}
       {status?.state === 'online' && status.publicUrl && <div className="space-y-3 border-t border-[var(--color-border)] pt-4">

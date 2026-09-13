@@ -4,6 +4,9 @@ import type {
 } from '../../types/settings'
 import type { Locale } from '../../i18n/locale'
 
+// Version 2 adds remote provider management and selected General settings.
+export const PUBLIC_ACCESS_CONSENT_VERSION = 2
+
 export type DesktopHostKind = 'browser' | 'electron'
 
 export type DesktopHostCapability =
