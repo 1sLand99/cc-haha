@@ -46,7 +46,7 @@ describe('ApiSmart sponsor provider', () => {
       provider: { ...input, id: 'saved-apismart', apiFormat: input.apiFormat ?? 'anthropic' },
     }))
     render(<ProviderSettings />)
-    fireEvent.click(await screen.findByRole('button', { name: /Add Provider/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Add Model/ }))
     const dialog = within(screen.getByRole('dialog'))
     const sponsor = dialog.getByRole('button', { name: 'ApiSmart' })
     expect(sponsor.parentElement).toBe(dialog.getByRole('button', { name: 'Atlas Cloud' }).parentElement)
@@ -83,7 +83,7 @@ describe('ApiSmart sponsor provider', () => {
 
   it('resets image credentials and defaults when switching presets', async () => {
     render(<ProviderSettings />)
-    fireEvent.click(await screen.findByRole('button', { name: /Add Provider/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Add Model/ }))
     const dialog = within(screen.getByRole('dialog'))
     fireEvent.click(dialog.getByRole('button', { name: 'ApiSmart' }))
     fireEvent.change(dialog.getAllByPlaceholderText('sk-...')[1]!, { target: { value: 'fake-image-only-key' } })
@@ -128,7 +128,7 @@ describe('retired sponsor providers', () => {
     }
     expect(useProviderStore.getState().providers).toEqual(savedProviders)
 
-    fireEvent.click(screen.getByRole('button', { name: /Add Provider/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Add Model/ }))
     const dialog = within(screen.getByRole('dialog'))
     for (const provider of savedProviders) {
       expect(dialog.queryByRole('button', { name: provider.name })).not.toBeInTheDocument()
