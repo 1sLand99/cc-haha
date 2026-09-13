@@ -56,6 +56,21 @@ describe('desktopRuntime browser H5 bootstrap', () => {
     globalThis.fetch = originalFetch
   })
 
+  it('keeps public cookie sessions same-origin despite legacy tokens and attacker URL parameters', async () => {
+    window.history.pushState({}, '', '/remote?serverUrl=https://attacker.example&h5Token=leak')
+    window.localStorage.setItem(H5_SERVER_URL_STORAGE_KEY, 'https://attacker.example')
+    window.localStorage.setItem(H5_TOKEN_STORAGE_KEY, 'old-secret')
+    clientMocks.explicitDefaultBaseUrl = true
+    clientMocks.defaultBaseUrl = 'https://configured.example'
+    globalThis.fetch = vi.fn().mockResolvedValue(healthOkResponse()) as typeof fetch
+
+    await expect(initializeDesktopServerUrl()).resolves.toBe(window.location.origin)
+    expect(clientMocks.setBaseUrl).toHaveBeenLastCalledWith(window.location.origin)
+    expect(clientMocks.setAuthToken).toHaveBeenLastCalledWith(null)
+    expect(globalThis.fetch).toHaveBeenCalledExactlyOnceWith(`${window.location.origin}/health`, { cache: 'no-store' })
+    expect(clientMocks.postVerify).not.toHaveBeenCalled()
+  })
+
   it('treats IPv6 loopback as local', () => {
     expect(isLoopbackHostname('[::1]')).toBe(true)
     expect(isLoopbackHostname('::1')).toBe(true)

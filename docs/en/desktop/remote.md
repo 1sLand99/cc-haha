@@ -12,7 +12,7 @@ A task is running on your computer and you want to check on it, or add one more 
 - **H5 Access** — open the same interface in a mobile browser: sessions, messages, attachments, permission buttons, all of it.
 - **IM Adapters** — talk to Claude directly inside WeChat, DingTalk, WhatsApp, Telegram, or Feishu.
 
-Both require your computer to be on with the app running. They expose the local desktop service; they don't move anything to a cloud.
+Both require your computer to be on with the app running. Tasks execute on your computer; public tunnels and IM platforms carry content through their respective service providers.
 
 ## H5 Access
 
@@ -62,6 +62,25 @@ Only when a task is idle *and* nothing is connected does the CLI process stop, a
 Session list and project switching, sending messages, stopping, streaming replies, image and file attachments, permission buttons, questions from Claude, `@` file references, copy and fork — the whole conversation flow.
 
 The desktop workspace, embedded terminal, native "open with", Computer Use authorization, and the desktop pet are not part of H5.
+
+## Public access with ngrok
+
+Open **Settings → H5 Access → Public access · ngrok** to connect your own ngrok account. You do not need to install ngrok or run commands. LAN settings remain independent.
+
+1. Open the account link, sign up or sign in on ngrok's official website, and copy your **Authtoken**. This is the tunnel credential, not an API Key.
+2. Paste it in the desktop app. Read the access and privacy notice, then choose **Agree and enable public access**.
+3. Wait for the public address, generate a pairing QR code, scan it in your phone browser, and submit the pairing request.
+4. Approve the phone on the desktop. Bookmark the public address for later visits.
+
+Pairing codes expire after 5 minutes and can only be used once. Phone credentials last 30 days by default. Keep QR codes private. Revoke individual phones or turn off public access to disconnect remote clients immediately; running tasks continue.
+
+The public entry supports conversations and approvals. Provider management, unrestricted local directory browsing, and path-based file previews remain desktop-only; session-scoped file and review APIs remain available.
+
+**Privacy:** Standard ngrok HTTPS tunnels terminate TLS at ngrok, which then forwards traffic through an encrypted tunnel to your computer. ngrok can technically access the conversations, commands, and files being transferred. This is not end-to-end encryption that prevents the relay from reading content. The Authtoken is stored in a separate private file in the active application data directory, without system keychain encryption. Your local account or an administrator may read it. Deleting the saved credential does not close your ngrok account; revoke the credential at ngrok if it may have leaked.
+
+Free accounts include an assigned development domain, with transfer and request quotas. Browsers may first show ngrok's warning page; continue to reach the app. The app never purchases an upgrade. See [ngrok's current free plan limits](https://ngrok.com/docs/pricing-limits/free-plan-limits).
+
+Automatic restoration on desktop startup is off by default. Enable it to reconnect on later launches. Your computer must remain running, connected, and awake. Connectivity varies by network. For authentication or quota errors, follow the settings panel guidance before retrying.
 
 ## IM Adapters
 

@@ -29,6 +29,11 @@ const workspaceBrowserServiceSource = mainSource.slice(
 )
 
 describe('Electron preview security boundary', () => {
+  it('restricts public access management to the main desktop frame', () => {
+    expect(mainSource).toContain("channel.startsWith('desktop:public-access:')")
+    expect(mainSource).toContain('senderWindow !== mainWindow || event.senderFrame !== event.sender.mainFrame')
+  })
+
   it('does not give the pet preload the desktop master access token', () => {
     const petPreloadSource = readFileSync(path.join(desktopRoot, 'electron', 'pet-preload.ts'), 'utf8')
 

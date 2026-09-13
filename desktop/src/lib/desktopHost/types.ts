@@ -367,7 +367,24 @@ export type AppModeSetInput = {
   portableDir: string | null
 }
 
+export type DesktopPublicAccessStatus = {
+  state: 'unconfigured' | 'disabled' | 'connecting' | 'online' | 'reconnecting' | 'failed'
+  hasCredential: boolean
+  publicUrl: string | null
+  error: 'auth' | 'quota' | 'network' | 'configuration' | null
+  autoStart: boolean
+  consentVersion: number
+}
+
 export type DesktopHost = {
+  publicAccess: {
+    getStatus(): Promise<DesktopPublicAccessStatus>
+    saveCredential(token: string): Promise<DesktopPublicAccessStatus>
+    deleteCredential(): Promise<DesktopPublicAccessStatus>
+    start(consentVersion: number): Promise<DesktopPublicAccessStatus>
+    stop(): Promise<DesktopPublicAccessStatus>
+    setAutoStart(enabled: boolean): Promise<DesktopPublicAccessStatus>
+  }
   kind: DesktopHostKind
   isDesktop: boolean
   capabilities: DesktopHostCapabilities

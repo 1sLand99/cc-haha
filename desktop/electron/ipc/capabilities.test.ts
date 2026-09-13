@@ -8,6 +8,18 @@ import {
 } from './capabilities'
 
 describe('Electron IPC capabilities', () => {
+  it('restricts public access credentials and consent to validated desktop IPC', () => {
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.publicAccessSaveCredential, 'fake-token')).toBe(true)
+    for (const value of ['', 'a b', 'x'.repeat(4097), {}, null]) {
+      expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.publicAccessSaveCredential, value)).toBe(false)
+    }
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.publicAccessStart, 1)).toBe(true)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.publicAccessStart, 0)).toBe(false)
+    for (const channel of Object.values(ELECTRON_IPC_CHANNELS).filter(value => value.startsWith('desktop:public-access:'))) {
+      expect(isElectronIpcChannelAllowedForPetWindow(channel)).toBe(false)
+    }
+  })
+
   it('accepts only the typed browser-menu fields and keeps the channel unavailable to pets', () => {
     const channel = ELECTRON_IPC_CHANNELS.workspaceBrowserShowMenu
     const labels = Object.fromEntries(['find', 'print', 'zoom', 'zoomIn', 'zoomOut', 'zoomReset', 'capture', 'pickElement', 'downloads', 'history', 'openExternal'].map(key => [key, key]))

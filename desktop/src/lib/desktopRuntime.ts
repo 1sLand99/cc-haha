@@ -7,6 +7,7 @@ import {
   setBaseUrl,
 } from '../api/client'
 import { getDesktopHost } from './desktopHost'
+import { isPublicAccessRuntime } from './publicAccessRuntime'
 
 export const H5_SERVER_URL_STORAGE_KEY = 'cc-haha-h5-server-url'
 export const H5_TOKEN_STORAGE_KEY = 'cc-haha-h5-token'
@@ -186,6 +187,16 @@ export async function initializeDesktopServerUrl() {
 }
 
 async function initializeBrowserServerUrl(fallbackUrl: string) {
+  if (isPublicAccessRuntime()) {
+    const origin = window.location.origin
+    setBaseUrl(origin)
+    setAuthToken(null)
+    await waitForHealth(origin)
+    // RemoteAccessGate has already authenticated the host-only device cookie.
+    // Do not read legacy localStorage or query-string connection credentials.
+    markDesktopServerReady()
+    return origin
+  }
   const query = typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search)
     : null
