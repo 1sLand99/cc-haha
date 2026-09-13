@@ -4,7 +4,7 @@ import { useTranslation, type TranslationKey } from '../i18n'
 import { terminalApi } from '../api/terminal'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useUIStore } from '../stores/uiStore'
-import { readTerminalPalette } from '../lib/terminalTheme'
+import { readTerminalPalette, readTerminalFontFamily } from '../lib/terminalTheme'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
@@ -58,6 +58,7 @@ type TerminalSettingsProps = {
   testId?: string
   workspace?: boolean
   docked?: boolean
+  compactHeader?: boolean
   showPreferences?: boolean
   runtimeId?: string
   preserveOnUnmount?: boolean
@@ -79,6 +80,7 @@ export function TerminalSettings({
   testId = 'settings-terminal-host',
   workspace = false,
   docked = false,
+  compactHeader = false,
   showPreferences = false,
   runtimeId,
   preserveOnUnmount = false,
@@ -203,7 +205,7 @@ export function TerminalSettings({
 
     const startPromise = Promise.resolve().then(async () => {
       if (!isCurrentStart()) return
-      updateTerminalRuntime(runtime, { error: null, status: 'starting', shellInfo: null })
+      updateTerminalRuntime(runtime, { error: null, status: 'starting', shellInfo: null, title: '' })
 
       const existing = runtime.nativeSessionId
       if (existing) {
@@ -222,11 +224,13 @@ export function TerminalSettings({
       host.innerHTML = ''
 
       let TerminalModule: typeof import('@xterm/xterm')
+      let WebLinksAddonModule: typeof import('@xterm/addon-web-links')
       let FitAddonModule: typeof import('@xterm/addon-fit')
       try {
-        [TerminalModule, FitAddonModule] = await Promise.all([
+        [TerminalModule, FitAddonModule, WebLinksAddonModule] = await Promise.all([
           import('@xterm/xterm'),
           import('@xterm/addon-fit'),
+          import('@xterm/addon-web-links'),
         ])
       } catch (err) {
         if (isCurrentStart()) {
@@ -248,9 +252,14 @@ export function TerminalSettings({
         terminal = new TerminalModule.Terminal({
           cursorBlink: true,
           convertEol: false,
-          fontFamily: "var(--font-mono), 'SFMono-Regular', Consolas, monospace",
-          fontSize: 12,
-          lineHeight: 1.25,
+          fontFamily: readTerminalFontFamily(),
+          fontSize: 13,
+          letterSpacing: 0,
+          lineHeight: 1.2,
+          cursorStyle: 'bar',
+          // xterm preserves scrollback position while writing; erasing the
+          // display must not override a user reading earlier output either.
+          scrollOnEraseInDisplay: false,
           scrollback: 4000,
           theme: readTerminalPalette(),
         })
@@ -258,6 +267,13 @@ export function TerminalSettings({
         const activeTerminal = terminal
         const activeFit = fit
         activeTerminal.loadAddon(activeFit)
+        activeTerminal.loadAddon(new WebLinksAddonModule.WebLinksAddon((_event, uri) => {
+          // Use the same external-open boundary as other desktop surfaces.
+          if (/^https?:\/\//i.test(uri)) void getDesktopHost().shell.open(uri).catch(() => {})
+        }))
+        activeTerminal.onTitleChange((title) => {
+          if (isCurrentStart()) updateTerminalRuntime(runtime, { title })
+        })
         activeTerminal.open(host)
         if (!isCurrentStart()) {
           activeTerminal.dispose()
@@ -344,6 +360,19 @@ export function TerminalSettings({
   }, [cwd, resizeSession, runtime])
 
   useEffect(() => {
+    const restart = () => {
+      void startTerminal().then(() => {
+        const host = hostRef.current
+        if (host && host.clientWidth > 0 && host.clientHeight > 0) runtime.terminal?.focus()
+      })
+    }
+    updateTerminalRuntime(runtime, { restart })
+    return () => {
+      if (runtime.restart === restart) updateTerminalRuntime(runtime, { restart: null })
+    }
+  }, [runtime, startTerminal])
+
+  useEffect(() => {
     lifecycleVersionRef.current += 1
     const lifecycleVersion = lifecycleVersionRef.current
     if (!terminalApi.isAvailable()) return
@@ -392,7 +421,16 @@ export function TerminalSettings({
     const terminal = runtime.terminal
     if (!terminal) return
     terminal.options.theme = readTerminalPalette()
-  }, [runtime, theme])
+    terminal.options.fontFamily = readTerminalFontFamily()
+    resizeSession()
+  }, [runtime, theme, resizeSession])
+
+  useEffect(() => {
+    const fonts = document.fonts
+    if (!fonts) return
+    fonts.addEventListener('loadingdone', resizeSession)
+    return () => fonts.removeEventListener('loadingdone', resizeSession)
+  }, [resizeSession])
 
   const clearTerminal = () => {
     runtime.terminal?.clear()
@@ -571,7 +609,7 @@ export function TerminalSettings({
           hasTerminalPanel ? 'bg-[var(--color-terminal-bg)]' : 'bg-[var(--color-surface-container-lowest)]',
         ].join(' ')}
       >
-        <div
+        {!compactHeader && <div
           data-testid="settings-terminal-toolbar"
           className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-3.5 ${
             docked ? 'min-h-9 py-1.5' : 'min-h-11 py-2'
@@ -663,7 +701,13 @@ export function TerminalSettings({
               />
             )}
           </div>
-        </div>
+        </div>}
+
+        {compactHeader && status === 'starting' && (
+          <div role="status" className="px-3 py-1 text-xs text-[var(--color-terminal-muted)]">
+            {t(STATUS_LABEL_KEYS[status])}
+          </div>
+        )}
 
         {status === 'unavailable' ? (
           <EmptyState

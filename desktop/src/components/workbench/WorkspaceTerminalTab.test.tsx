@@ -8,12 +8,14 @@ vi.mock('../../pages/TerminalSettings', () => ({
     cwd,
     runtimeId,
     preserveOnUnmount,
+    compactHeader,
     autoStart,
     testId,
   }: {
     active?: boolean
     cwd?: string
     runtimeId?: string
+    compactHeader?: boolean
     preserveOnUnmount?: boolean
     autoStart?: boolean
     testId: string
@@ -21,6 +23,7 @@ vi.mock('../../pages/TerminalSettings', () => ({
     <div
       data-testid={testId}
       data-active={active ? 'true' : 'false'}
+      data-compact-header={compactHeader ? 'true' : 'false'}
       data-cwd={cwd ?? ''}
       data-runtime-id={runtimeId ?? ''}
       data-preserve-on-unmount={preserveOnUnmount ? 'true' : 'false'}
@@ -81,6 +84,7 @@ describe('WorkspaceTerminalTab', () => {
     const host = screen.getByTestId('workspace-terminal-host-1')
     expect(host).toHaveAttribute('data-runtime-id', 'runtime-1')
     expect(host).toHaveAttribute('data-cwd', '/repo')
+    expect(host).toHaveAttribute('data-compact-header', 'true')
     // `preserveOnUnmount` is what lets a terminal move docks, survive the panel
     // being hidden and survive a task switch without restarting the PTY.
     expect(host).toHaveAttribute('data-preserve-on-unmount', 'true')

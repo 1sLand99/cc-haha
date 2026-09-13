@@ -58,6 +58,7 @@ export function WorkspaceTerminalTab({ sessionId, tab, active }: WorkspaceTermin
       <TerminalSettings
         active={active}
         docked
+        compactHeader
         cwd={tab.cwd}
         runtimeId={runtimeId}
         preserveOnUnmount

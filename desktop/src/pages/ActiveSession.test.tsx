@@ -2207,6 +2207,11 @@ describe('ActiveSession task polling', () => {
     expect(host).toHaveAttribute('data-preserve-on-unmount', 'true')
     expect(resizeHandle).toHaveAttribute('aria-valuemin', `${WORKSPACE_BOTTOM_MIN_HEIGHT}`)
     expect(resizeHandle).toHaveAttribute('aria-valuemax', `${WORKSPACE_BOTTOM_MAX_HEIGHT}`)
+    // The hit target overlays the existing panel border instead of adding a
+    // second visible line and a spacer above the terminal tabs.
+    expect(panel).toHaveClass('relative', 'border-t')
+    expect(resizeHandle).toHaveClass('absolute', 'bg-transparent')
+    expect(resizeHandle.firstElementChild).toHaveClass('bg-transparent')
 
     act(() => {
       fireEvent.keyDown(resizeHandle, { key: 'ArrowUp' })

@@ -309,9 +309,9 @@ function TerminalResizeHandle() {
         }
       }}
       onDoubleClick={() => setHeight(WORKSPACE_BOTTOM_DEFAULT_HEIGHT)}
-      className="group flex h-2.5 shrink-0 cursor-row-resize items-center bg-[var(--color-surface)] outline-none focus-visible:bg-[var(--color-surface-container)]"
+      className="group absolute inset-x-0 -top-1 z-[var(--z-raised)] flex h-2 cursor-row-resize items-center bg-transparent outline-none"
     >
-      <div className="mx-3 h-px flex-1 rounded-full bg-[var(--color-border)] transition-colors group-hover:bg-[var(--color-border-focus)] group-focus-visible:bg-[var(--color-border-focus)]" />
+      <div className="h-px flex-1 bg-transparent transition-colors group-hover:bg-[var(--color-border-focus)] group-focus-visible:bg-[var(--color-border-focus)]" />
     </div>
   )
 }
@@ -906,7 +906,7 @@ export function ActiveSession() {
               data-testid="session-terminal-panel"
               aria-label={t('workspace.bottomPanelLabel')}
               className={[
-                'flex min-h-0 shrink-0 flex-col border-t border-[var(--color-border)] bg-[var(--color-surface-container-lowest)]',
+                'relative flex min-h-0 shrink-0 flex-col border-t border-[var(--color-border)] bg-[var(--color-surface-container-lowest)]',
                 showTerminalPanel ? '' : 'hidden',
               ].join(' ')}
               style={{ height: showTerminalPanel ? terminalPanelHeight : 0 }}

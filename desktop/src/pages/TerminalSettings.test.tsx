@@ -4,7 +4,7 @@ import '@testing-library/jest-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useUIStore } from '../stores/uiStore'
-import { destroyTerminalRuntime } from '../lib/terminalRuntime'
+import { destroyTerminalRuntime, getTerminalRuntime } from '../lib/terminalRuntime'
 import { browserHost } from '../lib/desktopHost/browserHost'
 
 const terminalMocks = vi.hoisted(() => {
@@ -19,6 +19,7 @@ const terminalMocks = vi.hoisted(() => {
     open: vi.fn(),
     dispose: vi.fn(),
     onData: vi.fn(),
+    onTitleChange: vi.fn((_listener: (title: string) => void) => ({ dispose: vi.fn() })),
     write: vi.fn(),
     writeln: vi.fn(),
     clear: vi.fn(),
@@ -48,6 +49,8 @@ const terminalMocks = vi.hoisted(() => {
 vi.mock('@xterm/xterm', () => ({
   Terminal: vi.fn(() => terminalMocks.terminalInstance),
 }))
+
+vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: vi.fn() }))
 
 vi.mock('@xterm/addon-fit', () => ({
   FitAddon: vi.fn(() => terminalMocks.fitInstance),
@@ -122,6 +125,42 @@ describe('TerminalSettings', () => {
       disconnect = vi.fn()
     })
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
+  })
+
+  it('resolves typography and enables links without forcing history scroll', async () => {
+    terminalMocks.available = true
+    document.documentElement.style.setProperty('--font-mono', '"Test Mono", monospace')
+    render(<TerminalSettings />)
+    await waitFor(() => expect(terminalMocks.spawn).toHaveBeenCalled())
+    const { Terminal } = await import('@xterm/xterm')
+    expect(Terminal).toHaveBeenLastCalledWith(expect.objectContaining({
+      fontFamily: '"Test Mono", monospace', fontSize: 13, letterSpacing: 0, cursorStyle: 'bar',
+      scrollOnEraseInDisplay: false,
+    }))
+    const { WebLinksAddon } = await import('@xterm/addon-web-links')
+    expect(WebLinksAddon).toHaveBeenCalledWith(expect.any(Function))
+    const open = vi.spyOn(browserHost.shell, 'open').mockResolvedValue(undefined)
+    const handleLink = vi.mocked(WebLinksAddon).mock.calls.at(-1)![0]!
+    handleLink(new MouseEvent('click'), 'https://example.com/docs')
+    expect(open).toHaveBeenCalledWith('https://example.com/docs')
+    handleLink(new MouseEvent('click'), 'javascript:alert(1)')
+    expect(open).toHaveBeenCalledTimes(1)
+    document.documentElement.style.removeProperty('--font-mono')
+  })
+
+  it('exposes live title and restart to workspace chrome without a second toolbar', async () => {
+    terminalMocks.available = true
+    const { unmount } = render(<TerminalSettings runtimeId="chrome-bridge" compactHeader />)
+    await waitFor(() => expect(terminalMocks.spawn).toHaveBeenCalled())
+    expect(screen.queryByTestId('settings-terminal-toolbar')).not.toBeInTheDocument()
+    const runtime = getTerminalRuntime('chrome-bridge', 'idle')
+    act(() => terminalMocks.terminalInstance.onTitleChange.mock.calls.at(-1)?.[0]('project — zsh'))
+    expect(runtime.title).toBe('project — zsh')
+    await act(async () => { runtime.restart?.() })
+    expect(terminalMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(runtime.title).toBe('')
+    unmount()
+    expect(runtime.restart).toBeNull()
   })
 
   it('shows a desktop-runtime empty state outside Tauri', () => {

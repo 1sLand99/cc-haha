@@ -452,3 +452,59 @@ describe('WorkspaceTabStrip', () => {
     expect(screen.getByTestId('workspace-tab-strip-side').className).toContain('h-10')
   })
 })
+
+describe('terminal tab chrome', () => {
+  it('keeps the expanded terminal menu inside the viewport near the bottom edge', () => {
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('role') === 'menu'
+        ? { x: 0, y: 0, top: 0, left: 0, right: 210, bottom: 300, width: 210, height: 300, toJSON: () => ({}) }
+        : { x: 900, y: 720, top: 720, left: 900, right: 928, bottom: 748, width: 28, height: 28, toJSON: () => ({}) }
+    })
+    try {
+      renderStrip({ tabs: [TERMINAL_TAB], activeTabId: TERMINAL_TAB.id })
+      fireEvent.keyDown(screen.getByRole('tab'), { key: 'F10', shiftKey: true })
+      const menu = screen.getByRole('menu')
+      expect(Number.parseFloat(menu.style.top) + 300).toBeLessThanOrEqual(window.innerHeight - 8)
+      expect(menu).toHaveClass('overflow-y-auto')
+    } finally {
+      measure.mockRestore()
+    }
+  })
+
+  it('updates the title and shell tooltip without replacing the persisted tab', async () => {
+    const { getTerminalRuntime, updateTerminalRuntime, destroyTerminalRuntime } = await import('@/lib/terminalRuntime')
+    const { unmount } = renderStrip({ tabs: [TERMINAL_TAB], activeTabId: TERMINAL_TAB.id })
+    const runtime = getTerminalRuntime('rt-1', 'idle')
+    act(() => updateTerminalRuntime(runtime, { title: 'repo — zsh', shellInfo: { cwd: '/repo/packages', shell: '/bin/zsh' } }))
+    expect(screen.getByRole('tab', { name: 'repo — zsh' })).toHaveAttribute('title', '/repo/packages · /bin/zsh')
+    expect(TERMINAL_TAB).not.toHaveProperty('title')
+    act(() => updateTerminalRuntime(runtime, { title: '' }))
+    expect(screen.getByRole('tab')).not.toHaveTextContent('repo — zsh')
+    unmount()
+    destroyTerminalRuntime('rt-1')
+  })
+
+  it('offers terminal actions from the visible menu and disables restart while starting', async () => {
+    const { getTerminalRuntime, updateTerminalRuntime, destroyTerminalRuntime } = await import('@/lib/terminalRuntime')
+    const { t } = await import('@/i18n')
+    const runtime = getTerminalRuntime('rt-1', 'idle')
+    const clear = vi.fn()
+    const restart = vi.fn()
+    const focus = vi.fn()
+    const dispose = vi.fn()
+    updateTerminalRuntime(runtime, { terminal: { clear, dispose, focus } as unknown as NonNullable<typeof runtime.terminal>, restart, status: 'running' })
+    const { unmount } = renderStrip({ tabs: [TERMINAL_TAB], activeTabId: TERMINAL_TAB.id })
+    fireEvent.click(screen.getByRole('button', { name: t('workspace.tabMenu') }))
+    fireEvent.click(screen.getByRole('menuitem', { name: t('settings.terminal.clear') }))
+    expect(clear).toHaveBeenCalledOnce()
+    expect(focus).toHaveBeenCalledOnce()
+    fireEvent.keyDown(screen.getByRole('tab'), { key: 'F10', shiftKey: true })
+    fireEvent.click(screen.getByRole('menuitem', { name: t('settings.terminal.restart') }))
+    expect(restart).toHaveBeenCalledOnce()
+    act(() => updateTerminalRuntime(runtime, { status: 'starting' }))
+    fireEvent.click(screen.getByRole('button', { name: t('workspace.tabMenu') }))
+    expect(screen.getByRole('menuitem', { name: t('settings.terminal.restart') })).toBeDisabled()
+    unmount()
+    destroyTerminalRuntime('rt-1')
+  })
+})

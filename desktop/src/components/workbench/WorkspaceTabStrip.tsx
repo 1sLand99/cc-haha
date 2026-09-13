@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { FolderClosed, Globe, Plus, SquareTerminal, SquareSplitVertical } from 'lucide-react'
+import { FolderClosed, Globe, MoreHorizontal, Plus, SquareTerminal, SquareSplitVertical } from 'lucide-react'
 import { IconButton } from '@/components/ui/IconButton'
 import { useDismissable } from '@/hooks/useDismissable'
+import { useAnchoredPosition } from '@/hooks/useAnchoredPosition'
+import { getTerminalRuntime, subscribeTerminalRuntime } from '@/lib/terminalRuntime'
 import { useTranslation } from '../../i18n'
 import { workspaceTabTitle } from '../../stores/workspaceStore'
 import { useMenuKeyboard } from './menuKeyboard'
@@ -54,9 +56,23 @@ export function WorkspaceTabStrip({
   onAdd,
 }: WorkspaceTabStripProps) {
   const t = useTranslation()
+  const [, refreshTerminalState] = useState(0)
+  useEffect(() => {
+    const unsubscribers = tabs.filter((tab) => tab.kind === 'terminal').map((tab) =>
+      subscribeTerminalRuntime(getTerminalRuntime(tab.runtimeId, 'idle'), () => refreshTerminalState((value) => value + 1)),
+    )
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe())
+  }, [tabs])
   const [menu, setMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuTriggerRef = useRef<HTMLElement | null>(null)
+  const menuPosition = useAnchoredPosition({
+    open: menu !== null,
+    anchorRect: { top: menu?.y ?? 0, bottom: menu?.y ?? 0, left: menu?.x ?? 0, right: menu?.x ?? 0 },
+    floatingRef: menuRef,
+    offset: 0,
+    clampHeight: true,
+  })
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [focusedTabId, setFocusedTabId] = useState<string | null>(null)
   const dragRef = useRef<{ tabId: string; index: number; startX: number } | null>(null)
@@ -184,6 +200,9 @@ export function WorkspaceTabStrip({
 
   const menuDockTabs = tabs.filter((tab) => tab.dock === dock)
   const menuTabIndex = menuDockTabs.findIndex((tab) => tab.id === menu?.tabId)
+  const menuTab = menuDockTabs[menuTabIndex]
+  const menuRuntime = menuTab?.kind === 'terminal' ? getTerminalRuntime(menuTab.runtimeId, 'idle') : null
+  const activeTerminalTab = tabs.find((tab) => tab.id === activeTabId && tab.kind === 'terminal')
   const canCloseOthers = menuTabIndex >= 0 && menuDockTabs.length > 1
   const canCloseRight = menuTabIndex >= 0 && menuTabIndex < menuDockTabs.length - 1
 
@@ -205,7 +224,8 @@ export function WorkspaceTabStrip({
         >
           {tabs.map((tab, index) => {
             const Icon = KIND_ICON[tab.kind]
-            const title = workspaceTabTitle(tab, {
+            const runtime = tab.kind === 'terminal' ? getTerminalRuntime(tab.runtimeId, 'idle') : null
+            const title = runtime?.title?.trim() || workspaceTabTitle(tab, {
               newTab: t('workspace.newTabTitle'),
               review: t('workspace.reviewTabTitle'),
               files: t('workspace.files.openTitle'),
@@ -244,6 +264,7 @@ export function WorkspaceTabStrip({
                   id={`workspace-tab-${dock}-${tab.id}`}
                   tabIndex={isRoving ? 0 : -1}
                   aria-selected={isActive}
+                  title={tab.kind === 'terminal' ? [runtime?.shellInfo?.cwd || tab.cwd, runtime?.shellInfo?.shell].filter(Boolean).join(' · ') : title}
                   /*
                     The tab does carry a popup (right-click), so this is true.
                     `aria-expanded` deliberately stays off: on `role="tab"` it
@@ -279,7 +300,14 @@ export function WorkspaceTabStrip({
                     event.stopPropagation()
                     onClose(tab.id)
                   }}
-                  onKeyDown={(event) => handleTabKeyDown(event, index)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                      event.preventDefault()
+                      const rect = event.currentTarget.getBoundingClientRect()
+                      menuTriggerRef.current = event.currentTarget
+                      setMenu({ tabId: tab.id, x: rect.left, y: rect.bottom })
+                    } else handleTabKeyDown(event, index)
+                  }}
                   className="flex h-7 min-w-0 flex-1 cursor-default items-center gap-1.5 rounded-[var(--radius-sm)] text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)]"
                 >
                   {tab.kind === 'file' && tab.path ? <WorkspaceFileIcon path={tab.path} /> : (
@@ -340,6 +368,24 @@ export function WorkspaceTabStrip({
         </span>
       </div>
 
+      {activeTerminalTab ? (
+        <span className="flex shrink-0 items-center">
+          <IconButton
+            icon={<MoreHorizontal size={16} />}
+            label={t('workspace.tabMenu')}
+            size="sm"
+            tone="muted"
+            aria-haspopup="menu"
+            aria-expanded={menu?.tabId === activeTerminalTab.id}
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect()
+              menuTriggerRef.current = event.currentTarget
+              setMenu({ tabId: activeTerminalTab.id, x: Math.max(8, rect.right - 210), y: rect.bottom })
+            }}
+          />
+        </span>
+      ) : null}
+
       {menu ? (
         <div
           ref={menuRef}
@@ -347,9 +393,22 @@ export function WorkspaceTabStrip({
           aria-label={t('workspace.tabMenu')}
           data-testid="workspace-tab-menu"
           onKeyDown={handleMenuKeyDown}
-          className="fixed z-[var(--z-dropdown)] min-w-[190px] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1.5 shadow-[var(--shadow-dropdown)]"
-          style={{ left: menu.x, top: menu.y }}
+          className="fixed z-[var(--z-dropdown)] min-w-[190px] overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1.5 shadow-[var(--shadow-dropdown)]"
+          style={menuPosition.style}
         >
+          {menuRuntime ? <>
+            <WorkspaceTabMenuItem
+              label={t('settings.terminal.clear')}
+              disabled={!menuRuntime.terminal}
+              onSelect={() => { menuRuntime.terminal?.clear(); closeMenu(); menuRuntime.terminal?.focus() }}
+            />
+            <WorkspaceTabMenuItem
+              label={t('settings.terminal.restart')}
+              disabled={!menuRuntime.restart || menuRuntime.status === 'starting' || menuRuntime.status === 'unavailable'}
+              onSelect={() => { menuRuntime.restart?.(); closeMenu() }}
+            />
+            <div className="my-1 border-t border-[var(--color-border)]" />
+          </> : null}
           <WorkspaceTabMenuItem label={t('workspace.tabCloseCurrent')} onSelect={() => { onClose(menu.tabId); closeMenu() }} />
           <WorkspaceTabMenuItem label={t('workspace.tabCloseOthers')} disabled={!canCloseOthers} onSelect={() => { onCloseScope(menu.tabId, 'others'); closeMenu() }} />
           <WorkspaceTabMenuItem label={t('workspace.tabCloseRight')} disabled={!canCloseRight} onSelect={() => { onCloseScope(menu.tabId, 'right'); closeMenu() }} />

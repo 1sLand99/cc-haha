@@ -159,7 +159,11 @@
 }
 
 .settings-terminal-host .xterm-viewport {
-  scrollbar-color: var(--color-outline-a72) transparent;
+  scrollbar-color: var(--color-terminal-scrollbar) transparent;
+}
+
+.settings-terminal-host .xterm-viewport:hover {
+  scrollbar-color: var(--color-terminal-scrollbar-hover) transparent;
 }
 
 .settings-terminal-host .xterm-screen {
@@ -576,13 +580,29 @@
 }
 
 /* ─── Terminal ANSI palette ───────────────────────────────────────
-   The embedded terminal stays dark under all three themes (that is what
-   the per-theme `--color-terminal-*` values encode — light/white/dark
-   differ only in hue, not in lightness), so the 16 ANSI slots are shared.
-   Split them into the theme blocks if a theme ever needs its own ramp.
-   Consumed by `lib/terminalTheme.ts`, which is the only place allowed to
-   turn these into an xterm ITheme object. */
+   ANSI foregrounds use separate light and dark ramps. Black/white retain
+   ANSI semantics for programs that explicitly paint their own backgrounds. */
 :root {
+  --color-terminal-ansi-black: #242424;
+  --color-terminal-ansi-red: #B42318;
+  --color-terminal-ansi-green: #226C3C;
+  --color-terminal-ansi-yellow: #795500;
+  --color-terminal-ansi-blue: #155DB5;
+  --color-terminal-ansi-magenta: #8642A0;
+  --color-terminal-ansi-cyan: #176A72;
+  --color-terminal-ansi-white: #D7D2D0;
+  --color-terminal-ansi-bright-black: #696158;
+  --color-terminal-ansi-bright-red: #A82018;
+  --color-terminal-ansi-bright-green: #1D6735;
+  --color-terminal-ansi-bright-yellow: #755000;
+  --color-terminal-ansi-bright-blue: #1258AB;
+  --color-terminal-ansi-bright-magenta: #7E3698;
+  --color-terminal-ansi-bright-cyan: #12656D;
+  --color-terminal-ansi-bright-white: #FFFFFF;
+}
+
+[data-theme="dark"],
+[data-theme="ink-blue"] {
   --color-terminal-ansi-black: #1F1F1F;
   --color-terminal-ansi-red: #FF6D67;
   --color-terminal-ansi-green: #7EF18A;
@@ -1432,18 +1452,29 @@
   --color-diff-syntax-type: #7E5520;
   --color-diff-syntax-punctuation: #5C504A;
 
-  /* Terminal. The handoff pins one warm-ink panel across every theme; the
-     ink-blue theme swaps in its own cool ground below. */
-  --color-terminal-header: #221F19;
-  --color-terminal-bg: #191713;
-  --color-terminal-border: #14120F;
-  --color-terminal-fg: #E4DCCA;
-  --color-terminal-cursor: #D07B52;
-  --color-terminal-selection: #4C4433;
-  --color-terminal-muted: #8B8069;
-  --color-terminal-accent: #84B383;
-  --color-terminal-danger: #E06B52;
-  --color-terminal-warning: #D3A34C;
+  /* The terminal belongs to the current workspace theme. */
+  --color-terminal-header: var(--cc-bg);
+  --color-terminal-bg: var(--cc-bg);
+  --color-terminal-border: var(--cc-bd);
+  --color-terminal-fg: var(--cc-t1);
+  --color-terminal-cursor: var(--cc-t1);
+  --color-terminal-selection: var(--cc-ac-soft);
+  --color-terminal-muted: var(--cc-t3);
+  --color-terminal-accent: var(--cc-ok-ink);
+  --color-terminal-danger: var(--cc-er-ink);
+  --color-terminal-warning: var(--cc-wn-ink);
+  --color-terminal-scrollbar: var(--cc-bd2);
+  --color-terminal-scrollbar-hover: var(--cc-t3);
+
+  /* Image viewing keeps a dark neutral surround independently of terminals. */
+  --color-media-bg: #191713;
+  --color-media-header: #221F19;
+  --color-media-border: #4C4433;
+  --color-media-fg: #E4DCCA;
+  --color-media-muted: #B5AA96;
+  --color-media-selection: #4C4433;
+  --color-media-cursor: #D07B52;
+  --color-media-danger: #E06B52;
 
   /* Find-in-page highlights. These paint over arbitrary page content, not
      over a brand-soft panel, so they get their own pair instead of borrowing
@@ -1519,16 +1550,6 @@
   --color-overlay-scrim: rgba(var(--cc-scrim-rgb), 0.56);
   --shadow-button-primary: 0 2px 10px rgba(0, 0, 0, 0.4);
   --color-activity-tooltip-border: rgba(var(--cc-bg-rgb), 0.28);
-}
-
-/* Ink-blue runs a cool terminal ground rather than the shared warm ink. */
-[data-theme="ink-blue"] {
-  --color-terminal-header: #1B1F27;
-  --color-terminal-bg: #14171D;
-  --color-terminal-border: #101318;
-  --color-terminal-fg: #DDE1EB;
-  --color-terminal-selection: #434A5B;
-  --color-terminal-muted: #79808F;
 }
 
 /* ─── Material Symbols ─────────────────────────────────────────────
