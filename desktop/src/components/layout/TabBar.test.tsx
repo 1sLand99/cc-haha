@@ -157,6 +157,8 @@ vi.mock('../../i18n', () => ({
       'tabs.closeAllConfirmStop': 'Stop All & Close',
       'tabs.sessionRunning': 'Session running',
       'tabs.openTerminal': 'Open Terminal',
+      'workspace.controls.toggleBottom': 'Toggle bottom panel',
+      'workspace.controls.toggleSide': 'Show/hide side panel',
       'tabs.showWorkspace': 'Show Workspace',
       'tabs.hideWorkspace': 'Hide Workspace',
       'tabs.showBrowser': 'Show Browser',
@@ -273,7 +275,6 @@ describe('TabBar', () => {
     const { useTabStore } = await import('../../stores/tabStore')
     const { useChatStore } = await import('../../stores/chatStore')
     const { useSessionStore } = await import('../../stores/sessionStore')
-    const { useBrowserPanelStore } = await import('../../stores/browserPanelStore')
     const { useActivityPanelStore } = await import('../../stores/activityPanelStore')
     const { useCLITaskStore } = await import('../../stores/cliTaskStore')
     const { useTeamStore } = await import('../../stores/teamStore')
@@ -293,7 +294,6 @@ describe('TabBar', () => {
       selectedSessionIds: new Set(),
     } as Partial<ReturnType<typeof useSessionStore.getState>>)
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState(), true)
-    useBrowserPanelStore.setState(useBrowserPanelStore.getInitialState(), true)
     useActivityPanelStore.setState(useActivityPanelStore.getInitialState(), true)
     useCLITaskStore.setState(useCLITaskStore.getInitialState(), true)
     useTeamStore.setState(useTeamStore.getInitialState(), true)
@@ -301,6 +301,55 @@ describe('TabBar', () => {
 
     Reflect.deleteProperty(window, 'desktopHost')
     Reflect.deleteProperty(window, '__TAURI__')
+  })
+
+  it('owns the workspace layout controls in the window header and preserves resources across layout changes', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useWorkspaceStore } = await import('../../stores/workspaceStore')
+    const sessionId = 'layout-session'
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'Layout session', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    render(<TabBar />)
+
+    const side = screen.getByTestId('workspace-toggle-side')
+    const bottom = screen.getByTestId('workspace-toggle-bottom')
+    expect(screen.getByTestId('tab-bar')).toContainElement(side)
+    expect(screen.getByTestId('tab-bar')).toContainElement(bottom)
+    expect(screen.queryByTestId('workspace-toggle-fullscreen')).not.toBeInTheDocument()
+    expect(document.querySelectorAll('[data-workspace-focus="side-toggle"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-workspace-focus="bottom-toggle"]')).toHaveLength(1)
+
+    fireEvent.click(side)
+    act(() => {
+      useWorkspaceStore.getState().openTarget(sessionId, { kind: 'browser', url: 'https://fixture.test' })
+      useWorkspaceStore.getState().openTarget(sessionId, { kind: 'file', path: 'README.md' })
+    })
+    fireEvent.click(bottom)
+    const before = useWorkspaceStore.getState().getSession(sessionId).tabs
+    expect(before).toHaveLength(3)
+    expect(screen.getByTestId('tab-bar')).toContainElement(screen.getByTestId('workspace-toggle-fullscreen'))
+    fireEvent.click(screen.getByTestId('workspace-toggle-fullscreen'))
+    expect(useWorkspaceStore.getState().getSession(sessionId).layout).toBe('full')
+    fireEvent.click(screen.getByTestId('workspace-toggle-fullscreen'))
+    expect(useWorkspaceStore.getState().getSession(sessionId).layout).toBe('split')
+    fireEvent.click(side)
+    expect(useWorkspaceStore.getState().getSession(sessionId).layout).toBe('hidden')
+    fireEvent.click(side)
+    fireEvent.click(bottom)
+    fireEvent.click(bottom)
+    expect(useWorkspaceStore.getState().getSession(sessionId).tabs).toEqual(before)
+
+    act(() => {
+      useTabStore.setState({ activeTabId: 'second-session' })
+    })
+    expect(side).toHaveAttribute('aria-pressed', 'false')
+    expect(bottom).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(side)
+    expect(useWorkspaceStore.getState().getSession('second-session').layout).toBe('split')
+    expect(useWorkspaceStore.getState().getSession(sessionId).tabs).toEqual(before)
   })
 
   it('hides the activity button for no-activity chat session tabs', async () => {
@@ -2362,7 +2411,7 @@ describe('TabBar', () => {
       render(<TabBar />)
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open Terminal' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle bottom panel' }))
 
     const terminalTabs = useTabStore.getState().tabs.filter((tab) => tab.type === 'terminal')
     expect(terminalTabs).toHaveLength(0)
@@ -2391,7 +2440,7 @@ describe('TabBar', () => {
       render(<TabBar />)
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open Terminal' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle bottom panel' }))
 
     expect(useTabStore.getState().tabs.some((tab) => tab.type === 'terminal')).toBe(false)
     expect(useWorkspaceStore.getState().getSession('legacy-session').bottomOpen).toBe(true)
@@ -2423,6 +2472,18 @@ describe('TabBar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Hide Workspace' }))
     expect(useWorkspaceStore.getState().getSession('tab-1').layout).toBe('hidden')
+  })
+
+  it('keeps workspace and terminal entry points available on H5', async () => {
+    window.desktopHost = browserHost
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useWorkspaceStore } = await import('../../stores/workspaceStore')
+    useTabStore.setState({ tabs: [{ sessionId: 'h5-task', title: 'H5 Task', type: 'session', status: 'idle' }], activeTabId: 'h5-task' })
+    await act(async () => { render(<TabBar />) })
+    fireEvent.click(screen.getByRole('button', { name: 'Show Workspace' }))
+    expect(useWorkspaceStore.getState().getSession('h5-task').layout).toBe('split')
+    expect(screen.getByRole('button', { name: 'Toggle bottom panel' })).toBeInTheDocument()
   })
 
   it('does not render a browser toolbar button for session tabs', async () => {

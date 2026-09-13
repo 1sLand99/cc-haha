@@ -195,6 +195,8 @@ export function TerminalSettings({
     const host = hostRef.current
     if (!host) return Promise.resolve()
 
+    const requestId = crypto.randomUUID()
+    let exitedDuringStart = false
     const startToken = runtime.startToken + 1
     runtime.startToken = startToken
     const isCurrentStart = () => isTerminalRuntimeCurrent(runtime) && runtime.startToken === startToken
@@ -265,12 +267,15 @@ export function TerminalSettings({
         activeFit.fit()
 
         outputUnlisten = await terminalApi.onOutput((payload) => {
-          if (payload.session_id === runtime.nativeSessionId) {
+          if (!isCurrentStart()) return
+          if (payload.requestId === requestId || payload.session_id === runtime.nativeSessionId) {
             activeTerminal.write(payload.data)
           }
         })
         exitUnlisten = await terminalApi.onExit((payload) => {
-          if (payload.session_id !== runtime.nativeSessionId) return
+          if (!isCurrentStart()) return
+          if (payload.requestId !== requestId && payload.session_id !== runtime.nativeSessionId) return
+          exitedDuringStart = true
           updateTerminalRuntime(runtime, { status: 'exited' })
           const signal = payload.signal ? `, ${payload.signal}` : ''
           activeTerminal.writeln(`\r\n[process exited: ${payload.code}${signal}]`)
@@ -297,6 +302,7 @@ export function TerminalSettings({
         })
 
         const result = await terminalApi.spawn({
+          requestId,
           cols: activeTerminal.cols,
           rows: activeTerminal.rows,
           ...(cwd ? { cwd } : {}),
@@ -309,9 +315,9 @@ export function TerminalSettings({
           return
         }
         updateTerminalRuntime(runtime, {
-          nativeSessionId: result.session_id,
+          nativeSessionId: exitedDuringStart ? null : result.session_id,
           shellInfo: { shell: result.shell, cwd: result.cwd },
-          status: 'running',
+          status: exitedDuringStart ? 'exited' : 'running',
         })
         resizeSession()
       } catch (err) {
@@ -467,7 +473,7 @@ export function TerminalSettings({
   return (
     <div className={`flex h-full flex-col overflow-hidden ${
       docked
-        ? 'min-h-0 bg-[var(--color-surface-container-lowest)] px-3 py-1.5'
+        ? 'min-h-0 bg-[var(--color-surface-container-lowest)]'
         : workspace
           ? 'min-h-0 bg-[var(--color-surface)] px-5 py-4'
           : 'min-h-[min(720px,calc(100vh-8rem))]'
@@ -557,17 +563,13 @@ export function TerminalSettings({
         </>
       )}
 
-      {/* One panel, header included. The handoff draws the terminal as a warm
-          ink window (§9); its title bar belongs on that ground, not floating
-          above it on the page ground as a second toolbar. Without a session
-          there is no window to draw, so the chrome falls back to page tokens
-          rather than framing an empty state in ink. */}
+      {/* The workspace already owns a tab strip; only standalone terminals need window chrome. */}
       <div
-        className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-xl)] border ${
-          hasTerminalPanel
-            ? 'border-[var(--color-terminal-border)] bg-[var(--color-terminal-bg)] shadow-[var(--shadow-card)]'
-            : 'border-[var(--color-border)] bg-[var(--color-surface-container-lowest)]'
-        }`}
+        className={[
+          'flex min-h-0 flex-1 flex-col overflow-hidden',
+          docked ? '' : `rounded-[var(--radius-xl)] border ${hasTerminalPanel ? 'border-[var(--color-terminal-border)] shadow-[var(--shadow-card)]' : 'border-[var(--color-border)]'}`,
+          hasTerminalPanel ? 'bg-[var(--color-terminal-bg)]' : 'bg-[var(--color-surface-container-lowest)]',
+        ].join(' ')}
       >
         <div
           data-testid="settings-terminal-toolbar"
@@ -580,17 +582,17 @@ export function TerminalSettings({
           }`}
         >
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
-            <span className="flex shrink-0 items-center gap-1.5" aria-hidden="true">
+            {!docked && <span className="flex shrink-0 items-center gap-1.5" aria-hidden="true">
               <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-terminal-danger)]" />
               <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-terminal-warning)]" />
               <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-terminal-accent)]" />
-            </span>
-            <h2
+            </span>}
+            {!docked && <h2
               className={`${docked ? 'text-[12.5px]' : 'text-[13px]'} shrink-0 font-semibold ${terminalHeaderTitleClass}`}
               style={{ fontFamily: 'var(--font-headline)' }}
             >
               {t('settings.terminal.title')}
-            </h2>
+            </h2>}
             {shellInfo && (
               <div className={`flex min-w-0 items-center gap-1.5 font-mono text-[11.5px] ${terminalHeaderMetaClass}`}>
                 <span className="min-w-0 truncate">{shellInfo.cwd}</span>

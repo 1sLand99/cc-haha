@@ -22,6 +22,8 @@ export type WorkspaceFileState = WorkspaceReadFileResult['state'] | 'loading'
 
 export type WorkspaceFileEntry = {
   path: string
+  /** Server-validated identity used by watch events; the cache keeps its request path. */
+  watchPath?: string
   state: WorkspaceFileState
   content?: string
   dataUrl?: string
@@ -35,24 +37,39 @@ export type WorkspaceFileEntry = {
   refreshError?: string | null
 }
 
+export type WorkspaceTreeView = {
+  filter: string
+  mode: 'all' | 'changed'
+  scrollTop: number
+  open: boolean
+}
+
+export const EMPTY_WORKSPACE_TREE_VIEW: WorkspaceTreeView = { filter: '', mode: 'all', scrollTop: 0, open: true }
+export type WorkspaceFileView = { scrollTop: number; scrollLeft: number; revealNonce?: number }
+
 type WorkspaceContentStore = {
   filesByKey: Record<string, WorkspaceFileEntry | undefined>
   treeByKey: Record<string, WorkspaceTreeResult | undefined>
   treeLoadingByKey: Record<string, boolean | undefined>
   expandedBySession: Record<string, string[] | undefined>
   statusBySession: Record<string, WorkspaceStatusResult | undefined>
+  treeViewBySession: Record<string, WorkspaceTreeView | undefined>
+  fileViewByKey: Record<string, WorkspaceFileView | undefined>
+  setTreeView: (sessionId: string, patch: Partial<WorkspaceTreeView>) => void
+  setFileView: (sessionId: string, path: string, view: WorkspaceFileView) => void
 
   getFile: (sessionId: string, path: string) => WorkspaceFileEntry | undefined
   getTree: (sessionId: string, path: string) => WorkspaceTreeResult | undefined
   isTreeLoading: (sessionId: string, path: string) => boolean
   isExpanded: (sessionId: string, path: string) => boolean
 
-  loadStatus: (sessionId: string, options?: { force?: boolean }) => Promise<void>
-  loadFile: (sessionId: string, path: string, options?: { force?: boolean }) => Promise<void>
-  loadTree: (sessionId: string, path?: string, options?: { force?: boolean }) => Promise<void>
+  loadStatus: (sessionId: string, options?: { force?: boolean; signal?: AbortSignal }) => Promise<void>
+  loadFile: (sessionId: string, path: string, options?: { force?: boolean; signal?: AbortSignal }) => Promise<void>
+  loadTree: (sessionId: string, path?: string, options?: { force?: boolean; signal?: AbortSignal }) => Promise<void>
   toggleDirectory: (sessionId: string, path: string) => Promise<void>
   /** Drop caches for paths a watcher reported as changed, keeping tree shape. */
   invalidatePaths: (sessionId: string, paths: string[]) => void
+  refreshWatchedPaths: (sessionId: string, paths: string[], directories: string[], signal: AbortSignal) => Promise<void>
   forgetFile: (sessionId: string, path: string) => void
   clearSession: (sessionId: string) => void
 }
@@ -93,6 +110,18 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
   treeLoadingByKey: {},
   expandedBySession: {},
   statusBySession: {},
+  treeViewBySession: {},
+  fileViewByKey: {},
+
+  setTreeView: (sessionId, patch) => set((state) => ({
+    treeViewBySession: {
+      ...state.treeViewBySession,
+      [sessionId]: { ...EMPTY_WORKSPACE_TREE_VIEW, ...state.treeViewBySession[sessionId], ...patch },
+    },
+  })),
+  setFileView: (sessionId, path, view) => set((state) => ({
+    fileViewByKey: { ...state.fileViewByKey, [key(sessionId, path)]: view },
+  })),
 
   getFile: (sessionId, path) => get().filesByKey[key(sessionId, path)],
   getTree: (sessionId, path) => get().treeByKey[key(sessionId, path)],
@@ -100,6 +129,7 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
   isExpanded: (sessionId, path) => (get().expandedBySession[sessionId] ?? []).includes(path),
 
   loadStatus: async (sessionId, options) => {
+    if (options?.signal?.aborted) return
     const key = `${sessionId}::status`
     if (get().statusBySession[sessionId] && !options?.force) return
     // Guard the *request*, not just the result: a probe that fails caches
@@ -108,8 +138,8 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
     statusRequests.add(sessionId)
     const request = nextRequest(fileRequests, key)
     try {
-      const result = await sessionsApi.getWorkspaceStatus(sessionId)
-      if (!isCurrent(fileRequests, key, request)) return
+      const result = await sessionsApi.getWorkspaceStatus(sessionId, options?.signal)
+      if (options?.signal?.aborted || !isCurrent(fileRequests, key, request)) return
       set((state) => ({ statusBySession: { ...state.statusBySession, [sessionId]: result } }))
     } catch {
       // The launcher only needs this to explain why review is unavailable; a
@@ -118,6 +148,7 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
   },
 
   loadFile: async (sessionId, path, options) => {
+    if (options?.signal?.aborted) return
     const entryKey = key(sessionId, path)
     const existing = get().filesByKey[entryKey]
     if (existing && existing.state !== 'loading' && !options?.force) return
@@ -133,8 +164,8 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
     }))
 
     try {
-      const result = await sessionsApi.getWorkspaceFile(sessionId, path)
-      if (!isCurrent(fileRequests, entryKey, request)) return
+      const result = await sessionsApi.getWorkspaceFile(sessionId, path, options?.signal)
+      if (options?.signal?.aborted || !isCurrent(fileRequests, entryKey, request)) return
       set((state) => {
         const current = state.filesByKey[entryKey]
         // A failed refresh must not blank a file the user is reading; keep the
@@ -152,6 +183,7 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
             ...state.filesByKey,
             [entryKey]: {
               path,
+              watchPath: result.path,
               state: result.state,
               content: result.content,
               dataUrl: result.dataUrl,
@@ -167,7 +199,7 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
         }
       })
     } catch (error) {
-      if (!isCurrent(fileRequests, entryKey, request)) return
+      if (options?.signal?.aborted || !isCurrent(fileRequests, entryKey, request)) return
       const message = error instanceof Error ? error.message : 'Failed to read file'
       set((state) => {
         const current = state.filesByKey[entryKey]
@@ -187,6 +219,7 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
   },
 
   loadTree: async (sessionId, path = '', options) => {
+    if (options?.signal?.aborted) return
     const entryKey = key(sessionId, path)
     if (get().treeByKey[entryKey] && !options?.force) return
 
@@ -196,14 +229,14 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
     }))
 
     try {
-      const result = await sessionsApi.getWorkspaceTree(sessionId, path)
-      if (!isCurrent(treeRequests, entryKey, request)) return
+      const result = await sessionsApi.getWorkspaceTree(sessionId, path, options?.signal)
+      if (options?.signal?.aborted || !isCurrent(treeRequests, entryKey, request)) return
       set((state) => ({
         treeByKey: { ...state.treeByKey, [entryKey]: result },
         treeLoadingByKey: { ...state.treeLoadingByKey, [entryKey]: false },
       }))
     } catch (error) {
-      if (!isCurrent(treeRequests, entryKey, request)) return
+      if (options?.signal?.aborted || !isCurrent(treeRequests, entryKey, request)) return
       set((state) => ({
         treeByKey: {
           ...state.treeByKey,
@@ -216,6 +249,10 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
         },
         treeLoadingByKey: { ...state.treeLoadingByKey, [entryKey]: false },
       }))
+    } finally {
+      if (options?.signal?.aborted && isCurrent(treeRequests, entryKey, request)) {
+        set((state) => ({ treeLoadingByKey: { ...state.treeLoadingByKey, [entryKey]: false } }))
+      }
     }
   },
 
@@ -255,6 +292,40 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
     })
   },
 
+  refreshWatchedPaths: async (sessionId, paths, directories, signal) => {
+    if (signal.aborted) return
+    const prefix = `${sessionId}::`
+    const changed = (candidate: string) => paths.some((path) => candidate === path || candidate.startsWith(`${path}/`))
+    // Directory invalidations remain authoritative when either batching layer
+    // also receives named paths. An unnamed child can be a replaced directory,
+    // so refresh cached descendants too; never enumerate unopened descendants.
+    const inChangedDirectory = (candidate: string) => directories.some((directory) => directory === ''
+      ? !/^(?:[\\/]|[a-z]:[\\/])/i.test(candidate)
+      : candidate === directory || candidate.startsWith(`${directory}/`))
+    const state = get()
+    // Refresh in place. Dropping the cache first would unmount the code/tree
+    // surfaces and lose scroll, selection, and expanded-directory context.
+    const reads: Promise<void>[] = []
+    for (const entryKey of Object.keys(state.filesByKey)) {
+      if (!entryKey.startsWith(prefix)) continue
+      const path = entryKey.slice(prefix.length)
+      const watchPath = state.filesByKey[entryKey]?.watchPath ?? path
+      if (changed(path) || changed(watchPath) || inChangedDirectory(path) || inChangedDirectory(watchPath)) {
+        reads.push(get().loadFile(sessionId, path, { force: true, signal }))
+      }
+    }
+    for (const entryKey of Object.keys(state.treeByKey)) {
+      if (!entryKey.startsWith(prefix)) continue
+      const path = entryKey.slice(prefix.length)
+      const watchPath = state.treeByKey[entryKey]?.path ?? path
+      if (changed(path) || changed(watchPath) || inChangedDirectory(path) || inChangedDirectory(watchPath)) {
+        reads.push(get().loadTree(sessionId, path, { force: true, signal }))
+      }
+    }
+    reads.push(get().loadStatus(sessionId, { force: true, signal }))
+    await Promise.allSettled(reads)
+  },
+
   forgetFile: (sessionId, path) => {
     const entryKey = key(sessionId, path)
     invalidate(fileRequests, entryKey)
@@ -276,12 +347,15 @@ export const useWorkspaceContentStore = create<WorkspaceContentStore>((set, get)
     set((state) => {
       const { [sessionId]: _removed, ...expandedBySession } = state.expandedBySession
       const { [sessionId]: _status, ...statusBySession } = state.statusBySession
+      const { [sessionId]: _treeView, ...treeViewBySession } = state.treeViewBySession
       return {
         filesByKey: dropSessionKeys(state.filesByKey, sessionId),
         treeByKey: dropSessionKeys(state.treeByKey, sessionId),
         treeLoadingByKey: dropSessionKeys(state.treeLoadingByKey, sessionId),
         expandedBySession,
         statusBySession,
+        treeViewBySession,
+        fileViewByKey: dropSessionKeys(state.fileViewByKey, sessionId),
       }
     })
   },

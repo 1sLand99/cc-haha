@@ -60,6 +60,7 @@ import { traceCaptureService, trimTraceCallPreviews } from '../services/traceCap
 import { getSubagentRunByAgentId, getSubagentRunByTool } from '../services/subagentRunService.js'
 import { isValidPermissionMode } from '../services/settingsService.js'
 import { handleWorkspaceSearchRoute } from './workspaceSearch.js'
+import { handleWorkspaceWatchRoute } from './workspaceWatch.js'
 import { localIndexCoordinator } from '../services/localIndex/coordinator.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { isPetAccessAuthorized } from '../localAccessAuth.js'
@@ -269,7 +270,7 @@ export async function handleSessionsApi(
           { status: 405 }
         )
       }
-      return await handleSessionWorkspaceRoute(sessionId, url, segments[4])
+      return await handleSessionWorkspaceRoute(req, sessionId, url, segments[4])
     }
 
     if (subResource === 'review') {
@@ -504,6 +505,7 @@ async function getSessionTraceCall(sessionId: string, callId: string | undefined
 }
 
 async function handleSessionWorkspaceRoute(
+  req: Request,
   sessionId: string,
   url: URL,
   workspaceResource?: string,
@@ -511,6 +513,8 @@ async function handleSessionWorkspaceRoute(
   const workDir = await requireSessionWorkspace(sessionId)
 
   switch (workspaceResource) {
+    case 'watch':
+      return handleWorkspaceWatchRoute(req, sessionId, url, workspaceService)
     case 'status':
       return Response.json(await workspaceService.getStatus(sessionId))
     case 'tree':
@@ -556,6 +560,11 @@ async function handleSessionReviewRoute(
     return await runReviewRequest(() =>
       reviewService.getStatus(sessionId, parseReviewSourceFromQuery(url)),
     )
+  }
+
+  if (reviewResource === 'revision') {
+    if (req.method !== 'GET') return reviewMethodNotAllowed(req)
+    return await runReviewRequest(() => reviewService.getRevision(sessionId, parseReviewSourceFromQuery(url)))
   }
 
   if (reviewResource === 'diff') {
@@ -1379,7 +1388,7 @@ async function branchSession(req: Request, sessionId: string): Promise<Response>
 }
 
 async function getTurnCheckpoints(req: Request, sessionId: string): Promise<Response> {
-  const checkpoints = await listSessionTurnCheckpoints(sessionId, req.signal)
+  const checkpoints = await listSessionTurnCheckpoints(sessionId, req.signal, new URL(req.url).searchParams.get('frozen') === 'true')
   // Make this turn's real changed files previewable even when they live outside
   // the session workdir (e.g. the user told the model to write to an absolute
   // path on another drive). Writing them was authorized, so previewing is too.
@@ -1416,6 +1425,7 @@ async function getTurnCheckpointDiff(sessionId: string, url: URL): Promise<Respo
       userMessageIndex,
     },
     path,
+    url.searchParams.get('frozen') === 'true',
   )
 
   return Response.json(result)

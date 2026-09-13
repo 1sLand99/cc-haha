@@ -1,16 +1,17 @@
-import { useCallback, useRef, useState } from 'react'
-import { FileText, Globe, Plus, SquareTerminal, SquareSplitVertical } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { FolderClosed, Globe, Plus, SquareTerminal, SquareSplitVertical } from 'lucide-react'
 import { IconButton } from '@/components/ui/IconButton'
 import { useDismissable } from '@/hooks/useDismissable'
 import { useTranslation } from '../../i18n'
 import { workspaceTabTitle } from '../../stores/workspaceStore'
 import { useMenuKeyboard } from './menuKeyboard'
+import { WorkspaceFileIcon } from './WorkspaceFileIcon'
 import type { WorkspaceDock, WorkspaceTab } from '../../lib/workspace/types'
 
 const DRAG_START_THRESHOLD = 4
 
 const KIND_ICON = {
-  file: FileText,
+  file: FolderClosed,
   browser: Globe,
   review: SquareSplitVertical,
   terminal: SquareTerminal,
@@ -18,6 +19,7 @@ const KIND_ICON = {
 
 export type WorkspaceTabStripProps = {
   dock: WorkspaceDock
+  placement?: 'window' | 'dock'
   tabs: WorkspaceTab[]
   activeTabId: string | null
   onActivate: (tabId: string) => void
@@ -29,13 +31,14 @@ export type WorkspaceTabStripProps = {
   onMoveDock?: (tabId: string, dock: WorkspaceDock) => void
   onReopenClosed: () => void
   canReopenClosed: boolean
-  onAdd: () => void
-  /** Layout controls render at the far right, aligned with the strip. */
-  trailing?: React.ReactNode
+  addMenuId?: string
+  addMenuOpen?: boolean
+  onAdd: (trigger: HTMLButtonElement, initialFocus?: 'first' | 'last') => void
 }
 
 export function WorkspaceTabStrip({
   dock,
+  placement = 'dock',
   tabs,
   activeTabId,
   onActivate,
@@ -46,8 +49,9 @@ export function WorkspaceTabStrip({
   onMoveDock,
   onReopenClosed,
   canReopenClosed,
+  addMenuId,
+  addMenuOpen = false,
   onAdd,
-  trailing,
 }: WorkspaceTabStripProps) {
   const t = useTranslation()
   const [menu, setMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
@@ -59,7 +63,28 @@ export function WorkspaceTabStrip({
   const centersRef = useRef<number[]>([])
   const tabRefs = useRef(new Map<string, HTMLElement | null>())
   const tabButtonRefs = useRef(new Map<string, HTMLButtonElement | null>())
+  const tabListRef = useRef<HTMLDivElement>(null)
   const suppressClickRef = useRef(false)
+
+  useLayoutEffect(() => {
+    const strip = tabListRef.current
+    const active = activeTabId ? tabRefs.current.get(activeTabId) : null
+    if (!strip || !active) return
+    const viewport = strip.getBoundingClientRect()
+    const tab = active.getBoundingClientRect()
+    if (viewport.width <= 0 || tab.width <= 0) return
+    // Change only this strip's horizontal offset. scrollIntoView can move the
+    // entire conversation, and focusing the tab would steal the content focus
+    // requested by file/browser/terminal openers.
+    if (tab.left < viewport.left) strip.scrollLeft += tab.left - viewport.left
+    else if (tab.right > viewport.right) {
+      strip.scrollLeft += Math.min(tab.right - viewport.right, tab.left - viewport.left)
+    }
+  }, [activeTabId, tabs])
+
+  useEffect(() => {
+    if (menu && !tabs.some((tab) => tab.id === menu.tabId && tab.dock === dock)) setMenu(null)
+  }, [dock, menu, tabs])
 
   const closeMenu = useCallback(() => setMenu(null), [])
   useDismissable({ open: menu !== null, refs: [menuRef], onDismiss: closeMenu })
@@ -157,17 +182,23 @@ export function WorkspaceTabStrip({
     setDraggingId(null)
   }
 
+  const menuDockTabs = tabs.filter((tab) => tab.dock === dock)
+  const menuTabIndex = menuDockTabs.findIndex((tab) => tab.id === menu?.tabId)
+  const canCloseOthers = menuTabIndex >= 0 && menuDockTabs.length > 1
+  const canCloseRight = menuTabIndex >= 0 && menuTabIndex < menuDockTabs.length - 1
+
   return (
     <div
       data-testid={`workspace-tab-strip-${dock}`}
-      className="flex h-11 shrink-0 items-stretch gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] pl-2 pr-1"
+      className={`flex min-w-0 shrink-0 items-stretch gap-1 bg-[var(--color-surface)] pl-2 pr-1 ${placement === 'window' ? 'h-[52px] flex-1' : 'h-10 border-b border-[var(--color-border)]'}`}
     >
       <div className="flex min-w-0 flex-1 items-stretch gap-1">
         <div
+          ref={tabListRef}
           role="tablist"
           aria-label={t('workspace.tabStrip')}
           aria-orientation="horizontal"
-          className="flex min-w-0 items-stretch gap-0.5 overflow-x-auto"
+          className="flex min-w-0 items-stretch gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           onPointerMove={handlePointerMove}
           onPointerUp={endDrag}
           onPointerLeave={endDrag}
@@ -177,7 +208,7 @@ export function WorkspaceTabStrip({
             const title = workspaceTabTitle(tab, {
               newTab: t('workspace.newTabTitle'),
               review: t('workspace.reviewTabTitle'),
-              files: t('workspace.launcher.files'),
+              files: t('workspace.files.openTitle'),
               terminal: (ordinal) => t('workspace.terminalTabTitle', { n: ordinal }),
             })
             const isActive = tab.id === activeTabId
@@ -200,9 +231,9 @@ export function WorkspaceTabStrip({
                 onDoubleClick={() => onPin(tab.id)}
                 onContextMenu={(event) => openMenuAt(event, tab.id)}
                 className={[
-                  'group my-1 flex min-w-[112px] max-w-[200px] cursor-default items-center gap-0.5 rounded-[var(--radius-md)] pl-2 pr-1 transition-colors',
+                  `group ${placement === 'window' ? 'my-2.5' : 'my-1'} flex min-w-[112px] max-w-[200px] cursor-default items-center gap-0.5 rounded-[var(--radius-md)] pl-2 pr-1 transition-colors`,
                   isActive
-                    ? 'bg-[var(--color-surface-container)] text-[var(--color-text-primary)]'
+                    ? 'bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]'
                     : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]',
                 ].join(' ')}
               >
@@ -230,21 +261,41 @@ export function WorkspaceTabStrip({
                     }
                     onActivate(tab.id)
                   }}
+                  onMouseDown={(event) => {
+                    if (event.button === 1) {
+                      event.preventDefault()
+                      event.stopPropagation()
+                    }
+                  }}
+                  onMouseUp={(event) => {
+                    if (event.button === 1) {
+                      event.preventDefault()
+                      event.stopPropagation()
+                    }
+                  }}
+                  onAuxClick={(event) => {
+                    if (event.button !== 1) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onClose(tab.id)
+                  }}
                   onKeyDown={(event) => handleTabKeyDown(event, index)}
                   className="flex h-7 min-w-0 flex-1 cursor-default items-center gap-1.5 rounded-[var(--radius-sm)] text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)]"
                 >
-                  <Icon size={13} strokeWidth={1.9} aria-hidden="true" className="shrink-0" />
+                  {tab.kind === 'file' && tab.path ? <WorkspaceFileIcon path={tab.path} /> : (
+                    <Icon size={14} strokeWidth={1.9} aria-hidden="true" className="shrink-0" />
+                  )}
                   {/*
                     A preview tab is italic and nothing else. A dedicated badge or a
                     dotted border would make the replaceable state louder than the
                     file name, and the state only matters at the moment the next
                     single click replaces it.
                   */}
-                  <span className={`min-w-0 flex-1 truncate text-[12px] ${tab.preview ? 'italic' : ''}`}>
+                  <span className={`min-w-0 flex-1 truncate text-[13px] ${tab.preview ? 'italic' : ''}`}>
                     {title}
                   </span>
                 </button>
-                <span className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <span className={`shrink-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 ${isActive ? 'opacity-100' : 'opacity-0'}`}>
                   <IconButton
                     icon="close"
                     label={t('workspace.tabClose', { title })}
@@ -267,19 +318,27 @@ export function WorkspaceTabStrip({
           })}
         </div>
 
-        <span className="my-1 flex shrink-0 items-center">
+        <span className="flex shrink-0 items-center">
           <IconButton
             icon={<Plus size={15} strokeWidth={2} />}
             label={t('workspace.tabAdd')}
             size="sm"
             tone="muted"
             data-testid={`workspace-add-tab-${dock}`}
-            onClick={onAdd}
+            aria-haspopup="menu"
+            aria-expanded={addMenuOpen}
+            aria-controls={addMenuOpen ? addMenuId : undefined}
+            pressed={addMenuOpen}
+            onClick={(event) => onAdd(event.currentTarget)}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+              event.preventDefault()
+              event.stopPropagation()
+              onAdd(event.currentTarget, event.key === 'ArrowDown' ? 'first' : 'last')
+            }}
           />
         </span>
       </div>
-
-      {trailing ? <div className="flex shrink-0 items-center gap-0.5">{trailing}</div> : null}
 
       {menu ? (
         <div
@@ -292,8 +351,8 @@ export function WorkspaceTabStrip({
           style={{ left: menu.x, top: menu.y }}
         >
           <WorkspaceTabMenuItem label={t('workspace.tabCloseCurrent')} onSelect={() => { onClose(menu.tabId); closeMenu() }} />
-          <WorkspaceTabMenuItem label={t('workspace.tabCloseOthers')} onSelect={() => { onCloseScope(menu.tabId, 'others'); closeMenu() }} />
-          <WorkspaceTabMenuItem label={t('workspace.tabCloseRight')} onSelect={() => { onCloseScope(menu.tabId, 'right'); closeMenu() }} />
+          <WorkspaceTabMenuItem label={t('workspace.tabCloseOthers')} disabled={!canCloseOthers} onSelect={() => { onCloseScope(menu.tabId, 'others'); closeMenu() }} />
+          <WorkspaceTabMenuItem label={t('workspace.tabCloseRight')} disabled={!canCloseRight} onSelect={() => { onCloseScope(menu.tabId, 'right'); closeMenu() }} />
           <WorkspaceTabMenuItem label={t('workspace.tabCloseAll')} onSelect={() => { onCloseScope(menu.tabId, 'all'); closeMenu() }} />
           <div className="my-1 border-t border-[var(--color-border)]" />
           <WorkspaceTabMenuItem

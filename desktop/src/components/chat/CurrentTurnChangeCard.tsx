@@ -99,11 +99,11 @@ export function CurrentTurnChangeCard({
     // comparison: the card is about what this turn did, not about what the
     // working tree happens to hold now.
     workspaceOpen.review(sessionId, {
-      source: { kind: 'turn', turnKey: checkpoint.target.targetUserMessageId ?? '' },
+      source: { kind: 'turn', turnKey: checkpoint.target.targetUserMessageId ?? '', userMessageIndex: checkpoint.target.userMessageIndex },
       path: fileEntry.displayPath,
       origin,
     })
-  }, [checkpoint.target.targetUserMessageId, sessionId, files])
+  }, [checkpoint.target.targetUserMessageId, checkpoint.target.userMessageIndex, sessionId, files])
 
   const handleOpenWith = useCallback((event: ReactMouseEvent<HTMLButtonElement>, fileEntry: ChangedFileEntry) => {
     event.stopPropagation()

@@ -6,4 +6,4 @@
  * the store reaches — into the migration path.
  */
 export const WORKSPACE_STORAGE_KEY = 'cc-haha.workspace'
-export const WORKSPACE_STORAGE_VERSION = 1
+export const WORKSPACE_STORAGE_VERSION = 2

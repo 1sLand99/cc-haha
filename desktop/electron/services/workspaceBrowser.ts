@@ -1,11 +1,15 @@
 import { readFileSync } from 'node:fs'
+import { basename } from 'node:path'
+import { matchWorkspaceShortcut } from '../../src/lib/workspace/shortcuts'
 import type {
+  PreviewBrowserControlsMessage,
   WorkspaceBrowserCaptureKind,
   WorkspaceBrowserEvent,
   WorkspaceBrowserFindOptions,
   WorkspaceBrowserHistoryEntry,
 } from '../../src/lib/desktopHost/types'
 import { parsePreviewAgentMessage, type PreviewAgentMessage } from '../ipc/previewMessage'
+import { parseHostMessage, type HostMessage } from '../../src/preview-agent/protocol'
 import { isHttpUrl } from './navigationGuards'
 import {
   normalizePreviewBounds,
@@ -87,8 +91,13 @@ export type WorkspaceBrowserWebContentsLike = {
   on(event: 'did-start-loading', handler: () => void): unknown
   on(event: 'did-stop-loading', handler: () => void): unknown
   on(event: 'did-finish-load', handler: () => void): unknown
+  on(event: 'did-start-navigation' | 'did-redirect-navigation', handler: (event: unknown, url: string, isInPlace: boolean, isMainFrame: boolean) => void): unknown
+  on(event: 'zoom-changed', handler: (event: unknown, direction: string) => void): unknown
+  on(event: 'before-input-event', handler: (event: { preventDefault(): void }, input: {
+    type: string, key: string, code?: string, meta: boolean, control: boolean, shift: boolean, alt: boolean
+  }) => void): unknown
   on(event: 'did-navigate', handler: (event: unknown, url: string) => void): unknown
-  on(event: 'did-navigate-in-page', handler: (event: unknown, url: string) => void): unknown
+  on(event: 'did-navigate-in-page', handler: (event: unknown, url: string, isMainFrame?: boolean) => void): unknown
   on(event: 'page-title-updated', handler: (event: unknown, title: string) => void): unknown
   on(
     event: 'did-fail-load',
@@ -118,12 +127,14 @@ export type WorkspaceBrowserWebContentsLike = {
   goBack?(): void
   goForward?(): void
   setZoomFactor?(factor: number): void
+  getZoomFactor?(): number
   capturePage?(): Promise<{ toDataURL(): string }>
   printToPDF?(options: Record<string, unknown>): Promise<Uint8Array>
   debugger?: WorkspaceBrowserDebuggerLike
   session?: WorkspaceBrowserSessionLike
   close?(): void
   isDestroyed?(): boolean
+  isFocused?(): boolean
 }
 
 export type WorkspaceBrowserViewLike = {
@@ -133,6 +144,11 @@ export type WorkspaceBrowserViewLike = {
 }
 
 export type WorkspaceBrowserParentWindowLike = {
+  webContents?: {
+    focus(): void
+    isDestroyed?(): boolean
+  }
+  isDestroyed?(): boolean
   contentView: {
     addChildView(view: unknown): void
     removeChildView(view: unknown): void
@@ -144,6 +160,7 @@ export type WorkspaceBrowserCreateOptions = {
   storageId: string
   url?: string
   bounds?: WorkspaceBrowserBounds
+  visible?: boolean
 }
 
 export type ElectronWorkspaceBrowserServiceOptions = {
@@ -152,7 +169,8 @@ export type ElectronWorkspaceBrowserServiceOptions = {
   emit: (event: WorkspaceBrowserEvent) => void
   resolveScaleFactor?: (parent: WorkspaceBrowserParentWindowLike) => number
   /** Writes an exported PDF and resolves with the path it landed on. */
-  writePdf?: (input: { data: Uint8Array, filename: string }) => Promise<string>
+  writePdf?: (input: { data: Uint8Array, filename: string }) => Promise<string | null>
+  platform?: NodeJS.Platform
 }
 
 type WorkspaceBrowserPage = {
@@ -162,10 +180,20 @@ type WorkspaceBrowserPage = {
   attached: boolean
   requestedBounds: PreviewBounds | null
   zoomFactor: number
+  controls: PreviewBrowserControlsMessage | null
+  controlsSignature: string | null
   pickerArmed: boolean
+  persistentPicker: Extract<HostMessage, { type: 'enter-picker' }> | null
+  pickerGeneration: number
+  supportsPickerGeneration: boolean
   closed: boolean
   history: WorkspaceBrowserHistoryEntry[]
   fullCapture: Promise<string> | null
+  captureCount: number
+  navigationId: number
+  navigationUrl: string
+  navigationOutcome: 'idle' | 'pending' | 'succeeded' | 'failed'
+  navigationCommitted: boolean
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -213,7 +241,8 @@ export class ElectronWorkspaceBrowserService {
   private readonly previewScriptPath: string
   private readonly emit: (event: WorkspaceBrowserEvent) => void
   private readonly resolveScaleFactor?: (parent: WorkspaceBrowserParentWindowLike) => number
-  private readonly writePdf?: (input: { data: Uint8Array, filename: string }) => Promise<string>
+  private readonly writePdf?: (input: { data: Uint8Array, filename: string }) => Promise<string | null>
+  private readonly platform: NodeJS.Platform
   private readonly pages = new Map<string, WorkspaceBrowserPage>()
   private readonly hookedSessions = new Set<WorkspaceBrowserSessionLike>()
   private parent: WorkspaceBrowserParentWindowLike | null = null
@@ -225,6 +254,7 @@ export class ElectronWorkspaceBrowserService {
     this.emit = options.emit
     this.resolveScaleFactor = options.resolveScaleFactor
     this.writePdf = options.writePdf
+    this.platform = options.platform ?? process.platform
   }
 
   async create(
@@ -237,6 +267,7 @@ export class ElectronWorkspaceBrowserService {
     // `webContents` that was never attached and can never be addressed again.
     const bounds = options.bounds ? normalizePreviewBounds(options.bounds) : null
     const url = options.url ? normalizePreviewUrl(options.url) : null
+    if (options.visible !== undefined && typeof options.visible !== 'boolean') throw new Error('visible must be a boolean')
 
     this.parent = parent
     const existing = this.pages.get(tabId)
@@ -244,7 +275,12 @@ export class ElectronWorkspaceBrowserService {
     // it, so an already-known tab keeps its page.
     const page = existing ?? this.openPage(tabId, options)
     if (bounds) page.requestedBounds = bounds
-    this.showExclusively(page)
+    if (options.visible === false) {
+      this.detach(page)
+      // Registration is complete even while the first navigation is pending.
+      // The renderer may now safely send geometry, visibility and Stop.
+      this.emitState(page)
+    } else this.showExclusively(page)
     // A live page is NEVER re-navigated from `create`. The renderer re-mounts
     // this component every time its tab is re-activated, and `loadURL` on an
     // existing `webContents` is a hard navigation: it would wipe the form the
@@ -260,6 +296,8 @@ export class ElectronWorkspaceBrowserService {
   async navigate(tabId: string, url: string): Promise<void> {
     const page = this.requirePage(tabId)
     page.pickerArmed = false
+    page.persistentPicker = null
+    page.pickerGeneration += 1
     await page.view.webContents.loadURL(normalizePreviewUrl(url))
   }
 
@@ -302,6 +340,9 @@ export class ElectronWorkspaceBrowserService {
    * or steal clicks — it never destroys the page.
    */
   setVisible(tabId: string, visible: boolean): void {
+    // Controller close may precede the component's passive unmount cleanup.
+    // Only hide is an idempotent teardown; showing a missing page is still an error.
+    if (!visible && !this.pages.has(tabId)) return
     const page = this.requirePage(tabId)
     if (visible) this.showExclusively(page)
     else this.detach(page)
@@ -311,6 +352,9 @@ export class ElectronWorkspaceBrowserService {
     const page = this.requirePage(tabId)
     page.zoomFactor = normalizeZoomFactor(factor)
     page.view.webContents.setZoomFactor?.(page.zoomFactor)
+    // Chromium may apply zoom to another live page on the same origin.
+    // Read every native value so controls never report an invented factor.
+    for (const current of this.pages.values()) this.emitState(current)
   }
 
   find(tabId: string, text: string, options?: WorkspaceBrowserFindOptions): void {
@@ -333,34 +377,67 @@ export class ElectronWorkspaceBrowserService {
     this.emitFor(page, { type: 'screenshot', tabId: page.tabId, dataUrl, kind })
   }
 
+  /** Presentation-only image: never enters the screenshot/chat event stream. */
+  async snapshot(tabId: string): Promise<string> {
+    const page = this.requirePage(tabId)
+    const navigationId = page.navigationId
+    const dataUrl = await this.captureDataUrl(page, 'viewport')
+    if (page.closed || navigationId !== page.navigationId) {
+      throw new Error('Browser page changed during snapshot')
+    }
+    return dataUrl
+  }
+
   async message(tabId: string, payload: unknown): Promise<void> {
     const page = this.requirePage(tabId)
+    const controls = parseHostMessage(JSON.stringify(payload))
+    if (controls?.type === 'browser-controls') {
+      page.controls = { v: 1, ...controls }
+      await this.syncBrowserControls(page)
+      return
+    }
     if (isHostCaptureMessage(payload)) {
       await this.capture(tabId, payload.kind)
       return
     }
     if (isHostPickerMessage(payload)) {
-      page.pickerArmed = payload.type === 'enter-picker'
+      if (!controls || (controls.type !== 'enter-picker' && controls.type !== 'exit-picker')) return
+      page.pickerGeneration += 1
+      page.pickerArmed = controls.type === 'enter-picker'
+      page.persistentPicker = controls.type === 'enter-picker' && controls.persistent ? controls : null
+      this.emitState(page)
     }
-    const raw = JSON.stringify(payload)
-    await page.view.webContents.executeJavaScript(
-      `globalThis.__PREVIEW_BRIDGE__?.handleHostRaw(${JSON.stringify(raw)})`,
-    )
+    const raw = JSON.stringify(isHostPickerMessage(payload) ? { ...payload, generation: page.pickerGeneration } : payload)
+    const generation = page.pickerGeneration
+    try {
+      await page.view.webContents.executeJavaScript(
+        `globalThis.__PREVIEW_BRIDGE__?.handleHostRaw(${JSON.stringify(raw)})`,
+      )
+    } catch (error) {
+      if (isHostPickerMessage(payload) && generation === page.pickerGeneration) {
+        page.pickerArmed = false
+        page.persistentPicker = null
+        page.pickerGeneration += 1
+        this.emitState(page)
+      }
+      throw error
+    }
   }
 
   async printToPdf(tabId: string): Promise<void> {
     const page = this.requirePage(tabId)
     const webContents = page.view.webContents
     if (!webContents.printToPDF || !this.writePdf) throw new Error('pdf export unavailable')
-    const data = await webContents.printToPDF({ printBackground: true })
     const filename = workspaceBrowserPdfFilename(webContents.getURL(), webContents.getTitle())
+    const data = await webContents.printToPDF({ printBackground: true })
     const savePath = await this.writePdf({ data, filename })
-    this.emitFor(page, {
+    if (!savePath) return
+    this.emit({
       type: 'download',
       tabId: page.tabId,
       download: {
         id: this.nextDownloadId(),
-        filename,
+        filename: basename(savePath),
         savePath,
         receivedBytes: data.byteLength,
         totalBytes: data.byteLength,
@@ -411,10 +488,20 @@ export class ElectronWorkspaceBrowserService {
       attached: false,
       requestedBounds: null,
       zoomFactor: 1,
+      controls: null,
+      controlsSignature: null,
       pickerArmed: false,
+      persistentPicker: null,
+      pickerGeneration: 0,
+      supportsPickerGeneration: false,
       closed: false,
       history: [],
       fullCapture: null,
+      captureCount: 0,
+      navigationId: 0,
+      navigationUrl: '',
+      navigationOutcome: 'idle',
+      navigationCommitted: false,
     }
     this.pages.set(tabId, page)
     this.installPageListeners(page)
@@ -435,32 +522,86 @@ export class ElectronWorkspaceBrowserService {
       if (!isHttpUrl(url)) event.preventDefault()
     })
 
+    webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || !page.attached || page.closed) return
+      const action = matchWorkspaceShortcut({
+        key: input.key, code: input.code, metaKey: input.meta,
+        ctrlKey: input.control, shiftKey: input.shift, altKey: input.alt,
+      }, { platform: this.platform === 'darwin' ? 'mac' : 'other', context: 'browser' })
+      if (!action) return
+      // Prevent both the page event and the menu accelerator. The renderer's
+      // owner-aware controller executes the same action as a DOM shortcut.
+      event.preventDefault()
+      this.emitFor(page, { type: 'shortcut', tabId: page.tabId, action })
+    })
+    webContents.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
+      if (!isMainFrame) return
+      if (isInPlace) {
+        // Hash/history navigation keeps this document (and its event handlers)
+        // alive. Exit the page picker too; clearing only host state strands it.
+        void this.message(page.tabId, { v: 1, type: 'exit-picker' }).catch(error => {
+          if (!page.closed) console.error('Failed to exit annotation after in-page navigation', error)
+        })
+      } else {
+        page.pickerArmed = false
+        page.persistentPicker = null
+        page.pickerGeneration += 1
+      }
+      page.controlsSignature = null
+      page.navigationId += 1
+      page.navigationUrl = url
+      page.navigationOutcome = 'pending'
+      page.navigationCommitted = false
+      this.emitState(page)
+    })
+    webContents.on('did-redirect-navigation', (_event, url, _isInPlace, isMainFrame) => {
+      if (isMainFrame) page.navigationUrl = url
+    })
+    webContents.on('zoom-changed', () => {
+      for (const current of this.pages.values()) this.emitState(current)
+    })
+
     webContents.on('did-start-loading', () => this.emitState(page))
     webContents.on('did-stop-loading', () => this.emitState(page))
     webContents.on('page-title-updated', () => this.emitState(page))
     webContents.on('did-navigate', (_event, url) => {
       page.pickerArmed = false
+      page.persistentPicker = null
+      page.pickerGeneration += 1
+      page.navigationUrl = url
+      page.navigationCommitted = true
       this.recordVisit(page, url)
       this.emitState(page)
     })
-    webContents.on('did-navigate-in-page', (_event, url) => {
+    webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+      if (isMainFrame === false) return
+      page.navigationUrl = url
+      page.navigationOutcome = 'succeeded'
       this.recordVisit(page, url)
       this.emitState(page)
     })
     webContents.on('did-finish-load', () => {
-      void this.injectPreviewAgent(page)
+      if (page.navigationOutcome === 'pending' && page.navigationCommitted) {
+        page.navigationOutcome = 'succeeded'
+      }
+      void this.injectPreviewAgent(page).catch(error => {
+        if (!page.closed) console.error('Failed to initialize workspace browser controls', error)
+      })
       this.emitState(page)
     })
     webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       // Subframe failures are normal on the open web and must not put the whole
       // tab into an error state.
-      if (!isMainFrame) return
+      if (!isMainFrame || errorCode === -3 || page.navigationOutcome === 'succeeded') return
+      if (page.navigationUrl && validatedURL !== page.navigationUrl) return
+      page.navigationOutcome = 'failed'
       this.emitFor(page, {
         type: 'failed',
         tabId: page.tabId,
         url: validatedURL,
         errorCode,
         errorDescription,
+        navigationId: page.navigationId,
       })
     })
     webContents.on('render-process-gone', () => {
@@ -480,13 +621,13 @@ export class ElectronWorkspaceBrowserService {
     if (!session || this.hookedSessions.has(session)) return
     this.hookedSessions.add(session)
     // Downloads belong to the shared session, so the main process owns their
-    // lifetime and only reports progress back to the tab that started them.
+    // lifetime. Keep the source id for attribution after its page is closed.
     session.on('will-download', (_event, item, webContents) => {
       const page = this.findPageByWebContents(webContents)
       if (!page) return
       const id = this.nextDownloadId()
       const report = () => {
-        this.emitFor(page, {
+        this.emit({
           type: 'download',
           tabId: page.tabId,
           download: {
@@ -506,8 +647,26 @@ export class ElectronWorkspaceBrowserService {
   }
 
   private async deliverAgentMessage(page: WorkspaceBrowserPage, raw: string): Promise<void> {
+    const navigationId = page.navigationId
+    const pickerGeneration = page.pickerGeneration
+    const persistentPicker = page.persistentPicker
     const message = parsePreviewAgentMessage(raw)
     if (!message) return
+    if (message.type === 'ready' && message.supportsPickerGeneration === true) page.supportsPickerGeneration = true
+    if (message.type === 'selection' || message.type === 'picker-exited') {
+      if (message.generation !== undefined
+        ? message.generation !== page.pickerGeneration
+        : page.supportsPickerGeneration || page.persistentPicker !== null) return
+    }
+    if (message.type === 'browser-zoom') {
+      // Only the attached page can act as browser chrome. Background pages
+      // cannot modify another tab, and no zoom event enters the chat pipeline.
+      if (page.attached && page.controls) {
+        const current = page.view.webContents.getZoomFactor?.() ?? page.zoomFactor
+        this.setZoom(page.tabId, message.action === 'reset' ? 1 : Math.round((current + (message.action === 'in' ? 0.1 : -0.1)) * 10) / 10)
+      }
+      return
+    }
     if (message.type === 'selection') {
       // Consume before the asynchronous native capture so a page cannot replay
       // selection events while the first capture is in flight.
@@ -515,19 +674,39 @@ export class ElectronWorkspaceBrowserService {
       page.pickerArmed = false
     } else if (message.type === 'picker-exited') {
       page.pickerArmed = false
+      page.persistentPicker = null
+      page.pickerGeneration += 1
+      this.emitState(page)
     }
     const payload = message.type === 'selection'
       ? await this.withNativeSelectionScreenshot(page, message)
       : message
-    this.emitFor(page, { type: 'agent', tabId: page.tabId, message: payload })
+    if (navigationId !== page.navigationId) return
+    this.emitFor(page, { type: 'agent', tabId: page.tabId, message: message.type === 'selection' && persistentPicker
+      ? { ...payload, persistent: true } : payload })
+    // A selection still consumes exactly one authorization. Continue only once
+    // its native screenshot has finished, and never revive an exited/replaced
+    // mode from a late capture callback. Legacy enter-picker remains one-shot.
+    if (message.type === 'selection' && persistentPicker && !page.closed &&
+        pickerGeneration === page.pickerGeneration && page.persistentPicker) {
+      const nextLabel = message.payload.delivery === 'queue' ? (persistentPicker.label ?? 1) + 1 : persistentPicker.label ?? 1
+      await this.message(page.tabId, { v: 1, ...persistentPicker,
+        mode: message.payload.delivery === 'queue' ? 'batch' : persistentPicker.mode,
+        label: Math.min(99, nextLabel),
+      }).catch(error => {
+        if (!page.closed) console.error('Failed to continue browser annotation', error)
+      })
+    }
   }
 
   private async withNativeSelectionScreenshot(
     page: WorkspaceBrowserPage,
     message: Extract<PreviewAgentMessage, { type: 'selection' }>,
   ): Promise<PreviewAgentMessage> {
+    const navigationId = page.navigationId
+    const screenshot = isPlainRecord(message.payload.screenshot) ? message.payload.screenshot : {}
+    const captureId = typeof screenshot.captureId === 'number' ? screenshot.captureId : undefined
     try {
-      const screenshot = isPlainRecord(message.payload.screenshot) ? message.payload.screenshot : {}
       return {
         ...message,
         payload: {
@@ -542,15 +721,15 @@ export class ElectronWorkspaceBrowserService {
     } catch {
       return message
     } finally {
-      await this.clearSelectionOverlay(page)
+      if (navigationId === page.navigationId) await this.clearSelectionOverlay(page, captureId)
     }
   }
 
-  private async clearSelectionOverlay(page: WorkspaceBrowserPage): Promise<void> {
+  private async clearSelectionOverlay(page: WorkspaceBrowserPage, captureId?: number): Promise<void> {
     const webContents = page.view.webContents
     if (page.closed || webContents.isDestroyed?.()) return
     try {
-      await webContents.executeJavaScript('globalThis.__PREVIEW_AGENT_CLEAR_SELECTION_OVERLAY__?.()')
+      await webContents.executeJavaScript(`globalThis.__PREVIEW_AGENT_CLEAR_SELECTION_OVERLAY__?.(${captureId === undefined ? '' : JSON.stringify(captureId)})`)
     } catch {
       // The page may navigate while the native capture is in flight.
     }
@@ -560,8 +739,27 @@ export class ElectronWorkspaceBrowserService {
     const webContents = page.view.webContents
     if (page.closed || webContents.isDestroyed?.()) return
     page.pickerArmed = false
+    page.persistentPicker = null
+    page.pickerGeneration += 1
+    const navigationId = page.navigationId
     const script = readFileSync(resolvePreviewScriptPath(this.previewScriptPath), 'utf8')
     await webContents.executeJavaScript(script)
+    if (navigationId !== page.navigationId) return
+    page.controlsSignature = null
+    await this.syncBrowserControls(page)
+  }
+
+  private async syncBrowserControls(page: WorkspaceBrowserPage): Promise<void> {
+    if (!page.controls || page.closed || page.view.webContents.isDestroyed?.()) return
+    const raw = JSON.stringify({ ...page.controls, zoomFactor: page.zoomFactor })
+    if (page.controlsSignature === raw) return
+    page.controlsSignature = raw
+    try {
+      await page.view.webContents.executeJavaScript(`globalThis.__PREVIEW_BRIDGE__?.handleHostRaw(${JSON.stringify(raw)})`)
+    } catch (error) {
+      if (page.controlsSignature === raw) page.controlsSignature = null
+      throw error
+    }
   }
 
   private async captureDataUrl(
@@ -569,10 +767,23 @@ export class ElectronWorkspaceBrowserService {
     kind: WorkspaceBrowserCaptureKind,
   ): Promise<string> {
     const webContents = page.view.webContents
-    if (kind === 'full') return this.captureFullPageDataUrl(page)
-    if (!webContents.capturePage) throw new Error('native browser capture unavailable')
-    const image = await webContents.capturePage()
-    return image.toDataURL()
+    const hideChrome = async (hidden: boolean) => {
+      if (page.closed || webContents.isDestroyed?.()) return
+      await webContents.executeJavaScript(`globalThis.__PREVIEW_AGENT_SET_CHROME_HIDDEN__?.(${hidden})`)
+    }
+    page.captureCount += 1
+    try {
+      await hideChrome(true)
+      if (kind === 'full') return await this.captureFullPageDataUrl(page)
+      if (!webContents.capturePage) throw new Error('native browser capture unavailable')
+      const image = await webContents.capturePage()
+      return image.toDataURL()
+    } finally {
+      page.captureCount -= 1
+      if (page.captureCount === 0) {
+        try { await hideChrome(false) } catch { /* A navigation may replace the captured document. */ }
+      }
+    }
   }
 
   private async captureFullPageDataUrl(page: WorkspaceBrowserPage): Promise<string> {
@@ -650,13 +861,21 @@ export class ElectronWorkspaceBrowserService {
     }
     page.view.setVisible?.(true)
     this.applyBounds(page)
+    this.emitState(page)
   }
 
   private detach(page: WorkspaceBrowserPage): void {
+    // A DOM focus request cannot move macOS's native responder out of a
+    // WebContentsView. Capture ownership before hiding/removing the view drops
+    // it, and do not steal focus when a newer page or a host input already owns it.
+    const returnFocus = page.attached && !page.view.webContents.isDestroyed?.() && page.view.webContents.isFocused?.()
     page.view.setVisible?.(false)
     if (!page.attached) return
     this.parent?.contentView.removeChildView(page.view)
     page.attached = false
+    if (returnFocus && !this.parent?.isDestroyed?.() && !this.parent?.webContents?.isDestroyed?.()) {
+      this.parent?.webContents?.focus()
+    }
   }
 
   private applyBounds(page: WorkspaceBrowserPage): void {
@@ -680,6 +899,11 @@ export class ElectronWorkspaceBrowserService {
   private emitState(page: WorkspaceBrowserPage): void {
     const webContents = page.view.webContents
     if (webContents.isDestroyed?.()) return
+    const actualZoom = webContents.getZoomFactor?.()
+    if (actualZoom !== undefined && Number.isFinite(actualZoom) && actualZoom > 0) page.zoomFactor = actualZoom
+    void this.syncBrowserControls(page).catch(error => {
+      if (!page.closed) console.error('Failed to update workspace browser controls', error)
+    })
     this.emitFor(page, {
       type: 'state',
       tabId: page.tabId,
@@ -688,12 +912,16 @@ export class ElectronWorkspaceBrowserService {
       canGoBack: readCanGoBack(webContents),
       canGoForward: readCanGoForward(webContents),
       loading: webContents.isLoading(),
+      navigationId: page.navigationId,
+      navigationOutcome: page.navigationOutcome,
+      zoomFactor: page.zoomFactor,
+      annotationActive: page.persistentPicker !== null,
     })
   }
 
   /**
-   * Single exit for every event. A native callback that fires after `close` —
-   * a queued `did-stop-loading`, a download finishing, a crash notice — is
+   * Exit for page-scoped events. A native callback that fires after `close` —
+   * a queued `did-stop-loading` or a crash notice — is
    * dropped here instead of being applied to whatever took the tab's slot.
    */
   private emitFor(page: WorkspaceBrowserPage, event: WorkspaceBrowserEvent): void {

@@ -3,7 +3,7 @@ import { Highlight } from 'prism-react-renderer'
 import { Button } from '@/components/ui/Button'
 import { useTranslation } from '@/i18n'
 import { clearWindowSelection, useSelectionPopoverDismiss } from '@/hooks/useSelectionPopoverDismiss'
-import type { WorkspacePreviewReveal } from '@/stores/workspacePanelStore'
+import type { WorkspaceReveal } from '@/lib/workspace/types'
 import {
   normalizePrismLanguage,
   WORKSPACE_PREVIEW_LINE_LIMIT,
@@ -30,12 +30,14 @@ export function CodeSurface({
   value,
   language,
   reveal,
+  revealScroll = true,
   onAddLineComment,
   onAddSelection,
 }: {
   value: string
   language: string
-  reveal?: WorkspacePreviewReveal
+  reveal?: WorkspaceReveal
+  revealScroll?: boolean
   onAddLineComment: (lineStart: number, lineEnd: number, note: string, quote: string) => void
   onAddSelection: (selection: WorkspaceTextSelection) => void
 }) {
@@ -79,7 +81,7 @@ export function CodeSurface({
   // dependencies because both rebuild the line rows underneath us — highlighting
   // resolves asynchronously, so the row may not exist on the first pass.
   useEffect(() => {
-    if (!revealLine) return
+    if (!revealLine || !revealScroll) return
     const surface = surfaceRef.current
     const row = surface?.querySelector<HTMLElement>(`[data-workspace-line-number="${revealLine}"]`)
     if (!surface || !row) return
@@ -90,7 +92,7 @@ export function CodeSurface({
     const surfaceRect = surface.getBoundingClientRect()
     const delta = rowRect.top - surfaceRect.top - surface.clientHeight / 2 + rowRect.height / 2
     surface.scrollTop = Math.max(0, surface.scrollTop + delta)
-  }, [revealLine, revealNonce, value, shikiTokensByLine, showAllLines])
+  }, [revealLine, revealNonce, revealScroll, value, shikiTokensByLine, showAllLines])
 
   useEffect(() => {
     if (usePlainLargePreview) {
@@ -162,7 +164,7 @@ export function CodeSurface({
     if (!commentLineStart || commentLineEnd !== lineNumber) return null
 
     return (
-      <div className="grid grid-cols-[48px_minmax(0,720px)] gap-3 bg-[var(--color-brand-soft)] px-3 py-2">
+      <div className="grid grid-cols-[32px_minmax(0,720px)] gap-3 bg-[var(--color-brand-soft)] px-3 py-2">
         <span aria-hidden="true" />
         <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-card)]">
           <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2">
@@ -218,12 +220,12 @@ export function CodeSurface({
     // A comment selection is something the user just did by hand, so it outranks
     // the reveal mark left over from the reference they clicked to get here.
     if (isCommentLineSelected(lineNumber)) {
-      return 'group grid grid-cols-[48px_minmax(0,1fr)] gap-3 px-3 bg-[var(--color-info-container)]'
+      return 'group grid grid-cols-[32px_minmax(0,1fr)] gap-3 px-3 bg-[var(--color-info-container)]'
     }
     if (revealLine === lineNumber) {
-      return 'group grid grid-cols-[48px_minmax(0,1fr)] gap-3 px-3 bg-[var(--color-brand-soft)] shadow-[inset_2px_0_0_var(--color-brand)]'
+      return 'group grid grid-cols-[32px_minmax(0,1fr)] gap-3 px-3 bg-[var(--color-brand-soft)] shadow-[inset_2px_0_0_var(--color-brand)]'
     }
-    return 'group grid grid-cols-[48px_minmax(0,1fr)] gap-3 px-3 hover:bg-[var(--color-surface-hover)]'
+    return 'group grid grid-cols-[32px_minmax(0,1fr)] gap-3 px-3 hover:bg-[var(--color-surface-hover)]'
   }
 
   const renderLineNumberButton = (lineNumber: number) => {
@@ -240,7 +242,7 @@ export function CodeSurface({
             : { anchorLine: lineNumber, focusLine: lineNumber })
           if (!extendRange) setCommentDraft('')
         }}
-        className={`select-none text-right text-[11px] transition-colors focus-visible:outline-none ${
+        className={`select-none text-right text-[13px] transition-colors focus-visible:outline-none ${
           selected
             ? 'font-semibold text-[var(--color-info)]'
             : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-brand)] focus-visible:text-[var(--color-brand)]'
@@ -254,6 +256,7 @@ export function CodeSurface({
   return (
     <div
       ref={surfaceRef}
+      data-workspace-scroll-surface=""
       className="min-h-0 flex-1 overflow-auto bg-[var(--color-code-bg)]"
       onMouseUp={handleSelectionMouseUp}
       onKeyDown={(event) => {
@@ -265,7 +268,7 @@ export function CodeSurface({
           <pre
             data-workspace-code=""
             data-testid="workspace-code"
-            className="m-0 font-mono text-[12px] leading-[1.55]"
+            className="m-0 font-mono text-[15px] leading-[26px]"
             style={{ color: 'var(--color-code-fg)', background: 'transparent' }}
           >
             {visibleLines.map((line, index) => {
@@ -289,7 +292,7 @@ export function CodeSurface({
             data-workspace-code=""
             data-testid="workspace-code"
             data-highlight-engine="shiki"
-            className="m-0 font-mono text-[12px] leading-[1.55]"
+            className="m-0 font-mono text-[15px] leading-[26px]"
             style={{ color: 'var(--color-code-fg)', background: 'transparent' }}
           >
             {shikiTokensByLine.map((line, index) => {
@@ -329,7 +332,7 @@ export function CodeSurface({
                 data-workspace-code=""
                 data-testid="workspace-code"
                 data-highlight-engine="prism"
-                className="m-0 font-mono text-[12px] leading-[1.55]"
+                className="m-0 font-mono text-[15px] leading-[26px]"
                 style={{ color: 'var(--color-code-fg)', background: 'transparent' }}
               >
                 {tokens.map((line, index) => {

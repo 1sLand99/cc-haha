@@ -24,12 +24,14 @@ vi.mock('./browserHost', () => ({
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import {
   WORKSPACE_STORAGE_KEY,
+  WORKSPACE_STORAGE_VERSION,
   hydrateWorkspace,
   readWorkspaceStorage,
   serializeWorkspace,
   writeWorkspaceStorage,
 } from './persistence'
 import { initWorkspacePersistence } from './persistenceBridge'
+import { runDesktopPersistenceMigrations } from '../persistenceMigrations'
 import type { WorkspaceBrowserTab, WorkspaceTerminalTab } from './types'
 
 function memoryStorage() {
@@ -88,6 +90,84 @@ describe('serialize', () => {
 })
 
 describe('hydrate', () => {
+  it('repairs duplicate file identities and preview slots written by the old undo behavior', () => {
+    const restored = hydrateWorkspace({
+      version: WORKSPACE_STORAGE_VERSION,
+      sessions: {
+        s1: {
+          layout: 'split',
+          activeSideTabId: 'current',
+          tabs: [
+            { kind: 'file', id: 'old', path: 'a.ts', line: 1, preview: true },
+            { kind: 'file', id: 'other', path: 'b.ts', preview: true },
+            { kind: 'file', id: 'current', path: 'a.ts', line: 42, preview: true },
+          ],
+        },
+      },
+    }, makeId)
+    expect(restored.bySession.s1?.tabs).toHaveLength(2)
+    expect(restored.bySession.s1?.tabs.filter((tab) => tab.preview)).toEqual([
+      expect.objectContaining({ id: 'current', path: 'a.ts', reveal: { line: 42, nonce: 0 } }),
+    ])
+    expect(restored.bySession.s1?.activeSideTabId).toBe('current')
+  })
+
+  it('round-trips viewed files and the exact turn checkpoint identity', () => {
+    const state = useWorkspaceStore.getState()
+    const id = state.openTarget('s1', {
+      kind: 'review',
+      source: { kind: 'turn', turnKey: 'message-1', userMessageIndex: 4 },
+    })!
+    state.setReviewViewedPaths('s1', id, ['src/a.ts', 'src/b.ts'], 'snapshot-1')
+    const latest = useWorkspaceStore.getState()
+    const restored = hydrateWorkspace(serializeWorkspace(latest.bySession, latest), makeId)
+
+    expect(restored.bySession.s1?.tabs[0]).toMatchObject({
+      kind: 'review',
+      source: { kind: 'turn', turnKey: 'message-1', userMessageIndex: 4 },
+      viewedPaths: ['src/a.ts', 'src/b.ts'],
+    })
+  })
+
+  it('round-trips the valid Files launcher before any file selection', () => {
+    const id = useWorkspaceStore.getState().openTarget('s1', { kind: 'file', path: '' }, { preview: true })
+    useWorkspaceStore.getState().toggleFullscreen('s1')
+    const state = useWorkspaceStore.getState()
+    const restored = hydrateWorkspace(serializeWorkspace(state.bySession, state), makeId)
+
+    expect(restored.bySession.s1).toMatchObject({
+      layout: 'full',
+      activeSideTabId: id,
+      tabs: [{ kind: 'file', id, path: '', preview: true }],
+    })
+  })
+
+  it('restores an old Files launcher fixture but rejects absent and non-string paths', () => {
+    const storage = memoryStorage()
+    storage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
+      version: 1,
+      sessions: {
+        s1: {
+          layout: 'split',
+          activeSideTabId: 'files',
+          tabs: [
+            { kind: 'file', id: 'missing', preview: false },
+            { kind: 'file', id: 'invalid', path: 42, preview: false },
+            { kind: 'file', id: 'files', path: '', preview: true },
+          ],
+        },
+      },
+    }))
+    runDesktopPersistenceMigrations(storage)
+    const restored = hydrateWorkspace(readWorkspaceStorage(storage), makeId)
+
+    expect(restored.bySession.s1).toMatchObject({
+      layout: 'split',
+      activeSideTabId: 'files',
+      tabs: [{ id: 'files', path: '' }],
+    })
+  })
+
   it('round-trips a workspace through storage', () => {
     const store = useWorkspaceStore.getState()
     store.openTarget('s1', { kind: 'file', path: 'src/a.ts' })
@@ -111,7 +191,7 @@ describe('hydrate', () => {
   it('brings terminals back stopped, with a fresh runtime and no replay', () => {
     const restored = hydrateWorkspace(
       {
-        version: 1,
+        version: WORKSPACE_STORAGE_VERSION,
         sideWidth: 860,
         bottomHeight: 420,
         sessions: {
@@ -138,7 +218,7 @@ describe('hydrate', () => {
   it('restores a page by its restore identity, with a fresh webContents id', () => {
     const restored = hydrateWorkspace(
       {
-        version: 1,
+        version: WORKSPACE_STORAGE_VERSION,
         sideWidth: 860,
         bottomHeight: 420,
         sessions: {
@@ -194,7 +274,7 @@ describe('hydrate', () => {
   it('validates each active id against its own dock', () => {
     const restored = hydrateWorkspace(
       {
-        version: 1,
+        version: WORKSPACE_STORAGE_VERSION,
         sideWidth: 860,
         bottomHeight: 420,
         sessions: {
@@ -223,7 +303,7 @@ describe('hydrate', () => {
   it('drops duplicate tab ids rather than letting one close two tabs', () => {
     const restored = hydrateWorkspace(
       {
-        version: 1,
+        version: WORKSPACE_STORAGE_VERSION,
         sideWidth: 860,
         bottomHeight: 420,
         sessions: {
@@ -248,7 +328,7 @@ describe('hydrate', () => {
   it('refuses a non-finite terminal ordinal instead of labelling every terminal NaN', () => {
     const restored = hydrateWorkspace(
       {
-        version: 1,
+        version: WORKSPACE_STORAGE_VERSION,
         sideWidth: 860,
         bottomHeight: 420,
         sessions: {
@@ -273,7 +353,7 @@ describe('hydrate', () => {
     }))
     const restored = hydrateWorkspace(
       {
-        version: 1,
+        version: WORKSPACE_STORAGE_VERSION,
         sideWidth: 860,
         bottomHeight: 420,
         sessions: {
@@ -295,7 +375,7 @@ describe('hydrate', () => {
   it('drops corrupt tab entries but keeps the sound ones', () => {
     const restored = hydrateWorkspace(
       {
-        version: 1,
+        version: WORKSPACE_STORAGE_VERSION,
         sideWidth: 860,
         bottomHeight: 420,
         sessions: {
@@ -328,7 +408,7 @@ describe('hydrate', () => {
   it('never hands back a terminal ordinal that is already in use', () => {
     const restored = hydrateWorkspace(
       {
-        version: 1,
+        version: WORKSPACE_STORAGE_VERSION,
         sideWidth: 860,
         bottomHeight: 420,
         sessions: {
@@ -355,7 +435,7 @@ describe('bridge', () => {
     storage.setItem(
       WORKSPACE_STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: WORKSPACE_STORAGE_VERSION,
         sideWidth: 720,
         bottomHeight: 300,
         sessions: {
@@ -397,4 +477,14 @@ describe('primary-window gate', () => {
     expect(isPrimaryWorkspaceWindow('?petWindow=1')).toBe(false)
     expect(isPrimaryWorkspaceWindow('?traceWindow=1&traceSessionId=abc')).toBe(false)
   })
+
+  it('discards legacy viewed marks without a comparison fingerprint', () => {
+    const state = useWorkspaceStore.getState()
+    const id = state.openTarget('s1', { kind: 'review' })!
+    state.setReviewViewedPaths('s1', id, ['src/a.ts'])
+    const latest = useWorkspaceStore.getState()
+    const restored = hydrateWorkspace(serializeWorkspace(latest.bySession, latest), makeId)
+    expect(restored.bySession.s1?.tabs[0]).toMatchObject({ kind: 'review', viewedPaths: [] })
+  })
+
 })

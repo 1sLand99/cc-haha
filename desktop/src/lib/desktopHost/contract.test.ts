@@ -79,6 +79,7 @@ describe('desktop host contract', () => {
     await expect(browserHost.browser.find('wb-1', 'invoice')).resolves.toBeUndefined()
     await expect(browserHost.browser.stopFind('wb-1')).resolves.toBeUndefined()
     await expect(browserHost.browser.capture('wb-1', 'viewport')).resolves.toBeUndefined()
+    await expect(browserHost.browser.snapshot('wb-1')).resolves.toBeNull()
     await expect(browserHost.browser.message('wb-1', { v: 1, type: 'exit-picker' })).resolves.toBeUndefined()
     await expect(browserHost.browser.printToPdf('wb-1')).resolves.toBeUndefined()
     await expect(browserHost.browser.close('wb-1')).resolves.toBeUndefined()

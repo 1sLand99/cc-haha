@@ -30,15 +30,15 @@ function makeFile(lineCount: number) {
  * prototypes before render — the effect reads them on mount, which is earlier
  * than anything the render body could stub.
  */
-function stubSurfaceLayout() {
+function stubSurfaceLayout(rowHeight = ROW_HEIGHT) {
   const originalRect = Element.prototype.getBoundingClientRect
   const originalClientHeight = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight')
 
   Element.prototype.getBoundingClientRect = function getBoundingClientRect(this: Element) {
     const line = Number(this.getAttribute('data-workspace-line-number'))
     const isRow = Number.isFinite(line) && line > 0
-    const top = isRow ? line * ROW_HEIGHT : 0
-    const height = isRow ? ROW_HEIGHT : SURFACE_HEIGHT
+    const top = isRow ? line * rowHeight : 0
+    const height = isRow ? rowHeight : SURFACE_HEIGHT
     return {
       top,
       height,
@@ -69,6 +69,7 @@ function renderSurface(props: Partial<Parameters<typeof CodeSurface>[0]> = {}) {
       value={props.value ?? 'const a = 1\nconst b = 2\nconst c = 3'}
       language={props.language ?? 'typescript'}
       reveal={props.reveal}
+      revealScroll={props.revealScroll}
       onAddLineComment={props.onAddLineComment ?? vi.fn()}
       onAddSelection={props.onAddSelection ?? vi.fn()}
     />,
@@ -93,6 +94,18 @@ describe('CodeSurface', () => {
     expect(screen.getByRole('button', { name: 'Comment line 3' })).toHaveTextContent('3')
     expect(screen.queryByRole('button', { name: 'Comment line 4' })).not.toBeInTheDocument()
     expect(screen.getByTestId('workspace-code').textContent).toContain('const c = 3')
+  })
+
+  it('keeps the screenshot code rhythm and centers revealed lines using its measured 26px rows', () => {
+    const restore = stubSurfaceLayout(26)
+    try {
+      renderSurface({ value: makeFile(12), reveal: { line: 10, nonce: 9 } })
+      const code = screen.getByTestId('workspace-code')
+      expect(code.closest('pre')).toHaveClass('text-[15px]', 'leading-[26px]')
+      expect(code.closest('[data-workspace-scroll-surface]')!.scrollTop).toBe(223)
+    } finally {
+      restore()
+    }
   })
 
   it('caps a long preview and expands it on demand', async () => {
@@ -186,6 +199,21 @@ describe('CodeSurface', () => {
       await waitFor(() => {
         expect(surface.scrollTop).toBe(160)
       })
+    } finally {
+      restoreLayout()
+    }
+  })
+
+  it('keeps a restored viewport while retaining the old reveal mark', async () => {
+    const restoreLayout = stubSurfaceLayout()
+    try {
+      const { container } = renderSurface({ value: makeFile(30), reveal: { line: 10, nonce: 1 }, revealScroll: false })
+      const surface = container.firstElementChild as HTMLElement
+      surface.scrollTop = 40
+      await act(async () => { await Promise.resolve() })
+      expect(surface.scrollTop).toBe(40)
+      expect(screen.getByTestId('workspace-code').querySelector('[data-workspace-line-number="10"]')?.className)
+        .toContain('bg-[var(--color-brand-soft)]')
     } finally {
       restoreLayout()
     }

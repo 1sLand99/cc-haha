@@ -439,7 +439,7 @@ export function collectPatchPaths(patch: string): string[] {
 
   for (const rawLine of patch.split(/\r?\n/)) {
     if (rawLine.startsWith('--- ') || rawLine.startsWith('+++ ')) {
-      const target = rawLine.slice(4).trim().split('\t')[0] ?? ''
+      const target = rawLine.slice(4).split('\t')[0] ?? ''
       if (!target || target === '/dev/null') continue
       paths.add(stripPatchPrefix(target))
       continue
@@ -448,8 +448,7 @@ export function collectPatchPaths(patch: string): string[] {
       // `diff --git a/x b/x` — quoted paths with spaces are handled by the
       // ---/+++ lines above, so only take the unambiguous unquoted form.
       const rest = rawLine.slice('diff --git '.length)
-      if (rest.includes('"')) continue
-      const halves = rest.split(' ')
+      const halves = rest.match(/"(?:\\.|[^"\\])*"|[^ ]+/g) ?? []
       if (halves.length !== 2) continue
       for (const half of halves) {
         const stripped = stripPatchPrefix(half)
@@ -462,14 +461,29 @@ export function collectPatchPaths(patch: string): string[] {
 }
 
 function stripPatchPrefix(value: string): string {
-  let target = value.trim()
+  let target = value
   if (target.startsWith('"') && target.endsWith('"') && target.length > 1) {
-    target = target.slice(1, -1)
+    const escapes: Record<string, string> = { a: '\x07', b: '\b', t: '\t', n: '\n', v: '\v', f: '\f', r: '\r', '\\': '\\', '"': '"' }
+    const bytes: Buffer[] = []
+    let offset = 1
+    const escaped = /\\([0-7]{1,3}|[abtnvfr\\"])/g
+    for (const match of target.matchAll(escaped)) {
+      bytes.push(Buffer.from(target.slice(offset, match.index)))
+      bytes.push(/^[0-7]/.test(match[1]!) ? Buffer.from([parseInt(match[1]!, 8)]) : Buffer.from(escapes[match[1]!]!))
+      offset = match.index! + match[0].length
+    }
+    bytes.push(Buffer.from(target.slice(offset, -1)))
+    target = Buffer.concat(bytes).toString('utf8')
   }
   // `git diff` writes `a/<path>` and `b/<path>`; `-p1` strips exactly one level.
   const slash = target.indexOf('/')
   if (slash === -1) return target
   return target.slice(slash + 1)
+}
+
+function quoteGitPath(value: string): string {
+  if (!/[\x00-\x20"\\]/.test(value)) return value
+  return JSON.stringify(value).replace(/\\u00([0-9a-f]{2})/g, (_match, hex) => `\\${parseInt(hex, 16).toString(8).padStart(3, '0')}`)
 }
 
 function countTextLines(content: string): number {
@@ -527,6 +541,27 @@ export class ReviewService {
 
   // -- reads ----------------------------------------------------------------
 
+  private comparisonSnapshot(workspaceSnapshot: string, source: ResolvedReviewSource): string {
+    if (source.kind === 'commit') return createHash('sha256').update(JSON.stringify(source)).digest('hex')
+    if (source.kind === 'branch') return createHash('sha256').update(`${workspaceSnapshot}:${source.resolvedBase}`).digest('hex')
+    return workspaceSnapshot
+  }
+
+  /** An invalidation probe without numstat collection or per-file diff payloads. */
+  async getRevision(sessionId: string, source: ReviewSource): Promise<Pick<ReviewStatusResult, 'state' | 'source' | 'snapshot' | 'error'>> {
+    if (source.kind === 'turn') return this.rejectTurnSource(source)
+    const prepared = await this.prepare(sessionId)
+    if (prepared.kind === 'failed') return { state: prepared.state, source, snapshot: '', error: prepared.error }
+    const { ctx } = prepared
+    const head = await this.resolveHead(ctx)
+    const entries = source.kind === 'commit' ? { kind: 'ok' as const, entries: [] } : await this.readStatus(ctx)
+    if (entries.kind === 'error') return { state: 'error', source, snapshot: '', error: entries.message }
+    const workspaceSnapshot = source.kind === 'commit' ? '' : await this.computeSnapshot(ctx, head, entries.entries)
+    const resolution = await this.resolveSource(ctx, source, head)
+    if (resolution.kind !== 'ok') return { state: resolution.kind === 'no_head' ? 'no_head' : 'error', source: resolution.source, snapshot: workspaceSnapshot, error: resolution.error }
+    return { state: 'ok', source: resolution.resolved.source, snapshot: this.comparisonSnapshot(workspaceSnapshot, resolution.resolved.source) }
+  }
+
   async getStatus(sessionId: string, source: ReviewSource): Promise<ReviewStatusResult> {
     if (source.kind === 'turn') {
       return this.rejectTurnSource(source)
@@ -547,7 +582,7 @@ export class ReviewService {
     const { ctx } = prepared
 
     const head = await this.resolveHead(ctx)
-    const statusEntries = await this.readStatus(ctx)
+    const statusEntries = source.kind === 'commit' ? { kind: 'ok' as const, entries: [] } : await this.readStatus(ctx)
     if (statusEntries.kind === 'error') {
       return {
         state: 'error',
@@ -559,7 +594,7 @@ export class ReviewService {
         error: statusEntries.message,
       }
     }
-    const snapshot = await this.computeSnapshot(ctx, head, statusEntries.entries)
+    let snapshot = source.kind === 'commit' ? '' : await this.computeSnapshot(ctx, head, statusEntries.entries)
 
     const resolution = await this.resolveSource(ctx, source, head)
     if (resolution.kind !== 'ok') {
@@ -573,6 +608,8 @@ export class ReviewService {
         error: resolution.error,
       }
     }
+
+    snapshot = this.comparisonSnapshot(snapshot, resolution.resolved.source)
 
     const collected = await this.collectFiles(ctx, resolution.resolved, statusEntries.entries)
     if (collected.kind === 'error') {
@@ -628,11 +665,12 @@ export class ReviewService {
     }
     const { ctx } = prepared
 
-    const target = await this.resolveWorkspacePath(ctx, request.path)
-    const oldTarget = request.oldPath ? await this.resolveWorkspacePath(ctx, request.oldPath) : null
+    const historical = request.source.kind === 'commit'
+    const target = await this.resolveWorkspacePath(ctx, request.path, historical)
+    const oldTarget = request.oldPath ? await this.resolveWorkspacePath(ctx, request.oldPath, historical) : null
 
     const head = await this.resolveHead(ctx)
-    const statusEntries = await this.readStatus(ctx)
+    const statusEntries = historical ? { kind: 'ok' as const, entries: [] } : await this.readStatus(ctx)
     if (statusEntries.kind === 'error') {
       return {
         state: 'error',
@@ -642,7 +680,7 @@ export class ReviewService {
         error: statusEntries.message,
       }
     }
-    const snapshot = await this.computeSnapshot(ctx, head, statusEntries.entries)
+    let snapshot = historical ? '' : await this.computeSnapshot(ctx, head, statusEntries.entries)
 
     const resolution = await this.resolveSource(ctx, request.source, head)
     if (resolution.kind !== 'ok') {
@@ -655,9 +693,10 @@ export class ReviewService {
       }
     }
     const resolved = resolution.resolved
+    snapshot = this.comparisonSnapshot(snapshot, resolved.source)
 
     const entry = statusEntries.entries.find((candidate) => candidate.path === target.relativePath)
-    if (entry?.untracked) {
+    if (resolved.useWorkingTreeStatus && entry?.untracked) {
       if (!resolved.includeUntracked) {
         return {
           state: 'missing',
@@ -691,7 +730,7 @@ export class ReviewService {
     }
 
     const pathspecs = [target.repoPath]
-    const knownOldPath = oldTarget?.repoPath ?? entry?.repoOldPath
+    const knownOldPath = oldTarget?.repoPath ?? (resolved.useWorkingTreeStatus ? entry?.repoOldPath : undefined)
     if (knownOldPath && knownOldPath !== target.repoPath) {
       pathspecs.push(knownOldPath)
     }
@@ -734,6 +773,7 @@ export class ReviewService {
 
   /** Stage working-tree content (including untracked files) into the index. */
   async stage(sessionId: string, request: ReviewPathsRequest): Promise<ReviewWriteResult> {
+    if (request.source?.kind === 'staged') return this.writeFailure('error', 'Staged comparison only supports unstaging')
     return this.runPathWrite(sessionId, request, async (ctx, targets) => {
       const results: ReviewPathResult[] = []
       for (const target of targets) {
@@ -756,19 +796,33 @@ export class ReviewService {
 
   /** Drop index content back to `HEAD` (or to "nothing" in a repo with no commits). */
   async unstage(sessionId: string, request: ReviewPathsRequest): Promise<ReviewWriteResult> {
-    return this.runPathWrite(sessionId, request, async (ctx, targets, head) => {
+    if (request.source?.kind === 'unstaged') return this.writeFailure('error', 'Unstaged comparison only supports staging or discarding')
+    return this.runPathWrite(sessionId, request, async (ctx, targets, head, entries) => {
       const results: ReviewPathResult[] = []
       for (const target of targets) {
+        // A rename is one displayed row but two index entries. Derive its
+        // linked path from the validated status, never from a client pathspec.
+        const entry = entries.find(candidate => candidate.path === target.relativePath)
+        const paths = [literalPathspec(target.repoPath)]
+        if (entry?.repoOldPath) {
+          const oldPath = this.rebaseRepoPath(ctx, entry.repoOldPath)
+          if (oldPath === null) {
+            results.push({ path: target.relativePath, ok: false, error: 'Rename crosses workspace boundary' })
+            continue
+          }
+          const oldTarget = await this.resolveWorkspacePath(ctx, oldPath)
+          paths.push(literalPathspec(oldTarget.repoPath))
+        }
         const restoreArgs = head
-          ? ['restore', '--staged', '--', literalPathspec(target.repoPath)]
-          : ['reset', '-q', '--', literalPathspec(target.repoPath)]
+          ? ['restore', '--staged', '--', ...paths]
+          : ['reset', '-q', '--', ...paths]
         let result = await this.runGit(ctx.repoRoot, restoreArgs)
         let args = restoreArgs
 
         if (result.code !== 0 && head) {
           // `git restore` is 2.23+; fall back to the older plumbing rather than
           // reporting a failure the user cannot act on.
-          args = ['reset', '-q', 'HEAD', '--', literalPathspec(target.repoPath)]
+          args = ['reset', '-q', 'HEAD', '--', ...paths]
           result = await this.runGit(ctx.repoRoot, args)
         }
 
@@ -806,6 +860,7 @@ export class ReviewService {
    * the tracked file list can never sweep away untracked work.
    */
   async revert(sessionId: string, request: ReviewPathsRequest): Promise<ReviewWriteResult> {
+    if (request.source?.kind === 'staged') return this.writeFailure('error', 'Staged comparison does not display working-tree changes')
     return this.runPathWrite(sessionId, request, async (ctx, targets, _head, entries) => {
       const results: ReviewPathResult[] = []
       const backupDir = this.buildBackupDir(ctx.sessionId)
@@ -949,6 +1004,8 @@ export class ReviewService {
     }
     const refusal = rejectUnwritableSource(request.source)
     if (refusal) return this.writeFailure('error', refusal)
+
+    if (request.source && request.source.kind !== (reverse ? 'staged' : 'unstaged')) return this.writeFailure('error', 'Hunk action does not match the displayed comparison')
 
     const patchPaths = collectPatchPaths(request.patch)
     if (patchPaths.length !== 1) {
@@ -1666,8 +1723,8 @@ export class ReviewService {
         truncated: true,
         bytes: stat.stat.size,
         diff: [
-          `diff --git a/${repoPath} b/${repoPath}`,
-          'new file mode 100644',
+          `diff --git ${quoteGitPath(`a/${repoPath}`)} ${quoteGitPath(`b/${repoPath}`)}`,
+          `new file mode ${stat.stat.mode & 0o111 ? '100755' : '100644'}`,
           '',
         ].join('\n'),
       }
@@ -1683,34 +1740,39 @@ export class ReviewService {
       }
     }
 
-    if (buffer.includes(0)) {
+    if (buffer.includes(0) || !Buffer.from(buffer.toString('utf8')).equals(buffer)) {
       return {
         kind: 'ok',
         binary: true,
         diff: [
-          `diff --git a/${repoPath} b/${repoPath}`,
-          'new file mode 100644',
+          `diff --git ${quoteGitPath(`a/${repoPath}`)} ${quoteGitPath(`b/${repoPath}`)}`,
+          `new file mode ${stat.stat.mode & 0o111 ? '100755' : '100644'}`,
           `Binary files /dev/null and b/${repoPath} differ`,
           '',
         ].join('\n'),
       }
     }
 
-    const lines = buffer.toString('utf8').split(/\r\n|\r|\n/)
-    if (lines[lines.length - 1] === '') lines.pop()
+    // Unified patches delimit lines with LF. A CR belongs to the file bytes,
+    // and a missing final LF must be represented by Git's explicit marker.
+    const content = buffer.toString('utf8')
+    const lines = content ? content.split('\n') : []
+    if (content.endsWith('\n')) lines.pop()
     const hunkLines = lines.map((line) => `+${line}`)
-    if (hunkLines.length === 0) hunkLines.push('+')
+    if (content && !content.endsWith('\n')) hunkLines.push('\\ No newline at end of file')
 
     return {
       kind: 'ok',
       binary: false,
       diff: [
-        `diff --git a/${repoPath} b/${repoPath}`,
-        'new file mode 100644',
-        '--- /dev/null',
-        `+++ b/${repoPath}`,
-        `@@ -0,0 +1,${hunkLines.length} @@`,
-        ...hunkLines,
+        `diff --git ${quoteGitPath(`a/${repoPath}`)} ${quoteGitPath(`b/${repoPath}`)}`,
+        `new file mode ${stat.stat.mode & 0o111 ? '100755' : '100644'}`,
+        ...(lines.length ? [
+          '--- /dev/null',
+          `+++ ${quoteGitPath(`b/${repoPath}`)}`,
+          `@@ -0,0 +1,${lines.length} @@`,
+          ...hunkLines,
+        ] : []),
         '',
       ].join('\n'),
     }
@@ -1728,6 +1790,7 @@ export class ReviewService {
   private async resolveWorkspacePath(
     ctx: ReviewContext,
     requestedPath: string,
+    historical = false,
   ): Promise<ResolvedTarget> {
     if (typeof requestedPath !== 'string' || requestedPath.trim().length === 0) {
       throw new Error('path is required')
@@ -1743,6 +1806,13 @@ export class ReviewService {
       throw new Error(`Path is not a file inside the workspace: ${requestedPath}`)
     }
     this.rejectVcsMetadataSegments(relativePath, requestedPath)
+
+    if (historical) {
+      // git show/diff reads tree objects, so the current file type and symlink
+      // target have no authority over an historical repository path.
+      const canonicalPath = path.resolve(ctx.canonicalWorkspaceRoot, relativePath)
+      return { requestedPath, relativePath, absolutePath, canonicalPath, repoPath: toPosixPath(path.relative(ctx.repoRoot, canonicalPath)) }
+    }
 
     // A symlink is never reviewed through its target. `revert` copies the file
     // into the backup directory with `copyFile`, which follows links, and

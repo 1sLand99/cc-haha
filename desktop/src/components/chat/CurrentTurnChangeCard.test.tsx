@@ -6,7 +6,8 @@ import { act, useState } from 'react'
 // ──────────────────────────────────────────────────────────────────────────────
 // Hoisted mocks (vi.hoisted runs before module evaluation)
 // ──────────────────────────────────────────────────────────────────────────────
-const { openPreviewSpy, browserOpenSpy, openTargetSpy, ensureTargetsMock, getTargetsForPathMock, openSystemFileSpy, panelState } = vi.hoisted(() => {
+const { reviewOpenSpy, openPreviewSpy, browserOpenSpy, openTargetSpy, ensureTargetsMock, getTargetsForPathMock, openSystemFileSpy, panelState } = vi.hoisted(() => {
+  const reviewOpenSpy = vi.fn()
   const openPreviewSpy = vi.fn().mockResolvedValue(undefined)
   const browserOpenSpy = vi.fn()
   const openTargetSpy = vi.fn().mockResolvedValue(undefined)
@@ -17,7 +18,7 @@ const { openPreviewSpy, browserOpenSpy, openTargetSpy, ensureTargetsMock, getTar
   ])
   const openSystemFileSpy = vi.fn().mockResolvedValue(undefined)
   const panelState = { isOpen: false }
-  return { openPreviewSpy, browserOpenSpy, openTargetSpy, ensureTargetsMock, getTargetsForPathMock, openSystemFileSpy, panelState }
+  return { reviewOpenSpy, openPreviewSpy, browserOpenSpy, openTargetSpy, ensureTargetsMock, getTargetsForPathMock, openSystemFileSpy, panelState }
 })
 
 // Mock openTargetStore
@@ -50,33 +51,13 @@ vi.mock('../../lib/workspace/openTarget', () => ({
     file: (sessionId: string, path: string, options?: Record<string, unknown>) =>
       openPreviewSpy(sessionId, path, 'file', options?.origin),
     browser: (sessionId: string, url?: string) => browserOpenSpy(sessionId, url),
-    review: (sessionId: string, options?: Record<string, unknown>) =>
-      openPreviewSpy(sessionId, options?.path, 'diff', options?.origin),
+    review: (sessionId: string, options?: Record<string, unknown>) => {
+      reviewOpenSpy(sessionId, options)
+      return openPreviewSpy(sessionId, options?.path, 'diff', options?.origin)
+    },
     terminal: vi.fn(),
   },
   openWorkspaceTarget: vi.fn(),
-}))
-
-// Mock browserPanelStore
-vi.mock('../../stores/browserPanelStore', () => ({
-  useBrowserPanelStore: Object.assign(
-    (selector: (s: { open: () => void }) => unknown) =>
-      selector({ open: browserOpenSpy }),
-    {
-      getState: vi.fn(() => ({ open: browserOpenSpy })),
-    },
-  ),
-}))
-
-// Mock workspacePanelStore
-vi.mock('../../stores/workspacePanelStore', () => ({
-  useWorkspacePanelStore: Object.assign(
-    (selector: (s: { openPreview: () => Promise<void>; isPanelOpen: () => boolean }) => unknown) =>
-      selector({ openPreview: openPreviewSpy, isPanelOpen: () => panelState.isOpen }),
-    {
-      getState: vi.fn(() => ({ openPreview: openPreviewSpy, isPanelOpen: () => panelState.isOpen })),
-    },
-  ),
 }))
 
 // Mock @tauri-apps/plugin-shell
@@ -357,6 +338,7 @@ describe('CurrentTurnChangeCard – row opens the workspace diff', () => {
     fireEvent.click(row)
     // displayPath is the workDir-relative path (matches the workspace file tree)
     expect(openPreviewSpy).toHaveBeenCalledWith('s1', 'src/main.ts', 'diff', expect.objectContaining({ sourceTurnKey: 'msg-1' }))
+    expect(reviewOpenSpy).toHaveBeenCalledWith('s1', expect.objectContaining({ source: { kind: 'turn', turnKey: 'msg-1', userMessageIndex: 0 } }))
   })
 
   it('passes the workDir-relative displayPath (not the absolute path) to openPreview', () => {

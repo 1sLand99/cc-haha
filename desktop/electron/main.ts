@@ -1,7 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, WebContentsView } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'node:path'
-import { writeFile } from 'node:fs/promises'
 import { ELECTRON_EVENT_CHANNELS, ELECTRON_INTERNAL_CHANNELS, ELECTRON_IPC_CHANNELS, type ElectronIpcChannel } from './ipc/channels'
 import {
   isElectronIpcChannel,
@@ -18,6 +17,7 @@ import {
   sendDesktopNotification,
 } from './services/notifications'
 import { installApplicationMenu, installRendererContextMenu } from './services/menu'
+import { saveWorkspaceBrowserPdf } from './services/workspaceBrowserPdf'
 import { acquireSingleInstanceLock } from './services/singleInstance'
 import { installTray, shouldInstallTray, type TrayController } from './services/tray'
 import { ElectronUpdaterService, updaterSessionProxyConfig } from './services/updater'
@@ -367,9 +367,14 @@ function getWorkspaceBrowserService() {
       return bounds ? screen.getDisplayMatching(bounds).scaleFactor : 1
     },
     writePdf: async ({ data, filename }) => {
-      const savePath = path.join(workspaceBrowserDownloadsDir(), filename)
-      await writeFile(savePath, data)
-      return savePath
+      return saveWorkspaceBrowserPdf(data, async () => {
+        if (!mainWindow || mainWindow.isDestroyed()) return null
+        const result = await dialog.showSaveDialog(mainWindow, {
+          defaultPath: path.join(workspaceBrowserDownloadsDir(), filename),
+          filters: [{ name: 'PDF', extensions: ['pdf'] }],
+        })
+        return result.canceled ? null : result.filePath ?? null
+      })
     },
     createView: () => {
       const view = new WebContentsView({
@@ -774,6 +779,8 @@ function registerIpcHandlers() {
     const { tabId, kind } = payload as { tabId: string, kind: WorkspaceBrowserCaptureKind }
     return getWorkspaceBrowserService().capture(tabId, kind)
   })
+  registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserSnapshot, (_event, payload) =>
+    getWorkspaceBrowserService().snapshot((payload as { tabId: string }).tabId))
   registerHandler(ELECTRON_IPC_CHANNELS.workspaceBrowserMessage, (_event, payload) => {
     const { tabId, payload: message } = payload as { tabId: string, payload: unknown }
     return getWorkspaceBrowserService().message(tabId, message)

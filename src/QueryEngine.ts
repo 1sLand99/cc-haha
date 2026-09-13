@@ -53,6 +53,8 @@ import {
   type FileHistoryState,
   fileHistoryEnabled,
   fileHistoryMakeSnapshot,
+  fileHistoryCompleteSnapshot,
+  withFileHistoryCompletion,
 } from './utils/fileHistory.js'
 import {
   cloneFileStateCache,
@@ -60,7 +62,7 @@ import {
 } from './utils/fileStateCache.js'
 import { headlessProfilerCheckpoint } from './utils/headlessProfiler.js'
 import { registerStructuredOutputEnforcement } from './utils/hooks/hookHelpers.js'
-import { getInMemoryErrors } from './utils/log.js'
+import { getInMemoryErrors, logError } from './utils/log.js'
 import { countToolCalls, SYNTHETIC_MESSAGES } from './utils/messages.js'
 import {
   getMainLoopModel,
@@ -660,20 +662,22 @@ export class QueryEngine {
       return
     }
 
+    const checkpointMessages = messagesFromUserInput.filter(messageSelector().selectableUserMessagesFilter)
     if (fileHistoryEnabled() && persistSession) {
-      messagesFromUserInput
-        .filter(messageSelector().selectableUserMessagesFilter)
-        .forEach(message => {
-          void fileHistoryMakeSnapshot(
-            (updater: (prev: FileHistoryState) => FileHistoryState) => {
-              setAppState(prev => ({
-                ...prev,
-                fileHistory: updater(prev.fileHistory),
-              }))
-            },
-            message.uuid,
-          )
-        })
+      for (const message of checkpointMessages) {
+        await fileHistoryMakeSnapshot(updater => setAppState(prev => ({ ...prev, fileHistory: updater(prev.fileHistory) })), message.uuid)
+      }
+    }
+
+    let checkpointCompleted = false
+    const completeCheckpoint = async () => {
+      if (checkpointCompleted) return
+      checkpointCompleted = true
+      const checkpointMessage = checkpointMessages.at(-1)
+      if (persistSession && checkpointMessage) {
+        await fileHistoryCompleteSnapshot(updater => setAppState(prev => ({ ...prev, fileHistory: updater(prev.fileHistory) })), checkpointMessage.uuid).catch(logError)
+        await flushSessionStorage()
+      }
     }
 
     // Track current message usage (reset on each message_start)
@@ -694,7 +698,7 @@ export class QueryEngine {
       ? countToolCalls(this.mutableMessages, SYNTHETIC_OUTPUT_TOOL_NAME)
       : 0
 
-    for await (const message of query({
+    for await (const message of withFileHistoryCompletion(query({
       messages,
       systemPrompt,
       userContext,
@@ -705,7 +709,7 @@ export class QueryEngine {
       querySource: 'sdk',
       maxTurns,
       taskBudget,
-    })) {
+    }), completeCheckpoint)) {
       // Record assistant, user, and compact boundary messages
       if (
         message.type === 'assistant' ||
@@ -870,6 +874,7 @@ export class QueryEngine {
                 await flushSessionStorage()
               }
             }
+            await completeCheckpoint()
             yield {
               type: 'result',
               subtype: 'error_max_turns',
@@ -1019,6 +1024,7 @@ export class QueryEngine {
             await flushSessionStorage()
           }
         }
+        await completeCheckpoint()
         yield {
           type: 'result',
           subtype: 'error_max_budget_usd',
@@ -1062,6 +1068,7 @@ export class QueryEngine {
               await flushSessionStorage()
             }
           }
+          await completeCheckpoint()
           yield {
             type: 'result',
             subtype: 'error_max_structured_output_retries',
@@ -1108,6 +1115,9 @@ export class QueryEngine {
         ? (last(result.message.content)?.type ?? 'none')
         : 'n/a'
 
+    // Capture partial edits on stopped/error turns too, before their result.
+    await completeCheckpoint()
+
     // Flush buffered transcript writes before yielding result.
     // The desktop app kills the CLI process immediately after receiving the
     // result message, so any unflushed writes would be lost.
@@ -1121,6 +1131,7 @@ export class QueryEngine {
     }
 
     if (!isResultSuccessful(result, lastStopReason)) {
+      await completeCheckpoint()
       yield {
         type: 'result',
         subtype: 'error_during_execution',
@@ -1172,6 +1183,8 @@ export class QueryEngine {
       }
       isApiError = Boolean(result.isApiErrorMessage)
     }
+
+    await completeCheckpoint()
 
     yield {
       type: 'result',

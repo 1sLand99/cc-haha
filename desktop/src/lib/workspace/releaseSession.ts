@@ -7,11 +7,8 @@ import { useWorkspaceStore } from '../../stores/workspaceStore'
  * Release everything a task owns: its PTYs, its pages, its cached content and
  * its review state.
  *
- * This exists because "the task went away" has more than one entry point. The
- * tab strip's close was the only one wired up, so deleting a session from the
- * sidebar — single or batch — left its shells running and its pages alive for
- * the life of the app, and kept writing its tabs to disk forever for a session
- * that could never be reopened to clean them up.
+ * Successful single/batch deletion owns this boundary, including replacement
+ * of an empty task. Explicit task closes also call it; repeat calls are safe.
  *
  * Switching away from a task deliberately does NOT come here.
  */

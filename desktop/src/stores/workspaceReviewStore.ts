@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { parseWorkspaceDiff } from '@/components/workspace/workspaceDiffModel'
 import { sessionsApi } from '../api/sessions'
 import {
   reviewApi,
@@ -33,7 +34,7 @@ import {
  */
 export type WorkspaceReviewSourceDescriptor =
   | ResolvedReviewSource
-  | { kind: 'turn'; turnKey: string; resolvedBase?: undefined }
+  | { kind: 'turn'; turnKey: string; userMessageIndex?: number; resolvedBase?: undefined }
 
 export type WorkspaceReviewStatus = Omit<ReviewStatusResult, 'source'> & {
   source: WorkspaceReviewSourceDescriptor
@@ -50,6 +51,7 @@ export type WorkspaceReviewRefusalReason =
   /** No status has been read, so the server's staleness guard would be inert. */
   | 'no_snapshot'
   | 'no_paths'
+  | 'wrong_source'
 
 /**
  * Returned instead of `null` so a refusal is something the caller can render.
@@ -96,6 +98,7 @@ export type WorkspaceReviewEntry = {
   diffsByPath: Record<string, WorkspaceReviewDiff | undefined>
   diffLoadingByPath: Record<string, boolean | undefined>
   viewedPaths: string[]
+  viewedSnapshot: string | null
   /** Where the last revert stashed recoverable copies. */
   lastBackupDir: string | null
   /** Paths the last revert deleted from disk rather than restored. */
@@ -111,6 +114,7 @@ const EMPTY_ENTRY: WorkspaceReviewEntry = {
   diffsByPath: {},
   diffLoadingByPath: {},
   viewedPaths: [],
+  viewedSnapshot: null,
   lastBackupDir: null,
   lastDeletedPaths: [],
 }
@@ -128,14 +132,18 @@ function emptyEntryFor(source: WorkspaceReviewSource): WorkspaceReviewEntry {
 
 type WorkspaceReviewStore = {
   byKey: Record<string, WorkspaceReviewEntry | undefined>
+  revisionBySession: Record<string, number | undefined>
+  invalidateSession: (sessionId: string) => void
+  isWriting: (sessionId: string) => boolean
 
   getEntry: (sessionId: string, source: WorkspaceReviewSource) => WorkspaceReviewEntry
   load: (
     sessionId: string,
     source: WorkspaceReviewSource,
-    options?: { force?: boolean },
+    options?: { force?: boolean; signal?: AbortSignal },
   ) => Promise<void>
   loadDiff: (sessionId: string, source: WorkspaceReviewSource, path: string, oldPath?: string) => Promise<void>
+  restoreViewed: (sessionId: string, source: WorkspaceReviewSource, paths: string[], snapshot?: string) => void
   toggleViewed: (sessionId: string, source: WorkspaceReviewSource, path: string) => void
   /**
    * Classifies the paths a revert would touch, from the status already loaded.
@@ -149,6 +157,8 @@ type WorkspaceReviewStore = {
   stage: (sessionId: string, source: WorkspaceReviewSource, paths: string[]) => Promise<WorkspaceReviewWriteOutcome>
   unstage: (sessionId: string, source: WorkspaceReviewSource, paths: string[]) => Promise<WorkspaceReviewWriteOutcome>
   revert: (sessionId: string, source: WorkspaceReviewSource, paths: string[]) => Promise<WorkspaceReviewWriteOutcome>
+  stageHunk: (sessionId: string, source: WorkspaceReviewSource, patch: string) => Promise<WorkspaceReviewWriteOutcome>
+  unstageHunk: (sessionId: string, source: WorkspaceReviewSource, patch: string) => Promise<WorkspaceReviewWriteOutcome>
   clearSession: (sessionId: string) => void
 }
 
@@ -166,6 +176,19 @@ function refuse(reason: WorkspaceReviewRefusalReason): WorkspaceReviewRefusal {
 }
 
 const requests = new Map<string, number>()
+const writesBySession = new Map<string, number>()
+
+async function withReviewWrite<T>(sessionId: string, write: () => Promise<T>): Promise<T> {
+  writesBySession.set(sessionId, (writesBySession.get(sessionId) ?? 0) + 1)
+  try {
+    return await write()
+  } finally {
+    const remaining = (writesBySession.get(sessionId) ?? 1) - 1
+    if (remaining) writesBySession.set(sessionId, remaining)
+    else writesBySession.delete(sessionId)
+    useWorkspaceReviewStore.getState().invalidateSession(sessionId)
+  }
+}
 
 function nextRequest(key: string) {
   const next = (requests.get(key) ?? 0) + 1
@@ -175,11 +198,18 @@ function nextRequest(key: string) {
 
 export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) => ({
   byKey: {},
+  revisionBySession: {},
+  invalidateSession: (sessionId) => set(state => ({ revisionBySession: {
+    ...state.revisionBySession,
+    [sessionId]: (state.revisionBySession[sessionId] ?? 0) + 1,
+  } })),
+  isWriting: (sessionId) => writesBySession.has(sessionId),
 
   getEntry: (sessionId, source) =>
     get().byKey[entryKey(sessionId, source)] ?? emptyEntryFor(source),
 
   load: async (sessionId, source, options) => {
+    if (options?.signal?.aborted) return
     const git = toGitReviewSource(source)
     if (!git) return loadSessionChangeStatus(set, get, sessionId, source, options)
     const key = entryKey(sessionId, source)
@@ -196,8 +226,12 @@ export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) =
     }))
 
     try {
-      const status = await reviewApi.getStatus(sessionId, git)
+      const status = await (options?.signal ? reviewApi.getStatus(sessionId, git, { signal: options.signal }) : reviewApi.getStatus(sessionId, git))
       if (requests.get(key) !== request) return
+      if (options?.signal?.aborted) {
+        set(state => ({ byKey: { ...state.byKey, [key]: { ...(state.byKey[key] ?? base), loading: false } } }))
+        return
+      }
       set((state) => {
         const entry = state.byKey[key] ?? base
         // A new snapshot invalidates every cached diff: the per-file payloads
@@ -210,6 +244,8 @@ export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) =
             [key]: {
               ...entry,
               status,
+              viewedPaths: entry.viewedSnapshot === status.snapshot ? entry.viewedPaths : [],
+              viewedSnapshot: status.snapshot,
               loading: false,
               stale: false,
               readOnly: base.readOnly,
@@ -219,7 +255,7 @@ export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) =
               // worktree.
               error: status.error ?? null,
               diffsByPath: snapshotChanged ? {} : entry.diffsByPath,
-              diffLoadingByPath: snapshotChanged ? {} : entry.diffLoadingByPath,
+              diffLoadingByPath: {},
             },
           },
         }
@@ -232,7 +268,7 @@ export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) =
           [key]: {
             ...(state.byKey[key] ?? base),
             loading: false,
-            error: error instanceof Error ? error.message : 'Failed to load review',
+            error: options?.signal?.aborted ? state.byKey[key]?.error ?? null : error instanceof Error ? error.message : 'Failed to load review',
           },
         },
       }))
@@ -247,8 +283,9 @@ export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) =
     // The in-flight check matters as much as the cache one: a re-render while
     // the first request is open would otherwise issue a second request for the
     // same file, and a large review re-renders on every arriving diff.
-    if (existing?.diffsByPath[path] || existing?.diffLoadingByPath[path]) return
+    if (existing?.stale || existing?.loading || existing?.diffsByPath[path] || existing?.diffLoadingByPath[path]) return
 
+    const generation = requests.get(key)
     const base = emptyEntryFor(source)
     set((state) => {
       const entry = state.byKey[key] ?? base
@@ -265,6 +302,7 @@ export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) =
 
     try {
       const diff = await reviewApi.getDiff(sessionId, git, path, oldPath)
+      if (requests.get(key) !== generation || !get().byKey[key]) return
       set((state) => {
         const entry = state.byKey[key] ?? base
         // Drop a diff that arrived for a snapshot we have already moved past.
@@ -274,6 +312,7 @@ export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) =
               ...state.byKey,
               [key]: {
                 ...entry,
+                stale: true,
                 diffLoadingByPath: { ...entry.diffLoadingByPath, [path]: false },
               },
             },
@@ -291,6 +330,7 @@ export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) =
         }
       })
     } catch (error) {
+      if (requests.get(key) !== generation || !get().byKey[key]) return
       set((state) => {
         const entry = state.byKey[key] ?? base
         return {
@@ -316,6 +356,11 @@ export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) =
     }
   },
 
+  restoreViewed: (sessionId, source, paths, snapshot) => set(state => {
+    const key = entryKey(sessionId, source)
+    return { byKey: { ...state.byKey, [key]: { ...(state.byKey[key] ?? emptyEntryFor(source)), viewedPaths: snapshot ? paths : [], viewedSnapshot: snapshot ?? null } } }
+  }),
+
   toggleViewed: (sessionId, source, path) =>
     set((state) => {
       const key = entryKey(sessionId, source)
@@ -323,7 +368,7 @@ export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) =
       const viewedPaths = entry.viewedPaths.includes(path)
         ? entry.viewedPaths.filter((candidate) => candidate !== path)
         : [...entry.viewedPaths, path]
-      return { byKey: { ...state.byKey, [key]: { ...entry, viewedPaths } } }
+      return { byKey: { ...state.byKey, [key]: { ...entry, viewedPaths, viewedSnapshot: entry.status?.snapshot ?? null } } }
     }),
 
   describeRevert: (sessionId, source, paths) => {
@@ -344,13 +389,18 @@ export const useWorkspaceReviewStore = create<WorkspaceReviewStore>((set, get) =
   unstage: (sessionId, source, paths) => runWrite(set, get, sessionId, source, paths, 'unstage'),
   revert: (sessionId, source, paths) => runWrite(set, get, sessionId, source, paths, 'revert'),
 
+  stageHunk: (sessionId, source, patch) => runHunkWrite(set, get, sessionId, source, patch, 'stageHunk'),
+  unstageHunk: (sessionId, source, patch) => runHunkWrite(set, get, sessionId, source, patch, 'unstageHunk'),
+
   clearSession: (sessionId) =>
     set((state) => {
       const prefix = `${sessionId}::`
       for (const key of requests.keys()) {
         if (key.startsWith(prefix)) requests.set(key, (requests.get(key) ?? 0) + 1)
       }
+      const { [sessionId]: _revision, ...revisionBySession } = state.revisionBySession
       return {
+        revisionBySession,
         byKey: Object.fromEntries(
           Object.entries(state.byKey).filter(([key]) => !key.startsWith(prefix)),
         ),
@@ -372,15 +422,19 @@ async function runWrite(
   // too; refusing here keeps the request off the wire and gives the caller a
   // reason it can show instead of a silent no-op.
   if (!git || !isWritableReviewSource(source)) return refuse('read_only_source')
+  if (source.kind === 'staged' && operation !== 'unstage') return refuse('wrong_source')
   if (paths.length === 0) return refuse('no_paths')
 
   const key = entryKey(sessionId, source)
+  if (get().byKey[key]?.stale) return { state: 'stale', snapshot: get().byKey[key]?.status?.snapshot ?? '', results: [] }
   const snapshot = get().byKey[key]?.status?.snapshot
   // Without a snapshot there is nothing to compare against, so the guard that
   // stops a write landing on content the user never saw would be inert.
   if (!snapshot) return refuse('no_snapshot')
 
-  const result = await reviewApi[operation](sessionId, { paths, snapshot, source: git })
+  const generation = nextRequest(key)
+  const result = await withReviewWrite(sessionId, () => reviewApi[operation](sessionId, { paths, snapshot, source: git }))
+  if (requests.get(key) !== generation || !get().byKey[key]) return result
 
   set((state) => {
     const entry = state.byKey[key] ?? emptyEntryFor(source)
@@ -392,6 +446,8 @@ async function runWrite(
           stale: result.state === 'stale',
           error: result.state === 'stale' ? null : result.error ?? null,
           status: result.status ?? entry.status,
+          viewedPaths: [],
+          viewedSnapshot: result.snapshot,
           // Every write moves the snapshot, so cached diffs are worthless.
           diffsByPath: {},
           diffLoadingByPath: {},
@@ -407,24 +463,40 @@ async function runWrite(
   return result
 }
 
+async function runHunkWrite(
+  set: SetState,
+  get: () => WorkspaceReviewStore,
+  sessionId: string,
+  source: WorkspaceReviewSource,
+  patch: string,
+  operation: 'stageHunk' | 'unstageHunk',
+): Promise<WorkspaceReviewWriteOutcome> {
+  if (source.kind !== (operation === 'stageHunk' ? 'unstaged' : 'staged')) return refuse('wrong_source')
+  const key = entryKey(sessionId, source)
+  const entry = get().byKey[key]
+  if (!entry?.status?.snapshot) return refuse('no_snapshot')
+  if (entry.stale) return { state: 'stale', snapshot: entry.status.snapshot, results: [] }
+  const generation = nextRequest(key)
+  const result = await withReviewWrite(sessionId, () => reviewApi[operation](sessionId, { source, snapshot: entry.status!.snapshot, patch }))
+  if (requests.get(key) !== generation || !get().byKey[key]) return result
+  set(state => ({ byKey: { ...state.byKey, [key]: {
+    ...state.byKey[key]!,
+    status: result.status ?? state.byKey[key]!.status,
+    viewedPaths: [],
+    viewedSnapshot: result.snapshot,
+    stale: result.state === 'stale',
+    error: result.state === 'stale' ? null : result.error ?? null,
+    diffsByPath: {},
+    diffLoadingByPath: {},
+  } } }))
+  return result
+}
+
 type SetState = (updater: (state: { byKey: Record<string, WorkspaceReviewEntry | undefined> }) => {
   byKey: Record<string, WorkspaceReviewEntry | undefined>
 }) => void
 
-/**
- * The `turn` entry, served by `sessionsApi.getWorkspaceStatus`.
- *
- * **This is not a snapshot of one turn.** `turnKey` is not sent anywhere and
- * nothing here is scoped to a turn. The endpoint returns the workspace's
- * *current* `git status` (every uncommitted change, whoever made it) merged
- * with the files this session is recorded as having touched — the semantics the
- * chat "changed files" card has always had, which §5.4 keeps for that card.
- *
- * It stays because the chat card depends on it, and it is marked read-only
- * because a write carrying these paths would act on the live working tree
- * while the panel claims to be showing session history. The label must not
- * promise a turn comparison either; see `workspace.review.sourceTurn`.
- */
+/** A turn review only reads recorded checkpoint boundaries, never workspace Git. */
 async function loadSessionChangeStatus(
   set: SetState,
   get: () => WorkspaceReviewStore,
@@ -432,81 +504,47 @@ async function loadSessionChangeStatus(
   source: WorkspaceReviewSource,
   options?: { force?: boolean },
 ): Promise<void> {
+  if (source.kind !== 'turn') return
   const key = entryKey(sessionId, source)
   if (get().byKey[key]?.status && !options?.force) return
-
   const request = nextRequest(key)
   const base = emptyEntryFor(source)
-  const descriptor: WorkspaceReviewSourceDescriptor = source.kind === 'turn'
-    ? { kind: 'turn', turnKey: source.turnKey }
-    : source
-
-  set((state) => ({
-    byKey: { ...state.byKey, [key]: { ...(state.byKey[key] ?? base), loading: true, error: null } },
-  }))
-
+  set(state => ({ byKey: { ...state.byKey, [key]: { ...(state.byKey[key] ?? base), loading: true, error: null, diffLoadingByPath: {} } } }))
   try {
-    const result = await sessionsApi.getWorkspaceStatus(sessionId)
+    const result = await sessionsApi.getTurnCheckpoints(sessionId, undefined, true)
     if (requests.get(key) !== request) return
-    set((state) => ({
-      byKey: {
-        ...state.byKey,
-        [key]: {
-          ...(state.byKey[key] ?? base),
-          loading: false,
-          readOnly: true,
-          error: result.error ?? null,
-          status: {
-            state: result.state,
-            // Reported as what it is. Labelling it `unstaged` claimed a Git
-            // comparison this data never ran.
-            source: descriptor,
-            // No snapshot: there is no Git version token behind this view, so
-            // no write could be guarded against it — consistent with the entry
-            // being read-only.
-            snapshot: '',
-            untracked: [],
-            files: result.changedFiles.map((file) => ({
-              path: file.path,
-              ...(file.oldPath ? { oldPath: file.oldPath } : {}),
-              status: file.status === 'unknown' ? 'unknown' : file.status,
-              additions: file.additions,
-              deletions: file.deletions,
-              binary: false,
-              staged: false,
-              unstaged: true,
-              conflicted: false,
-            })),
-            totals: {
-              additions: result.changedFiles.reduce((sum, file) => sum + file.additions, 0),
-              deletions: result.changedFiles.reduce((sum, file) => sum + file.deletions, 0),
-              files: result.changedFiles.length,
-            },
-          },
-        },
+    const checkpoint = result.checkpoints.find(candidate =>
+      (source.turnKey ? candidate.target.targetUserMessageId === source.turnKey : true) &&
+      (source.userMessageIndex === undefined ? !!source.turnKey : candidate.target.userMessageIndex === source.userMessageIndex))
+    if (!checkpoint) throw new Error('The recorded turn checkpoint is unavailable')
+    const root = checkpoint.workDir?.replaceAll('\\', '/').replace(/\/+$/, '')
+    const paths = checkpoint.code.filesChanged.map(path => {
+      const normalized = path.replaceAll('\\', '/')
+      return root && normalized.startsWith(`${root}/`) ? normalized.slice(root.length + 1) : normalized
+    })
+    set(state => ({ byKey: { ...state.byKey, [key]: {
+      ...(state.byKey[key] ?? base),
+      loading: false,
+      readOnly: true,
+      stale: false,
+      error: checkpoint.code.available === false ? checkpoint.code.reason ?? 'The recorded turn checkpoint is unavailable' : null,
+      diffsByPath: {},
+      diffLoadingByPath: {},
+      status: {
+        state: checkpoint.code.available === false ? 'error' : 'ok',
+        source,
+        snapshot: reviewSourceKey(source),
+        untracked: [],
+        files: paths.map(path => ({ path, status: 'modified', additions: 0, deletions: 0, binary: false, staged: false, unstaged: false, conflicted: false })),
+        totals: { additions: checkpoint.code.insertions, deletions: checkpoint.code.deletions, files: paths.length },
       },
-    }))
+    } } }))
   } catch (error) {
     if (requests.get(key) !== request) return
-    set((state) => ({
-      byKey: {
-        ...state.byKey,
-        [key]: {
-          ...(state.byKey[key] ?? base),
-          loading: false,
-          error: error instanceof Error ? error.message : 'Failed to load changes',
-        },
-      },
-    }))
+    set(state => ({ byKey: { ...state.byKey, [key]: { ...(state.byKey[key] ?? base), loading: false, error: error instanceof Error ? error.message : 'Failed to load checkpoint' } } }))
   }
 }
 
-/**
- * Per-file diff for the same entry, from `sessionsApi.getWorkspaceDiff`.
- *
- * Same caveat as the status above: this is the live working-tree diff against
- * `HEAD` for that path, not the diff a particular turn produced.
- */
 async function loadSessionChangeDiff(
   set: SetState,
   get: () => WorkspaceReviewStore,
@@ -514,52 +552,34 @@ async function loadSessionChangeDiff(
   source: WorkspaceReviewSource,
   path: string,
 ): Promise<void> {
+  if (source.kind !== 'turn') return
   const key = entryKey(sessionId, source)
   const existing = get().byKey[key]
-  if (existing?.diffsByPath[path] || existing?.diffLoadingByPath[path]) return
-
-  const base = emptyEntryFor(source)
-  const descriptor: WorkspaceReviewSourceDescriptor = source.kind === 'turn'
-    ? { kind: 'turn', turnKey: source.turnKey }
-    : source
-
-  set((state) => {
-    const entry = state.byKey[key] ?? base
-    return {
-      byKey: {
-        ...state.byKey,
-        [key]: { ...entry, diffLoadingByPath: { ...entry.diffLoadingByPath, [path]: true } },
-      },
-    }
-  })
-
-  const result = await sessionsApi.getWorkspaceDiff(sessionId, path).catch((error: unknown) => ({
-    state: 'error' as const,
-    path,
-    error: error instanceof Error ? error.message : 'Failed to load diff',
+  if (!existing?.status || existing.loading || existing.diffsByPath[path] || existing.diffLoadingByPath[path]) return
+  const generation = requests.get(key)
+  set(state => ({ byKey: { ...state.byKey, [key]: { ...state.byKey[key]!, diffLoadingByPath: { ...state.byKey[key]!.diffLoadingByPath, [path]: true } } } }))
+  const result = await sessionsApi.getTurnCheckpointDiff(sessionId, source.turnKey, path, source.userMessageIndex, true).catch((error: unknown) => ({
+    state: 'error' as const, path, error: error instanceof Error ? error.message : 'Failed to load checkpoint diff',
   }))
-
-  set((state) => {
-    const entry = state.byKey[key] ?? base
-    return {
-      byKey: {
-        ...state.byKey,
-        [key]: {
-          ...entry,
-          diffLoadingByPath: { ...entry.diffLoadingByPath, [path]: false },
-          diffsByPath: {
-            ...entry.diffsByPath,
-            [path]: {
-              state: result.state === 'ok' ? 'ok' : result.state === 'missing' ? 'missing' : 'error',
-              source: descriptor,
-              snapshot: '',
-              path,
-              diff: 'diff' in result ? result.diff : undefined,
-              error: result.error,
-            },
-          },
-        },
-      },
-    }
-  })
+  if (requests.get(key) !== generation || !get().byKey[key]) return
+  const parsed = 'diff' in result && result.diff ? parseWorkspaceDiff(result.diff) : []
+  const rows = parsed.flatMap(file => file.rows)
+  set(state => ({ byKey: { ...state.byKey, [key]: {
+    ...state.byKey[key]!,
+    status: state.byKey[key]!.status ? {
+      ...state.byKey[key]!.status!,
+      files: state.byKey[key]!.status!.files.map(file => file.path === path ? {
+        ...file,
+        additions: rows.filter(row => row.kind === 'addition').length,
+        deletions: rows.filter(row => row.kind === 'deletion').length,
+      } : file),
+    } : null,
+    diffLoadingByPath: { ...state.byKey[key]!.diffLoadingByPath, [path]: false },
+    diffsByPath: { ...state.byKey[key]!.diffsByPath, [path]: {
+      state: result.state === 'ok' ? 'ok' : result.state === 'missing' ? 'missing' : 'error',
+      source, snapshot: reviewSourceKey(source), path,
+      diff: 'diff' in result ? result.diff : undefined,
+      error: result.error,
+    } },
+  } } }))
 }

@@ -27,6 +27,7 @@ import {
 } from '../../stores/projectDisplayNameStore'
 import { openDesktopNotificationTarget } from '../../lib/desktopNotificationNavigation'
 import { TabBar } from './TabBar'
+import { WorkspaceHeaderProvider } from './WorkspaceHeaderContext'
 import { StartupErrorView } from './StartupErrorView'
 import { useTabStore, SETTINGS_TAB_ID } from '../../stores/tabStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -399,8 +400,10 @@ export function AppShell() {
             ) : null}
           </div>
         ) : null}
-        {!isMobileShell ? <TabBar /> : null}
-        <ContentRouter />
+        <WorkspaceHeaderProvider>
+          {!isMobileShell ? <TabBar /> : null}
+          <ContentRouter />
+        </WorkspaceHeaderProvider>
       </main>
       <ToastContainer />
       <UpdateChecker />

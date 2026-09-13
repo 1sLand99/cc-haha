@@ -1363,7 +1363,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
             `-mx-3` has to cancel the panel's `p-3` exactly, and the panel is
             padded by the same chrome rule.
           */}
-          <div data-testid="chat-input-toolbar" className={`flex items-center justify-between ${
+          <div data-testid="chat-input-toolbar" className={`flex min-w-0 items-center justify-between gap-2 ${
             isHeroComposer
               ? 'pt-3'
               : useCompactChrome
@@ -1372,11 +1372,11 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
           }`}>
             <div
               data-testid="chat-input-toolbar-leading"
-              className={`flex min-w-0 items-center ${isMobileComposer ? 'shrink-0 gap-1' : 'gap-2'}`}
+              className={`flex min-w-0 shrink-0 items-center ${showLocationInToolbar ? 'max-w-[55%]' : ''} ${isMobileComposer ? 'gap-1' : 'gap-2'}`}
             >
               {!isMemberSession && (
                 <>
-                  <div ref={plusMenuRef} className="relative">
+                  <div ref={plusMenuRef} className="relative shrink-0">
                     {/*
                       Not `IconButton`: the mobile composer pins 44px touch
                       targets (`h-11 w-11`), and the component's largest size is
@@ -1416,34 +1416,38 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                     )}
                   </div>
 
-                  <PermissionModeSelector compact={useCompactControls} />
+                  <div className="shrink-0">
+                    <PermissionModeSelector compact={useCompactControls} />
+                  </div>
 
                   {showLocationInToolbar && (
-                    embedLaunchControlsInToolbar ? (
-                      <RepositoryLaunchControls
-                        workDir={activeLaunchWorkDir}
-                        onWorkDirChange={handleLaunchWorkDirChange}
-                        branch={launchBranch}
-                        onBranchChange={setLaunchBranch}
-                        useWorktree={launchUseWorktree}
-                        onUseWorktreeChange={setLaunchUseWorktree}
-                        onLaunchReadyChange={setLaunchReady}
-                        disabled={isActive || launchTransitioning}
-                        placement="toolbar"
-                      />
-                    ) : (
-                      <ProjectContextChip
-                        workDir={resolvedWorkDir}
-                        projectRoot={activeSession?.projectRoot}
-                        repoName={gitInfo?.repoName || null}
-                        branch={gitInfo?.branch || null}
-                        sourceWorkDir={gitInfo?.worktree?.sourceWorkDir || null}
-                        isWorktree={!!gitInfo?.worktree?.enabled}
-                        worktreeSlug={gitInfo?.worktree?.slug || null}
-                        worktreePath={gitInfo?.worktree?.path || gitInfo?.worktree?.plannedPath || null}
-                        variant="toolbar"
-                      />
-                    )
+                    <div data-testid="chat-input-toolbar-location" className="min-w-0 flex-1">
+                      {embedLaunchControlsInToolbar ? (
+                        <RepositoryLaunchControls
+                          workDir={activeLaunchWorkDir}
+                          onWorkDirChange={handleLaunchWorkDirChange}
+                          branch={launchBranch}
+                          onBranchChange={setLaunchBranch}
+                          useWorktree={launchUseWorktree}
+                          onUseWorktreeChange={setLaunchUseWorktree}
+                          onLaunchReadyChange={setLaunchReady}
+                          disabled={isActive || launchTransitioning}
+                          placement="toolbar"
+                        />
+                      ) : (
+                        <ProjectContextChip
+                          workDir={resolvedWorkDir}
+                          projectRoot={activeSession?.projectRoot}
+                          repoName={gitInfo?.repoName || null}
+                          branch={gitInfo?.branch || null}
+                          sourceWorkDir={gitInfo?.worktree?.sourceWorkDir || null}
+                          isWorktree={!!gitInfo?.worktree?.enabled}
+                          worktreeSlug={gitInfo?.worktree?.slug || null}
+                          worktreePath={gitInfo?.worktree?.path || gitInfo?.worktree?.plannedPath || null}
+                          variant="toolbar"
+                        />
+                      )}
+                    </div>
                   )}
                 </>
               )}
@@ -1451,7 +1455,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
 
             <div
               data-testid="chat-input-toolbar-trailing"
-              className={`flex min-w-0 items-center ${isMobileComposer ? 'flex-1 justify-end gap-1' : 'shrink-0 gap-2'}`}
+              className={`flex min-w-0 flex-1 items-center justify-end ${isMobileComposer ? 'gap-1' : 'gap-2'}`}
             >
               {!isMemberSession && activeTabId && (
                 <ContextUsageIndicator
@@ -1473,7 +1477,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                   runtimeKey={activeTabId}
                   disabled={isActive}
                   compact={useCompactControls}
-                  fluid={isMobileComposer}
+                  fluid
                 />
               )}
               {!isMemberSession && !isActive && hasRunningSubagents ? (

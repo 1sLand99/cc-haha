@@ -479,30 +479,30 @@ export const sessionsApi = {
     })
   },
 
-  getWorkspaceStatus(sessionId: string) {
-    return api.get<WorkspaceStatusResult>(buildWorkspacePath(sessionId, 'status'))
+  getWorkspaceStatus(sessionId: string, signal?: AbortSignal) {
+    return api.get<WorkspaceStatusResult>(buildWorkspacePath(sessionId, 'status'), { signal })
   },
 
-  getWorkspaceTree(sessionId: string, workspacePath = '') {
-    return api.get<WorkspaceTreeResult>(buildWorkspacePath(sessionId, 'tree', workspacePath))
+  getWorkspaceTree(sessionId: string, workspacePath = '', signal?: AbortSignal) {
+    return api.get<WorkspaceTreeResult>(buildWorkspacePath(sessionId, 'tree', workspacePath), { signal })
   },
 
-  searchWorkspace(sessionId: string, query: string) {
+  searchWorkspace(sessionId: string, query: string, signal?: AbortSignal) {
     const params = new URLSearchParams({ query })
-    return api.get<WorkspaceSearchResult>(`/api/sessions/${sessionId}/workspace/search?${params}`)
+    return api.get<WorkspaceSearchResult>(`/api/sessions/${sessionId}/workspace/search?${params}`, { signal })
   },
 
-  getWorkspaceFile(sessionId: string, workspacePath: string) {
-    return api.get<WorkspaceReadFileResult>(buildWorkspacePath(sessionId, 'file', workspacePath))
+  getWorkspaceFile(sessionId: string, workspacePath: string, signal?: AbortSignal) {
+    return api.get<WorkspaceReadFileResult>(buildWorkspacePath(sessionId, 'file', workspacePath), { signal })
   },
 
   getWorkspaceDiff(sessionId: string, workspacePath: string) {
     return api.get<WorkspaceDiffResult>(buildWorkspacePath(sessionId, 'diff', workspacePath))
   },
 
-  getTurnCheckpoints(sessionId: string, options?: ApiRequestOptions) {
+  getTurnCheckpoints(sessionId: string, options?: ApiRequestOptions, frozen = false) {
     return api.get<SessionTurnCheckpointsResponse>(
-      `/api/sessions/${sessionId}/turn-checkpoints`,
+      `/api/sessions/${sessionId}/turn-checkpoints${frozen ? '?frozen=true' : ''}`,
       options,
     )
   },
@@ -512,8 +512,10 @@ export const sessionsApi = {
     targetUserMessageId: string,
     workspacePath: string,
     userMessageIndex?: number,
+    frozen = false,
   ) {
     const query = new URLSearchParams()
+    if (frozen) query.set('frozen', 'true')
     query.set('targetUserMessageId', targetUserMessageId)
     if (Number.isInteger(userMessageIndex)) {
       query.set('userMessageIndex', String(userMessageIndex))

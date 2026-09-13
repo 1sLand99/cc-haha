@@ -325,6 +325,7 @@ export const browserHost: DesktopHost = {
     async find() {},
     async stopFind() {},
     async capture() {},
+    async snapshot() { return null },
     async message() {},
     async printToPdf() {},
     async close() {},

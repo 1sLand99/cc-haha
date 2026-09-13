@@ -170,6 +170,10 @@ function reviewPath(sessionId: string, suffix = '', query?: URLSearchParams): st
 }
 
 export const reviewApi = {
+  getRevision(sessionId: string, source: GitReviewSource, options?: ApiRequestOptions) {
+    return api.get<Pick<ReviewStatusResult, 'state' | 'source' | 'snapshot' | 'error'>>(reviewPath(sessionId, '/revision', buildSourceQuery(source)), options)
+  },
+
   getStatus(sessionId: string, source: GitReviewSource, options?: ApiRequestOptions) {
     return api.get<ReviewStatusResult>(reviewPath(sessionId, '', buildSourceQuery(source)), options)
   },

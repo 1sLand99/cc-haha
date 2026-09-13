@@ -108,6 +108,8 @@ export type DesktopUpdateCheckOptions = {
 }
 
 export type TerminalSpawnOptions = {
+  /** Correlates events that can arrive before the spawn IPC reply. */
+  requestId?: string
   cwd?: string
   cols: number
   rows: number
@@ -120,11 +122,15 @@ export type TerminalSession = {
 }
 
 export type TerminalOutputEvent = {
+  /** Correlates events that can arrive before the spawn IPC reply. */
+  requestId?: string
   session_id: number
   data: string
 }
 
 export type TerminalExitEvent = {
+  /** Correlates events that can arrive before the spawn IPC reply. */
+  requestId?: string
   session_id: number
   code: number
   signal?: string | null
@@ -153,6 +159,7 @@ export type PreviewPickerMessage = {
 } & (
   | {
       type: 'enter-picker'
+      persistent?: boolean
       mode?: 'single' | 'batch'
       label?: number
       copy?: {
@@ -169,7 +176,16 @@ export type PreviewPickerMessage = {
   | { type: 'commit-selection-draft' }
 )
 
-export type PreviewHostMessage = PreviewCaptureMessage | PreviewPickerMessage
+export type PreviewBrowserControlsMessage = {
+  v: 1
+  type: 'browser-controls'
+  zoomFactor: number
+  appZoom: number
+  copy: { zoom: string; zoomOut: string; zoomIn: string; zoomReset: string }
+  colors: { background: string; foreground: string; muted: string; border: string; hover: string; focus: string; shadow: string }
+}
+
+export type PreviewHostMessage = PreviewCaptureMessage | PreviewPickerMessage | PreviewBrowserControlsMessage
 
 /**
  * Multi-page browser host. Every method names its page, so a second page never
@@ -208,6 +224,7 @@ export type WorkspaceBrowserHistoryEntry = {
  * makes that check possible.
  */
 export type WorkspaceBrowserEvent =
+  | { type: 'shortcut'; tabId: string; action: import('../workspace/shortcuts').WorkspaceShortcutAction }
   | {
       type: 'state'
       tabId: string
@@ -216,6 +233,10 @@ export type WorkspaceBrowserEvent =
       canGoBack: boolean
       canGoForward: boolean
       loading: boolean
+      navigationId?: number
+      navigationOutcome?: 'idle' | 'pending' | 'succeeded' | 'failed'
+      zoomFactor?: number
+      annotationActive?: boolean
     }
   | {
       type: 'failed'
@@ -223,6 +244,7 @@ export type WorkspaceBrowserEvent =
       url: string
       errorCode: number
       errorDescription: string
+      navigationId?: number
     }
   /** `window.open`, `target=_blank` and popups all land here as a new tab. */
   | { type: 'new-window'; tabId: string; url: string }
@@ -423,6 +445,8 @@ export type DesktopHost = {
     onNativeMenuNavigate(handler: (destination: string) => void): Promise<DesktopHostUnlisten>
   }
   terminal: {
+    /** Absent in older preloads whose IPC validator rejects requestId. */
+    supportsStartupCorrelation?: boolean
     spawn(options: TerminalSpawnOptions): Promise<TerminalSession>
     write(sessionId: number, data: string): Promise<void>
     resize(sessionId: number, cols: number, rows: number): Promise<void>
@@ -445,7 +469,7 @@ export type DesktopHost = {
   browser: {
     create(
       tabId: string,
-      options: { storageId: string; url?: string; bounds?: WorkspaceBrowserBounds },
+      options: { storageId: string; url?: string; bounds?: WorkspaceBrowserBounds; visible?: boolean },
     ): Promise<void>
     navigate(tabId: string, url: string): Promise<void>
     goBack(tabId: string): Promise<void>
@@ -458,6 +482,8 @@ export type DesktopHost = {
     find(tabId: string, text: string, options?: WorkspaceBrowserFindOptions): Promise<void>
     stopFind(tabId: string): Promise<void>
     capture(tabId: string, kind: WorkspaceBrowserCaptureKind): Promise<void>
+    /** Read-only presentation backdrop, with no screenshot or composer event. */
+    snapshot(tabId: string): Promise<string | null>
     message(tabId: string, payload: PreviewHostMessage): Promise<void>
     printToPdf(tabId: string): Promise<void>
     close(tabId: string): Promise<void>

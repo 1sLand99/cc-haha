@@ -19,6 +19,8 @@ export type MenuKeyboardOptions = {
   /** Focus returns here when the menu closes. */
   triggerRef?: RefObject<HTMLElement | null>
   onClose: () => void
+  initialFocus?: 'first' | 'last'
+  loop?: boolean
 }
 
 function menuItemsOf(menu: HTMLElement | null): HTMLElement[] {
@@ -32,10 +34,13 @@ export function useMenuKeyboard({
   menuRef,
   triggerRef,
   onClose,
+  initialFocus = 'first',
+  loop = true,
 }: MenuKeyboardOptions): (event: KeyboardEvent<HTMLElement>) => void {
   useEffect(() => {
     if (!open) return
-    menuItemsOf(menuRef.current)[0]?.focus()
+    const items = menuItemsOf(menuRef.current)
+    items[initialFocus === 'last' ? items.length - 1 : 0]?.focus()
     return () => {
       // Only reclaim focus the menu itself was holding. A click that lands
       // somewhere else already moved focus on purpose, and stealing it back to
@@ -45,7 +50,7 @@ export function useMenuKeyboard({
       const active = document.activeElement
       if (active === null || active === document.body) triggerRef?.current?.focus()
     }
-  }, [menuRef, open, triggerRef])
+  }, [initialFocus, menuRef, open, triggerRef])
 
   return useCallback((event: KeyboardEvent<HTMLElement>) => {
     const items = menuItemsOf(menuRef.current)
@@ -59,10 +64,10 @@ export function useMenuKeyboard({
 
     switch (event.key) {
       case 'ArrowDown':
-        focusAt(index < 0 || index === items.length - 1 ? 0 : index + 1)
+        focusAt(index < 0 || (loop && index === items.length - 1) ? 0 : index + 1)
         break
       case 'ArrowUp':
-        focusAt(index <= 0 ? items.length - 1 : index - 1)
+        focusAt(index < 0 || (loop && index === 0) ? items.length - 1 : index - 1)
         break
       case 'Home':
         focusAt(0)
@@ -82,5 +87,5 @@ export function useMenuKeyboard({
       default:
         break
     }
-  }, [menuRef, onClose])
+  }, [loop, menuRef, onClose])
 }

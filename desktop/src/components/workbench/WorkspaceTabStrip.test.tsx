@@ -83,6 +83,12 @@ function renderStrip(overrides: Partial<Parameters<typeof WorkspaceTabStrip>[0]>
 }
 
 describe('WorkspaceTabStrip', () => {
+  it('preserves the file language identity without adding it to the tab name', () => {
+    renderStrip()
+    const tab = screen.getByRole('tab', { name: 'adapters.ts' })
+    expect(tab.querySelector('[data-file-type="ts"]')).toHaveAttribute('aria-hidden', 'true')
+  })
+
   it('shows the strip for a single tab', () => {
     renderStrip()
     // The reference keeps the strip at one tab too: it is what makes "this
@@ -130,6 +136,74 @@ describe('WorkspaceTabStrip', () => {
     expect(props.onActivate).not.toHaveBeenCalled()
   })
 
+  it.each([FILE_TAB, BROWSER_TAB, TERMINAL_TAB])('closes a background $kind tab with the middle button without activating or dragging it', (target) => {
+    const other: WorkspaceTab = { ...FILE_TAB, id: 'active-file', path: 'README.md' }
+    const { props } = renderStrip({ tabs: [other, target], activeTabId: other.id })
+    const tab = screen.getByTestId(`workspace-tab-${target.id}`)
+    const down = createEvent.mouseDown(tab, { button: 1 })
+    fireEvent(tab, down)
+    const aux = new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 })
+    fireEvent(tab, aux)
+
+    expect(down.defaultPrevented).toBe(true)
+    expect(aux.defaultPrevented).toBe(true)
+    expect(props.onClose).toHaveBeenCalledExactlyOnceWith(target.id)
+    expect(props.onActivate).not.toHaveBeenCalled()
+    expect(props.onReorder).not.toHaveBeenCalled()
+  })
+
+  it('does not close a tab for left or right auxiliary clicks', () => {
+    const { props } = renderStrip()
+    const tab = screen.getByTestId('workspace-tab-tab-file')
+    for (const button of [0, 2]) {
+      fireEvent(tab, new MouseEvent('auxclick', { bubbles: true, button }))
+    }
+    expect(props.onClose).not.toHaveBeenCalled()
+  })
+
+  it('reveals a newly active overflowing tab within its strip without stealing focus', () => {
+    const rect = (left: number, right: number) => ({ left, right, top: 0, bottom: 40, width: right - left, height: 40, x: left, y: 0, toJSON: () => ({}) })
+    const originalRect = HTMLElement.prototype.getBoundingClientRect
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'tablist') return rect(100, 400)
+      if (this.dataset.testid === 'workspace-tab-wrap-tab-review') return rect(450, 590)
+      if (this.dataset.testid === 'workspace-tab-wrap-tab-file') return rect(100, 240)
+      return originalRect.call(this)
+    })
+    try {
+      const { props, rerender } = renderStrip({ tabs: [FILE_TAB, BROWSER_TAB] })
+      const strip = screen.getByRole('tablist')
+      const trigger = screen.getByTestId('workspace-add-tab-side')
+      act(() => { trigger.focus() })
+      rerender(<WorkspaceTabStrip {...props} tabs={[FILE_TAB, BROWSER_TAB, REVIEW_TAB]} activeTabId={REVIEW_TAB.id} />)
+      expect(strip.scrollLeft).toBe(190)
+      expect(document.activeElement).toBe(trigger)
+
+      // Once revealed, an unrelated rerender must leave the user's scroll alone.
+      measure.mockImplementation(function (this: HTMLElement) {
+        if (this.getAttribute('role') === 'tablist') return rect(100, 400)
+        if (this.dataset.testid === 'workspace-tab-wrap-tab-review') return rect(250, 390)
+        return originalRect.call(this)
+      })
+      rerender(<WorkspaceTabStrip {...props} tabs={[FILE_TAB, BROWSER_TAB, REVIEW_TAB]} activeTabId={REVIEW_TAB.id} />)
+      expect(strip.scrollLeft).toBe(190)
+    } finally {
+      measure.mockRestore()
+    }
+  })
+
+  it('reveals an activated tab hidden to the left without scrolling the document', () => {
+    const { props, rerender } = renderStrip({ tabs: [FILE_TAB, BROWSER_TAB], activeTabId: BROWSER_TAB.id })
+    const strip = screen.getByRole('tablist')
+    strip.scrollLeft = 180
+    strip.getBoundingClientRect = () => ({ left: 200, right: 500, width: 300 } as DOMRect)
+    screen.getByTestId('workspace-tab-wrap-tab-file').getBoundingClientRect = () => ({ left: 20, right: 160, width: 140 } as DOMRect)
+    const documentScroll = document.documentElement.scrollTop
+    rerender(<WorkspaceTabStrip {...props} activeTabId={FILE_TAB.id} />)
+    expect(strip.scrollLeft).toBe(0)
+    expect(document.documentElement.scrollTop).toBe(documentScroll)
+  })
+
   it('offers the close scopes from the context menu', () => {
     const { props } = renderStrip({ tabs: [FILE_TAB, BROWSER_TAB] })
 
@@ -146,6 +220,31 @@ describe('WorkspaceTabStrip', () => {
     expect(screen.getByText('Reopen closed tab')).toBeDisabled()
   })
 
+  it.each(['side', 'bottom'] as const)('disables close scopes without targets in the %s dock', (dock) => {
+    const target: WorkspaceTab = { ...TERMINAL_TAB, dock }
+    const otherDock: WorkspaceTab = { ...TERMINAL_TAB, id: 'other-dock', dock: dock === 'side' ? 'bottom' : 'side' }
+    renderStrip({ dock, tabs: [target, otherDock], activeTabId: target.id })
+    fireEvent.contextMenu(screen.getByTestId(`workspace-tab-${target.id}`))
+    expect(screen.getByText('Close others')).toBeDisabled()
+    expect(screen.getByText('Close to the right')).toBeDisabled()
+  })
+
+  it('only enables close-right for a tab with another tab to its right in this dock', () => {
+    renderStrip({ tabs: [FILE_TAB, BROWSER_TAB] })
+    fireEvent.contextMenu(screen.getByTestId('workspace-tab-tab-web'))
+    expect(screen.getByText('Close others')).not.toBeDisabled()
+    expect(screen.getByText('Close to the right')).toBeDisabled()
+    fireEvent.contextMenu(screen.getByTestId('workspace-tab-tab-file'))
+    expect(screen.getByText('Close to the right')).not.toBeDisabled()
+  })
+
+  it('dismisses a context menu whose target was closed elsewhere', () => {
+    const { props, rerender } = renderStrip({ tabs: [FILE_TAB, BROWSER_TAB] })
+    fireEvent.contextMenu(screen.getByTestId('workspace-tab-tab-web'))
+    rerender(<WorkspaceTabStrip {...props} tabs={[FILE_TAB]} />)
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
   it('offers the dock move only for terminals', () => {
     const { props, unmount } = renderStrip({ tabs: [TERMINAL_TAB], activeTabId: TERMINAL_TAB.id })
     fireEvent.contextMenu(screen.getByTestId('workspace-tab-tab-term'))
@@ -160,10 +259,34 @@ describe('WorkspaceTabStrip', () => {
     expect(screen.queryByText('Move to bottom panel')).toBeNull()
   })
 
-  it('opens the content picker from the plus button', () => {
-    const { props } = renderStrip()
-    fireEvent.click(screen.getByTestId('workspace-add-tab-side'))
+  it.each(['side', 'bottom'] as const)('passes the %s plus button so the picker can return focus', (dock) => {
+    const { props } = renderStrip({ dock })
+    const trigger = screen.getByTestId(`workspace-add-tab-${dock}`)
+    fireEvent.click(trigger)
     expect(props.onAdd).toHaveBeenCalledTimes(1)
+    expect(props.onAdd).toHaveBeenCalledWith(trigger)
+  })
+
+  it('exposes the plus menu expanded state and only controls a mounted menu', () => {
+    const { props, rerender } = renderStrip({ addMenuId: 'resource-menu', addMenuOpen: false })
+    const trigger = screen.getByTestId('workspace-add-tab-side')
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(trigger).not.toHaveAttribute('aria-controls')
+    expect(trigger).toHaveAttribute('aria-pressed', 'false')
+    rerender(<WorkspaceTabStrip {...props} addMenuOpen />)
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(trigger).toHaveAttribute('aria-controls', 'resource-menu')
+    expect(trigger).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it.each([['ArrowDown', 'first'], ['ArrowUp', 'last']] as const)('opens plus menu with %s at the %s enabled item', (key, initialFocus) => {
+    const { props } = renderStrip()
+    const trigger = screen.getByTestId('workspace-add-tab-side')
+    const event = createEvent.keyDown(trigger, { key })
+    fireEvent(trigger, event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(props.onAdd).toHaveBeenCalledExactlyOnceWith(trigger, initialFocus)
   })
 
   it('reorders on drag and suppresses the click that ends the drag', () => {
@@ -323,10 +446,9 @@ describe('WorkspaceTabStrip', () => {
   })
 
   it('stands at the one workbench bar height', () => {
-    // h-11 is the shared scale: the strip, the file header, the review toolbar
-    // and the browser toolbar. It was the only one at h-11 while the file and
-    // review toolbars sat at h-9, so the content area jumped on every switch.
+    // Match the file and review toolbars so switching resources does not move
+    // the content boundary. The OS titlebar keeps its independent dimensions.
     renderStrip()
-    expect(screen.getByTestId('workspace-tab-strip-side').className).toContain('h-11')
+    expect(screen.getByTestId('workspace-tab-strip-side').className).toContain('h-10')
   })
 })

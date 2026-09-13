@@ -129,7 +129,8 @@ const terminalSpawn: Validator = value =>
   value === undefined
   || (
     isRecord(value)
-    && hasOnlyKeys(value, ['cols', 'rows', 'cwd'])
+    && hasOnlyKeys(value, ['cols', 'rows', 'cwd', 'requestId'])
+    && (value.requestId === undefined || (typeof value.requestId === 'string' && value.requestId.length > 0 && value.requestId.length <= 128))
     && (value.cols === undefined || isTerminalDimension(value.cols))
     && (value.rows === undefined || isTerminalDimension(value.rows))
     && (
@@ -199,11 +200,12 @@ const workspaceBrowserTab: Validator = value =>
 
 const workspaceBrowserCreate: Validator = value =>
   isRecord(value)
-  && hasOnlyKeys(value, ['tabId', 'storageId', 'url', 'bounds'])
+  && hasOnlyKeys(value, ['tabId', 'storageId', 'url', 'bounds', 'visible'])
   && isWorkspaceBrowserId(value.tabId)
   && isWorkspaceBrowserId(value.storageId)
   && (value.url === undefined || (typeof value.url === 'string' && value.url.length <= 8_192))
   && (value.bounds === undefined || boundsPayload(value.bounds))
+  && (value.visible === undefined || typeof value.visible === 'boolean')
 
 const workspaceBrowserNavigate: Validator = value =>
   isRecord(value)
@@ -362,6 +364,7 @@ export const ELECTRON_IPC_VALIDATORS = {
   [ELECTRON_IPC_CHANNELS.workspaceBrowserFind]: workspaceBrowserFind,
   [ELECTRON_IPC_CHANNELS.workspaceBrowserStopFind]: workspaceBrowserTab,
   [ELECTRON_IPC_CHANNELS.workspaceBrowserCapture]: workspaceBrowserCapture,
+  [ELECTRON_IPC_CHANNELS.workspaceBrowserSnapshot]: workspaceBrowserTab,
   [ELECTRON_IPC_CHANNELS.workspaceBrowserMessage]: workspaceBrowserMessage,
   [ELECTRON_IPC_CHANNELS.workspaceBrowserPrintToPdf]: workspaceBrowserTab,
   [ELECTRON_IPC_CHANNELS.workspaceBrowserClose]: workspaceBrowserTab,

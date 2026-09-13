@@ -6,6 +6,7 @@ import {
   DEFAULT_REVIEW_SOURCE,
   basenameOf,
   isBlankBrowserTab,
+  reviewSourceKey,
   type WorkspaceBrowserTab,
   type WorkspaceClosedGroup,
   type WorkspaceCloseScope,
@@ -117,6 +118,7 @@ type WorkspaceStore = {
   ) => void
   setReviewSource: (sessionId: string, tabId: string, source: WorkspaceReviewSource) => void
   setReviewSelectedPath: (sessionId: string, tabId: string, path: string | null) => void
+  setReviewViewedPaths: (sessionId: string, tabId: string, paths: string[], snapshot?: string) => void
   setTerminalStatus: (
     sessionId: string,
     runtimeId: string,
@@ -485,6 +487,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           tabs[index] = {
             ...existing,
             source: target.source ? source : existing.source,
+            viewedSnapshot: target.source && reviewSourceKey(source) !== reviewSourceKey(existing.source) ? undefined : existing.viewedSnapshot,
+            viewedPaths: target.source && reviewSourceKey(source) !== reviewSourceKey(existing.source)
+              ? []
+              : existing.viewedPaths,
             selectedPath: target.path ?? existing.selectedPath,
             preview: false,
           }
@@ -750,14 +756,30 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       // Lowest index first so each insertion lands in a list that already holds
       // everything that belonged to its left.
       for (const entry of [...group.tabs].sort((a, b) => a.dockIndex - b.dockIndex)) {
+        const closedTab = entry.tab
+        const existingIndex = closedTab.kind === 'file'
+          ? tabs.findIndex((candidate) => candidate.kind === 'file' && candidate.path === closedTab.path)
+          : -1
+        // The file may have been reopened since this close action. Keep its
+        // current identity and location; undo is an explicit durable open.
+        if (existingIndex >= 0) {
+          const existing = tabs[existingIndex]!
+          tabs[existingIndex] = { ...existing, preview: false }
+          activeByDock[existing.dock] = existing.id
+          restoredId = existing.id
+          if (layout === 'hidden') layout = 'split'
+          continue
+        }
         // A restored terminal is a fresh, stopped shell: new runtime id, no
         // replay. Pretending the old PTY is back is how "undo close" would
         // silently re-run whatever the user last typed.
         const tab: WorkspaceTab = entry.tab.kind === 'terminal'
           ? { ...entry.tab, runtimeId: nextId('wterm'), status: 'exited' }
           : entry.tab.kind === 'browser'
-            ? { ...entry.tab, browserTabId: nextId('wb'), loadError: null }
-            : entry.tab
+            ? { ...entry.tab, preview: false, browserTabId: nextId('wb'), loadError: null }
+            // Restoring a closed preview must not create another replaceable
+            // slot or discard the preview the user is currently looking at.
+            : { ...entry.tab, preview: false }
 
         const dockTabs = tabs.filter((candidate) => candidate.dock === tab.dock)
         const successor = dockTabs[entry.dockIndex]
@@ -819,10 +841,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       const index = current.tabs.findIndex((tab) => tab.id === tabId && tab.kind === 'review')
       if (index < 0) return store
       const tab = current.tabs[index] as WorkspaceReviewTab
+      if (reviewSourceKey(tab.source) === reviewSourceKey(source)) return store
       const tabs = [...current.tabs]
       // Changing the comparison resets the selection: the previous file may not
       // even be part of the new source.
-      tabs[index] = { ...tab, source, selectedPath: null }
+      tabs[index] = { ...tab, source, selectedPath: null, viewedPaths: [], viewedSnapshot: undefined }
       return { bySession: { ...store.bySession, [sessionId]: { ...current, tabs } } }
     }),
 
@@ -835,6 +858,19 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       if (tab.selectedPath === path) return store
       const tabs = [...current.tabs]
       tabs[index] = { ...tab, selectedPath: path }
+      return { bySession: { ...store.bySession, [sessionId]: { ...current, tabs } } }
+    }),
+
+  setReviewViewedPaths: (sessionId, tabId, paths, snapshot) =>
+    set((store) => {
+      const current = session(store.bySession, sessionId)
+      const index = current.tabs.findIndex((tab) => tab.id === tabId && tab.kind === 'review')
+      if (index < 0) return store
+      const tab = current.tabs[index] as WorkspaceReviewTab
+      const viewedPaths = [...new Set(paths)]
+      if (tab.viewedSnapshot === snapshot && tab.viewedPaths?.length === viewedPaths.length && viewedPaths.every((path, i) => path === tab.viewedPaths?.[i])) return store
+      const tabs = [...current.tabs]
+      tabs[index] = { ...tab, viewedPaths, viewedSnapshot: snapshot }
       return { bySession: { ...store.bySession, [sessionId]: { ...current, tabs } } }
     }),
 

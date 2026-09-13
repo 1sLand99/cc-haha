@@ -13,7 +13,7 @@ import * as os from 'node:os'
 import { createInterface } from 'node:readline'
 import { ApiError } from '../middleware/errorHandler.js'
 import { sanitizePath as sanitizePortablePath } from '../../utils/sessionStoragePortable.js'
-import type { FileHistorySnapshot } from '../../utils/fileHistory.js'
+import { migrateFileHistorySnapshot, type FileHistorySnapshot } from '../../utils/fileHistory.js'
 import { findCanonicalGitRoot } from '../../utils/git.js'
 import { calculateUSDCost, MODEL_COSTS } from '../../utils/modelCost.js'
 import {
@@ -352,6 +352,7 @@ type RawEntry = {
   snapshot?: {
     messageId?: string
     trackedFileBackups?: Record<string, unknown>
+    completedFileBackups?: Record<string, unknown>
     timestamp?: string
   }
   customTitle?: string
@@ -581,6 +582,14 @@ function getSharedSessionMutationState(
   const created: SharedSessionMutationState = { epoch: 0, bypass: null }
   sharedSessionMutationStates.set(gateway, created)
   return created
+}
+
+// Read-time evidence only: spreads preserve it, JSON serialization does not.
+// A malformed before map must not become indistinguishable from a valid {}.
+const malformedFileHistoryBefore = Symbol('malformed-file-history-before')
+
+export function hasMalformedFileHistoryBefore(snapshot: FileHistorySnapshot): boolean {
+  return (snapshot as FileHistorySnapshot & { [malformedFileHistoryBefore]?: true })[malformedFileHistoryBefore] === true
 }
 
 export class SessionService {
@@ -4620,17 +4629,22 @@ export class SessionService {
 
       if (!snapshotMessageId) continue
 
-      snapshotsByMessageId.set(snapshotMessageId, {
+      const beforeMapValid = !!entry.snapshot.trackedFileBackups && typeof entry.snapshot.trackedFileBackups === 'object' && !Array.isArray(entry.snapshot.trackedFileBackups)
+      snapshotsByMessageId.set(snapshotMessageId, migrateFileHistorySnapshot({
         messageId: snapshotMessageId as FileHistorySnapshot['messageId'],
-        trackedFileBackups:
-          entry.snapshot.trackedFileBackups &&
-          typeof entry.snapshot.trackedFileBackups === 'object'
-            ? (entry.snapshot.trackedFileBackups as FileHistorySnapshot['trackedFileBackups'])
+        trackedFileBackups: beforeMapValid ? entry.snapshot.trackedFileBackups as FileHistorySnapshot['trackedFileBackups'] : {},
+        ...(!beforeMapValid ? { [malformedFileHistoryBefore]: true } : {}),
+        // A corrupt completion marker must not become a legacy before-only
+        // record that can silently fall through to another turn's boundary.
+        ...(Object.prototype.hasOwnProperty.call(entry.snapshot, 'completedFileBackups') ? {
+          completedFileBackups: entry.snapshot.completedFileBackups && typeof entry.snapshot.completedFileBackups === 'object' && !Array.isArray(entry.snapshot.completedFileBackups)
+            ? entry.snapshot.completedFileBackups as FileHistorySnapshot['completedFileBackups']
             : {},
+        } : {}),
         timestamp: new Date(
           entry.snapshot.timestamp || entry.timestamp || new Date().toISOString(),
         ),
-      })
+      }))
     }
 
     return [...snapshotsByMessageId.values()]

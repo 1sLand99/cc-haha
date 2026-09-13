@@ -138,7 +138,7 @@ describe('TerminalSettings', () => {
     render(<TerminalSettings />)
 
     await waitFor(() => {
-      expect(terminalMocks.spawn).toHaveBeenCalledWith({ cols: 80, rows: 24 })
+      expect(terminalMocks.spawn).toHaveBeenCalledWith({ cols: 80, rows: 24, requestId: expect.any(String) })
     })
     expect(screen.getByText('/bin/zsh')).toBeInTheDocument()
     expect(screen.getByText('/Users/test')).toBeInTheDocument()
@@ -205,6 +205,20 @@ describe('TerminalSettings', () => {
     expect(panel?.className).toContain('bg-[var(--color-terminal-bg)]')
     expect(panel?.className).toContain('rounded-[var(--radius-xl)]')
     expect(panel).toContainElement(screen.getByTestId('settings-terminal-frame'))
+  })
+
+  it('uses a flush workspace surface while keeping shell status and actions when docked', async () => {
+    terminalMocks.available = true
+    render(<TerminalSettings docked />)
+    await waitFor(() => expect(terminalMocks.spawn).toHaveBeenCalled())
+    const toolbar = screen.getByTestId('settings-terminal-toolbar')
+    expect(toolbar.querySelector('h2')).toBeNull()
+    expect(toolbar.parentElement?.className).not.toContain('rounded-')
+    expect(toolbar.parentElement?.className).not.toContain('shadow-')
+    expect(toolbar).toHaveTextContent('/bin/zsh')
+    expect(toolbar).toHaveTextContent('Running')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    expect(terminalMocks.terminalInstance.clear).toHaveBeenCalled()
   })
 
   it('puts the cwd and shell in mono and keeps the status a bare dot', async () => {
@@ -295,8 +309,27 @@ describe('TerminalSettings', () => {
         cols: 80,
         rows: 24,
         cwd: '/tmp/current-project',
+        requestId: expect.any(String),
       })
     })
+  })
+
+  it('preserves output and exit delivered before the spawn IPC reply without reviving the process', async () => {
+    terminalMocks.available = true
+    terminalMocks.spawn.mockImplementation(async (input) => {
+      expect(input.requestId).toEqual(expect.any(String))
+      const output = terminalMocks.onOutput.mock.calls.at(-1)![0]
+      const exit = terminalMocks.onExit.mock.calls.at(-1)![0]
+      output({ session_id: 91, requestId: 'another-start', data: 'wrong terminal' })
+      output({ session_id: 7, requestId: input.requestId, data: 'startup prompt' })
+      exit({ session_id: 7, requestId: input.requestId, code: 0 })
+      return { session_id: 7, shell: '/bin/zsh', cwd: '/fixture' }
+    })
+    render(<TerminalSettings />)
+    await waitFor(() => expect(terminalMocks.terminalInstance.write).toHaveBeenCalledWith('startup prompt'))
+    expect(terminalMocks.terminalInstance.write).not.toHaveBeenCalledWith('wrong terminal')
+    expect(screen.getByText('Exited')).toBeInTheDocument()
+    expect(screen.queryByText('Running')).toBeNull()
   })
 
   it('writes matching terminal output events into xterm', async () => {

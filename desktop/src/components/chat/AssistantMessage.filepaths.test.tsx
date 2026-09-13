@@ -14,10 +14,6 @@ vi.mock('../../lib/workspace/openTarget', () => ({
   },
   openWorkspaceTarget: vi.fn(),
 }))
-
-vi.mock('../../stores/browserPanelStore', () => ({
-  useBrowserPanelStore: { getState: () => ({ open: openBrowser }) },
-}))
 vi.mock('../../lib/desktopRuntime', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   getServerBaseUrl: () => 'http://127.0.0.1:4321',

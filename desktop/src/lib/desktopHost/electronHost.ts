@@ -169,6 +169,7 @@ export function createElectronHost(bridge: ElectronHostBridge): DesktopHost {
       onNativeMenuNavigate: handler => subscribe(ELECTRON_EVENT_CHANNELS.nativeMenuNavigate, handler),
     },
     terminal: {
+      supportsStartupCorrelation: true,
       spawn: options => invoke(ELECTRON_IPC_CHANNELS.terminalSpawn, options),
       write: (sessionId, data) => invoke(ELECTRON_IPC_CHANNELS.terminalWrite, { sessionId, data }),
       resize: (sessionId, cols, rows) => invoke(ELECTRON_IPC_CHANNELS.terminalResize, { sessionId, cols, rows }),
@@ -194,6 +195,7 @@ export function createElectronHost(bridge: ElectronHostBridge): DesktopHost {
         storageId: options.storageId,
         ...(options.url === undefined ? {} : { url: options.url }),
         ...(options.bounds === undefined ? {} : { bounds: options.bounds }),
+        ...(options.visible === undefined ? {} : { visible: options.visible }),
       }),
       navigate: (tabId, url) => invoke(ELECTRON_IPC_CHANNELS.workspaceBrowserNavigate, { tabId, url }),
       goBack: tabId => invoke(ELECTRON_IPC_CHANNELS.workspaceBrowserGoBack, { tabId }),
@@ -213,6 +215,7 @@ export function createElectronHost(bridge: ElectronHostBridge): DesktopHost {
       }),
       stopFind: tabId => invoke(ELECTRON_IPC_CHANNELS.workspaceBrowserStopFind, { tabId }),
       capture: (tabId, kind) => invoke(ELECTRON_IPC_CHANNELS.workspaceBrowserCapture, { tabId, kind }),
+      snapshot: (tabId) => invoke(ELECTRON_IPC_CHANNELS.workspaceBrowserSnapshot, { tabId }),
       message: (tabId, payload) => invoke(ELECTRON_IPC_CHANNELS.workspaceBrowserMessage, { tabId, payload }),
       printToPdf: tabId => invoke(ELECTRON_IPC_CHANNELS.workspaceBrowserPrintToPdf, { tabId }),
       close: tabId => invoke(ELECTRON_IPC_CHANNELS.workspaceBrowserClose, { tabId }),

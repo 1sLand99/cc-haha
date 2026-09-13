@@ -1976,6 +1976,7 @@ describe('ActiveSession task polling', () => {
     const resizeHandle = screen.getByTestId('workspace-resize-handle')
 
     const workbenchPanel = screen.getByTestId('workbench-panel')
+    expect(workbenchPanel.style.maxWidth).toBe('70%')
 
     expect(within(contentRow).getByTestId('message-list')).toBeInTheDocument()
     expect(within(contentRow).getByTestId('message-list')).toHaveAttribute('data-compact', 'true')
@@ -2377,7 +2378,7 @@ describe('ActiveSession task polling', () => {
       .getAttribute('data-runtime-id')
     expect(runtimeIdBefore).toBeTruthy()
 
-    fireEvent.click(screen.getByTestId('workspace-hide-bottom'))
+    act(() => useWorkspaceStore.getState().toggleBottomPanel(sessionId, '/tmp/project'))
 
     expect(useWorkspaceStore.getState().getSession(sessionId).bottomOpen).toBe(false)
     // Hidden, not unmounted, and still the same PTY: re-opening must come back

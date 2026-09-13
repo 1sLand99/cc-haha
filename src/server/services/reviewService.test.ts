@@ -569,7 +569,7 @@ describe('ReviewService write operations', () => {
     const result = await service.stage(SESSION, {
       paths: ['tracked.txt', 'does-not-exist.txt'],
       snapshot: before.snapshot,
-      source: STAGED,
+      source: UNSTAGED,
     })
 
     expect(result.state).toBe('partial')
@@ -577,8 +577,8 @@ describe('ReviewService write operations', () => {
     expect(result.results.find((entry) => entry.path === 'does-not-exist.txt')?.ok).toBe(false)
     // The refreshed status reflects what actually landed.
     expect(result.status?.files.map((file) => file.path).sort()).toEqual([
-      'staged-only.txt',
-      'tracked.txt',
+      'binary.dat',
+      'untracked.txt',
     ])
   })
 })
@@ -1433,4 +1433,157 @@ describe('ReviewService wildcard filenames', () => {
     expect(await fs.readFile(path.join(repoDir, 'report.txt'), 'utf8')).toBe('EDITED\n')
     expect(await fs.readFile(path.join(repoDir, 'reportX.txt'), 'utf8')).toBe('EDITED\n')
   })
+})
+
+
+describe('ReviewService review safety regressions', () => {
+  it.each([
+    ['', 0o644], ['abc', 0o644], ['abc\n', 0o644], ['abc\r\nnext\r\n', 0o644], ['#!/bin/sh\nprintf ok', 0o755],
+  ])('stages new-file bytes and mode exactly: %j / %s', async (content, mode) => {
+    const repoDir = await initRepo()
+    await write(repoDir, 'new.txt', content)
+    await fs.chmod(path.join(repoDir, 'new.txt'), mode)
+    const service = makeService(repoDir)
+    const diff = await service.getFileDiff(SESSION, { source: UNSTAGED, path: 'new.txt' })
+    expect(diff.state).toBe('ok')
+    const result = await service.stageHunk(SESSION, { patch: diff.diff!, snapshot: diff.snapshot, source: UNSTAGED })
+    expect(result.state).toBe('ok')
+    expect(execFileSync('git', ['show', ':new.txt'], { cwd: repoDir })).toEqual(Buffer.from(content))
+    expect(git(repoDir, 'ls-files', '--stage', 'new.txt').split(' ')[0]).toBe(mode === 0o755 ? '100755' : '100644')
+  })
+
+  it('rejects working-tree writes from the staged comparison without changing either side', async () => {
+    const repoDir = await initRepo()
+    await write(repoDir, 'both.txt', 'HEAD\n')
+    git(repoDir, 'add', '.')
+    git(repoDir, 'commit', '-m', 'base')
+    await write(repoDir, 'both.txt', 'STAGED\n')
+    git(repoDir, 'add', '.')
+    await write(repoDir, 'both.txt', 'UNSTAGED\n')
+    const service = makeService(repoDir)
+    const status = await service.getStatus(SESSION, STAGED)
+    for (const operation of ['stage', 'revert'] as const) {
+      const result = await service[operation](SESSION, { source: STAGED, paths: ['both.txt'], snapshot: status.snapshot })
+      expect(result.state).toBe('error')
+      expect(git(repoDir, 'show', ':both.txt')).toBe('STAGED\n')
+      expect(await fs.readFile(path.join(repoDir, 'both.txt'), 'utf8')).toBe('UNSTAGED\n')
+    }
+    const result = await service.unstage(SESSION, { source: STAGED, paths: ['both.txt'], snapshot: status.snapshot })
+    expect(result.state).toBe('ok')
+    expect(git(repoDir, 'show', ':both.txt')).toBe('HEAD\n')
+    expect(await fs.readFile(path.join(repoDir, 'both.txt'), 'utf8')).toBe('UNSTAGED\n')
+  })
+})
+
+
+describe('ReviewService rename and historical isolation regressions', () => {
+  it.each([false, true])('unstages both ends of a cross-directory rename with later edits=%s', async (modified) => {
+    const repoDir = await initRepo()
+    await write(repoDir, 'old/name.txt', 'one\ntwo\nthree\nfour\n')
+    git(repoDir, 'add', '.')
+    git(repoDir, 'commit', '-m', 'base')
+    await fs.mkdir(path.join(repoDir, 'new'))
+    git(repoDir, 'mv', 'old/name.txt', 'new/name.txt')
+    if (modified) await write(repoDir, 'new/name.txt', 'one\ntwo\nthree\nfour\nworking edit\n')
+    const service = makeService(repoDir)
+    const before = await service.getStatus(SESSION, STAGED)
+    expect(before.files[0]).toMatchObject({ path: 'new/name.txt', oldPath: 'old/name.txt' })
+    const result = await service.unstage(SESSION, { source: STAGED, paths: ['new/name.txt'], snapshot: before.snapshot })
+    expect(result.state).toBe('ok')
+    expect(git(repoDir, 'diff', '--cached', '--name-status')).toBe('')
+    expect(await fs.readFile(path.join(repoDir, 'new/name.txt'), 'utf8')).toContain(modified ? 'working edit' : 'four')
+  })
+
+  it('does not partially unstage a rename whose other end is outside the workspace', async () => {
+    const repoDir = await initRepo()
+    await write(repoDir, 'outside.txt', 'base\n')
+    await fs.mkdir(path.join(repoDir, 'workspace'))
+    git(repoDir, 'add', '.')
+    git(repoDir, 'commit', '-m', 'base')
+    git(repoDir, 'mv', 'outside.txt', 'workspace/new.txt')
+    const service = makeService(path.join(repoDir, 'workspace'))
+    const before = await service.getStatus(SESSION, STAGED)
+    const oldIndex = git(repoDir, 'ls-files', '--stage')
+    const result = await service.unstage(SESSION, { source: STAGED, paths: ['new.txt'], snapshot: before.snapshot })
+    expect(result.state).toBe('error')
+    expect(git(repoDir, 'ls-files', '--stage')).toBe(oldIndex)
+  })
+
+  it.each(['untracked', 'directory', 'symlink'])('reads an added historical blob when current path is %s', async (currentType) => {
+    const repoDir = await initRepo()
+    await write(repoDir, 'file.txt', 'historical\n')
+    git(repoDir, 'add', '.')
+    git(repoDir, 'commit', '-m', 'base')
+    const commit = git(repoDir, 'rev-parse', 'HEAD').trim()
+    git(repoDir, 'rm', 'file.txt')
+    git(repoDir, 'commit', '-m', 'delete')
+    if (currentType === 'untracked') await write(repoDir, 'file.txt', 'unrelated live file\n')
+    if (currentType === 'directory') await write(repoDir, 'file.txt/child.txt', 'unrelated live directory\n')
+    if (currentType === 'symlink') await fs.symlink('does-not-exist', path.join(repoDir, 'file.txt'))
+    const service = makeService(repoDir)
+    const source: ReviewSource = { kind: 'commit', commit }
+    expect((await service.getStatus(SESSION, source)).files.map(file => file.path)).toEqual(['file.txt'])
+    const diff = await service.getFileDiff(SESSION, { source, path: 'file.txt' })
+    expect(diff.state).toBe('ok')
+    expect(diff.diff).toContain('+historical')
+    expect(diff.diff).not.toContain('unrelated')
+  })
+})
+
+
+describe('ReviewService exact new-file path headers', () => {
+  it.each(['space name.txt', 'line\nbreak.txt', 'back\\slash.txt', 'trailing .txt '])('stages an empty file whose name needs Git quoting: %j', async (name) => {
+    const repoDir = await initRepo()
+    await write(repoDir, name, '')
+    const service = makeService(repoDir)
+    const diff = await service.getFileDiff(SESSION, { source: UNSTAGED, path: name })
+    expect(collectPatchPaths(diff.diff!)).toEqual([name])
+    const staged = await service.stageHunk(SESSION, { source: UNSTAGED, snapshot: diff.snapshot, patch: diff.diff! })
+    expect(staged.state).toBe('ok')
+    expect(execFileSync('git', ['show', `:${name}`], { cwd: repoDir })).toEqual(Buffer.alloc(0))
+  })
+})
+
+
+it('keeps a commit review snapshot stable while unrelated working-tree files change', async () => {
+  const repoDir = await createMixedRepo()
+  const service = makeService(repoDir)
+  const source: ReviewSource = { kind: 'commit', commit: 'HEAD' }
+  const status = await service.getStatus(SESSION, source)
+  await write(repoDir, 'untracked.txt', 'later change\n')
+  const diff = await service.getFileDiff(SESSION, { source, path: 'tracked.txt' })
+  expect(diff.snapshot).toBe(status.snapshot)
+  expect(diff.state).toBe('ok')
+})
+
+describe('review comparison revisions', () => {
+  it('changes the branch revision when its merge base moves without workspace changes', async () => {
+    const repo = await initRepo()
+    await write(repo, 'a.txt', 'base\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-qm', 'base')
+    git(repo, 'branch', 'comparison')
+    await write(repo, 'a.txt', 'next\n')
+    git(repo, 'commit', '-qam', 'next')
+    const service = makeService(repo)
+    const source = { kind: 'branch' as const, baseRef: 'comparison' }
+    const before = await service.getStatus(SESSION, source)
+    git(repo, 'branch', '-f', 'comparison', 'HEAD')
+    const after = await service.getStatus(SESSION, source)
+    expect(before.files).toHaveLength(1)
+    expect(after.files).toHaveLength(0)
+    expect(after.snapshot).not.toBe(before.snapshot)
+    expect((await service.getRevision(SESSION, source)).snapshot).toBe(after.snapshot)
+  })
+})
+
+
+it('uses the same no-head revision as the full status for an unborn repository', async () => {
+  const repo = await initRepo()
+  await write(repo, 'new.txt', 'new\n')
+  const service = makeService(repo)
+  const full = await service.getStatus(SESSION, STAGED)
+  const revision = await service.getRevision(SESSION, STAGED)
+  expect(revision.state).toBe('no_head')
+  expect(revision.snapshot).toBe(full.snapshot)
 })

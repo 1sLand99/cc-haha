@@ -1,4 +1,5 @@
 import { getDesktopHost } from '../desktopHost'
+import { usePreviewSelectionStore } from '../../stores/previewSelectionStore'
 import type {
   WorkspaceBrowserBounds,
   WorkspaceBrowserCaptureKind,
@@ -47,7 +48,7 @@ async function call(
 export const workspaceBrowserHost = {
   create: (
     tabId: string,
-    options: { storageId: string; url?: string; bounds?: WorkspaceBrowserBounds },
+    options: { storageId: string; url?: string; bounds?: WorkspaceBrowserBounds; visible?: boolean },
   ) => call((api) => api.create(tabId, options)),
   navigate: (tabId: string, url: string) => call((api) => api.navigate(tabId, url)),
   goBack: (tabId: string) => call((api) => api.goBack(tabId)),
@@ -64,6 +65,10 @@ export const workspaceBrowserHost = {
   stopFind: (tabId: string) => call((api) => api.stopFind(tabId)),
   capture: (tabId: string, kind: WorkspaceBrowserCaptureKind) =>
     call((api) => api.capture(tabId, kind)),
+  snapshot: async (tabId: string): Promise<string | null> => {
+    const api = host()
+    return api ? api.snapshot(tabId) : null
+  },
   message: (tabId: string, payload: PreviewHostMessage) =>
     call((api) => api.message(tabId, payload)),
   close: (tabId: string) => call((api) => api.close(tabId)),
@@ -76,6 +81,7 @@ export const workspaceBrowserHost = {
  * page (crash, window teardown) still has to let the UI forget about it.
  */
 export function releaseWorkspaceBrowserTab(browserTabId: string): void {
+  usePreviewSelectionStore.getState().clear(browserTabId)
   void workspaceBrowserHost.close(browserTabId).catch(() => {})
 }
 

@@ -6,6 +6,11 @@ const { loadFile, loadStatus } = vi.hoisted(() => ({
   loadFile: vi.fn().mockResolvedValue(undefined),
   loadStatus: vi.fn().mockResolvedValue(undefined),
 }))
+const openWithState = vi.hoisted(() => ({
+  primaryTarget: { id: 'code', kind: 'ide', label: 'VS Code', icon: '', platform: 'darwin' },
+  targets: [], loading: false, error: null, openTarget: vi.fn(),
+}))
+vi.mock('../workspace/workspaceFileOpenTargets', () => ({ useWorkspaceFileOpenTargets: () => openWithState }))
 
 /**
  * The tree pane and the two text surfaces have their own suites. Stubbing them
@@ -55,10 +60,11 @@ vi.mock('../workspace/surfaces/MarkdownSurface', () => ({
  * the keyboard cases.
  */
 vi.mock('../workspace/WorkspaceFileOpenWith', () => ({
-  WorkspaceFileOpenWith: ({ absolutePath }: { absolutePath: string }) => (
+  WorkspaceFileOpenWith: ({ absolutePath, onRefresh }: { absolutePath: string; onRefresh?: () => void }) => (
     <div data-testid="open-with-menu" data-absolute-path={absolutePath}>
       <button type="button" role="menuitem">Open in editor</button>
       <button type="button" role="menuitem">Reveal in finder</button>
+      <button type="button" role="menuitem" onClick={onRefresh}>Refresh workspace</button>
     </div>
   ),
 }))
@@ -104,6 +110,8 @@ beforeEach(() => {
     treeByKey: {},
     treeLoadingByKey: {},
     expandedBySession: {},
+    treeViewBySession: {},
+    fileViewByKey: {},
     statusBySession: {
       [SESSION]: {
         state: 'ok',
@@ -128,6 +136,28 @@ afterEach(() => {
 })
 
 describe('content states', () => {
+  it('gives the file picker a centered invitation while the tree remains available', () => {
+    renderTab('')
+    expect(screen.getByRole('heading', { name: 'Open file' })).toBeVisible()
+    expect(screen.getByText('Choose a file from the tree')).toBeVisible()
+    expect(screen.getByTestId('file-tree-pane')).toBeVisible()
+  })
+
+  it('keeps one full-width toolbar above both the preview and the file tree', () => {
+    seedEntry('src/a.ts', { content: 'export const value = 1', language: 'typescript' })
+    renderTab('src/a.ts')
+    const header = screen.getByTestId('workspace-file-header')
+    const body = screen.getByTestId('workspace-file-body')
+    expect(header.parentElement).toBe(body.parentElement)
+    expect(body).toContainElement(screen.getByTestId('code-surface'))
+    expect(body).toContainElement(screen.getByTestId('file-tree-pane'))
+    expect(header).not.toContainElement(screen.getByTestId('file-tree-pane'))
+    fireEvent.click(screen.getByTestId('workspace-file-tree-toggle'))
+    expect(header).toBeVisible()
+    expect(screen.getByTestId('workspace-tree-sidebar')).not.toBeVisible()
+    expect(screen.getByTestId('code-surface')).toBeVisible()
+  })
+
   it('asks for the file as soon as the tab is shown', () => {
     renderTab('src/a.ts')
     expect(loadFile).toHaveBeenCalledWith(SESSION, 'src/a.ts')
@@ -214,7 +244,8 @@ describe('refresh', () => {
     seedEntry('src/a.ts', { state: 'ok', content: 'const x = 1' })
     renderTab('src/a.ts')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh workspace' }))
+    fireEvent.click(screen.getByTestId('workspace-file-open-with'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh workspace' }))
 
     expect(loadFile).toHaveBeenLastCalledWith(SESSION, 'src/a.ts', { force: true })
   })
@@ -267,7 +298,7 @@ describe('file tree', () => {
 
     fireEvent.click(toggle)
 
-    expect(screen.queryByTestId('file-tree-pane')).toBeNull()
+    expect(screen.getByTestId('file-tree-pane')).not.toBeVisible()
     expect(screen.getByTestId('code-surface')).toBeInTheDocument()
     expect(screen.getByTestId('workspace-file-tree-toggle')).toHaveAttribute('aria-pressed', 'false')
 
@@ -287,6 +318,27 @@ describe('file tree', () => {
 })
 
 describe('breadcrumb and chat handoff', () => {
+  it.each([
+    { workDir: 'C:\\repo', path: 'C:\\repo\\src\\a.ts', watchPath: undefined },
+    { workDir: 'C:\\repo\\', path: 'c:/repo/src/a.ts', watchPath: undefined },
+    { workDir: '\\\\server\\share\\repo', path: '\\\\server\\share\\repo\\src\\a.ts', watchPath: undefined },
+    { workDir: '/repo', path: '/resolved/alias/a.ts', watchPath: 'src/a.ts' },
+  ])('normalizes the project-relative breadcrumb for $path', ({ workDir, path, watchPath }) => {
+    useWorkspaceContentStore.setState(state => ({ statusBySession: {
+      ...state.statusBySession,
+      [SESSION]: { ...state.statusBySession[SESSION]!, workDir },
+    } }))
+    seedEntry(path, { content: '', watchPath })
+    renderTab(path)
+    expect(screen.getByRole('navigation', { name: 'File path' })).toHaveTextContent(/^reposrca.ts$/)
+  })
+
+  it('identifies the project before the file path', () => {
+    seedEntry('src/a.ts', { content: '' })
+    renderTab('src/a.ts')
+    expect(screen.getByRole('navigation', { name: 'File path' })).toHaveTextContent(/^reposrca.ts$/)
+  })
+
   it('spells out the path segments of the open file', () => {
     seedEntry('src/lib/a.ts', { state: 'ok', previewType: 'text', content: '' })
     renderTab('src/lib/a.ts')
@@ -300,7 +352,7 @@ describe('breadcrumb and chat handoff', () => {
   it('says no file is selected rather than showing an empty breadcrumb', () => {
     renderTab('')
     expect(screen.getByRole('navigation', { name: 'File path' })).toHaveTextContent(
-      'No file selected',
+      '/',
     )
   })
 
@@ -324,6 +376,24 @@ describe('breadcrumb and chat handoff', () => {
 })
 
 describe('open with', () => {
+  it.each([
+    ['/repo/src/a.ts', '/repo', '/repo/src/a.ts'],
+    ['/tmp/outside.ts', '/repo', '/tmp/outside.ts'],
+    ['C:\\repo\\src\\a.ts', 'C:\\repo', 'C:\\repo\\src\\a.ts'],
+    ['D:/outside/a.ts', 'C:/repo', 'D:/outside/a.ts'],
+    ['\\\\server\\share\\a.ts', 'C:/repo', '\\\\server\\share\\a.ts'],
+    ['src/a.ts', 'C:\\repo\\', 'C:\\repo/src/a.ts'],
+  ])('resolves Open With target %s without prefixing an already absolute path', (path, workDir, expected) => {
+    useWorkspaceContentStore.setState((state) => ({ statusBySession: {
+      ...state.statusBySession,
+      [SESSION]: { ...state.statusBySession[SESSION]!, workDir },
+    } }))
+    seedEntry(path, { state: 'ok', previewType: 'text', content: 'const x = 1' })
+    renderTab(path)
+    fireEvent.click(screen.getByTestId('workspace-file-open-with'))
+    expect(screen.getByTestId('open-with-menu')).toHaveAttribute('data-absolute-path', expected)
+  })
+
   it('hands the open-with menu an absolute path', async () => {
     // Regression anchor: `workDir` was an optional prop that the only render
     // site never passed, so this menu (and the Markdown surface) received
@@ -376,13 +446,15 @@ describe('open with', () => {
 
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'ArrowDown' })
     expect(document.activeElement).toBe(items[1])
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(items[2])
 
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'ArrowDown' })
     // Wraps rather than dead-ends at the bottom.
     expect(document.activeElement).toBe(items[0])
 
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'End' })
-    expect(document.activeElement).toBe(items[1])
+    expect(document.activeElement).toBe(items[2])
 
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Home' })
     expect(document.activeElement).toBe(items[0])
@@ -403,9 +475,16 @@ describe('open with', () => {
 
 describe('toolbar density', () => {
   it('matches the shared workbench bar height', () => {
-    // Same h-11 as the tab strip and the review toolbar: an h-9 header here
-    // moved the content up 8px whenever the user switched to a file tab.
+    // Same height as the resource tab strip and review toolbar; switching
+    // resources must not move the content boundary.
     renderTab('src/a.ts')
-    expect(screen.getByTestId('workspace-file-header').className).toContain('h-11')
+    expect(screen.getByTestId('workspace-file-header').className).toContain('h-[52px]')
+  })
+
+  it('opens with the displayed application from the primary half without opening the dropdown', () => {
+    renderTab('src/a.ts')
+    fireEvent.click(screen.getByTestId('workspace-file-open-primary'))
+    expect(openWithState.openTarget).toHaveBeenCalledWith(openWithState.primaryTarget)
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 })

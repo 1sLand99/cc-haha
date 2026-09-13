@@ -49,6 +49,7 @@ import { runsForSession, useWorkflowStore } from '../stores/workflowStore'
 import type { SessionListItem } from '../types/session'
 import type { ActiveGoalState, TokenUsage } from '../types/chat'
 import type { TeamMember } from '../types/team'
+import { useWorkspaceAdaptiveLayout } from '@/hooks/useWorkspaceAdaptiveLayout'
 import { useMobileViewport } from '../hooks/useMobileViewport'
 import { useWorkspaceShortcuts } from '../hooks/useWorkspaceShortcuts'
 import { useWorkspaceFocusReturn } from '../hooks/useWorkspaceFocusReturn'
@@ -376,7 +377,8 @@ export function ActiveSession() {
   const showRightPanel = showWorkbench
   // `full` still renders the same panel; the chat column is what gives way, so
   // no tab is recreated and no page or PTY restarts on the way in or out.
-  const isWorkspaceFull = workspaceLayout === 'full'
+  const compactWorkspace = useWorkspaceAdaptiveLayout(workbenchPanelRef, showWorkbench)
+  const isWorkspaceFull = workspaceLayout === 'full' || compactWorkspace
   const rightPanelWidth = useWorkspaceStore((state) => state.sideWidth)
   const showTerminalPanel = useWorkspaceStore((state) =>
     workspaceEnabled && activeTabId ? state.bySession[activeTabId]?.bottomOpen ?? false : false,
@@ -784,11 +786,11 @@ export function ActiveSession() {
           <aside
             ref={workbenchPanelRef}
             data-testid="workbench-panel"
-            data-workspace-layout={workspaceLayout}
+            data-workspace-layout={isWorkspaceFull ? 'full' : workspaceLayout}
             className="flex h-full min-w-0 flex-col bg-[var(--color-surface)]"
             style={isWorkspaceFull
               ? { flex: '1 1 auto' }
-              : { width: rightPanelWidth, flex: '0 0 auto', maxWidth: '62%', minWidth: 'min(420px, 54%)' }}
+              : { width: rightPanelWidth, flex: '0 0 auto', maxWidth: '70%', minWidth: 'min(420px, 54%)' }}
           >
             <WorkspaceSurface
               sessionId={activeTabId}
@@ -811,7 +813,7 @@ export function ActiveSession() {
               <div className="flex max-w-[420px] flex-col items-center gap-[13px] text-center">
                 <BrandSeal size={compactEmptyHero ? 'lg' : 'xl'} />
                 <h1
-                  className={`${compactEmptyHero ? 'text-2xl' : 'text-[27px]'} font-bold tracking-tight text-[var(--color-text-primary)]`}
+                  className={`text-2xl font-semibold tracking-tight text-[var(--color-text-primary)]`}
                   style={{ fontFamily: 'var(--font-headline)' }}
                 >
                   {t('empty.title')}
@@ -920,12 +922,7 @@ export function ActiveSession() {
                 sessionId={activeTabId}
                 dock="bottom"
                 cwd={getSessionTerminalCwd(session) ?? ''}
-                showLayoutControls={false}
                 visible={showTerminalPanel}
-                onHidePanel={() => useWorkspaceStore.getState().toggleBottomPanel(
-                  activeTabId,
-                  getSessionTerminalCwd(session) ?? '',
-                )}
               />
             </div>
           ) : null}

@@ -2123,6 +2123,19 @@ describe('ChatInput file mentions', () => {
     expect(panel).not.toHaveClass('overflow-hidden')
   })
 
+  it.each([320, 400, 529, 530, 640])('lets the model yield space without compressing toolbar actions in a %ipx desktop column', (width) => {
+    stubComposerColumnWidth(width)
+    render(<ChatInput compact />)
+    expect(screen.getByTestId('chat-input-toolbar-leading')).toHaveClass('shrink-0')
+    if (width >= 530) {
+      expect(screen.getByTestId('chat-input-toolbar-leading')).toHaveClass('max-w-[55%]')
+      expect(screen.getByTestId('chat-input-toolbar-location')).toHaveClass('min-w-0', 'flex-1')
+    }
+    expect(screen.getByTestId('chat-input-toolbar-trailing')).toHaveClass('min-w-0', 'flex-1', 'justify-end')
+    expect(screen.getByTestId('model-selector-shell')).toHaveClass('min-w-0', 'flex-1')
+    expect(screen.getByRole('button', { name: 'Run' })).toHaveClass('shrink-0')
+  })
+
   it('uses larger icon-only mobile action buttons for browser H5 access', async () => {
     viewportMocks.isMobile = true
     mocks.search.mockResolvedValueOnce({

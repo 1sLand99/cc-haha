@@ -58,14 +58,25 @@ describe('page state', () => {
     // The toolbar reads this before the first event lands; an undefined page
     // would disable nothing and enable nothing in particular.
     expect(store().getPage(TAB)).toEqual({
+      registered: false,
       url: '',
       title: '',
       canGoBack: false,
       canGoForward: false,
       loading: false,
+      navigationId: 0,
+      navigationOutcome: 'idle',
+      zoomFactor: 1,
       find: null,
     })
     expect(store().getHistory(TAB)).toEqual([])
+  })
+
+  it('accepts only a native state event as registration, not optimistic zoom', () => {
+    store().setZoom(TAB, 1.2)
+    expect(store().getPage(TAB).registered).toBe(false)
+    apply(stateEvent({ loading: true }))
+    expect(store().getPage(TAB).registered).toBe(true)
   })
 
   it('takes back/forward availability straight from the host', () => {
@@ -237,5 +248,48 @@ describe('forgetTab', () => {
 
     expect(useWorkspaceBrowserStore.getState().pageByTabId).toBe(before.pageByTabId)
     expect(useWorkspaceBrowserStore.getState().historyByTabId).toBe(before.historyByTabId)
+  })
+})
+
+
+it('tracks annotation mode per live page and accepts legacy state events without resetting it', () => {
+  apply({ ...stateEvent(), annotationActive: true } as WorkspaceBrowserEvent)
+  apply(stateEvent({ title: 'New title' }))
+  expect(store().getPage(TAB).annotationActive).toBe(true)
+  expect(store().getPage(OTHER_TAB).annotationActive ?? false).toBe(false)
+  apply({ ...stateEvent(), annotationActive: false } as WorkspaceBrowserEvent)
+  expect(store().getPage(TAB).annotationActive).toBe(false)
+  store().forgetTab(TAB)
+  expect(store().getPage(TAB).annotationActive ?? false).toBe(false)
+})
+
+
+describe('native history contract', () => {
+  it('uses committed host visits and their timestamps rather than dropping history events', () => {
+    apply({ type: 'history', tabId: TAB, entries: [{ url: 'https://a.test/', title: '', visitedAt: 123 }] })
+    expect(store().getHistory(TAB)).toEqual([{ url: 'https://a.test/', title: '', visitedAt: 123 }])
+    // Titles resolve after did-navigate. Enrich without inventing a timestamp.
+    apply(stateEvent({ url: 'https://a.test/', title: 'Resolved title' }))
+    apply({ type: 'history', tabId: TAB, entries: [
+      { url: 'https://a.test/', title: '', visitedAt: 123 },
+      { url: 'https://b.test/', title: 'B', visitedAt: 456 },
+    ] })
+    expect(store().getHistory(TAB)).toEqual([
+      { url: 'https://a.test/', title: 'Resolved title', visitedAt: 123 },
+      { url: 'https://b.test/', title: 'B', visitedAt: 456 },
+    ])
+    expect(store().getHistory(OTHER_TAB)).toEqual([])
+  })
+
+  it('does not turn a stopped failed navigation into a successful visit', () => {
+    apply({ ...stateEvent({ url: 'https://failed.test/', title: 'Error' }), navigationOutcome: 'failed', navigationId: 1 } as WorkspaceBrowserEvent)
+    expect(store().getHistory(TAB)).toEqual([])
+  })
+
+  it('updates a late page title on the existing visit without adding duplicates', () => {
+    apply(stateEvent({ url: 'https://a.test/' }))
+    const timestamp = store().getHistory(TAB)[0]!.visitedAt
+    apply(stateEvent({ url: 'https://a.test/', title: 'Loaded title' }))
+    expect(store().getHistory(TAB)).toEqual([{ url: 'https://a.test/', title: 'Loaded title', visitedAt: timestamp }])
   })
 })

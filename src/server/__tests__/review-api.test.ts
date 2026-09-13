@@ -90,6 +90,13 @@ describe('session review routes', () => {
     expect(status.untracked).toEqual(['fresh.txt'])
     expect(status.snapshot.length).toBeGreaterThan(0)
 
+    const revision = await (await call('GET', '/revision?source=unstaged', sessionId)).json() as Record<string, unknown>
+    expect(revision.snapshot).toBe(status.snapshot)
+    expect(revision.state).toBe('ok')
+    expect(revision).not.toHaveProperty('files')
+    expect(revision).not.toHaveProperty('diff')
+    expect((await call('POST', '/revision?source=unstaged', sessionId, {})).status).toBe(405)
+
     const fileDiffRes = await call('GET', '/diff?source=unstaged&path=tracked.txt', sessionId)
     expect(fileDiffRes.status).toBe(200)
     expect((await fileDiffRes.json() as { diff: string }).diff).toContain('+three')

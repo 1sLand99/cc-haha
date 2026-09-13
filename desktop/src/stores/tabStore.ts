@@ -43,12 +43,6 @@ export type Tab = {
   returnTabId?: string
 }
 
-export type WorkbenchTabOrigin = {
-  sourceSessionId?: string
-  sourceTurnKey?: string
-  sourceElementId?: string
-}
-
 type TabPersistence = {
   openTabs: Array<{ sessionId: string; title: string; type?: TabType; traceSessionId?: string }>
   activeTabId: string | null
@@ -62,8 +56,6 @@ type TabStore = {
   openTracesTab: (title?: string) => string
   openTraceTab: (sessionId: string, title?: string) => string
   openTerminalTab: (cwd?: string, terminalRuntimeId?: string) => string
-  openWorkbenchTab: (sessionId: string, title?: string, origin?: WorkbenchTabOrigin) => string
-  returnFromWorkbench: (tabId: string) => void
   openSubagentTab: (
     sourceSessionId: string,
     toolUseId: string,
@@ -213,46 +205,6 @@ export const useTabStore = create<TabStore>((set, get) => ({
     })
     get().saveTabs()
     return sessionId
-  },
-
-  openWorkbenchTab: (sessionId, title = 'Workbench', origin) => {
-    const tabId = `${WORKBENCH_TAB_PREFIX}${sessionId}`
-    const { tabs } = get()
-    const existing = tabs.find((tab) => tab.sessionId === tabId)
-    const tab: Tab = {
-      sessionId: tabId,
-      title,
-      type: 'workbench',
-      status: 'idle',
-      workbenchSessionId: sessionId,
-      sourceSessionId: origin?.sourceSessionId ?? sessionId,
-      ...(origin?.sourceTurnKey ? { sourceTurnKey: origin.sourceTurnKey } : {}),
-      ...(origin?.sourceElementId ? { sourceElementId: origin.sourceElementId } : {}),
-    }
-
-    if (existing) {
-      set({
-        tabs: tabs.map((current) => current.sessionId === tabId ? tab : current),
-        activeTabId: tabId,
-      })
-    } else {
-      set({
-        tabs: [...tabs, tab],
-        activeTabId: tabId,
-      })
-    }
-    get().saveTabs()
-    return tabId
-  },
-
-  returnFromWorkbench: (tabId) => {
-    const tab = get().tabs.find((current) => current.sessionId === tabId)
-    if (tab?.type !== 'workbench') return
-
-    if (tab.sourceSessionId && get().tabs.some((current) => current.sessionId === tab.sourceSessionId)) {
-      get().setActiveTab(tab.sourceSessionId)
-    }
-    get().closeTab(tabId)
   },
 
   openSubagentTab: (sourceSessionId, toolUseId, title = 'SubAgent', taskId, returnTabId) => {

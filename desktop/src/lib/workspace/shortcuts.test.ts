@@ -16,11 +16,18 @@ function key(partial: Partial<WorkspaceKeyEvent> & { key: string }): WorkspaceKe
 }
 
 describe('matchWorkspaceShortcut', () => {
+  it('supports the reference side-panel chord without stealing extra-modifier keys', () => {
+    const mac = { platform: 'mac' as const, context: 'chat' as const }
+    expect(matchWorkspaceShortcut(key({ key: 'b', metaKey: true, altKey: true }), mac)).toBe('toggle-workspace')
+    expect(matchWorkspaceShortcut(key({ key: '∫', code: 'KeyB', metaKey: true, altKey: true }), mac)).toBe('toggle-workspace')
+    expect(matchWorkspaceShortcut(key({ key: 'b', metaKey: true, altKey: true, shiftKey: true }), mac)).toBeNull()
+    expect(matchWorkspaceShortcut(key({ key: 'j', metaKey: true }), mac)).toBe('toggle-bottom-panel')
+  })
   it('maps the documented mac bindings', () => {
     const mac = { platform: 'mac' as const, context: 'chat' as const }
     expect(matchWorkspaceShortcut(key({ key: 'p', metaKey: true }), mac)).toBe('quick-open-file')
     expect(matchWorkspaceShortcut(key({ key: 't', metaKey: true }), mac)).toBe('new-browser-tab')
-    expect(matchWorkspaceShortcut(key({ key: '`', ctrlKey: true }), mac)).toBe('toggle-bottom-panel')
+    expect(matchWorkspaceShortcut(key({ key: '`', ctrlKey: true }), mac)).toBe('toggle-terminal')
     expect(matchWorkspaceShortcut(key({ key: 'b', metaKey: true, shiftKey: true }), mac)).toBe('toggle-workspace')
     expect(matchWorkspaceShortcut(key({ key: 'f', metaKey: true, shiftKey: true }), mac)).toBe('toggle-fullscreen')
     expect(matchWorkspaceShortcut(key({ key: 'g', ctrlKey: true, shiftKey: true }), mac)).toBe('open-review')
@@ -37,7 +44,7 @@ describe('matchWorkspaceShortcut', () => {
     expect(matchWorkspaceShortcut(
       key({ key: 'Dead', code: 'Backquote', ctrlKey: true }),
       { platform: 'mac', context: 'chat' },
-    )).toBe('toggle-bottom-panel')
+    )).toBe('toggle-terminal')
   })
 
   it('leaves close and new-terminal to a focused terminal', () => {
@@ -60,7 +67,7 @@ describe('matchWorkspaceShortcut', () => {
     const mac = { platform: 'mac' as const, context: 'chat' as const }
     expect(matchWorkspaceShortcut(key({ key: 't', metaKey: true }), mac)).toBe('new-browser-tab')
     expect(matchWorkspaceShortcut(key({ key: 't', metaKey: true, shiftKey: true }), mac)).toBe('reopen-closed-tab')
-    expect(matchWorkspaceShortcut(key({ key: '`', ctrlKey: true }), mac)).toBe('toggle-bottom-panel')
+    expect(matchWorkspaceShortcut(key({ key: '`', ctrlKey: true }), mac)).toBe('toggle-terminal')
     expect(matchWorkspaceShortcut(key({ key: '`', ctrlKey: true, shiftKey: true }), mac)).toBe('new-terminal')
   })
 })
@@ -70,7 +77,9 @@ describe('formatWorkspaceShortcut', () => {
     expect(formatWorkspaceShortcut('quick-open-file', 'mac')).toBe('⌘P')
     expect(formatWorkspaceShortcut('quick-open-file', 'other')).toBe('Ctrl+P')
     expect(formatWorkspaceShortcut('open-review', 'mac')).toBe('⌃⇧G')
-    expect(formatWorkspaceShortcut('toggle-bottom-panel', 'mac')).toBe('⌃`')
+    expect(formatWorkspaceShortcut('toggle-bottom-panel', 'mac')).toBe('⌘J')
+    expect(formatWorkspaceShortcut('toggle-terminal', 'mac')).toBe('⌃`')
+    expect(formatWorkspaceShortcut('toggle-workspace', 'mac')).toBe('⌥⌘B')
   })
 
   it('returns nothing for actions with no advertised binding', () => {

@@ -15,10 +15,6 @@ vi.mock('../../lib/workspace/openTarget', () => ({
   openWorkspaceTarget: vi.fn(),
 }))
 
-vi.mock('../../stores/browserPanelStore', () => ({
-  useBrowserPanelStore: { getState: () => ({ open: openBrowser }) },
-}))
-
 vi.mock('../../lib/desktopRuntime', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   getServerBaseUrl: () => 'http://127.0.0.1:4321',
@@ -33,11 +29,6 @@ vi.mock('../../stores/openTargetStore', () => ({
 }))
 
 const openPreviewFn = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
-vi.mock('../../stores/workspacePanelStore', () => ({
-  useWorkspacePanelStore: {
-    getState: () => ({ statusBySession: {}, openPreview: openPreviewFn }),
-  },
-}))
 
 const shellOpen = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 vi.mock('@tauri-apps/plugin-shell', () => ({ open: shellOpen }))

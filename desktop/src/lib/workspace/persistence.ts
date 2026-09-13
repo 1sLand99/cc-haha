@@ -71,6 +71,8 @@ export type PersistedWorkspaceTab =
       id: string
       source: WorkspaceReviewSource
       selectedPath: string | null
+      viewedPaths: string[]
+      viewedSnapshot?: string
     }
   | {
       kind: 'terminal'
@@ -98,7 +100,15 @@ function asReviewSource(value: unknown): WorkspaceReviewSource | null {
     case 'branch':
       return typeof value.baseRef === 'string' ? { kind: 'branch', baseRef: value.baseRef } : null
     case 'turn':
-      return typeof value.turnKey === 'string' ? { kind: 'turn', turnKey: value.turnKey } : null
+      return typeof value.turnKey === 'string'
+        ? {
+            kind: 'turn',
+            turnKey: value.turnKey,
+            ...(typeof value.userMessageIndex === 'number' && Number.isInteger(value.userMessageIndex) && value.userMessageIndex >= 0
+              ? { userMessageIndex: value.userMessageIndex }
+              : {}),
+          }
+        : null
     case 'commit':
       return typeof value.commit === 'string' ? { kind: 'commit', commit: value.commit } : null
     default:
@@ -131,6 +141,8 @@ export function serializeWorkspaceTab(tab: WorkspaceTab): PersistedWorkspaceTab 
         id: tab.id,
         source: tab.source,
         selectedPath: tab.selectedPath,
+        viewedPaths: tab.viewedSnapshot ? tab.viewedPaths ?? [] : [],
+        ...(tab.viewedSnapshot ? { viewedSnapshot: tab.viewedSnapshot } : {}),
       }
     case 'terminal':
       return {
@@ -187,7 +199,8 @@ export function hydrateWorkspaceTab(
   switch (descriptor.kind) {
     case 'file': {
       const path = asString(descriptor.path)
-      if (!path) return null
+      // Files opens as an empty, valid picker before the user selects a file.
+      if (path === null) return null
       const line = typeof descriptor.line === 'number' && Number.isFinite(descriptor.line)
         ? descriptor.line
         : null
@@ -228,6 +241,10 @@ export function hydrateWorkspaceTab(
         createdAt,
         source,
         selectedPath: asString(descriptor.selectedPath),
+        viewedSnapshot: typeof descriptor.viewedSnapshot === 'string' ? descriptor.viewedSnapshot : undefined,
+        viewedPaths: typeof descriptor.viewedSnapshot === 'string' && Array.isArray(descriptor.viewedPaths)
+          ? [...new Set(descriptor.viewedPaths.filter((path): path is string => typeof path === 'string'))]
+          : [],
       }
     }
     case 'terminal': {
@@ -276,7 +293,7 @@ export function hydrateWorkspace(
     if (!isRecord(value) || !Array.isArray(value.tabs)) continue
 
     const seenIds = new Set<string>()
-    const tabs = value.tabs
+    const restoredTabs = value.tabs
       .slice(0, MAX_RESTORED_TABS_PER_SESSION)
       .map((descriptor) => hydrateWorkspaceTab(descriptor, makeResourceId))
       .filter((tab): tab is WorkspaceTab => tab !== null)
@@ -288,6 +305,16 @@ export function hydrateWorkspace(
         seenIds.add(tab.id)
         return true
       })
+    const fileIds = new Map<string, string>()
+    for (const tab of restoredTabs) {
+      if (tab.kind === 'file' && (!fileIds.has(tab.path) || tab.id === value.activeSideTabId)) fileIds.set(tab.path, tab.id)
+    }
+    const uniqueTabs = restoredTabs.filter((tab) => tab.kind !== 'file' || fileIds.get(tab.path) === tab.id)
+    const previewId = uniqueTabs.find((tab) => tab.preview && tab.id === value.activeSideTabId)?.id
+      ?? uniqueTabs.find((tab) => tab.preview)?.id
+    // Older undo-close behavior could persist duplicate files or preview
+    // slots. Restore one file identity and pin any additional previews.
+    const tabs = uniqueTabs.map((tab) => tab.preview && tab.id !== previewId ? { ...tab, preview: false } : tab)
     if (tabs.length === 0) continue
 
     const layout = WORKSPACE_LAYOUTS.includes(value.layout as WorkspaceLayout)

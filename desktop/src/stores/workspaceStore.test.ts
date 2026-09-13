@@ -298,6 +298,34 @@ describe('closing', () => {
 })
 
 describe('undo close', () => {
+  it('pins a restored preview without competing with the current preview slot', () => {
+    const a = openFile('a.ts', { preview: true })
+    store().closeTab(SESSION, a)
+    openFile('b.ts', { preview: true })
+    store().reopenClosedTab(SESSION)
+    openFile('c.ts', { preview: true })
+
+    expect(sideTabs().filter((tab) => tab.preview)).toHaveLength(1)
+    expect(sideTabs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: a, path: 'a.ts', preview: false }),
+      expect.objectContaining({ path: 'c.ts', preview: true }),
+    ]))
+    expect(sideTabs()).toHaveLength(2)
+  })
+
+  it('reuses an already reopened file and preserves its newer location', () => {
+    const closed = openFile('a.ts', { preview: true, line: 3 })
+    store().closeTab(SESSION, closed)
+    const current = openFile('a.ts', { preview: true, line: 42 })
+    openFile('b.ts')
+
+    expect(store().reopenClosedTab(SESSION)).toBe(current)
+    expect(sideTabs().filter((tab) => tab.kind === 'file' && tab.path === 'a.ts')).toHaveLength(1)
+    expect(store().getTab(SESSION, current)).toMatchObject({ preview: false, reveal: { line: 42 } })
+    expect(store().getSession(SESSION).activeSideTabId).toBe(current)
+    expect(store().getSession(SESSION).closed).toHaveLength(0)
+  })
+
   it('restores the tab at its old position', () => {
     const a = openFile('a.ts')
     const b = openFile('b.ts')
@@ -337,6 +365,22 @@ describe('undo close', () => {
 
   it('does nothing when there is nothing to reopen', () => {
     expect(store().reopenClosedTab(SESSION)).toBeNull()
+  })
+})
+
+describe('review viewed paths', () => {
+  it('keeps viewed files for the same source and clears them when the comparison changes', () => {
+    const source = { kind: 'turn' as const, turnKey: 'message-1', userMessageIndex: 0 }
+    const id = store().openTarget(SESSION, { kind: 'review', source })!
+    store().setReviewViewedPaths(SESSION, id, ['src/a.ts', 'src/a.ts'])
+    store().setReviewSource(SESSION, id, source)
+    expect(store().getTab(SESSION, id)).toMatchObject({ viewedPaths: ['src/a.ts'] })
+    store().setReviewSource(SESSION, id, { ...source, userMessageIndex: 1 })
+    expect(store().getTab(SESSION, id)).toMatchObject({ viewedPaths: [] })
+
+    store().setReviewViewedPaths(SESSION, id, ['src/b.ts'])
+    store().openTarget(SESSION, { kind: 'review', source: { kind: 'unstaged' } })
+    expect(store().getTab(SESSION, id)).toMatchObject({ viewedPaths: [] })
   })
 })
 

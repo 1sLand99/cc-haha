@@ -8,10 +8,31 @@ import {
 } from './capabilities'
 
 describe('Electron IPC capabilities', () => {
+  it('accepts optional initial browser visibility without widening the create payload', () => {
+    const channel = ELECTRON_IPC_CHANNELS.workspaceBrowserCreate
+    const identity = { tabId: 'wb-1', storageId: 'store-1' }
+    expect(validateElectronIpcPayload(channel, identity)).toBe(true)
+    expect(validateElectronIpcPayload(channel, { ...identity, visible: false })).toBe(true)
+    expect(validateElectronIpcPayload(channel, { ...identity, visible: true })).toBe(true)
+    for (const visible of ['false', 0, null, {}]) {
+      expect(validateElectronIpcPayload(channel, { ...identity, visible })).toBe(false)
+    }
+    expect(validateElectronIpcPayload(channel, { ...identity, visible: false, unknown: true })).toBe(false)
+  })
+
   it('has a validator for every exposed invoke channel', () => {
     expect(Object.keys(ELECTRON_IPC_VALIDATORS).sort()).toEqual(
       Object.values(ELECTRON_IPC_CHANNELS).sort(),
     )
+  })
+
+  it('limits presentation snapshots to a single browser page id', () => {
+    const channel = ELECTRON_IPC_CHANNELS.workspaceBrowserSnapshot
+    expect(validateElectronIpcPayload(channel, { tabId: 'wb-1' })).toBe(true)
+    for (const payload of [{}, { tabId: '' }, { tabId: 'wb-1', kind: 'full' }, { tabId: 'wb-1', url: 'https://example.com' }]) {
+      expect(validateElectronIpcPayload(channel, payload)).toBe(false)
+    }
+    expect(isElectronIpcChannelAllowedForPetWindow(channel)).toBe(false)
   })
 
   it('rejects channels outside the desktop host contract', () => {
@@ -37,6 +58,9 @@ describe('Electron IPC capabilities', () => {
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalWrite, { sessionId: 1, data: 'pwd\n' })).toBe(true)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalWrite, { sessionId: '1', data: 'pwd\n' })).toBe(false)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: 80, rows: 24, cwd: '/tmp' })).toBe(true)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: 80, rows: 24, requestId: 'start' })).toBe(true)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { requestId: '' })).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { requestId: 'x'.repeat(129) })).toBe(false)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: '80', rows: 24 })).toBe(false)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: 80, rows: 24, shell: '/bin/sh' })).toBe(false)
     expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.terminalSpawn, { cols: Number.NaN, rows: 24 })).toBe(false)

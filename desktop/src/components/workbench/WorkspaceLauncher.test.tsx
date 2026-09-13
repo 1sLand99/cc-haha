@@ -21,24 +21,29 @@ describe('WorkspaceLauncher', () => {
     ])
   })
 
-  it('advertises the keyboard route to each entry', () => {
+  it('advertises the four global resource shortcuts while clicks retain their dock', () => {
     render(<WorkspaceLauncher onSelect={vi.fn()} />)
     // The hint is what makes the launcher teach its own shortcuts rather than
     // being the only way in.
     for (const testId of [
       'workspace-launcher-review',
-      'workspace-launcher-terminal',
       'workspace-launcher-browser',
       'workspace-launcher-file',
     ]) {
       expect(screen.getByTestId(testId).querySelector('kbd')).not.toBeNull()
     }
+    expect(screen.getByTestId('workspace-launcher-terminal').querySelector('kbd')).toHaveTextContent('`')
   })
 
-  it('shows only the kinds the dock can hold', () => {
-    render(<WorkspaceLauncher onSelect={vi.fn()} kinds={['terminal']} />)
-    expect(screen.getAllByRole('button').map((item) => item.getAttribute('data-testid')))
-      .toEqual(['workspace-launcher-terminal'])
+  it('keeps all four actions available in the compact bottom picker', () => {
+    render(<WorkspaceLauncher onSelect={vi.fn()} dock="bottom" />)
+    expect(screen.getAllByRole('button').map((item) => item.getAttribute('data-testid'))).toEqual([
+      'workspace-launcher-review',
+      'workspace-launcher-terminal',
+      'workspace-launcher-browser',
+      'workspace-launcher-file',
+    ])
+    expect(screen.getByTestId('workspace-launcher-terminal').querySelector('kbd')).not.toBeNull()
   })
 
   it('reports the chosen kind', () => {
@@ -72,8 +77,8 @@ describe('WorkspaceLauncher', () => {
 
 /**
  * The workbench components defined three strings nothing ever rendered:
- * `workspace.launcher.bottomTerminalOnly` (the bottom dock filters the entry
- * list instead of explaining itself), `workspace.review.stats` (the toolbar
+ * `workspace.launcher.bottomTerminalOnly` (both docks now offer the same entry
+ * list), `workspace.review.stats` (the toolbar
  * composes its own +/- spans so it can colour them) and
  * `workspace.review.readOnly` (a read-only comparison drops the write actions
  * rather than captioning them). A string that is translated five times and

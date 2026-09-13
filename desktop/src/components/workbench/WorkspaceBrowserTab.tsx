@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import {
   ArrowLeft,
   ArrowRight,
-  Camera,
-  Download,
   ExternalLink,
-  History,
+  Globe,
+  MessageSquarePlus,
+  Minus,
   MoreVertical,
-  MousePointer2,
-  Printer,
+  Plus,
   RotateCw,
   Search,
   X,
 } from 'lucide-react'
 import { IconButton } from '@/components/ui/IconButton'
 import { Spinner } from '@/components/ui/Spinner'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { WorkspaceBrowserAddressBar } from '@/components/workbench/WorkspaceBrowserAddressBar'
+import { WorkspaceBrowserSelectionBar } from '@/components/workbench/WorkspaceBrowserSelectionBar'
 import { useDismissable } from '@/hooks/useDismissable'
 import { useTranslation } from '../../i18n'
 import { computeWebviewBounds } from '../browser/computeWebviewBounds'
@@ -29,13 +32,20 @@ import {
 } from '../../lib/workspace/browserHost'
 import { useOverlayStore } from '../../stores/overlayStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useUIStore } from '@/stores/uiStore'
 import { useWorkspaceBrowserStore } from '../../stores/workspaceBrowserStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
+import { usePreviewSelectionStore } from '../../stores/previewSelectionStore'
+import { normalizeBrowserAddress } from '../../lib/workspace/browserAddress'
+import { discardBrowserSelections } from '../../lib/workspace/browserSelections'
+import { buildPreviewPickerMessage } from '../../lib/previewSelectionPicker'
+import { MIN_APP_ZOOM, MAX_APP_ZOOM } from '../../lib/appZoom'
 import type { WorkspaceBrowserTab as WorkspaceBrowserTabModel } from '../../lib/workspace/types'
 
-const MIN_ZOOM = 0.5
-const MAX_ZOOM = 1.5
+const MIN_ZOOM = MIN_APP_ZOOM
+const MAX_ZOOM = MAX_APP_ZOOM
 const ZOOM_STEP = 0.1
+const PRESENTATION_SNAPSHOT_TIMEOUT_MS = 800
 
 type BrowserPanel = 'downloads' | 'history' | null
 
@@ -46,7 +56,7 @@ export type WorkspaceBrowserTabProps = {
 }
 
 function resolveNavigationUrl(input: string, sessionId: string): string {
-  const value = input.trim()
+  const value = normalizeBrowserAddress(input)
   if (!value) return ''
   const classified = classifyPreviewLink(value)
   if (classified.kind === 'browser-file' && classified.path) {
@@ -68,26 +78,70 @@ function resolveNavigationUrl(input: string, sessionId: string): string {
  */
 export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowserTabProps) {
   const t = useTranslation()
+  const browserRootRef = useRef<HTMLDivElement>(null)
+  const addressRef = useRef<HTMLInputElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
-  const [draft, setDraft] = useState(tab.url ?? '')
-  const [zoom, setZoom] = useState(1)
   const [menuOpen, setMenuOpen] = useState(false)
   const [panel, setPanel] = useState<BrowserPanel>(null)
+  const [pendingNavigation, setPendingNavigation] = useState<{ run: () => void } | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const [findText, setFindText] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
   const menuTriggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const appZoom = useSettingsStore((state) => state.uiZoom)
+  const theme = useUIStore((state) => state.theme)
   const overlayCount = useOverlayStore((state) => state.count)
+  const snapshotOverlayCount = useOverlayStore((state) => state.snapshotCount)
+  const nativePresentedRef = useRef(false)
+  const [presentationSnapshot, setPresentationSnapshot] = useState<string | null>(null)
   const available = useMemo(() => isWorkspaceBrowserAvailable(), [])
   const browserTabId = tab.browserTabId
+  const [registeredId, setRegisteredId] = useState<string | null>(null)
+  const [createAttempt, setCreateAttempt] = useState(0)
+  const lifetimeRef = useRef<{ id: string; ready: boolean; cancelled: boolean } | null>(null)
+  const navigationRequestRef = useRef(0)
+  const appZoomRef = useRef(appZoom)
+  appZoomRef.current = appZoom
   const page = useWorkspaceBrowserStore((state) => state.pageByTabId[browserTabId])
-  const history = useWorkspaceBrowserStore((state) => state.historyByTabId[browserTabId])
+  const ready = page?.registered === true || registeredId === browserTabId
+  const initialAddressFocusRef = useRef({ browserTabId, pending: !tab.url && !ready, activated: false })
+  if (initialAddressFocusRef.current.browserTabId !== browserTabId) {
+    initialAddressFocusRef.current = { browserTabId, pending: !tab.url && !ready, activated: false }
+  }
+  const selectionCount = usePreviewSelectionStore((state) => state.bySession[browserTabId]?.items.length ?? 0)
+  const zoom = page?.zoomFactor ?? 1
+  const historyByTabId = useWorkspaceBrowserStore((state) => state.historyByTabId)
+  const history = historyByTabId[browserTabId]
+  const visits = useMemo(() => Object.values(historyByTabId).flatMap((entries) => entries ?? []), [historyByTabId])
   const downloads = useWorkspaceBrowserStore((state) => state.downloads)
   const loading = page?.loading ?? false
 
-  useEffect(() => { setDraft(page?.url || tab.url || '') }, [page?.url, tab.url])
+  const currentAddress = page?.url || tab.url || ''
+  const annotationActive = page?.annotationActive ?? false
+
+  useLayoutEffect(() => {
+    const request = initialAddressFocusRef.current
+    if (!request.pending || !available) return
+    if (tab.url || (!active && request.activated)) { request.pending = false; return }
+    if (!active) return
+    request.activated = true
+    if (ready) {
+      request.pending = false
+      addressRef.current?.focus({ preventScroll: true })
+      return
+    }
+    // A disabled address bar cannot receive the workspace's initial focus
+    // request. Retry on readiness only if the user has not moved elsewhere.
+    const onFocus = (event: FocusEvent) => {
+      const target = event.target
+      if (!(target instanceof Node) || target === document.body || target === document.documentElement) return
+      const panel = browserRootRef.current?.closest('[role="tabpanel"]') ?? browserRootRef.current
+      if (!panel?.contains(target)) request.pending = false
+    }
+    document.addEventListener('focusin', onFocus)
+    return () => document.removeEventListener('focusin', onFocus)
+  }, [active, available, browserTabId, ready, tab.url])
 
   useDismissable({
     open: menuOpen,
@@ -96,30 +150,88 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
   })
   useDismissable({ open: panel !== null, refs: [panelRef], onDismiss: () => setPanel(null) })
 
+  const stillOwned = useCallback(() => useWorkspaceStore.getState().findBrowserTabOwner(browserTabId)?.sessionId === sessionId, [browserTabId, sessionId])
+  const canCommand = useCallback(() => {
+    const lifetime = lifetimeRef.current
+    return lifetime?.id === browserTabId && !lifetime.cancelled && stillOwned() &&
+      (lifetime.ready || useWorkspaceBrowserStore.getState().pageByTabId[browserTabId]?.registered === true)
+  }, [browserTabId, stillOwned])
+  const reportHostError = useCallback((error: unknown) => {
+    const lifetime = lifetimeRef.current
+    if (lifetime?.id !== browserTabId || lifetime.cancelled || !stillOwned()) return
+    useWorkspaceStore.getState().updateBrowserTab(sessionId, browserTabId, {
+      loadError: error instanceof Error ? error.message : String(error),
+    })
+  }, [browserTabId, sessionId, stillOwned])
+  const runCommand = (command: () => Promise<unknown>) => {
+    if (canCommand()) void command().catch(reportHostError)
+  }
+  const runNavigationCommand = (command: () => Promise<unknown>) => {
+    if (!canCommand()) return
+    const request = ++navigationRequestRef.current
+    const before = useWorkspaceBrowserStore.getState().pageByTabId[browserTabId]?.navigationId ?? 0
+    void command().catch((error: unknown) => {
+      if (request !== navigationRequestRef.current) return
+      const current = useWorkspaceBrowserStore.getState().pageByTabId[browserTabId]
+      if (current && (current.navigationId > before + 1 || (current.navigationId > before && current.navigationOutcome === 'succeeded'))) return
+      reportHostError(error)
+    })
+  }
   const reportBounds = useCallback(() => {
+    if (!canCommand()) return
     const element = stageRef.current
     if (!element) return
     void workspaceBrowserHost.setBounds(
       browserTabId,
-      computeWebviewBounds(element.getBoundingClientRect(), appZoom),
-    )
-  }, [appZoom, browserTabId])
+      computeWebviewBounds(element.getBoundingClientRect(), appZoomRef.current),
+    ).catch(reportHostError)
+  }, [browserTabId, canCommand, reportHostError])
 
   // Create once per page identity. `storageId` travels with it so a restored
   // tab reopens the same page rather than a blank one.
   useEffect(() => {
+    if (!available || !stillOwned()) return
+    const lifetime = { id: browserTabId, ready: false, cancelled: false }
+    lifetimeRef.current = lifetime
+    const request = ++navigationRequestRef.current
+    const navigationId = useWorkspaceBrowserStore.getState().pageByTabId[browserTabId]?.navigationId ?? 0
     const element = stageRef.current
     void workspaceBrowserHost.create(browserTabId, {
       storageId: tab.storageId,
+      // A delayed completion must never attach an abandoned tab over its replacement.
+      visible: false,
       ...(tab.url ? { url: tab.url } : {}),
       ...(element
         ? { bounds: computeWebviewBounds(element.getBoundingClientRect(), appZoom) }
         : {}),
+    }).then((result) => {
+      if (lifetime.cancelled || !stillOwned() || !result.ok) return
+      lifetime.ready = true
+      setRegisteredId(browserTabId)
+      reportBounds()
+    }).catch((error: unknown) => {
+      if (lifetime.cancelled || !stillOwned() || request !== navigationRequestRef.current) return
+      const current = useWorkspaceBrowserStore.getState().pageByTabId[browserTabId]
+      // The initial load may reject after the user has already navigated again.
+      if (current && (current.navigationId > navigationId + 1 || current.navigationOutcome === 'succeeded')) return
+      reportHostError(error)
     })
     // Deliberately NOT closing on unmount: the page belongs to the tab, and the
     // tab outlives this component. `closeTab` is the only thing that ends it.
+    return () => {
+      const registered = lifetime.ready || useWorkspaceBrowserStore.getState().pageByTabId[browserTabId]?.registered === true
+      lifetime.cancelled = true
+      if (registered && stillOwned()) {
+        void workspaceBrowserHost.setVisible(browserTabId, false).catch((error: unknown) => {
+          // Missing pages are an idempotent hide in the host. Other teardown
+          // failures remain diagnostic errors rather than unhandled promises.
+          console.error('Failed to hide workspace browser page', error)
+        })
+      }
+    }
+    // The URL/bounds are initial inputs, not a reason to recreate a live page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [browserTabId])
+  }, [browserTabId, createAttempt])
 
   /*
     A `WebContentsView` always paints above the DOM, so "is this page on screen"
@@ -136,56 +248,144 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
     is: the browser's own dropdown and its retry overlay are DOM siblings drawn
     inside the page's rectangle, and no z-index can lift them above it.
   */
-  const pageVisible = active &&
-    overlayCount === 0 &&
+  const pageCanBePresented = active &&
     panel === null &&
     !menuOpen &&
+    !pendingNavigation &&
     !tab.loadError &&
     Boolean(tab.url)
+  const pageVisible = pageCanBePresented && overlayCount === 0
+  const snapshotRequested = pageCanBePresented && overlayCount > 0 && overlayCount === snapshotOverlayCount
+  const navigationId = page?.navigationId ?? 0
 
-  useEffect(() => {
-    void workspaceBrowserHost.setVisible(browserTabId, pageVisible)
-    return () => {
-      void workspaceBrowserHost.setVisible(browserTabId, false)
+  useLayoutEffect(() => {
+    if (!canCommand()) return
+    let cancelled = false
+    let settled = false
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const present = (visible: boolean) => {
+      nativePresentedRef.current = visible
+      void workspaceBrowserHost.setVisible(browserTabId, visible).catch(reportHostError)
     }
-  }, [browserTabId, pageVisible])
+    if (snapshotRequested && nativePresentedRef.current) {
+      // Capture while the native page is still attached. Its WebContentsView
+      // would otherwise cover a DOM menu, but detaching first can capture an
+      // empty frame. This image is presentation-only and never becomes a chat
+      // attachment. Ordinary modal overlays still hide immediately below.
+      const finish = (dataUrl: string | null) => {
+        if (cancelled || settled) return
+        settled = true
+        clearTimeout(timeout)
+        // Commit the already-decoded image before the IPC detaches the view.
+        flushSync(() => setPresentationSnapshot(dataUrl))
+        present(false)
+      }
+      timeout = setTimeout(() => finish(null), PRESENTATION_SNAPSHOT_TIMEOUT_MS)
+      void workspaceBrowserHost.snapshot(browserTabId).then(async (dataUrl) => {
+        if (cancelled || settled) return
+        if (!dataUrl?.startsWith('data:image/png;base64,')) { finish(null); return }
+        const image = new Image()
+        image.src = dataUrl
+        if (image.decode) await image.decode()
+        finish(dataUrl)
+      }).catch(() => finish(null))
+    } else {
+      setPresentationSnapshot(null)
+      present(pageVisible)
+    }
+    return () => {
+      cancelled = true
+      clearTimeout(timeout)
+    }
+    // Navigation invalidates an image even when the page identity is reused.
+  }, [browserTabId, canCommand, navigationId, pageVisible, ready, reportHostError, snapshotRequested])
 
   useEffect(() => {
-    if (!active) return
+    if (!active || !ready) return
     const element = stageRef.current
     if (!element) return
-    const observer = new ResizeObserver(() => reportBounds())
+    let cancelled = false
+    const update = () => { if (!cancelled) reportBounds() }
+    const observer = new ResizeObserver(update)
     observer.observe(element)
-    window.addEventListener('resize', reportBounds)
+    window.addEventListener('resize', update)
     return () => {
+      cancelled = true
       observer.disconnect()
-      window.removeEventListener('resize', reportBounds)
+      window.removeEventListener('resize', update)
     }
-  }, [active, reportBounds])
+  }, [active, ready, reportBounds])
 
   useLayoutEffect(() => {
     if (active) reportBounds()
-  }, [active, reportBounds])
+  }, [active, appZoom, ready, reportBounds])
 
-  const navigate = (input: string) => {
+  // The capsule must be drawn inside the native page, not behind it in React.
+  // The host retains this configuration and replays it after each navigation.
+  useEffect(() => {
+    if (!ready || !available || !active || !canCommand()) return
+    const styles = getComputedStyle(document.documentElement)
+    const token = (name: string) => styles.getPropertyValue(name).trim()
+    void workspaceBrowserHost.message(browserTabId, {
+      v: 1, type: 'browser-controls', zoomFactor: zoom, appZoom,
+      copy: {
+        zoom: t('workspace.browser.zoom'), zoomOut: t('workspace.browser.zoomOut'),
+        zoomIn: t('workspace.browser.zoomIn'), zoomReset: t('workspace.browser.zoomReset'),
+      },
+      colors: {
+        background: token('--color-surface-container-lowest'), foreground: token('--color-text-primary'),
+        muted: token('--color-text-secondary'), border: token('--color-border'),
+        hover: token('--color-surface-hover'), focus: token('--color-border-focus'), shadow: token('--shadow-dropdown'),
+      },
+    }).catch(reportHostError)
+  }, [active, appZoom, available, browserTabId, canCommand, ready, reportHostError, t, theme, zoom])
+
+  const requestNavigation = (run: () => void) => {
+    if (!canCommand()) return
+    if (usePreviewSelectionStore.getState().bySession[browserTabId]?.items.length) setPendingNavigation({ run })
+    else run()
+  }
+
+  const navigate = (input: string, onAccepted?: () => void) => {
     const url = resolveNavigationUrl(input, sessionId)
     if (!url) return
-    useWorkspaceStore.getState().updateBrowserTab(sessionId, browserTabId, { loadError: null })
-    void workspaceBrowserHost.navigate(browserTabId, url)
+    requestNavigation(() => {
+      useWorkspaceStore.getState().updateBrowserTab(sessionId, browserTabId, { loadError: null })
+      addressRef.current?.blur()
+      onAccepted?.()
+      let samePage = false
+      try { samePage = new URL(currentAddress).href === new URL(url).href } catch { /* A blank page has no URL yet. */ }
+      runNavigationCommand(() => samePage
+        ? workspaceBrowserHost.reload(browserTabId)
+        : workspaceBrowserHost.navigate(browserTabId, url))
+    })
   }
 
   const applyZoom = (next: number) => {
+    if (!canCommand()) return
     const clamped = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next)) * 10) / 10
-    setZoom(clamped)
-    void workspaceBrowserHost.setZoom(browserTabId, clamped)
+    useWorkspaceBrowserStore.getState().setZoom(browserTabId, clamped)
+    runCommand(() => workspaceBrowserHost.setZoom(browserTabId, clamped))
+  }
+
+  const pickElement = () => {
+    if (annotationActive) {
+      runCommand(() => workspaceBrowserHost.message(browserTabId, { v: 1, type: 'exit-picker' }))
+      return
+    }
+    const selectionDraft = usePreviewSelectionStore.getState().bySession[browserTabId]
+    const message = buildPreviewPickerMessage(selectionDraft?.items.length ? 'batch' : 'single', selectionDraft?.nextNumber ?? 1)
+    if (message.type === 'enter-picker') {
+      runCommand(() => workspaceBrowserHost.message(browserTabId, { ...message, persistent: true }))
+    }
   }
 
   const runFind = (text: string, findNext: boolean) => {
     if (!text) {
-      void workspaceBrowserHost.stopFind(browserTabId)
+      runCommand(() => workspaceBrowserHost.stopFind(browserTabId))
       return
     }
-    void workspaceBrowserHost.find(browserTabId, text, { findNext, forward: true })
+    runCommand(() => workspaceBrowserHost.find(browserTabId, text, { findNext, forward: true }))
   }
 
   if (!available) {
@@ -215,60 +415,75 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
   }
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div ref={browserRootRef} className="relative flex min-h-0 flex-1 flex-col">
       <div
         data-testid="workspace-browser-toolbar"
-        className="flex h-11 shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2"
+        className="flex h-[52px] shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2.5"
       >
         <IconButton
           icon={<ArrowLeft size={15} strokeWidth={1.9} />}
           label={t('workspace.browser.back')}
-          size="xs"
+          size="md"
           tone="muted"
-          disabled={!page?.canGoBack}
-          onClick={() => { void workspaceBrowserHost.goBack(browserTabId) }}
+          disabled={!ready || !page?.canGoBack}
+          onClick={() => requestNavigation(() => runNavigationCommand(() => workspaceBrowserHost.goBack(browserTabId)))}
         />
         <IconButton
           icon={<ArrowRight size={15} strokeWidth={1.9} />}
           label={t('workspace.browser.forward')}
-          size="xs"
+          size="md"
           tone="muted"
-          disabled={!page?.canGoForward}
-          onClick={() => { void workspaceBrowserHost.goForward(browserTabId) }}
+          disabled={!ready || !page?.canGoForward}
+          onClick={() => requestNavigation(() => runNavigationCommand(() => workspaceBrowserHost.goForward(browserTabId)))}
         />
         <IconButton
           icon={loading ? <Spinner size={15} /> : <RotateCw size={15} strokeWidth={1.9} />}
           label={t(loading ? 'workspace.browser.stop' : 'workspace.browser.reload')}
-          size="xs"
+          size="md"
           tone="muted"
           aria-busy={loading}
+          disabled={!ready}
           onClick={() => {
-            if (loading) void workspaceBrowserHost.stop(browserTabId)
-            else void workspaceBrowserHost.reload(browserTabId)
+            if (loading) {
+              navigationRequestRef.current += 1
+              runCommand(() => workspaceBrowserHost.stop(browserTabId))
+            } else requestNavigation(() => runNavigationCommand(() => workspaceBrowserHost.reload(browserTabId)))
           }}
         />
-        <form
-          className="min-w-0 flex-1"
-          onSubmit={(event) => {
-            event.preventDefault()
-            navigate(draft)
+        <WorkspaceBrowserAddressBar
+          key={browserTabId}
+          ref={addressRef}
+          currentAddress={currentAddress}
+          active={active}
+          disabled={!ready}
+          blank={!tab.url}
+          visits={visits}
+          resolveAddress={(input) => resolveNavigationUrl(input, sessionId)}
+          onNavigate={navigate}
+          onOpenExternal={(url) => { void getDesktopHost().shell.open(url) }}
+        />
+        <IconButton
+          icon={<MessageSquarePlus size={16} strokeWidth={1.75} />}
+          label={t(annotationActive ? 'workspace.browser.annotationActive' : 'workspace.browser.pickElement')}
+          pressed={annotationActive}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && annotationActive) {
+              event.preventDefault()
+              event.stopPropagation()
+              runCommand(() => workspaceBrowserHost.message(browserTabId, { v: 1, type: 'exit-picker' }))
+            }
           }}
-        >
-          <input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            spellCheck={false}
-            aria-label={t('workspace.browser.address')}
-            placeholder={t('workspace.browser.addressPlaceholder')}
-            data-testid="workspace-browser-address"
-            className="h-7 w-full rounded-[var(--radius-md)] bg-[var(--color-surface-container)] px-3 text-center text-[12px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-          />
-        </form>
+          size="md"
+          tone="muted"
+          disabled={!ready || !tab.url || !!tab.loadError}
+          data-testid="workspace-browser-annotate"
+          onClick={pickElement}
+        />
         <IconButton
           ref={menuTriggerRef}
           icon={<MoreVertical size={15} strokeWidth={1.9} />}
           label={t('workspace.browser.menu')}
-          size="xs"
+          size="md"
           tone="muted"
           pressed={menuOpen}
           data-testid="workspace-browser-menu-trigger"
@@ -299,7 +514,7 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
               if (event.key === 'Escape') {
                 event.preventDefault()
                 setFindOpen(false)
-                void workspaceBrowserHost.stopFind(browserTabId)
+                runCommand(() => workspaceBrowserHost.stopFind(browserTabId))
               }
             }}
             className="h-6 min-w-0 flex-1 bg-transparent text-[12px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
@@ -319,7 +534,7 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
             tone="muted"
             onClick={() => {
               setFindOpen(false)
-              void workspaceBrowserHost.stopFind(browserTabId)
+              runCommand(() => workspaceBrowserHost.stopFind(browserTabId))
             }}
           />
         </div>
@@ -327,12 +542,23 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
 
       <div className="relative min-h-0 flex-1 overflow-hidden" data-testid="workspace-browser-stage">
         <div ref={stageRef} className="absolute inset-0" />
+        {presentationSnapshot ? (
+          <img
+            data-testid="workspace-browser-backdrop"
+            src={presentationSnapshot}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            className="pointer-events-none absolute inset-0 h-full w-full object-fill"
+          />
+        ) : null}
         {!tab.url && !tab.loadError ? (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-center">
-            <p className="text-[13px] font-medium text-[var(--color-text-primary)]">
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
+            <Globe size={32} strokeWidth={1.75} aria-hidden="true" className="mb-2 text-[var(--color-text-tertiary)]" />
+            <p className="text-[16px] font-medium text-[var(--color-text-primary)]">
               {t('workspace.browser.emptyTitle')}
             </p>
-            <p className="text-[12px] text-[var(--color-text-secondary)]">
+            <p className="text-[14px] text-[var(--color-text-secondary)]">
               {t('workspace.browser.emptyBody')}
             </p>
           </div>
@@ -353,7 +579,8 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
               type="button"
               onClick={() => {
                 useWorkspaceStore.getState().updateBrowserTab(sessionId, browserTabId, { loadError: null })
-                void workspaceBrowserHost.reload(browserTabId, { ignoreCache: true })
+                if (ready) runNavigationCommand(() => workspaceBrowserHost.reload(browserTabId, { ignoreCache: true }))
+                else setCreateAttempt((attempt) => attempt + 1)
               }}
               className="mt-1 rounded-[var(--radius-md)] border border-[var(--color-border)] px-3 py-1.5 text-[12px] text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
             >
@@ -363,11 +590,27 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
         ) : null}
       </div>
 
+      <WorkspaceBrowserSelectionBar sessionId={sessionId} browserTabId={browserTabId} />
+      <ConfirmDialog
+        open={pendingNavigation !== null}
+        onClose={() => setPendingNavigation(null)}
+        onConfirm={async () => {
+          const pending = pendingNavigation
+          if (!pending) return
+          await discardBrowserSelections(browserTabId)
+          setPendingNavigation(null)
+          pending.run()
+        }}
+        title={t('browser.selection.navigationTitle')}
+        body={t('browser.selection.navigationBody', { count: selectionCount })}
+        confirmLabel={t('browser.selection.navigationContinue')}
+        cancelLabel={t('browser.selection.cancel')}
+      />
       {panel !== null ? (
         <div
           ref={panelRef}
           data-testid={`workspace-browser-panel-${panel}`}
-          className="absolute inset-x-0 bottom-0 top-11 z-[var(--z-raised)] flex flex-col border-t border-[var(--color-border)] bg-[var(--color-surface)]"
+          className="absolute inset-x-0 bottom-0 top-[52px] z-[var(--z-raised)] flex flex-col border-t border-[var(--color-border)] bg-[var(--color-surface)]"
         >
           <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--color-border)] px-3">
             <span className="text-[12px] font-medium text-[var(--color-text-primary)]">
@@ -451,86 +694,69 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
           ref={menuRef}
           role="menu"
           data-testid="workspace-browser-menu"
-          className="absolute right-2 top-11 z-[var(--z-dropdown)] w-[248px] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1.5 shadow-[var(--shadow-dropdown)]"
+          className="absolute right-2 top-[52px] z-[var(--z-dropdown)] w-[288px] max-w-[calc(100%_-_16px)] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] py-1.5 shadow-[var(--shadow-dropdown)]"
         >
           <BrowserMenuItem
-            icon={<Search size={14} />}
             label={t('workspace.browser.findInPage')}
+            disabled={!ready || !tab.url}
             onSelect={() => { setFindOpen(true); setMenuOpen(false) }}
           />
           <BrowserMenuItem
-            icon={<Printer size={14} />}
             label={t('workspace.browser.print')}
-            onSelect={() => { void workspaceBrowserHost.printToPdf(browserTabId); setMenuOpen(false) }}
+            disabled={!ready || !tab.url}
+            onSelect={() => { runCommand(() => workspaceBrowserHost.printToPdf(browserTabId)); setMenuOpen(false) }}
           />
-          <div className="flex items-center justify-between gap-2 px-3.5 py-1.5">
-            <span className="text-[12px] text-[var(--color-text-primary)]">
+          <div className="mx-3.5 my-1 border-t border-[var(--color-border)]" />
+          <div className="flex h-11 items-center justify-between gap-2 px-3.5">
+            <span className="text-[13px] text-[var(--color-text-primary)]">
               {t('workspace.browser.zoom')}
             </span>
             <span className="flex items-center gap-1">
-              <IconButton
-                icon="remove"
-                label={t('workspace.browser.zoomOut')}
-                size="2xs"
-                tone="muted"
-                disabled={zoom <= MIN_ZOOM}
-                onClick={() => applyZoom(zoom - ZOOM_STEP)}
-              />
-              <span className="min-w-[38px] text-center font-mono text-[11px] tabular-nums text-[var(--color-text-secondary)]">
-                {Math.round(zoom * 100)}%
+              <span className="flex items-center overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-hover)]">
+                <IconButton
+                  icon={<Minus size={14} />}
+                  label={t('workspace.browser.zoomOut')}
+                  size="sm"
+                  tone="muted"
+                  disabled={!ready || zoom <= MIN_ZOOM}
+                  onClick={() => applyZoom(zoom - ZOOM_STEP)}
+                />
+                <span className="min-w-[46px] border-x border-[var(--color-border)] text-center text-[13px] tabular-nums text-[var(--color-text-primary)]">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <IconButton
+                  icon={<Plus size={14} />}
+                  label={t('workspace.browser.zoomIn')}
+                  size="sm"
+                  tone="muted"
+                  disabled={!ready || zoom >= MAX_ZOOM}
+                  onClick={() => applyZoom(zoom + ZOOM_STEP)}
+                />
               </span>
               <IconButton
-                icon="add"
-                label={t('workspace.browser.zoomIn')}
-                size="2xs"
-                tone="muted"
-                disabled={zoom >= MAX_ZOOM}
-                onClick={() => applyZoom(zoom + ZOOM_STEP)}
-              />
-              <IconButton
-                icon="refresh"
+                icon={<RotateCw size={15} />}
                 label={t('workspace.browser.zoomReset')}
-                size="2xs"
+                size="sm"
                 tone="muted"
-                disabled={zoom === 1}
+                disabled={!ready || zoom === 1}
                 onClick={() => applyZoom(1)}
               />
             </span>
           </div>
           <div className="my-1 border-t border-[var(--color-border)]" />
           <BrowserMenuItem
-            icon={<Camera size={14} />}
             label={t('workspace.browser.capture')}
-            onSelect={() => { void workspaceBrowserHost.capture(browserTabId, 'full'); setMenuOpen(false) }}
-          />
-          <BrowserMenuItem
-            icon={<MousePointer2 size={14} />}
-            label={t('workspace.browser.pickElement')}
-            onSelect={() => {
-              void workspaceBrowserHost.message(browserTabId, { v: 1, type: 'enter-picker' })
-              setMenuOpen(false)
-            }}
+            disabled={!ready || !tab.url}
+            onSelect={() => { runCommand(() => workspaceBrowserHost.capture(browserTabId, 'full')); setMenuOpen(false) }}
           />
           <div className="my-1 border-t border-[var(--color-border)]" />
           <BrowserMenuItem
-            icon={<Download size={14} />}
             label={t('workspace.browser.downloads')}
             onSelect={() => { setPanel('downloads'); setMenuOpen(false) }}
           />
           <BrowserMenuItem
-            icon={<History size={14} />}
             label={t('workspace.browser.history')}
             onSelect={() => { setPanel('history'); setMenuOpen(false) }}
-          />
-          <BrowserMenuItem
-            icon={<ExternalLink size={14} />}
-            label={t('workspace.browser.openExternal')}
-            disabled={!page?.url && !tab.url}
-            onSelect={() => {
-              const url = page?.url || tab.url
-              if (url) void getDesktopHost().shell.open(url)
-              setMenuOpen(false)
-            }}
           />
         </div>
       ) : null}
@@ -539,12 +765,10 @@ export function WorkspaceBrowserTab({ sessionId, tab, active }: WorkspaceBrowser
 }
 
 function BrowserMenuItem({
-  icon,
   label,
   onSelect,
   disabled = false,
 }: {
-  icon: React.ReactNode
   label: string
   onSelect: () => void
   disabled?: boolean
@@ -555,9 +779,8 @@ function BrowserMenuItem({
       role="menuitem"
       disabled={disabled}
       onClick={onSelect}
-      className="flex w-full items-center gap-2.5 px-3.5 py-1.5 text-left text-[12px] text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:text-[var(--color-text-tertiary)] disabled:hover:bg-transparent"
+      className="flex h-9 w-full items-center px-3.5 text-left text-[13px] text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-border-focus)] disabled:cursor-not-allowed disabled:text-[var(--color-text-tertiary)] disabled:hover:bg-transparent"
     >
-      <span aria-hidden="true" className="shrink-0 text-[var(--color-text-tertiary)]">{icon}</span>
       {label}
     </button>
   )

@@ -40,7 +40,7 @@ export type WorkspaceReviewSource =
   | { kind: 'staged' }
   | { kind: 'uncommitted' }
   | { kind: 'branch'; baseRef: string }
-  | { kind: 'turn'; turnKey: string }
+  | { kind: 'turn'; turnKey: string; userMessageIndex?: number }
   | { kind: 'commit'; commit: string }
 
 export const DEFAULT_REVIEW_SOURCE: WorkspaceReviewSource = { kind: 'unstaged' }
@@ -55,7 +55,7 @@ export function reviewSourceKey(source: WorkspaceReviewSource): string {
     case 'branch':
       return `branch:${source.baseRef}`
     case 'turn':
-      return `turn:${source.turnKey}`
+      return `turn:${source.turnKey}${source.userMessageIndex === undefined ? '' : `:${source.userMessageIndex}`}`
     case 'commit':
       return `commit:${source.commit}`
     default:
@@ -116,6 +116,9 @@ export type WorkspaceReviewTab = WorkspaceTabBase & {
   source: WorkspaceReviewSource
   /** File selected inside the review, or `null` for "show every file". */
   selectedPath: string | null
+  /** Persisted review marks; scoped to this exact comparison. */
+  viewedPaths?: string[]
+  viewedSnapshot?: string
 }
 
 export type WorkspaceTerminalTabStatus = 'live' | 'exited'

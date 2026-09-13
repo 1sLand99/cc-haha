@@ -70,6 +70,7 @@ export const ELECTRON_IPC_CHANNELS = {
   workspaceBrowserFind: 'desktop:workspace-browser:find',
   workspaceBrowserStopFind: 'desktop:workspace-browser:stop-find',
   workspaceBrowserCapture: 'desktop:workspace-browser:capture',
+  workspaceBrowserSnapshot: 'desktop:workspace-browser:snapshot',
   workspaceBrowserMessage: 'desktop:workspace-browser:message',
   workspaceBrowserPrintToPdf: 'desktop:workspace-browser:print-to-pdf',
   workspaceBrowserClose: 'desktop:workspace-browser:close',

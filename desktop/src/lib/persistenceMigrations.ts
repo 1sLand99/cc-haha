@@ -10,7 +10,7 @@ import {
   normalizeAppZoomLevel,
 } from './appZoom'
 
-export const CURRENT_DESKTOP_PERSISTENCE_SCHEMA_VERSION = 2
+export const CURRENT_DESKTOP_PERSISTENCE_SCHEMA_VERSION = 3
 export const DESKTOP_PERSISTENCE_VERSION_KEY = 'cc-haha.persistence.schemaVersion'
 
 type DesktopMigrationReport = {
@@ -181,10 +181,9 @@ function migrateThemeKey(
 }
 
 /**
- * Schema 2 introduced the unified workspace store. There is nothing to carry
- * forward — the panel/browser/terminal stores it replaces were never persisted
- * — so the job here is purely defensive: an entry written by a future build, or
- * a half-written one, must be dropped rather than fed to the hydrator.
+ * Schema 2 introduced the unified workspace store. Schema 3 adds review viewed
+ * paths and the turn checkpoint index to its descriptors. Old workspaces keep
+ * their tabs, including the Files picker whose path is deliberately empty.
  *
  * Terminal descriptors are the reason this cannot be left to the hydrator
  * alone: a stale entry carrying a live-looking runtime id is exactly the shape
@@ -201,7 +200,7 @@ function migrateWorkspaceState(storage: StorageLike, report: DesktopMigrationRep
       report.migratedKeys.push(WORKSPACE_STORAGE_KEY)
       return
     }
-    if (parsed.version !== WORKSPACE_STORAGE_VERSION) {
+    if (parsed.version !== 1 && parsed.version !== WORKSPACE_STORAGE_VERSION) {
       // A newer build wrote this. The hydrator already refuses a version it
       // does not know, so leave the entry alone — deleting it would mean that
       // downgrading once, briefly, permanently discards the workspace the newer
@@ -209,7 +208,7 @@ function migrateWorkspaceState(storage: StorageLike, report: DesktopMigrationRep
       return
     }
 
-    let changed = false
+    let changed = parsed.version !== WORKSPACE_STORAGE_VERSION
     const sessions: Record<string, unknown> = {}
     for (const [sessionId, value] of Object.entries(parsed.sessions)) {
       if (!isRecord(value) || !Array.isArray(value.tabs)) {
@@ -224,6 +223,9 @@ function migrateWorkspaceState(storage: StorageLike, report: DesktopMigrationRep
         !('runtimeId' in tab) &&
         !('browserTabId' in tab) &&
         WORKSPACE_PERSISTED_TAB_KINDS.includes(tab.kind as string))
+        .map((tab) => parsed.version === 1 && tab.kind === 'review'
+          ? { ...tab, viewedPaths: [] }
+          : tab)
       if (tabs.length !== value.tabs.length) changed = true
       if (tabs.length === 0) {
         changed = true
@@ -238,7 +240,7 @@ function migrateWorkspaceState(storage: StorageLike, report: DesktopMigrationRep
       return
     }
     if (changed) {
-      writeJson(storage, WORKSPACE_STORAGE_KEY, { ...parsed, sessions })
+      writeJson(storage, WORKSPACE_STORAGE_KEY, { ...parsed, version: WORKSPACE_STORAGE_VERSION, sessions })
       report.migratedKeys.push(WORKSPACE_STORAGE_KEY)
     }
   } catch {

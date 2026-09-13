@@ -134,6 +134,123 @@ describe('tree', () => {
 })
 
 describe('invalidation', () => {
+  it.each([
+    { name: 'coarse-only', paths: [], directories: ['src'] },
+    { name: 'mixed', paths: ['other/b.ts'], directories: ['src', 'other'] },
+  ])('refreshes cached descendants for $name directory events without enumerating other files', async ({ paths, directories }) => {
+    let revision = 'before'
+    mocks.getWorkspaceFile.mockImplementation(async (_session, path) => ({ state: 'ok', path: path.replace('/repo/', ''), content: revision, language: 'ts', size: 6 }))
+    mocks.getWorkspaceTree.mockImplementation(async (_session, path) => ({ state: 'ok', path, entries: [] }))
+    for (const path of ['/repo/src/nested/a.ts', 'src/c.ts', 'other/b.ts', 'src-other/keep.ts']) await store().loadFile(SESSION, path)
+    await store().loadFile('session-b', 'src/c.ts')
+    await store().toggleDirectory(SESSION, 'src/nested')
+    store().setFileView(SESSION, '/repo/src/nested/a.ts', { scrollTop: 123, scrollLeft: 7 })
+    mocks.getWorkspaceFile.mockClear()
+    mocks.getWorkspaceTree.mockClear()
+    revision = 'after'
+    await store().refreshWatchedPaths(SESSION, paths, directories, new AbortController().signal)
+    expect(store().getFile(SESSION, '/repo/src/nested/a.ts')?.content).toBe('after')
+    expect(store().getFile(SESSION, 'src/c.ts')?.content).toBe('after')
+    expect(store().getFile(SESSION, 'src-other/keep.ts')?.content).toBe('before')
+    expect(store().getFile('session-b', 'src/c.ts')?.content).toBe('before')
+    expect(mocks.getWorkspaceFile.mock.calls.map((call) => call[1])).toEqual([
+      '/repo/src/nested/a.ts', 'src/c.ts', ...(directories.includes('other') ? ['other/b.ts'] : []),
+    ])
+    expect(mocks.getWorkspaceTree).toHaveBeenCalledWith(SESSION, 'src/nested', expect.any(AbortSignal))
+    expect(store().isExpanded(SESSION, 'src/nested')).toBe(true)
+    expect(store().fileViewByKey[`${SESSION}::/repo/src/nested/a.ts`]).toEqual({ scrollTop: 123, scrollLeft: 7 })
+  })
+
+  it('limits a root directory invalidation to cached workspace identities', async () => {
+    let revision = 'before'
+    mocks.getWorkspaceFile.mockImplementation(async (_session, path) => ({ state: 'ok', path: path.replace('/repo/', ''), content: revision, language: 'ts', size: 6 }))
+    for (const path of ['root.ts', '/repo/src/nested/a.ts', 'c:relative.ts', '/outside/keep.ts', 'C:\\outside\\keep.ts']) await store().loadFile(SESSION, path)
+    mocks.getWorkspaceFile.mockClear()
+    revision = 'after'
+    await store().refreshWatchedPaths(SESSION, ['root.ts'], [''], new AbortController().signal)
+    expect(mocks.getWorkspaceFile.mock.calls.map((call) => call[1])).toEqual(['root.ts', '/repo/src/nested/a.ts', 'c:relative.ts'])
+    expect(store().getFile(SESSION, '/repo/src/nested/a.ts')?.content).toBe('after')
+    expect(store().getFile(SESSION, '/outside/keep.ts')?.content).toBe('before')
+    expect(store().getFile(SESSION, 'C:\\outside\\keep.ts')?.content).toBe('before')
+  })
+
+  it('refreshes absolute opened files and trees from the server-relative watch paths', async () => {
+    mocks.getWorkspaceFile.mockResolvedValue({ state: 'ok', path: 'src/a.ts', content: 'before', language: 'ts', size: 6 })
+    mocks.getWorkspaceTree.mockResolvedValue({ state: 'ok', path: 'src', entries: [] })
+    await store().loadFile(SESSION, '/repo/src/a.ts')
+    await store().loadTree(SESSION, '/repo/src')
+    mocks.getWorkspaceFile.mockResolvedValue({ state: 'ok', path: 'src/a.ts', content: 'after', language: 'ts', size: 5 })
+    mocks.getWorkspaceFile.mockClear()
+    mocks.getWorkspaceTree.mockClear()
+
+    const signal = new AbortController().signal
+    await store().refreshWatchedPaths(SESSION, ['src/a.ts'], ['src'], signal)
+
+    expect(mocks.getWorkspaceFile).toHaveBeenCalledWith(SESSION, '/repo/src/a.ts', signal)
+    expect(mocks.getWorkspaceTree).toHaveBeenCalledWith(SESSION, '/repo/src', signal)
+    expect(store().getFile(SESSION, '/repo/src/a.ts')?.content).toBe('after')
+    expect(store().getFile(SESSION, 'src/a.ts')).toBeUndefined()
+
+    mocks.getWorkspaceFile.mockResolvedValue({ state: 'ok', path: 'src/a.ts', content: 'coarse event', language: 'ts', size: 12 })
+    await store().refreshWatchedPaths(SESSION, [], ['src'], signal)
+    expect(store().getFile(SESSION, '/repo/src/a.ts')?.content).toBe('coarse event')
+  })
+
+  it('refreshes only changed cached paths in place while preserving directory expansion', async () => {
+    mocks.getWorkspaceFile.mockImplementation(async (_session, path) => ({ state: 'ok', path, content: 'before', language: 'ts', size: 6 }))
+    mocks.getWorkspaceTree.mockResolvedValue({ state: 'ok', path: 'src', entries: [{ path: 'src/a.ts', name: 'a.ts', isDirectory: false }] })
+    await store().loadFile(SESSION, 'src/a.ts')
+    await store().loadFile(SESSION, 'unrelated.ts')
+    await store().toggleDirectory(SESSION, 'src')
+    mocks.getWorkspaceFile.mockClear()
+    const read = deferred<unknown>()
+    mocks.getWorkspaceFile.mockReturnValue(read.promise)
+    const refresh = store().refreshWatchedPaths(SESSION, ['src/a.ts'], ['src'], new AbortController().signal)
+    expect(store().getFile(SESSION, 'src/a.ts')?.content).toBe('before')
+    expect(store().isExpanded(SESSION, 'src')).toBe(true)
+    expect(mocks.getWorkspaceFile).toHaveBeenCalledTimes(1)
+    read.resolve({ state: 'ok', path: 'src/a.ts', content: 'after', language: 'ts', size: 5 })
+    await refresh
+    expect(store().getFile(SESSION, 'src/a.ts')?.content).toBe('after')
+    expect(store().getFile(SESSION, 'unrelated.ts')?.content).toBe('before')
+  })
+
+  it('does not apply a late watch refresh after cancellation or task release', async () => {
+    mocks.getWorkspaceFile.mockResolvedValueOnce({ state: 'ok', path: 'a.ts', content: 'before', language: 'ts', size: 6 })
+    await store().loadFile(SESSION, 'a.ts')
+    const read = deferred<unknown>()
+    mocks.getWorkspaceFile.mockReturnValue(read.promise)
+    const abort = new AbortController()
+    const refresh = store().refreshWatchedPaths(SESSION, ['a.ts'], [''], abort.signal)
+    abort.abort()
+    store().clearSession(SESSION)
+    read.resolve({ state: 'ok', path: 'a.ts', content: 'late', language: 'ts', size: 4 })
+    await refresh
+    expect(store().getFile(SESSION, 'a.ts')).toBeUndefined()
+  })
+
+  it('keeps cached file and tree content when only the subscription is cancelled', async () => {
+    mocks.getWorkspaceFile.mockResolvedValueOnce({ state: 'ok', path: 'src/a.ts', content: 'before', language: 'ts', size: 6 })
+    mocks.getWorkspaceTree.mockResolvedValueOnce({ state: 'ok', path: 'src', entries: [{ name: 'a.ts', path: 'src/a.ts', isDirectory: false }] })
+    await store().loadFile(SESSION, 'src/a.ts')
+    await store().loadTree(SESSION, 'src')
+    const file = deferred<unknown>()
+    const tree = deferred<unknown>()
+    mocks.getWorkspaceFile.mockReturnValue(file.promise)
+    mocks.getWorkspaceTree.mockReturnValue(tree.promise)
+    const abort = new AbortController()
+    const refresh = store().refreshWatchedPaths(SESSION, ['src/a.ts'], ['src'], abort.signal)
+    expect(mocks.getWorkspaceFile).toHaveBeenLastCalledWith(SESSION, 'src/a.ts', abort.signal)
+    expect(mocks.getWorkspaceTree).toHaveBeenLastCalledWith(SESSION, 'src', abort.signal)
+    abort.abort()
+    file.resolve({ state: 'ok', path: 'src/a.ts', content: 'late', language: 'ts', size: 4 })
+    tree.resolve({ state: 'ok', path: 'src', entries: [] })
+    await refresh
+    expect(store().getFile(SESSION, 'src/a.ts')?.content).toBe('before')
+    expect(store().getTree(SESSION, 'src')?.entries).toHaveLength(1)
+    expect(store().isTreeLoading(SESSION, 'src')).toBe(false)
+  })
+
   it('drops a changed file and its directory listing but keeps the tree open', async () => {
     mocks.getWorkspaceFile.mockResolvedValue({ state: 'ok', path: 'src/a.ts', content: 'x', language: 'ts', size: 1 })
     mocks.getWorkspaceTree.mockResolvedValue({ state: 'ok', path: 'src', entries: [] })

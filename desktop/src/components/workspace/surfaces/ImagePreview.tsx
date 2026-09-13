@@ -14,7 +14,7 @@ export function ImagePreview({ dataUrl, path, error }: { dataUrl?: string; path:
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-[var(--color-surface)] p-4">
+    <div data-workspace-scroll-surface="" className="min-h-0 flex-1 overflow-auto bg-[var(--color-surface)] p-4">
       <div className="flex min-h-full items-center justify-center">
         <img
           src={dataUrl}

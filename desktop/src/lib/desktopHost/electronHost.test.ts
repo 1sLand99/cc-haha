@@ -1,8 +1,33 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ELECTRON_EVENT_CHANNELS, ELECTRON_IPC_CHANNELS } from '../../../electron/ipc/channels'
+import { ELECTRON_EVENT_CHANNELS, ELECTRON_IPC_CHANNELS, type ElectronIpcChannel } from '../../../electron/ipc/channels'
+import { validateElectronIpcPayload } from '../../../electron/ipc/capabilities'
 import { createElectronHost } from './electronHost'
 
 describe('electron desktop host', () => {
+  it('carries a terminal startup identity through the production IPC validator and early events', async () => {
+    const handlers = new Map<string, (event: unknown) => void>()
+    const host = createElectronHost({
+      async invoke<T>(channel: ElectronIpcChannel, payload?: unknown) {
+        expect(validateElectronIpcPayload(channel, payload)).toBe(true)
+        const request = payload as { requestId: string }
+        handlers.get(ELECTRON_EVENT_CHANNELS.terminalOutput)?.({ session_id: 9, requestId: request.requestId, data: 'prompt' })
+        handlers.get(ELECTRON_EVENT_CHANNELS.terminalExit)?.({ session_id: 9, requestId: request.requestId, code: 0 })
+        return { session_id: 9, shell: '/fixture/sh', cwd: '/fixture' } as T
+      },
+      async subscribe(channel, handler) {
+        handlers.set(channel, handler as (event: unknown) => void)
+        return () => { handlers.delete(channel) }
+      },
+    })
+    const output = vi.fn()
+    const exit = vi.fn()
+    await host.terminal.onOutput(output)
+    await host.terminal.onExit(exit)
+    await host.terminal.spawn({ cols: 80, rows: 24, requestId: 'fixture-start' })
+    expect(output).toHaveBeenCalledWith({ session_id: 9, requestId: 'fixture-start', data: 'prompt' })
+    expect(exit).toHaveBeenCalledWith({ session_id: 9, requestId: 'fixture-start', code: 0 })
+  })
+
   it('synchronizes locale preferences through narrow app IPC boundaries', async () => {
     const invoke = vi.fn()
       .mockResolvedValueOnce('jp')
@@ -153,6 +178,7 @@ describe('electron desktop host', () => {
       storageId: 'wsb-1',
       url: 'https://example.com',
       bounds: { x: 0, y: 40, width: 800, height: 600 },
+      visible: false,
     })
     await host.browser.navigate('wb-1', 'https://example.com/next')
     await host.browser.goBack('wb-1')
@@ -176,6 +202,7 @@ describe('electron desktop host', () => {
         storageId: 'wsb-1',
         url: 'https://example.com',
         bounds: { x: 0, y: 40, width: 800, height: 600 },
+        visible: false,
       }],
       [ELECTRON_IPC_CHANNELS.workspaceBrowserNavigate, { tabId: 'wb-1', url: 'https://example.com/next' }],
       [ELECTRON_IPC_CHANNELS.workspaceBrowserGoBack, { tabId: 'wb-1' }],
@@ -199,6 +226,15 @@ describe('electron desktop host', () => {
     const host = createElectronHost({ invoke: vi.fn(), subscribe: vi.fn() })
 
     expect(host.capabilities.workspaceBrowser).toBe(true)
+  })
+
+  it('returns a presentation snapshot through its own addressed IPC without requesting a chat capture', async () => {
+    const invoke = vi.fn().mockResolvedValue('data:image/png;base64,BACKDROP')
+    const host = createElectronHost({ invoke, subscribe: vi.fn() })
+    await expect(host.browser.snapshot('wb-1')).resolves.toBe('data:image/png;base64,BACKDROP')
+    expect(invoke.mock.calls).toEqual([[ELECTRON_IPC_CHANNELS.workspaceBrowserSnapshot, { tabId: 'wb-1' }]])
+    await expect(host.browser.snapshot('')).rejects.toThrow('Invalid Electron IPC payload')
+    expect(invoke).toHaveBeenCalledTimes(1)
   })
 
   it('rejects an unaddressed browser call before it reaches Electron IPC', async () => {

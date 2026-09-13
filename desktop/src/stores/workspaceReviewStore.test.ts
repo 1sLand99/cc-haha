@@ -6,10 +6,14 @@ const reviewApi = vi.hoisted(() => ({
   stage: vi.fn(),
   unstage: vi.fn(),
   revert: vi.fn(),
+  stageHunk: vi.fn(),
+  unstageHunk: vi.fn(),
 }))
 
 const sessionsApi = vi.hoisted(() => ({
   getWorkspaceStatus: vi.fn(),
+  getTurnCheckpoints: vi.fn(),
+  getTurnCheckpointDiff: vi.fn(),
   getWorkspaceDiff: vi.fn(),
 }))
 
@@ -28,7 +32,7 @@ import type {
   ReviewWriteResult,
 } from '../api/review'
 import type { WorkspaceReviewSource } from '../lib/workspace/types'
-import { translate, type Locale } from '../i18n'
+import { translate } from '../i18n'
 
 const SESSION = 'session-a'
 const OTHER = 'session-b'
@@ -38,16 +42,12 @@ const TURN: WorkspaceReviewSource = { kind: 'turn', turnKey: 't1' }
 const BRANCH: WorkspaceReviewSource = { kind: 'branch', baseRef: 'main' }
 const COMMIT: WorkspaceReviewSource = { kind: 'commit', commit: 'abc1234' }
 
-/** Shape `sessionsApi.getWorkspaceStatus` answers with. */
 function workspaceStatus(changedFiles: Array<Record<string, unknown>> = []) {
-  return {
-    state: 'ok' as const,
+  return { checkpoints: [{
+    target: { targetUserMessageId: 't1', userMessageIndex: 0, userMessageCount: 1 },
     workDir: '/repo',
-    repoName: 'repo',
-    branch: 'main',
-    isGitRepo: true,
-    changedFiles,
-  }
+    code: { available: true, filesChanged: changedFiles.map(file => file.path), insertions: 4, deletions: 2 },
+  }] }
 }
 
 function refusalOf(outcome: WorkspaceReviewWriteOutcome): string | null {
@@ -124,22 +124,16 @@ describe('source routing', () => {
     expect(toGitReviewSource(UNSTAGED)).toEqual(UNSTAGED)
   })
 
-  /**
-   * The `turn` entry is served by `sessionsApi.getWorkspaceStatus`, which
-   * returns the *current* working tree blended with the session's own file
-   * history. It is not a turn snapshot and `turnKey` is not sent anywhere.
-   * That behaviour is grandfathered for the chat change card, so the contract
-   * this test pins is that the entry says what it actually is.
-   */
   it('labels the session-changes entry as what it is, not as a Git comparison', async () => {
-    sessionsApi.getWorkspaceStatus.mockResolvedValueOnce(
+    sessionsApi.getTurnCheckpoints.mockResolvedValueOnce(
       workspaceStatus([{ path: 'src/a.ts', status: 'modified', additions: 4, deletions: 2 }]),
     )
 
     await store().load(SESSION, TURN)
 
     expect(reviewApi.getStatus).not.toHaveBeenCalled()
-    expect(sessionsApi.getWorkspaceStatus).toHaveBeenCalledWith(SESSION)
+    expect(sessionsApi.getTurnCheckpoints).toHaveBeenCalledWith(SESSION, undefined, true)
+    expect(sessionsApi.getWorkspaceStatus).not.toHaveBeenCalled()
     expect(entry(SESSION, TURN).status?.files.map((f) => f.path)).toEqual(['src/a.ts'])
 
     // Calling this `unstaged` claimed an index -> working-tree comparison that
@@ -147,7 +141,7 @@ describe('source routing', () => {
     expect(entry(SESSION, TURN).status?.source).toEqual({ kind: 'turn', turnKey: 't1' })
     expect(entry(SESSION, TURN).status?.source.resolvedBase).toBeUndefined()
     // No Git version token exists for this view, so no write can be guarded.
-    expect(entry(SESSION, TURN).status?.snapshot).toBe('')
+    expect(entry(SESSION, TURN).status?.snapshot).toBe('turn:t1')
     expect(entry(SESSION, TURN).readOnly).toBe(true)
   })
 
@@ -161,11 +155,11 @@ describe('source routing', () => {
   })
 
   it('labels the session-changes diff with the same source as its status', async () => {
-    sessionsApi.getWorkspaceStatus.mockResolvedValueOnce(
+    sessionsApi.getTurnCheckpoints.mockResolvedValueOnce(
       workspaceStatus([{ path: 'src/a.ts', status: 'modified', additions: 4, deletions: 2 }]),
     )
     await store().load(SESSION, TURN)
-    sessionsApi.getWorkspaceDiff.mockResolvedValueOnce({
+    sessionsApi.getTurnCheckpointDiff.mockResolvedValueOnce({
       state: 'ok',
       path: 'src/a.ts',
       diff: '--- a/src/a.ts\n+++ b/src/a.ts\n',
@@ -180,7 +174,7 @@ describe('source routing', () => {
   })
 
   it('refuses every write against the session-changes entry and never calls the API', async () => {
-    sessionsApi.getWorkspaceStatus.mockResolvedValueOnce(
+    sessionsApi.getTurnCheckpoints.mockResolvedValueOnce(
       workspaceStatus([{ path: 'src/a.ts', status: 'modified', additions: 4, deletions: 2 }]),
     )
     await store().load(SESSION, TURN)
@@ -408,12 +402,14 @@ describe('writes', () => {
     expect(reviewApi.getStatus).toHaveBeenCalledTimes(1)
   })
 
-  it('clears the stale flag once a write lands', async () => {
+  it('requires fresh status before clearing stale with a new write', async () => {
     reviewApi.getStatus.mockResolvedValueOnce(status('snap-1'))
     await store().load(SESSION, UNSTAGED)
     reviewApi.stage.mockResolvedValueOnce(writeResult({ state: 'stale' }))
     await store().stage(SESSION, UNSTAGED, ['src/a.ts'])
 
+    reviewApi.getStatus.mockResolvedValueOnce(status('snap-2'))
+    await store().load(SESSION, UNSTAGED, { force: true })
     reviewApi.stage.mockResolvedValueOnce(writeResult({ status: status('snap-2') }))
     await store().stage(SESSION, UNSTAGED, ['src/a.ts'])
 
@@ -621,7 +617,7 @@ describe('diff request fan-out', () => {
     expect(entry().diffsByPath['src/a.ts']?.diff).toContain('+new')
   })
 
-  it('retries a file after a failed read, because the guard is in-flight only', async () => {
+  it('retries a mismatched file only after explicit status refresh', async () => {
     reviewApi.getStatus.mockResolvedValueOnce(status('snap-1'))
     await store().load(SESSION, UNSTAGED)
 
@@ -635,45 +631,33 @@ describe('diff request fan-out', () => {
     expect(entry().diffsByPath['src/a.ts']).toBeUndefined()
     expect(entry().diffLoadingByPath['src/a.ts']).toBe(false)
 
+    reviewApi.getStatus.mockResolvedValueOnce(status('snap-1'))
+    await store().load(SESSION, UNSTAGED, { force: true })
     reviewApi.getDiff.mockResolvedValueOnce(diff('src/a.ts', 'snap-1'))
     await store().loadDiff(SESSION, UNSTAGED, 'src/a.ts')
     expect(reviewApi.getDiff).toHaveBeenCalledTimes(2)
   })
 
   it('guards the session-changes diff against the same duplicate request', async () => {
-    sessionsApi.getWorkspaceStatus.mockResolvedValueOnce(
+    sessionsApi.getTurnCheckpoints.mockResolvedValueOnce(
       workspaceStatus([{ path: 'src/a.ts', status: 'modified', additions: 1, deletions: 0 }]),
     )
     await store().load(SESSION, TURN)
 
     const pending = deferred<{ state: 'ok'; path: string; diff: string }>()
-    sessionsApi.getWorkspaceDiff.mockReturnValueOnce(pending.promise)
+    sessionsApi.getTurnCheckpointDiff.mockReturnValueOnce(pending.promise)
 
     const first = store().loadDiff(SESSION, TURN, 'src/a.ts')
     const second = store().loadDiff(SESSION, TURN, 'src/a.ts')
-    expect(sessionsApi.getWorkspaceDiff).toHaveBeenCalledTimes(1)
+    expect(sessionsApi.getTurnCheckpointDiff).toHaveBeenCalledTimes(1)
 
     pending.resolve({ state: 'ok', path: 'src/a.ts', diff: 'x' })
     await Promise.all([first, second])
-    expect(sessionsApi.getWorkspaceDiff).toHaveBeenCalledTimes(1)
+    expect(sessionsApi.getTurnCheckpointDiff).toHaveBeenCalledTimes(1)
   })
 })
 
-describe('session-changes label', () => {
-  /**
-   * The tab label is the only place the user learns what the panel is showing.
-   * `turn` is served by the live workspace endpoints, so a label promising one
-   * turn's changes is a claim the data cannot keep — and the reason a reviewer
-   * read the panel as a turn comparison in the first place.
-   */
-  const RETIRED_TURN_LABELS = {
-    en: ['This turn', 'turn'],
-    zh: ['本轮改动', '本轮'],
-    'zh-TW': ['本輪變更', '本輪'],
-    jp: ['このターンの変更', 'ターン'],
-    kr: ['이번 턴의 변경', '턴'],
-  } as const
-
+describe('turn review labels', () => {
   const NEW_KEYS = [
     'workspace.review.sourceTurnHint',
     'workspace.review.readOnlySource',
@@ -687,15 +671,6 @@ describe('session-changes label', () => {
     'workspace.review.diffTruncated',
     'workspace.review.statsTruncated',
   ] as const
-
-  it('no longer promises a single turn in any locale', () => {
-    for (const [locale, [retired, word]] of Object.entries(RETIRED_TURN_LABELS)) {
-      const label = translate(locale as Locale, 'workspace.review.sourceTurn')
-      expect(label, `${locale} still uses the retired label`).not.toBe(retired)
-      expect(label.toLowerCase(), `${locale} still calls it a turn`).not.toContain(word.toLowerCase())
-      expect(label.length).toBeGreaterThan(0)
-    }
-  })
 
   it('carries the review keys the panel needs in every locale', () => {
     for (const locale of ['en', 'zh', 'zh-TW', 'jp', 'kr'] as const) {
@@ -717,4 +692,73 @@ describe('session-changes label', () => {
       expect(deleted).toContain('/tmp/backup')
     }
   })
+})
+
+
+describe('frozen turn identity and stale generations', () => {
+  it('keeps a partial frozen checkpoint visibly unavailable even when it contains a successful file', async () => {
+    const checkpoint = workspaceStatus([{ path: 'src/a.ts' }]).checkpoints[0]!
+    sessionsApi.getTurnCheckpoints.mockResolvedValue({ checkpoints: [{
+      ...checkpoint,
+      code: { ...checkpoint.code, available: false, reason: 'Recorded file history is incomplete for: src/b.ts' },
+      restoreAvailable: false,
+    }] })
+    await store().load(SESSION, TURN)
+    expect(entry(SESSION, TURN).status?.state).toBe('error')
+    expect(entry(SESSION, TURN).status?.files).toHaveLength(1)
+    expect(entry(SESSION, TURN).error).toContain('src/b.ts')
+    expect(entry(SESSION, TURN).readOnly).toBe(true)
+    expect(sessionsApi.getWorkspaceStatus).not.toHaveBeenCalled()
+    expect(sessionsApi.getWorkspaceDiff).not.toHaveBeenCalled()
+  })
+
+  it('uses distinct checkpoint identities for two turns touching the same path and never reads live Git', async () => {
+    const first = { kind: 'turn', turnKey: 't1', userMessageIndex: 0 } as const
+    const second = { kind: 'turn', turnKey: 't2', userMessageIndex: 1 } as const
+    sessionsApi.getTurnCheckpoints.mockResolvedValue({ checkpoints: [
+      { ...workspaceStatus([{ path: 'src/a.ts' }]).checkpoints[0], target: { targetUserMessageId: 't1', userMessageIndex: 0 } },
+      { ...workspaceStatus([{ path: 'src/a.ts' }]).checkpoints[0], target: { targetUserMessageId: 't2', userMessageIndex: 1 } },
+    ] })
+    sessionsApi.getTurnCheckpointDiff.mockImplementation((_session, turn) => Promise.resolve({ state: 'ok', path: 'src/a.ts', diff: `frozen ${turn}` }))
+    for (const source of [first, second]) {
+      await store().load(SESSION, source)
+      await store().loadDiff(SESSION, source, 'src/a.ts')
+      expect(sessionsApi.getTurnCheckpointDiff).toHaveBeenCalledWith(SESSION, source.turnKey, 'src/a.ts', source.userMessageIndex, true)
+      expect(entry(SESSION, source).diffsByPath['src/a.ts']?.diff).toBe(`frozen ${source.turnKey}`)
+    }
+    expect(sessionsApi.getWorkspaceStatus).not.toHaveBeenCalled()
+    expect(sessionsApi.getWorkspaceDiff).not.toHaveBeenCalled()
+    expect(reviewApi.getDiff).not.toHaveBeenCalled()
+  })
+
+  it('reports missing historical data without requesting the live workspace fallback', async () => {
+    sessionsApi.getTurnCheckpoints.mockResolvedValue({ checkpoints: [] })
+    await store().load(SESSION, TURN)
+    expect(entry(SESSION, TURN).error).toContain('unavailable')
+    expect(sessionsApi.getWorkspaceStatus).not.toHaveBeenCalled()
+  })
+
+  it('does not recreate a cleared task from a delayed diff', async () => {
+    reviewApi.getStatus.mockResolvedValue(status('snap-1'))
+    await store().load(SESSION, UNSTAGED)
+    const response = deferred<ReviewDiffResult>()
+    reviewApi.getDiff.mockReturnValue(response.promise)
+    const pending = store().loadDiff(SESSION, UNSTAGED, 'src/a.ts')
+    store().clearSession(SESSION)
+    response.resolve(diff('src/a.ts', 'snap-1'))
+    await pending
+    expect(store().byKey).toEqual({})
+  })
+})
+
+
+it('invalidates persisted viewed marks when the server snapshot changes', async () => {
+  store().restoreViewed(SESSION, UNSTAGED, ['src/a.ts'], 'old-snapshot')
+  reviewApi.getStatus.mockResolvedValue(status('new-snapshot'))
+  await store().load(SESSION, UNSTAGED)
+  expect(entry().viewedPaths).toEqual([])
+  store().toggleViewed(SESSION, UNSTAGED, 'src/a.ts')
+  expect(entry().viewedSnapshot).toBe('new-snapshot')
+  await store().load(SESSION, UNSTAGED, { force: true })
+  expect(entry().viewedPaths).toEqual(['src/a.ts'])
 })

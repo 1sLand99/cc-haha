@@ -44,6 +44,10 @@ export type FileHistorySnapshot = {
   messageId: UUID // The associated message ID for this snapshot
   trackedFileBackups: Record<string, FileHistoryBackup> // Map of file paths to backup versions
   timestamp: Date
+  /** Schema 1 (or absent) has only the before boundary. */
+  schemaVersion?: 1 | 2
+  /** Immutable after copies. Missing keys are failed captures, never unchanged files. */
+  completedFileBackups?: Record<string, FileHistoryBackup>
 }
 
 export type FileHistoryState = {
@@ -312,6 +316,7 @@ export async function fileHistoryMakeSnapshot(
       }
       const now = new Date()
       const newSnapshot: FileHistorySnapshot = {
+        schemaVersion: 2,
         messageId,
         trackedFileBackups,
         timestamp: now,
@@ -354,6 +359,49 @@ export async function fileHistoryMakeSnapshot(
       return state
     }
   })
+}
+
+/** Upgrade old snapshots without inventing an after boundary from today's files. */
+export function migrateFileHistorySnapshot(snapshot: FileHistorySnapshot): FileHistorySnapshot {
+  return { ...snapshot, schemaVersion: snapshot.schemaVersion && snapshot.schemaVersion >= 2 ? snapshot.schemaVersion : 2 }
+}
+
+/** Finish the checkpoint on normal exhaustion, cancellation, or a thrown query. */
+export async function* withFileHistoryCompletion<T>(query: AsyncIterable<T>, complete: () => Promise<void>): AsyncGenerator<T> {
+  try {
+    yield* query
+  } finally {
+    await complete()
+  }
+}
+
+/** Capture once, retaining safe partial copies; missing paths remain unavailable. */
+export async function fileHistoryCompleteSnapshot(
+  updateFileHistoryState: (updater: (prev: FileHistoryState) => FileHistoryState) => void,
+  messageId: UUID,
+): Promise<void> {
+  if (!fileHistoryEnabled()) return
+  let captured: FileHistorySnapshot | undefined
+  updateFileHistoryState(state => {
+    captured = state.snapshots.find(snapshot => snapshot.messageId === messageId)
+    return state
+  })
+  if (!captured || captured.completedFileBackups) return
+  const completedFileBackups: Record<string, FileHistoryBackup> = {}
+  // Reuse the checkpoint's safe-copy boundary. A distinct immutable filename
+  // cannot collide with the next turn's incrementing before-backup version.
+  for (const [trackingPath, before] of Object.entries(captured.trackedFileBackups)) {
+    try {
+      completedFileBackups[trackingPath] = await createBackup(maybeExpandFilePath(trackingPath), before.version, `completed-${messageId}-${randomUUID()}`)
+    } catch (error) { logError(error) }
+  }
+  let completed: FileHistorySnapshot | undefined
+  updateFileHistoryState(state => ({ ...state, snapshots: state.snapshots.map(snapshot => {
+    if (snapshot.messageId !== messageId || snapshot.completedFileBackups) return snapshot
+    completed = { ...migrateFileHistorySnapshot(snapshot), completedFileBackups }
+    return completed
+  }) }))
+  if (completed) await recordFileHistorySnapshot(messageId, completed, true)
 }
 
 /**
@@ -898,12 +946,13 @@ async function areSafeDirectoryEntriesUnchanged(
 async function createBackup(
   filePath: string | null,
   version: number,
+  suffix?: string,
 ): Promise<FileHistoryBackup> {
   if (filePath === null) {
     return { backupFileName: null, version, backupTime: new Date() }
   }
 
-  const backupFileName = getBackupFileName(filePath, version)
+  const backupFileName = `${getBackupFileName(filePath, version)}${suffix ? `-${suffix}` : ''}`
   const backupPath = resolveBackupPath(backupFileName)
 
   let pathStats: Stats
@@ -1322,8 +1371,9 @@ export function fileHistoryRestoreStateFromLog(
       trackedFileBackups[trackingPath] = backup
     }
     snapshots.push({
-      ...snapshot,
-      trackedFileBackups: trackedFileBackups,
+      ...migrateFileHistorySnapshot(snapshot),
+      trackedFileBackups,
+      ...(snapshot.completedFileBackups ? { completedFileBackups: Object.fromEntries(Object.entries(snapshot.completedFileBackups).map(([filePath, backup]) => [maybeShortenFilePath(filePath), backup])) } : {}),
     })
   }
   onUpdateState({
@@ -1379,7 +1429,7 @@ export async function copyFileHistoryForResume(log: LogOption): Promise<void> {
     let failedSnapshots = 0
     await Promise.allSettled(
       fileHistorySnapshots.map(async snapshot => {
-        const backupEntries = Object.values(snapshot.trackedFileBackups).filter(
+        const backupEntries = [...Object.values(snapshot.trackedFileBackups), ...Object.values(snapshot.completedFileBackups ?? {})].filter(
           (backup): backup is typeof backup & { backupFileName: string } =>
             backup.backupFileName !== null,
         )

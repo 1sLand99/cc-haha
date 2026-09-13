@@ -2,6 +2,7 @@ export type WorkspaceShortcutAction =
   | 'quick-open-file'
   | 'new-browser-tab'
   | 'toggle-bottom-panel'
+  | 'toggle-terminal'
   | 'new-terminal'
   | 'toggle-workspace'
   | 'toggle-fullscreen'
@@ -53,14 +54,18 @@ export function matchWorkspaceShortcut(
 ): WorkspaceShortcutAction | null {
   const primary = isPrimaryModifier(event, options.platform)
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key
+  // Ctrl+J sends a newline at the shell, including on macOS.
+  if (options.context === 'terminal' && event.ctrlKey && !event.metaKey && key === 'j') return null
   let action: WorkspaceShortcutAction | null = null
 
   // `Ctrl+\`` everywhere, including on macOS: it is the terminal key users
   // already know from other editors, and Cmd+` is taken by window cycling.
   if (event.ctrlKey && !event.metaKey && !event.altKey && (key === '`' || event.code === 'Backquote')) {
-    action = event.shiftKey ? 'new-terminal' : 'toggle-bottom-panel'
+    action = event.shiftKey ? 'new-terminal' : 'toggle-terminal'
   } else if (event.ctrlKey && event.shiftKey && !event.metaKey && key === 'g') {
     action = 'open-review'
+  } else if (primary && !event.ctrlKey && event.altKey && !event.shiftKey && (key === 'b' || event.code === 'KeyB') && options.platform === 'mac') {
+    action = 'toggle-workspace'
   } else if (primary && event.shiftKey && !event.altKey && key === 'b') {
     action = 'toggle-workspace'
   } else if (primary && event.shiftKey && !event.altKey && key === 'f') {
@@ -71,6 +76,8 @@ export function matchWorkspaceShortcut(
     action = 'quick-open-file'
   } else if (primary && !event.shiftKey && !event.altKey && key === 't') {
     action = 'new-browser-tab'
+  } else if (primary && !event.shiftKey && !event.altKey && key === 'j') {
+    action = 'toggle-bottom-panel'
   } else if (primary && !event.shiftKey && !event.altKey && key === 'w') {
     action = 'close-tab'
   } else if (event.ctrlKey && !event.metaKey && !event.altKey && key === 'Tab') {
@@ -95,12 +102,14 @@ export function formatWorkspaceShortcut(
       return `${primary}P`
     case 'new-browser-tab':
       return `${primary}T`
-    case 'toggle-bottom-panel':
+    case 'toggle-terminal':
       return `${ctrl}\``
+    case 'toggle-bottom-panel':
+      return `${primary}J`
     case 'open-review':
       return `${ctrl}${shift}G`
     case 'toggle-workspace':
-      return `${primary}${shift}B`
+      return platform === 'mac' ? '⌥⌘B' : `${primary}${shift}B`
     case 'toggle-fullscreen':
       return `${primary}${shift}F`
     default:

@@ -82,6 +82,7 @@ export function MarkdownSurface({
   return (
     <div
       ref={surfaceRef}
+      data-workspace-scroll-surface=""
       className="min-h-0 flex-1 overflow-auto bg-[var(--color-surface)]"
       onMouseUp={handleSelectionMouseUp}
       onKeyDown={(event) => {

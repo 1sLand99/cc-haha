@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useWorkspaceHeaderTarget } from '../layout/WorkspaceHeaderContext'
 import { useShallow } from 'zustand/react/shallow'
-import { X } from 'lucide-react'
-import { IconButton } from '@/components/ui/IconButton'
 import { t, useTranslation } from '../../i18n'
 import { useChatStore } from '../../stores/chatStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
-import { buildSelectionDirectMessage, type SelectionPayload } from '../../lib/selectionComposer'
+import { discardNavigatedBrowserSelections, handleBrowserSelectionEvent } from '../../lib/workspace/browserSelections'
 import { useWorkspaceBrowserStore } from '../../stores/workspaceBrowserStore'
 import { useWorkspaceContentStore } from '../../stores/workspaceContentStore'
 import { openWorkspaceTarget, workspaceOpen } from '../../lib/workspace/openTarget'
@@ -13,14 +13,12 @@ import { subscribeWorkspaceBrowserEvents } from '../../lib/workspace/browserHost
 import type { WorkspaceDock, WorkspaceTabKind } from '../../lib/workspace/types'
 import { WorkspaceTabStrip } from './WorkspaceTabStrip'
 import { WorkspaceLauncher } from './WorkspaceLauncher'
-import { WorkspaceLayoutControls } from './WorkspaceLayoutControls'
+import { WorkspaceAddMenu } from './WorkspaceAddMenu'
 import { WorkspaceBrowserTab } from './WorkspaceBrowserTab'
 import { WorkspaceTerminalTab } from './WorkspaceTerminalTab'
+import { useWorkspaceFileWatch } from '@/lib/workspace/useWorkspaceFileWatch'
 import { WorkspaceFileTab } from './WorkspaceFileTab'
 import { WorkspaceReviewTab } from './WorkspaceReviewTab'
-
-/** The bottom dock is a terminal dock; everything else lives on the side. */
-const BOTTOM_DOCK_KINDS: readonly WorkspaceTabKind[] = ['terminal']
 
 export type WorkspaceSurfaceProps = {
   sessionId: string
@@ -29,15 +27,12 @@ export type WorkspaceSurfaceProps = {
   cwd: string
   /** Reason the review entry is unavailable here, e.g. "not a Git repository". */
   reviewUnavailableReason?: string | null
-  showLayoutControls?: boolean
   /**
    * Whether this dock is on screen. The bottom dock stays mounted while hidden
    * so xterm keeps its geometry, so "mounted" and "visible" are not the same
    * question and the content needs to be told which one it is.
    */
   visible?: boolean
-  /** Hide-this-panel affordance for docks without the full layout trio. */
-  onHidePanel?: () => void
 }
 
 /**
@@ -52,12 +47,17 @@ export function WorkspaceSurface({
   dock,
   cwd,
   reviewUnavailableReason = null,
-  showLayoutControls = true,
   visible = true,
-  onHidePanel,
 }: WorkspaceSurfaceProps) {
   const t = useTranslation()
-  const [pickerOpen, setPickerOpen] = useState(false)
+  const surfaceRef = useRef<HTMLDivElement>(null)
+  const headerTarget = useWorkspaceHeaderTarget(surfaceRef, sessionId, dock === 'side' && visible)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuId = useId()
+  const initialMenuFocus = useRef<'first' | 'last'>('first')
+  const pendingMenuSelection = useRef<WorkspaceTabKind | null>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const watchError = useWorkspaceFileWatch(sessionId, dock === 'side' && visible)
   const contentRef = useRef<HTMLDivElement>(null)
 
   const tabs = useWorkspaceStore(
@@ -68,8 +68,6 @@ export function WorkspaceSurface({
       ? state.bySession[sessionId]?.activeSideTabId ?? null
       : state.bySession[sessionId]?.activeBottomTabId ?? null,
   )
-  const layout = useWorkspaceStore((state) => state.bySession[sessionId]?.layout ?? 'hidden')
-  const bottomOpen = useWorkspaceStore((state) => state.bySession[sessionId]?.bottomOpen ?? false)
   const canReopenClosed = useWorkspaceStore(
     (state) => (state.bySession[sessionId]?.closed.length ?? 0) > 0,
   )
@@ -81,6 +79,16 @@ export function WorkspaceSurface({
   )
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null
+
+  useEffect(() => {
+    // A chooser belongs to the dock and task where it was opened. A reused
+    // surface must show the next task's content, not the previous task's menu.
+    setMenuOpen(false)
+    menuTriggerRef.current = null
+    pendingMenuSelection.current = null
+  }, [dock, sessionId, visible])
+
+  const closeMenu = useCallback(() => setMenuOpen(false), [])
 
   /*
     This surface can only ever honour a request to focus its *content*. The two
@@ -94,27 +102,23 @@ export function WorkspaceSurface({
     if (!focus) return
     const wanted = dock === 'side' ? 'active-side-tab' : 'active-bottom-tab'
     if (focus.target !== wanted) return
-    contentRef.current?.focus({ preventScroll: true })
+    const target = contentRef.current?.querySelector<HTMLElement>('[data-workspace-autofocus]') ?? contentRef.current
+    target?.focus({ preventScroll: true })
     useWorkspaceStore.getState().consumeFocusRequest(sessionId)
   }, [dock, focus, sessionId])
 
   const handleLauncherSelect = useCallback((kind: WorkspaceTabKind) => {
-    setPickerOpen(false)
-    // The picker is the one entry point allowed to consume a blank new-tab
-    // page — the user is choosing what this slot should hold. Every other
-    // opener must leave it alone: a browser tab counts as blank until the host
-    // reports a committed URL, so between pressing Enter in the address bar and
-    // the page committing, an unrelated open would destroy a page mid-load.
-    const replaceBlankPlaceholder = true
+    setMenuOpen(false)
+    // A + action adds a resource; even an uncommitted browser page belongs
+    // to its existing tab and must not be consumed as a blank placeholder.
     switch (kind) {
       case 'review':
-        openWorkspaceTarget({ sessionId, target: { kind: 'review' }, replaceBlankPlaceholder })
+        openWorkspaceTarget({ sessionId, target: { kind: 'review' } })
         break
       case 'terminal':
         openWorkspaceTarget({
           sessionId,
           target: { kind: 'terminal', cwd, dock },
-          replaceBlankPlaceholder,
         })
         break
       case 'browser':
@@ -127,48 +131,35 @@ export function WorkspaceSurface({
           sessionId,
           target: { kind: 'file', path: '' },
           preview: true,
-          replaceBlankPlaceholder,
         })
         break
     }
   }, [cwd, dock, sessionId])
 
-  const layoutControls = !showLayoutControls ? (
-    onHidePanel ? (
-      <IconButton
-        icon={<X size={15} strokeWidth={1.9} />}
-        label={t('workspace.controls.bottomPanel')}
-        size="sm"
-        tone="muted"
-        data-testid="workspace-hide-bottom"
-        onClick={onHidePanel}
-      />
-    ) : null
-  ) : (
-    <WorkspaceLayoutControls
-      layout={layout}
-      bottomOpen={bottomOpen}
-      onToggleFullscreen={() => useWorkspaceStore.getState().toggleFullscreen(sessionId)}
-      onToggleBottom={() => useWorkspaceStore.getState().toggleBottomPanel(sessionId, cwd)}
-      onToggleWorkspace={() => useWorkspaceStore.getState().toggleWorkspace(sessionId)}
-    />
-  )
+  // Let the menu finish its own focus cleanup before opening/focusing a resource.
+  // Otherwise its close autofocus can pull focus out of a new address bar or tree.
+  useEffect(() => {
+    if (menuOpen || !visible) return
+    const kind = pendingMenuSelection.current
+    pendingMenuSelection.current = null
+    if (kind) handleLauncherSelect(kind)
+  }, [handleLauncherSelect, menuOpen, visible])
 
-  return (
-    <div
-      data-testid={`workspace-surface-${dock}`}
-      aria-label={t('workspace.panelLabel')}
-      className="flex h-full min-h-0 w-full flex-col bg-[var(--color-surface)]"
-    >
+  const selectFromMenu = useCallback((kind: WorkspaceTabKind) => {
+    pendingMenuSelection.current = kind
+    setMenuOpen(false)
+  }, [])
+
+  const tabStrip = tabs.length > 0 ? (
       <WorkspaceTabStrip
         dock={dock}
+        placement={headerTarget ? 'window' : 'dock'}
         tabs={tabs}
         activeTabId={activeTabId}
-        trailing={layoutControls}
         canReopenClosed={canReopenClosed}
         onActivate={(tabId) => {
           // Choosing an existing tab is also a way of cancelling the picker.
-          setPickerOpen(false)
+          setMenuOpen(false)
           useWorkspaceStore.getState().activateTab(sessionId, tabId)
         }}
         onPin={(tabId) => useWorkspaceStore.getState().pinTab(sessionId, tabId)}
@@ -178,8 +169,25 @@ export function WorkspaceSurface({
         onMoveDock={(tabId, nextDock) =>
           useWorkspaceStore.getState().moveTabToDock(sessionId, tabId, nextDock)}
         onReopenClosed={() => useWorkspaceStore.getState().reopenClosedTab(sessionId)}
-        onAdd={() => setPickerOpen(true)}
+        addMenuId={menuId}
+        addMenuOpen={menuOpen}
+        onAdd={(trigger, initialFocus = 'first') => {
+          menuTriggerRef.current = trigger
+          initialMenuFocus.current = initialFocus
+          setMenuOpen((open) => !open)
+        }}
       />
+  ) : null
+
+  return (
+    <div
+      ref={surfaceRef}
+      data-testid={`workspace-surface-${dock}`}
+      aria-label={t('workspace.panelLabel')}
+      className="flex h-full min-h-0 w-full flex-col bg-[var(--color-surface)]"
+    >
+      {watchError ? <p role="status" className="shrink-0 px-3 py-1 text-xs text-[var(--color-text-tertiary)]">{t('workspace.files.watchFailed', { reason: watchError })}</p> : null}
+      {tabStrip && headerTarget ? createPortal(tabStrip, headerTarget) : tabStrip}
 
       <div
         ref={contentRef}
@@ -190,31 +198,12 @@ export function WorkspaceSurface({
         // pairing the tablist announces a control that governs nothing.
         {...(activeTabId ? { 'aria-labelledby': `workspace-tab-${dock}-${activeTabId}` } : {})}
         className="flex min-h-0 flex-1 flex-col outline-none"
-        onKeyDown={(event) => {
-          // Without this the picker is a one-way door: it covers the active
-          // tab's content and the only way back is to open a fifth thing.
-          if (pickerOpen && event.key === 'Escape') {
-            event.stopPropagation()
-            setPickerOpen(false)
-          }
-        }}
       >
-        {pickerOpen && tabs.length > 0 ? (
-          <WorkspacePickerOverlay
-            onCancel={() => setPickerOpen(false)}
-            cancelLabel={t('workspace.pickerCancel')}
-          >
-            <WorkspaceLauncher
-              onSelect={handleLauncherSelect}
-              {...(dock === 'bottom' ? { kinds: BOTTOM_DOCK_KINDS } : {})}
-              reviewUnavailableReason={dock === 'bottom' ? null : reviewUnavailableReason}
-            />
-          </WorkspacePickerOverlay>
-        ) : tabs.length === 0 ? (
+        {tabs.length === 0 ? (
           <WorkspaceLauncher
             onSelect={handleLauncherSelect}
-            {...(dock === 'bottom' ? { kinds: BOTTOM_DOCK_KINDS } : {})}
-            reviewUnavailableReason={dock === 'bottom' ? null : reviewUnavailableReason}
+            dock={dock}
+            reviewUnavailableReason={reviewUnavailableReason}
           />
         ) : activeTab === null ? null : activeTab.kind === 'browser' ? (
           <WorkspaceBrowserTab sessionId={sessionId} tab={activeTab} active={visible} />
@@ -224,48 +213,24 @@ export function WorkspaceSurface({
           <WorkspaceFileTab sessionId={sessionId} tab={activeTab} />
         ) : (
           <WorkspaceReviewTab
+            active={visible}
             sessionId={sessionId}
             tab={activeTab}
             defaultBranchRef={defaultBranchRef}
           />
         )}
       </div>
-    </div>
-  )
-}
-
-/**
- * The `+` picker shown over an existing tab, with an explicit way out.
- *
- * It is a separate frame from the empty-workspace launcher on purpose: with no
- * tabs there is nothing to cancel back to, and offering a cancel that lands on
- * a blank pane would be worse than not offering one.
- */
-function WorkspacePickerOverlay({
-  children,
-  onCancel,
-  cancelLabel,
-}: {
-  children: React.ReactNode
-  onCancel: () => void
-  cancelLabel: string
-}) {
-  return (
-    <div
-      data-testid="workspace-picker"
-      className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface)]"
-    >
-      <div className="flex shrink-0 justify-end px-2 pt-2">
-        <IconButton
-          icon={<X size={14} strokeWidth={1.9} />}
-          label={cancelLabel}
-          size="xs"
-          tone="muted"
-          data-testid="workspace-picker-cancel"
-          onClick={onCancel}
+      {menuOpen && visible ? (
+        <WorkspaceAddMenu
+          id={menuId}
+          anchorRef={menuTriggerRef}
+          dock={dock}
+          initialFocus={initialMenuFocus.current}
+          reviewUnavailableReason={reviewUnavailableReason}
+          onSelect={selectFromMenu}
+          onClose={closeMenu}
         />
-      </div>
-      {children}
+      ) : null}
     </div>
   )
 }
@@ -294,19 +259,33 @@ export function useWorkspaceBrowserEventBridge(enabled: boolean) {
     let cancelled = false
 
     void subscribeWorkspaceBrowserEvents((event) => {
-      useWorkspaceBrowserStore.getState().applyEvent(event)
-
       const store = useWorkspaceStore.getState()
+      if (event.type === 'shortcut') {
+        window.dispatchEvent(new CustomEvent('workspace-native-shortcut', { detail: event }))
+        return
+      }
+      // Downloads outlive their source tab. Only their global entry may update
+      // after close; page-specific events must not resurrect forgotten state.
+      if (event.type === 'download') {
+        useWorkspaceBrowserStore.getState().applyEvent(event)
+        return
+      }
       const owner = store.findBrowserTabOwner(event.tabId)
       // A page that no longer belongs to any tab has been closed; its late
       // events must not be applied to whatever took its place.
       if (!owner) return
+      const previousNavigationId = useWorkspaceBrowserStore.getState().getPage(event.tabId).navigationId
+      if (!useWorkspaceBrowserStore.getState().applyEvent(event)) return
 
       switch (event.type) {
         case 'state':
+          if (event.navigationOutcome === 'pending' && (event.navigationId ?? 0) > previousNavigationId) {
+            discardNavigatedBrowserSelections(event.tabId)
+          }
           store.updateBrowserTab(owner.sessionId, event.tabId, {
             url: event.url || null,
             title: event.title || null,
+            ...(event.navigationOutcome === 'succeeded' ? { loadError: null } : {}),
           })
           break
         case 'failed':
@@ -343,7 +322,7 @@ export function useWorkspaceBrowserEventBridge(enabled: boolean) {
           })
           break
         case 'agent':
-          deliverBrowserAgentMessage(owner.sessionId, event.message)
+          handleBrowserSelectionEvent(owner.sessionId, event.tabId, event.message)
           break
         default:
           break
@@ -358,40 +337,4 @@ export function useWorkspaceBrowserEventBridge(enabled: boolean) {
       unsubscribe?.()
     }
   }, [enabled])
-}
-
-/**
- * Deliver an in-page selection to the conversation.
- *
- * Only the direct path is wired: the element picker hands back one selection
- * and it lands in the composer with its screenshot attached. The legacy
- * multi-select queue is not reproduced here, so a payload asking to be queued
- * is delivered directly rather than dropped — losing the user's pick silently
- * is worse than delivering it one at a time.
- */
-function deliverBrowserAgentMessage(sessionId: string, message: unknown): void {
-  if (typeof message !== 'object' || message === null) return
-  const parsed = message as { type?: string; payload?: unknown }
-  if (parsed.type !== 'selection') return
-
-  const payload = parsed.payload as SelectionPayload | undefined
-  if (!payload || typeof payload !== 'object' || !payload.element) return
-
-  const selection = buildSelectionDirectMessage(payload)
-  const attachments = payload.screenshot?.dataUrl
-    ? [{
-        type: 'image' as const,
-        name: selection.displayName,
-        mimeType: 'image/png',
-        data: payload.screenshot.dataUrl,
-        note: selection.note,
-        quote: payload.element.selector,
-      }]
-    : []
-
-  useChatStore.getState().queueComposerPrefill(sessionId, {
-    text: selection.modelText,
-    mode: 'append',
-    attachments,
-  })
 }

@@ -80,15 +80,18 @@ class FakeWebContents implements WorkspaceBrowserWebContentsLike {
   loadedUrls: string[] = []
   scripts: string[] = []
   zoomFactors: number[] = []
+  zoomFactor = 1
   finds: Array<{ text: string, options?: unknown }> = []
   stopFinds: string[] = []
   reloads: string[] = []
   stops = 0
   destroyed = false
+  focused = false
   closed = 0
   title = 'Page'
   url = ''
   loading = false
+  loadResult?: Promise<unknown>
   history = {
     canGoBack: vi.fn(() => this.backEntries > 0),
     canGoForward: vi.fn(() => this.forwardEntries > 0),
@@ -122,7 +125,7 @@ class FakeWebContents implements WorkspaceBrowserWebContentsLike {
   async loadURL(url: string) {
     this.loadedUrls.push(url)
     this.url = url
-    return undefined
+    return await this.loadResult
   }
 
   getURL() {
@@ -176,6 +179,11 @@ class FakeWebContents implements WorkspaceBrowserWebContentsLike {
 
   setZoomFactor(factor: number) {
     this.zoomFactors.push(factor)
+    this.zoomFactor = factor
+  }
+
+  getZoomFactor() {
+    return this.zoomFactor
   }
 
   close() {
@@ -185,6 +193,10 @@ class FakeWebContents implements WorkspaceBrowserWebContentsLike {
 
   isDestroyed() {
     return this.destroyed
+  }
+
+  isFocused() {
+    return this.focused
   }
 
   emit(event: string, ...args: unknown[]) {
@@ -205,11 +217,14 @@ class FakeView implements WorkspaceBrowserViewLike {
 
   setVisible(visible: boolean) {
     this.visible.push(visible)
+    if (!visible) this.webContents.focused = false
   }
 }
 
 function fakeParent() {
   return {
+    webContents: { focus: vi.fn(), isDestroyed: vi.fn(() => false) },
+    isDestroyed: vi.fn(() => false),
     contentView: {
       addChildView: vi.fn(),
       removeChildView: vi.fn(),
@@ -228,6 +243,12 @@ function previewScript() {
   return file
 }
 
+const browserControls = {
+  v: 1, type: 'browser-controls', zoomFactor: 1, appZoom: 1,
+  copy: { zoom: 'Page zoom', zoomOut: 'Zoom out', zoomIn: 'Zoom in', zoomReset: 'Reset zoom' },
+  colors: { background: 'white', foreground: 'black', muted: 'gray', border: 'gray', hover: 'white', focus: 'blue', shadow: 'none' },
+}
+
 type Harness = {
   service: ElectronWorkspaceBrowserService
   parent: ReturnType<typeof fakeParent>
@@ -238,7 +259,7 @@ type Harness = {
   pdfWrites: Array<{ data: Uint8Array, filename: string }>
 }
 
-function createHarness(options?: { scaleFactor?: number }): Harness {
+function createHarness(options?: { scaleFactor?: number, platform?: NodeJS.Platform, cancelPdf?: boolean, loadResult?: Promise<unknown> }): Harness {
   const views: FakeView[] = []
   const events: WorkspaceBrowserEvent[] = []
   const partitions: string[] = []
@@ -249,8 +270,10 @@ function createHarness(options?: { scaleFactor?: number }): Harness {
   const service = new ElectronWorkspaceBrowserService({
     previewScriptPath: previewScript(),
     emit: event => events.push(event),
+    platform: options?.platform,
     resolveScaleFactor: () => options?.scaleFactor ?? 1,
     writePdf: async input => {
+      if (options?.cancelPdf) return null
       pdfWrites.push(input)
       return `/downloads/${input.filename}`
     },
@@ -258,6 +281,7 @@ function createHarness(options?: { scaleFactor?: number }): Harness {
       partitions.push(WORKSPACE_BROWSER_PARTITION)
       const view = new FakeView()
       view.webContents.session = sharedSession
+      view.webContents.loadResult = options?.loadResult
       views.push(view)
       return view
     },
@@ -365,6 +389,66 @@ describe('Electron workspace browser service', () => {
     expect(requireView(harness, 0).webContents.destroyed).toBe(false)
   })
 
+  it('accepts a redundant post-close hide but still rejects show and bounds for an absent page', async () => {
+    const h = createHarness()
+    await h.service.create(h.parent, 'closed', { storageId: 'closed' })
+    h.service.close('closed')
+    expect(() => h.service.setVisible('closed', false)).not.toThrow()
+    expect(() => h.service.setVisible('closed', true)).toThrow('workspace browser tab not open')
+    expect(() => h.service.setBounds('closed', { x: 0, y: 0, width: 100, height: 100 })).toThrow('workspace browser tab not open')
+  })
+
+  it('registers an initially hidden page without attaching or obscuring the visible page', async () => {
+    const h = createHarness()
+    await h.service.create(h.parent, 'shown', { storageId: 'shown' })
+    await h.service.create(h.parent, 'pending', { storageId: 'pending', visible: false })
+    expect(h.parent.contentView.addChildView).toHaveBeenCalledTimes(1)
+    expect(requireView(h, 0).visible.at(-1)).toBe(true)
+    expect(requireView(h, 1).visible.at(-1)).toBe(false)
+    expect(h.events).toContainEqual(expect.objectContaining({ type: 'state', tabId: 'pending' }))
+  })
+
+  it.each(['resolve', 'reject'] as const)('never resurrects a closed page when its initial load later %ss', async (outcome) => {
+    let resolve!: () => void
+    let reject!: (error: Error) => void
+    const loadResult = new Promise<void>((done, fail) => { resolve = done; reject = fail })
+    const h = createHarness({ loadResult })
+    const creation = h.service.create(h.parent, 'pending', { storageId: 'pending', url: 'https://slow.test/', visible: false })
+    // Registration occurs before load settles, and Stop/geometry already work.
+    expect(h.events).toContainEqual(expect.objectContaining({ type: 'state', tabId: 'pending' }))
+    h.service.setBounds('pending', { x: 0, y: 0, width: 100, height: 100 })
+    h.service.stop('pending')
+    h.service.close('pending')
+    const eventCount = h.events.length
+    if (outcome === 'resolve') {
+      resolve()
+      await creation
+    } else {
+      reject(new Error('initial navigation failed'))
+      await expect(creation).rejects.toThrow('initial navigation failed')
+    }
+    expect(h.events).toHaveLength(eventCount)
+    expect(requireView(h, 0).webContents.closed).toBe(1)
+    expect(h.parent.contentView.addChildView).not.toHaveBeenCalled()
+    expect(() => h.service.setVisible('pending', false)).not.toThrow()
+    expect(() => h.service.setVisible('pending', true)).toThrow('workspace browser tab not open')
+  })
+
+  it('rejects a malformed initial visibility option before constructing any resource', async () => {
+    const h = createHarness()
+    await expect(h.service.create(h.parent, 'bad', { storageId: 'bad', visible: 'no' as unknown as boolean })).rejects.toThrow('visible must be a boolean')
+    expect(h.views).toHaveLength(0)
+  })
+
+  it('keeps registered resources retryable while propagating the initial navigation failure', async () => {
+    const h = createHarness({ loadResult: Promise.reject(new Error('initial navigation denied')) })
+    await expect(h.service.create(h.parent, 'retry', { storageId: 'retry', url: 'https://retry.test/', visible: false })).rejects.toThrow('initial navigation denied')
+    expect(h.events).toContainEqual(expect.objectContaining({ type: 'state', tabId: 'retry' }))
+    expect(() => h.service.reload('retry', { ignoreCache: true })).not.toThrow()
+    expect(requireView(h, 0).webContents.reloads).toEqual(['reload-ignoring-cache'])
+    expect(requireView(h, 0).webContents.destroyed).toBe(false)
+  })
+
   it('attaches only one page at a time so a shown page cannot sit under another', async () => {
     const harness = createHarness()
 
@@ -375,6 +459,47 @@ describe('Electron workspace browser service', () => {
     expect(requireView(harness, 0).visible.at(-1)).toBe(false)
     expect(requireView(harness, 1).visible.at(-1)).toBe(true)
     expect(requireView(harness, 0).webContents.destroyed).toBe(false)
+  })
+
+  it.each(['hide', 'close'] as const)('returns native input focus to the host before %s leaves no page responder', async (action) => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'tab-a', { storageId: 'store-a' })
+    const contents = requireView(harness, 0).webContents
+    contents.focused = true
+
+    if (action === 'hide') harness.service.setVisible('tab-a', false)
+    else harness.service.close('tab-a')
+
+    // Hiding drops the native responder before the renderer's DOM focus can
+    // receive its next shortcut; test ownership before that native transition.
+    expect(contents.focused).toBe(false)
+    expect(harness.parent.webContents.focus).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not steal native page B focus when page A is hidden or closed later', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'tab-a', { storageId: 'store-a' })
+    await harness.service.create(harness.parent, 'tab-b', { storageId: 'store-b' })
+    requireView(harness, 1).webContents.focused = true
+
+    harness.service.setVisible('tab-a', false)
+    harness.service.close('tab-a')
+
+    expect(requireView(harness, 1).webContents.focused).toBe(true)
+    expect(harness.parent.webContents.focus).not.toHaveBeenCalled()
+  })
+
+  it('does not refocus a host-owned input or a destroyed parent during detach', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'tab-a', { storageId: 'store-a' })
+    harness.service.setVisible('tab-a', false)
+    expect(harness.parent.webContents.focus).not.toHaveBeenCalled()
+
+    harness.service.setVisible('tab-a', true)
+    requireView(harness, 0).webContents.focused = true
+    harness.parent.isDestroyed.mockReturnValue(true)
+    harness.service.close('tab-a')
+    expect(harness.parent.webContents.focus).not.toHaveBeenCalled()
   })
 
   it('destroys only the closed page and leaves its neighbour intact', async () => {
@@ -503,6 +628,7 @@ describe('Electron workspace browser service', () => {
         url: 'https://a.example/missing',
         errorCode: -6,
         errorDescription: 'FILE_NOT_FOUND',
+        navigationId: 0,
       },
       { type: 'destroyed', tabId: 'tab-a', reason: 'crashed' },
     ])
@@ -673,6 +799,276 @@ describe('Electron workspace browser service', () => {
     expect(requireView(harness, 1).webContents.scripts).toEqual([])
   })
 
+  it('keeps native floating zoom controls synchronized through menus, page changes and tab activation', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    await harness.service.create(harness.parent, 'b', { storageId: 'b' })
+    await harness.service.message('a', browserControls)
+    await harness.service.message('b', browserControls)
+    const a = requireView(harness, 0).webContents
+    const b = requireView(harness, 1).webContents
+    const readConfig = (script: string) => JSON.parse(JSON.parse(script.slice(script.indexOf('(') + 1, -1))) as { type: string, zoomFactor: number }
+    a.scripts.length = 0
+    b.scripts.length = 0
+    harness.service.handleMessageFromView(a, JSON.stringify({ v: 1, type: 'browser-zoom', action: 'out' }))
+    await Promise.resolve()
+    expect(a.zoomFactors).toEqual([])
+    harness.service.handleMessageFromView(b, JSON.stringify({ v: 1, type: 'browser-zoom', action: 'out' }))
+    await Promise.resolve()
+    expect(b.zoomFactors).toEqual([0.9])
+    expect(readConfig(b.scripts.at(-1)!)).toMatchObject({ type: 'browser-controls', zoomFactor: 0.9 })
+    expect(a.scripts).toEqual([])
+    harness.service.setZoom('b', 0.7)
+    expect(readConfig(b.scripts.at(-1)!)).toMatchObject({ zoomFactor: 0.7 })
+    b.scripts.length = 0
+    b.emit('did-start-navigation', {}, 'https://b.example/next', false, true)
+    b.emit('did-finish-load')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(readConfig(b.scripts.at(-1)!)).toMatchObject({ zoomFactor: 0.7 })
+    expect(b.scripts.some(script => script.includes('window.__previewInjected'))).toBe(true)
+    harness.service.setVisible('a', true)
+    expect(harness.events.filter(event => event.type === 'agent' && (event.message as { type: string }).type === 'browser-zoom')).toEqual([])
+  })
+
+  it('hides the native zoom capsule for a capture and restores it after a capture failure', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    page.capturePage.mockRejectedValueOnce(new Error('capture failed'))
+    await expect(harness.service.capture('a', 'viewport')).rejects.toThrow('capture failed')
+    expect(page.scripts).toEqual([
+      'globalThis.__PREVIEW_AGENT_SET_CHROME_HIDDEN__?.(true)',
+      'globalThis.__PREVIEW_AGENT_SET_CHROME_HIDDEN__?.(false)',
+    ])
+  })
+
+  it('returns a presentation snapshot without emitting a composer screenshot or changing page lifetime', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    harness.events.length = 0
+    expect(await harness.service.snapshot('a')).toBe('data:image/png;base64,VIEWPORT')
+    expect(harness.events).toEqual([])
+    expect(page.scripts).toEqual([
+      'globalThis.__PREVIEW_AGENT_SET_CHROME_HIDDEN__?.(true)',
+      'globalThis.__PREVIEW_AGENT_SET_CHROME_HIDDEN__?.(false)',
+    ])
+    expect(page.capturePage).toHaveBeenCalledTimes(1)
+  })
+
+  it('discards a presentation snapshot when its page navigates during capture', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    let finish!: (image: Awaited<ReturnType<typeof page.capturePage>>) => void
+    page.capturePage.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const snapshot = harness.service.snapshot('a')
+    await Promise.resolve()
+    page.emit('did-start-navigation', {}, 'https://next.example/', false, true)
+    finish({ toDataURL: () => 'data:image/png;base64,VIEWPORT' })
+    await expect(snapshot).rejects.toThrow('changed during snapshot')
+    expect(harness.events.some(event => event.type === 'screenshot')).toBe(false)
+  })
+
+  it('keeps zoom chrome hidden until all overlapping native captures finish', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    let resolveFirst!: (image: Awaited<ReturnType<typeof page.capturePage>>) => void
+    page.capturePage.mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }))
+    const first = harness.service.capture('a', 'viewport')
+    await Promise.resolve()
+    await harness.service.capture('a', 'viewport')
+    expect(page.scripts.some(script => script.includes('CHROME_HIDDEN__?.(false)'))).toBe(false)
+    resolveFirst({ toDataURL: () => 'data:image/png;base64,VIEWPORT' })
+    await first
+    expect(page.scripts.at(-1)).toBe('globalThis.__PREVIEW_AGENT_SET_CHROME_HIDDEN__?.(false)')
+  })
+
+  const pickerCommandGeneration = (page: FakeWebContents): number => {
+    const script = page.scripts.filter(script => script.includes('enter-picker') || script.includes('exit-picker')).at(-1)!
+    return JSON.parse(JSON.parse(script.match(/handleHostRaw\((.*)\)$/)![1]!)).generation as number
+  }
+
+  it.each([false, true])('exits the live page picker on same-document navigation (capture pending: %s)', async (capturing) => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    let finish!: (image: Awaited<ReturnType<typeof page.capturePage>>) => void
+    await harness.service.message('a', { v: 1, type: 'enter-picker', persistent: true })
+    if (capturing) {
+      page.capturePage.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+      harness.service.handleMessageFromView(page, JSON.stringify({ v: 1, type: 'selection', generation: pickerCommandGeneration(page), payload: { element: { tag: 'h1' }, screenshot: { kind: 'region', captureId: 1 } } }))
+      await new Promise(resolve => setImmediate(resolve))
+    }
+    page.emit('did-start-navigation', {}, 'https://example.test/#next', true, true)
+    page.emit('did-navigate-in-page', {}, 'https://example.test/#next', true)
+    expect(page.scripts.some(script => script.includes('exit-picker'))).toBe(true)
+    expect(harness.events.filter(event => event.type === 'state').at(-1)).toMatchObject({ annotationActive: false })
+    const count = page.scripts.filter(script => script.includes('enter-picker')).length
+    if (capturing) finish({ toDataURL: () => 'data:image/png;base64,VIEWPORT' })
+    await new Promise(resolve => setImmediate(resolve))
+    expect(page.scripts.filter(script => script.includes('enter-picker'))).toHaveLength(count)
+  })
+
+  it('rejects delayed exits and selections after a newer generation, including missing identity after negotiation', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    const commandGeneration = () => {
+      const script = page.scripts.filter(script => script.includes('enter-picker') || script.includes('exit-picker')).at(-1)!
+      return JSON.parse(JSON.parse(script.match(/handleHostRaw\((.*)\)$/)![1]!)).generation as number
+    }
+    harness.service.handleMessageFromView(page, '{"v":1,"type":"ready","supportsPickerGeneration":true}')
+    await harness.service.message('a', { v: 1, type: 'enter-picker', persistent: true })
+    await harness.service.message('a', { v: 1, type: 'exit-picker' })
+    const oldGeneration = commandGeneration()
+    await harness.service.message('a', { v: 1, type: 'enter-picker', persistent: true })
+    const newGeneration = commandGeneration()
+    expect(newGeneration).toBeGreaterThan(oldGeneration)
+    for (const generation of [oldGeneration, undefined]) {
+      harness.service.handleMessageFromView(page, JSON.stringify({ v: 1, type: 'picker-exited', reason: 'host', generation }))
+      harness.service.handleMessageFromView(page, JSON.stringify({ v: 1, type: 'selection', generation, payload: { element: { tag: 'old' } } }))
+    }
+    expect(harness.events.filter(event => event.type === 'state').at(-1)).toMatchObject({ annotationActive: true })
+    harness.service.handleMessageFromView(page, JSON.stringify({ v: 1, type: 'selection', generation: newGeneration, payload: { element: { tag: 'h1' } } }))
+    await new Promise(resolve => setImmediate(resolve))
+    expect(harness.events.filter(event => event.type === 'agent' && (event.message as { type?: string }).type === 'selection')).toHaveLength(1)
+  })
+
+  it('preserves legacy v1 single selection and cancellation without a generation handshake', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    const select = () => harness.service.handleMessageFromView(page, '{"v":1,"type":"selection","payload":{"element":{"tag":"h1"}}}')
+    await harness.service.message('a', { v: 1, type: 'enter-picker' })
+    select()
+    await new Promise(resolve => setImmediate(resolve))
+    const selections = () => harness.events.filter(event => event.type === 'agent' && (event.message as { type?: string }).type === 'selection')
+    expect(selections()).toHaveLength(1)
+    await harness.service.message('a', { v: 1, type: 'enter-picker' })
+    harness.service.handleMessageFromView(page, '{"v":1,"type":"picker-exited","reason":"cancel-current"}')
+    select()
+    await new Promise(resolve => setImmediate(resolve))
+    expect(selections()).toHaveLength(1)
+  })
+
+  it('does not let a delayed failed exit or its old event clear a newer mode', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    await harness.service.message('a', { v: 1, type: 'enter-picker', persistent: true })
+    const oldGeneration = pickerCommandGeneration(page)
+    let rejectExit!: (error: Error) => void
+    vi.spyOn(page, 'executeJavaScript').mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectExit = reject }))
+    const exiting = harness.service.message('a', { v: 1, type: 'exit-picker' })
+    await harness.service.message('a', { v: 1, type: 'enter-picker', persistent: true })
+    rejectExit(new Error('old page command failed'))
+    await expect(exiting).rejects.toThrow('old page command failed')
+    harness.service.handleMessageFromView(page, JSON.stringify({ v: 1, type: 'picker-exited', generation: oldGeneration, reason: 'host' }))
+    expect(harness.events.filter(event => event.type === 'state').at(-1)).toMatchObject({ annotationActive: true })
+  })
+
+  it('clears annotation mode if the page rejects a picker command', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    vi.spyOn(page, 'executeJavaScript').mockRejectedValueOnce(new Error('page unavailable'))
+    await expect(harness.service.message('a', { v: 1, type: 'enter-picker', persistent: true })).rejects.toThrow('page unavailable')
+    expect(harness.events.filter(event => event.type === 'state').at(-1)).toMatchObject({ annotationActive: false })
+    harness.service.handleMessageFromView(page, JSON.stringify({ v: 1, type: 'selection', payload: { element: { tag: 'h1' } } }))
+    await new Promise(resolve => setImmediate(resolve))
+    expect(harness.events.filter(event => event.type === 'agent')).toHaveLength(0)
+  })
+
+  it('rearms persistent annotations after capture but keeps legacy picking one-shot', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    await harness.service.message('a', { v: 1, type: 'enter-picker', persistent: true, label: 1 })
+    const select = () => harness.service.handleMessageFromView(page, JSON.stringify({ v: 1, type: 'selection', generation: pickerCommandGeneration(page), payload: { element: { tag: 'h1' }, screenshot: { kind: 'region', captureId: 1 } } }))
+    select()
+    select() // a replay during capture must still be rejected
+    await new Promise(resolve => setImmediate(resolve))
+    expect(harness.events.filter(event => event.type === 'agent')).toHaveLength(1)
+    expect(page.scripts.filter(script => script.includes('enter-picker'))).toHaveLength(2)
+    select()
+    await new Promise(resolve => setImmediate(resolve))
+    expect(harness.events.filter(event => event.type === 'agent')).toHaveLength(2)
+    await harness.service.message('a', { v: 1, type: 'enter-picker' })
+    const count = page.scripts.filter(script => script.includes('enter-picker')).length
+    select()
+    await new Promise(resolve => setImmediate(resolve))
+    expect(page.scripts.filter(script => script.includes('enter-picker'))).toHaveLength(count)
+    select()
+    await new Promise(resolve => setImmediate(resolve))
+    expect(harness.events.filter(event => event.type === 'agent')).toHaveLength(3)
+  })
+
+  it.each(['exit', 'navigate', 'new-picker'] as const)('does not rearm an old annotation after %s during capture', async (action) => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    let finish!: (image: Awaited<ReturnType<typeof page.capturePage>>) => void
+    page.capturePage.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    await harness.service.message('a', { v: 1, type: 'enter-picker', persistent: true })
+    harness.service.handleMessageFromView(page, JSON.stringify({ v: 1, type: 'selection', generation: pickerCommandGeneration(page), payload: { element: { tag: 'h1' }, screenshot: { kind: 'region', captureId: 1 } } }))
+    await new Promise(resolve => setImmediate(resolve))
+    if (action === 'exit') await harness.service.message('a', { v: 1, type: 'exit-picker' })
+    else if (action === 'navigate') page.emit('did-start-navigation', {}, 'https://next.test/', false, true)
+    else await harness.service.message('a', { v: 1, type: 'enter-picker' })
+    const count = page.scripts.filter(script => script.includes('enter-picker')).length
+    finish({ toDataURL: () => 'data:image/png;base64,VIEWPORT' })
+    await new Promise(resolve => setImmediate(resolve))
+    expect(page.scripts.filter(script => script.includes('enter-picker'))).toHaveLength(count)
+    expect(harness.events.filter(event => event.type === 'state').at(-1)).toMatchObject({ annotationActive: false })
+  })
+
+  it('returns the selection capture id to its own cleanup even when captures finish out of order', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    let resolveFirst!: (image: Awaited<ReturnType<typeof page.capturePage>>) => void
+    page.capturePage.mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }))
+    const select = async (captureId: number) => {
+      await harness.service.message('a', { v: 1, type: 'enter-picker' })
+      harness.service.handleMessageFromView(page, JSON.stringify({ v: 1, type: 'selection',
+        payload: { element: { tag: 'h1' }, screenshot: { kind: 'region', captureId } },
+      }))
+      await new Promise(resolve => setImmediate(resolve))
+    }
+    await select(14)
+    await select(15)
+    expect(page.scripts.filter(script => script.includes('CLEAR_SELECTION_OVERLAY'))).toEqual([
+      'globalThis.__PREVIEW_AGENT_CLEAR_SELECTION_OVERLAY__?.(15)',
+    ])
+    resolveFirst({ toDataURL: () => 'data:image/png;base64,VIEWPORT' })
+    await new Promise(resolve => setImmediate(resolve))
+    expect(page.scripts.filter(script => script.includes('CLEAR_SELECTION_OVERLAY'))).toEqual([
+      'globalThis.__PREVIEW_AGENT_CLEAR_SELECTION_OVERLAY__?.(15)',
+      'globalThis.__PREVIEW_AGENT_CLEAR_SELECTION_OVERLAY__?.(14)',
+    ])
+  })
+
+  it('does not clean a new document when an old selection capture finishes after navigation', async () => {
+    const harness = createHarness()
+    await harness.service.create(harness.parent, 'a', { storageId: 'a' })
+    const page = requireView(harness, 0).webContents
+    let finishCapture!: (image: Awaited<ReturnType<typeof page.capturePage>>) => void
+    page.capturePage.mockReturnValueOnce(new Promise(resolve => { finishCapture = resolve }))
+    await harness.service.message('a', { v: 1, type: 'enter-picker' })
+    harness.service.handleMessageFromView(page, JSON.stringify({ v: 1, type: 'selection',
+      payload: { element: { tag: 'h1' }, screenshot: { kind: 'region', captureId: 1 } },
+    }))
+    await new Promise(resolve => setImmediate(resolve))
+    page.emit('did-start-navigation', {}, 'https://a.example/new', false, true)
+    finishCapture({ toDataURL: () => 'data:image/png;base64,VIEWPORT' })
+    await new Promise(resolve => setImmediate(resolve))
+    expect(page.scripts.some(script => script.includes('CLEAR_SELECTION_OVERLAY'))).toBe(false)
+    expect(harness.events.filter(event => event.type === 'agent')).toEqual([])
+  })
+
   it('records a visit log without standing in for the native back stack', async () => {
     const harness = createHarness()
 
@@ -775,5 +1171,115 @@ describe('Electron workspace browser service', () => {
     expect(requireView(harness, 0).webContents.reloads).toEqual(['reload-ignoring-cache'])
     expect(requireView(harness, 1).webContents.reloads).toEqual(['reload'])
     expect(requireView(harness, 1).webContents.stops).toBe(1)
+  })
+})
+
+
+describe('browser recovery boundaries', () => {
+  it.each(['completed', 'cancelled', 'interrupted'])('reports %s after closing the source page or session', async (state) => {
+    for (const closeAll of [false, true]) {
+      const h = createHarness()
+      await h.service.create(h.parent, 'source', { storageId: 'source' })
+      const contents = requireView(h, 0).webContents
+      const item = new FakeDownloadItem('large.zip', 2000)
+      h.sharedSession.startDownload(item, contents)
+      item.advance(100, 'progressing')
+      if (closeAll) h.service.closeAll()
+      else h.service.close('source')
+      const before = h.events.length
+      contents.emit('did-fail-load', {}, -105, 'late failure', 'https://old.test/', true)
+      expect(h.events).toHaveLength(before)
+      item.advance(state === 'completed' ? 2000 : 100, state)
+      const reports = h.events.filter(event => event.type === 'download')
+      expect(new Set(reports.map(event => event.download.id)).size).toBe(1)
+      expect(reports.at(-1)?.download.state).toBe(state)
+      expect(contents.closed).toBe(1)
+    }
+  })
+
+  it('does not report a completed PDF when the Save dialog is cancelled', async () => {
+    const h = createHarness({ cancelPdf: true })
+    await h.service.create(h.parent, 'source', { storageId: 'source' })
+    await h.service.printToPdf('source')
+    expect(h.pdfWrites).toHaveLength(0)
+    expect(h.events.filter(event => event.type === 'download')).toHaveLength(0)
+  })
+
+  it.each(['goBack', 'goForward', 'reload', 'navigate'] as const)('marks successful %s after an error with a new generation', async (operation) => {
+    const h = createHarness()
+    await h.service.create(h.parent, 'source', { storageId: 'source' })
+    const contents = requireView(h, 0).webContents
+    contents.emit('did-start-navigation', {}, 'https://bad.test/', false, true)
+    contents.emit('did-fail-load', {}, -105, 'NAME_NOT_RESOLVED', 'https://bad.test/', true)
+    contents.emit('did-stop-loading')
+    contents.emit('did-finish-load') // Chromium also finishes its error document.
+    expect(h.events.at(-1)).toMatchObject({ type: 'state', navigationId: 1, navigationOutcome: 'failed' })
+    if (operation === 'navigate') await h.service.navigate('source', 'https://ok.test/')
+    else h.service[operation]('source')
+    contents.emit('did-start-navigation', {}, 'https://ok.test/', false, true)
+    contents.emit('did-fail-load', {}, -105, 'LATE_FAILURE', 'https://bad.test/', true)
+    contents.url = 'https://ok.test/'
+    contents.emit('did-navigate', {}, contents.url)
+    contents.emit('did-finish-load')
+    expect(h.events.at(-1)).toMatchObject({ type: 'state', navigationId: 2, navigationOutcome: 'succeeded' })
+    const count = h.events.length
+    contents.emit('did-fail-load', {}, -105, 'LATE_FAILURE', contents.url, true)
+    expect(h.events).toHaveLength(count)
+  })
+
+  it('ignores cancelled/subframe loads and tracks redirected navigation failure', async () => {
+    const h = createHarness()
+    await h.service.create(h.parent, 'source', { storageId: 'source' })
+    const contents = requireView(h, 0).webContents
+    contents.emit('did-start-navigation', {}, 'https://old.test/', false, true)
+    contents.emit('did-start-navigation', {}, 'https://frame.test/', false, false)
+    contents.emit('did-redirect-navigation', {}, 'https://new.test/', false, true)
+    contents.emit('did-fail-load', {}, -3, 'ERR_ABORTED', 'https://old.test/', true)
+    expect(h.events.filter(event => event.type === 'failed')).toHaveLength(0)
+    contents.emit('did-fail-load', {}, -105, 'NAME_NOT_RESOLVED', 'https://new.test/', true)
+    expect(h.events.at(-1)).toMatchObject({ type: 'failed', navigationId: 1, url: 'https://new.test/' })
+  })
+
+  it.each(['darwin', 'win32', 'linux'] as const)('routes focused native shortcuts on %s without consuming page editing', async (platform) => {
+    const h = createHarness({ platform })
+    await h.service.create(h.parent, 'source', { storageId: 'source' })
+    const contents = requireView(h, 0).webContents
+    const input = { type: 'keyDown', key: 'w', meta: platform === 'darwin', control: platform !== 'darwin', shift: false, alt: false }
+    for (const [key, action] of [['w', 'close-tab'], ['t', 'new-browser-tab'], ['j', 'toggle-bottom-panel']]) {
+      const preventDefault = vi.fn()
+      contents.emit('before-input-event', { preventDefault }, { ...input, key })
+      expect(preventDefault).toHaveBeenCalledTimes(1)
+      expect(h.events.at(-1)).toMatchObject({ type: 'shortcut', tabId: 'source', action })
+    }
+    const cycle = vi.fn()
+    contents.emit('before-input-event', { preventDefault: cycle }, { ...input, key: 'Tab', meta: false, control: true })
+    expect(h.events.at(-1)).toMatchObject({ type: 'shortcut', action: 'next-tab' })
+    for (const key of ['f', 'c', 'v', 'a', 'z']) {
+      const preventDefault = vi.fn()
+      contents.emit('before-input-event', { preventDefault }, { ...input, key })
+      expect(preventDefault).not.toHaveBeenCalled()
+    }
+    h.service.setVisible('source', false)
+    const hidden = vi.fn()
+    contents.emit('before-input-event', { preventDefault: hidden }, input)
+    expect(hidden).not.toHaveBeenCalled()
+  })
+
+  it('reports actual zoom after reattachment and across same-origin pages', async () => {
+    const h = createHarness()
+    await h.service.create(h.parent, 'a', { storageId: 'a', url: 'https://same.test/a' })
+    await h.service.create(h.parent, 'b', { storageId: 'b', url: 'https://same.test/b' })
+    const a = requireView(h, 0).webContents
+    const b = requireView(h, 1).webContents
+    // Emulate Chromium applying shared-origin zoom outside this service.
+    a.zoomFactor = 1.5
+    b.zoomFactor = 1.5
+    h.service.setVisible('a', true)
+    expect(h.events.at(-1)).toMatchObject({ type: 'state', tabId: 'a', zoomFactor: 1.5 })
+    h.service.setZoom('b', 1.8)
+    expect(h.events.filter(event => event.type === 'state' && event.tabId === 'b').at(-1)).toMatchObject({ zoomFactor: 1.8 })
+    a.zoomFactor = 2
+    a.emit('zoom-changed', {}, 'in')
+    expect(h.events.filter(event => event.type === 'state' && event.tabId === 'a').at(-1)).toMatchObject({ zoomFactor: 2 })
   })
 })

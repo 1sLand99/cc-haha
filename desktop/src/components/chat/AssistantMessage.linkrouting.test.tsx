@@ -14,10 +14,6 @@ vi.mock('../../lib/workspace/openTarget', () => ({
   },
   openWorkspaceTarget: vi.fn(),
 }))
-
-vi.mock('../../stores/browserPanelStore', () => ({
-  useBrowserPanelStore: { getState: () => ({ open: openBrowser }) },
-}))
 vi.mock('../../lib/desktopRuntime', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   getServerBaseUrl: () => 'http://127.0.0.1:4321',
@@ -35,14 +31,6 @@ vi.mock('../../stores/openTargetStore', () => ({
 // Mock workspacePanelStore — usable both as a hook selector and via getState().
 // workDir is undefined (no active workspace) so relative paths resolve as-is.
 const openPreviewFn = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
-vi.mock('../../stores/workspacePanelStore', () => {
-  const state = { statusBySession: {} as Record<string, { workDir?: string } | undefined>, openPreview: openPreviewFn }
-  const useWorkspacePanelStore = Object.assign(
-    (selector: (s: typeof state) => unknown) => selector(state),
-    { getState: () => state },
-  )
-  return { useWorkspacePanelStore }
-})
 
 // Mock tauri shell (used by openSystem inside the card's open-with)
 const shellOpen = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))

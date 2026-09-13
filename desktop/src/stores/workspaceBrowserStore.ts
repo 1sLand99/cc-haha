@@ -18,11 +18,17 @@ const HISTORY_LIMIT = 200
 const DOWNLOAD_LIMIT = 50
 
 export type WorkspaceBrowserPageState = {
+  /** A native state event confirms that the host has registered this resource. */
+  registered: boolean
+  annotationActive?: boolean
   url: string
   title: string
   canGoBack: boolean
   canGoForward: boolean
   loading: boolean
+  navigationId: number
+  navigationOutcome: 'idle' | 'pending' | 'succeeded' | 'failed'
+  zoomFactor: number
   find: { active: number; total: number } | null
 }
 
@@ -33,11 +39,15 @@ export type WorkspaceBrowserVisit = {
 }
 
 const EMPTY_PAGE_STATE: WorkspaceBrowserPageState = {
+  registered: false,
   url: '',
   title: '',
   canGoBack: false,
   canGoForward: false,
   loading: false,
+  navigationId: 0,
+  navigationOutcome: 'idle',
+  zoomFactor: 1,
   find: null,
 }
 
@@ -49,7 +59,8 @@ type WorkspaceBrowserStore = {
   getPage: (browserTabId: string) => WorkspaceBrowserPageState
   getHistory: (browserTabId: string) => WorkspaceBrowserVisit[]
 
-  applyEvent: (event: WorkspaceBrowserEvent) => void
+  applyEvent: (event: WorkspaceBrowserEvent) => boolean
+  setZoom: (browserTabId: string, factor: number) => void
   forgetTab: (browserTabId: string) => void
   clearDownloads: () => void
 }
@@ -62,7 +73,14 @@ export const useWorkspaceBrowserStore = create<WorkspaceBrowserStore>((set, get)
   getPage: (browserTabId) => get().pageByTabId[browserTabId] ?? EMPTY_PAGE_STATE,
   getHistory: (browserTabId) => get().historyByTabId[browserTabId] ?? [],
 
-  applyEvent: (event) =>
+  applyEvent: (event) => {
+    const previous = get().pageByTabId[event.tabId]
+    if (event.type === 'state' || event.type === 'failed') {
+      if (event.navigationId !== undefined && previous && (
+        event.navigationId < previous.navigationId ||
+        (event.type === 'failed' && event.navigationId === previous.navigationId && previous.navigationOutcome === 'succeeded')
+      )) return false
+    }
     set((state) => {
       switch (event.type) {
         case 'state': {
@@ -71,29 +89,50 @@ export const useWorkspaceBrowserStore = create<WorkspaceBrowserStore>((set, get)
           // Record a visit only when a *different* URL has committed. Title
           // updates and loading flips arrive as separate `state` events for the
           // same page and would otherwise fill the history with duplicates.
-          const isNewVisit = !event.loading && event.url && event.url !== history.at(-1)?.url
+          const committed = !event.loading &&
+            (event.navigationOutcome === undefined || event.navigationOutcome === 'succeeded')
+          const lastVisit = history.at(-1)
+          const isNewVisit = committed && event.url && event.url !== lastVisit?.url
+          const updatedTitle = committed && lastVisit?.url === event.url && event.title && event.title !== lastVisit.title
+          const nextHistory = isNewVisit
+            ? [...history, { url: event.url, title: event.title, visitedAt: Date.now() }].slice(-HISTORY_LIMIT)
+            : updatedTitle
+              ? [...history.slice(0, -1), { ...lastVisit, title: event.title }]
+              : history
           return {
             pageByTabId: {
               ...state.pageByTabId,
               [event.tabId]: {
+                registered: true,
+                annotationActive: event.annotationActive ?? previous.annotationActive ?? false,
                 url: event.url,
                 title: event.title,
                 canGoBack: event.canGoBack,
                 canGoForward: event.canGoForward,
                 loading: event.loading,
+                navigationId: event.navigationId ?? previous.navigationId,
+                navigationOutcome: event.navigationOutcome ?? previous.navigationOutcome,
+                zoomFactor: event.zoomFactor ?? previous.zoomFactor,
                 find: event.loading ? null : previous.find,
               },
             },
-            historyByTabId: isNewVisit
-              ? {
-                  ...state.historyByTabId,
-                  [event.tabId]: [
-                    ...history,
-                    { url: event.url, title: event.title, visitedAt: Date.now() },
-                  ].slice(-HISTORY_LIMIT),
-                }
-              : state.historyByTabId,
+            historyByTabId: nextHistory === history ? state.historyByTabId : {
+              ...state.historyByTabId,
+              [event.tabId]: nextHistory,
+            },
           }
+        }
+        case 'history': {
+          // The main process owns committed visits and timestamps. State events
+          // still support legacy hosts, but must not replace this authoritative
+          // snapshot or lose titles that resolved after did-navigate.
+          const previous = state.historyByTabId[event.tabId] ?? []
+          const knownVisits = new Map(previous.map(visit => [`${visit.visitedAt}:${visit.url}`, visit]))
+          const entries = event.entries.slice(-HISTORY_LIMIT).map(visit => {
+            const known = knownVisits.get(`${visit.visitedAt}:${visit.url}`)
+            return { ...visit, title: known?.title || visit.title }
+          })
+          return { historyByTabId: { ...state.historyByTabId, [event.tabId]: entries } }
         }
         case 'found': {
           const previous = state.pageByTabId[event.tabId] ?? EMPTY_PAGE_STATE
@@ -112,7 +151,12 @@ export const useWorkspaceBrowserStore = create<WorkspaceBrowserStore>((set, get)
           return {
             pageByTabId: {
               ...state.pageByTabId,
-              [event.tabId]: { ...previous, loading: false },
+              [event.tabId]: {
+                ...previous,
+                loading: false,
+                navigationId: event.navigationId ?? previous.navigationId,
+                navigationOutcome: 'failed',
+              },
             },
           }
         }
@@ -123,7 +167,16 @@ export const useWorkspaceBrowserStore = create<WorkspaceBrowserStore>((set, get)
         default:
           return state
       }
-    }),
+    })
+    return true
+  },
+
+  setZoom: (browserTabId, factor) => set((state) => ({
+    pageByTabId: {
+      ...state.pageByTabId,
+      [browserTabId]: { ...(state.pageByTabId[browserTabId] ?? EMPTY_PAGE_STATE), zoomFactor: factor },
+    },
+  })),
 
   forgetTab: (browserTabId) =>
     set((state) => {
