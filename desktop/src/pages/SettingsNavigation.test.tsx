@@ -14,7 +14,7 @@ vi.mock('../api/traces', () => ({
   },
 }))
 
-import { Settings } from './Settings'
+import { DesktopSettings as Settings } from './Settings'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useUIStore } from '../stores/uiStore'
 

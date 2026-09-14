@@ -1,3 +1,4 @@
+import { PublicAccessManager } from './services/publicAccess'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, WebContentsView } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'node:path'
@@ -100,6 +101,7 @@ import {
 
 let mainWindow: BrowserWindow | null = null
 let serverRuntime: ElectronServerRuntime | null = null
+let publicAccessManager: PublicAccessManager | null = null
 let updaterService: ElectronUpdaterService | null = null
 let terminalService: ElectronTerminalService | null = null
 let previewService: ElectronPreviewService | null = null
@@ -243,6 +245,8 @@ async function openTraceWindow(sessionId: string) {
 
 function getServerRuntime() {
   serverRuntime ??= new ElectronServerRuntime({
+    onServerUnavailable: () => { void publicAccessManager?.serverUnavailable() },
+    onServerReady: () => { void publicAccessManager?.serverChanged() },
     desktopRoot: unpackedRoot(),
     appRoot: appRoot(),
     h5DistDir: path.join(unpackedRoot(), 'dist'),
@@ -250,6 +254,35 @@ function getServerRuntime() {
     resolveSystemProxy: (url) => session.defaultSession.resolveProxy(url),
   })
   return serverRuntime
+}
+
+function getPublicAccessManager() {
+  if (publicAccessManager) return publicAccessManager
+  let queue: Promise<unknown> = Promise.resolve()
+  publicAccessManager = new PublicAccessManager({
+    directory: path.join(getAppMode(app).activeConfigDir ?? app.getPath('userData'), 'cc-haha', 'public-access'),
+    backend: {
+      request<T>(route: string, method: string, body?: unknown): Promise<T> {
+        const operation = queue.catch(() => {}).then(async () => {
+          const runtime = getServerRuntime()
+          // Never boot the sidecar merely to disable an already stopped tunnel.
+          const serverUrl = runtime.getActiveServerUrl()
+          if (!serverUrl) throw new Error('Server unavailable')
+          const response = await fetch(`${serverUrl}/api/public-access${route}`, {
+            method,
+            headers: { Authorization: `Bearer ${runtime.getLocalAccessToken()}`, 'Content-Type': 'application/json' },
+            body: body === undefined ? undefined : JSON.stringify(body),
+            signal: AbortSignal.timeout(10_000),
+          })
+          if (!response.ok) throw new Error('Public access configuration failed')
+          return await response.json() as T
+        })
+        queue = operation
+        return operation
+      },
+    },
+  })
+  return publicAccessManager
 }
 
 function resolvePetServerAccess(): PreviewLocalAccess | null {
@@ -437,6 +470,9 @@ function registerHandler<T>(
       throw new Error(`Invalid Electron IPC payload for ${channel}`)
     }
     const senderWindow = BrowserWindow.fromWebContents(event.sender)
+    if (channel.startsWith('desktop:public-access:') && (senderWindow !== mainWindow || event.senderFrame !== event.sender.mainFrame)) {
+      throw new Error('Public access management requires the main desktop window')
+    }
     if (
       petWindowController?.owns(senderWindow) &&
       !isElectronIpcChannelAllowedForPetWindow(channel)
@@ -496,6 +532,12 @@ function registerIpcHandlers() {
     if (getWorkspaceBrowserService().handleMessageFromView(event.sender, raw)) return
     void getPreviewService().sendMessageToRenderer(event.sender, raw, mainWindow?.webContents)
   })
+  registerHandler(ELECTRON_IPC_CHANNELS.publicAccessGetStatus, () => getPublicAccessManager().getStatus())
+  registerHandler(ELECTRON_IPC_CHANNELS.publicAccessSaveCredential, (_event, payload) => getPublicAccessManager().saveCredential(payload as string))
+  registerHandler(ELECTRON_IPC_CHANNELS.publicAccessDeleteCredential, () => getPublicAccessManager().deleteCredential())
+  registerHandler(ELECTRON_IPC_CHANNELS.publicAccessStart, (_event, payload) => getPublicAccessManager().start(payload as number))
+  registerHandler(ELECTRON_IPC_CHANNELS.publicAccessStop, () => getPublicAccessManager().stop())
+  registerHandler(ELECTRON_IPC_CHANNELS.publicAccessSetAutoStart, (_event, payload) => getPublicAccessManager().setAutoStart(payload as boolean))
   registerHandler(ELECTRON_IPC_CHANNELS.appGetVersion, () => app.getVersion())
   registerHandler(
     ELECTRON_IPC_CHANNELS.appGetLocalePreference,
@@ -681,7 +723,7 @@ function registerIpcHandlers() {
     mainWindow?.webContents.send(ELECTRON_EVENT_CHANNELS.updateDownloadEvent, event)
   }))
   registerHandler(ELECTRON_IPC_CHANNELS.updateInstall, () => getUpdaterService().stageDownloadedUpdate())
-  registerHandler(ELECTRON_IPC_CHANNELS.updatePrepareInstall, () => getServerRuntime().stopAll())
+  registerHandler(ELECTRON_IPC_CHANNELS.updatePrepareInstall, async () => { await publicAccessManager?.stop(); getServerRuntime().stopAll() })
   registerHandler(ELECTRON_IPC_CHANNELS.updateCancelInstall, () => getUpdaterService().cancelInstall())
   registerHandler(ELECTRON_IPC_CHANNELS.updateRelaunch, () => {
     if (getUpdaterService().hasDownloadedUpdate()) {
@@ -939,6 +981,7 @@ app.whenReady().then(async () => {
   await getServerRuntime().startServer().catch(error => {
     console.error('[desktop] failed to start Electron server sidecar', error)
   })
+  await getPublicAccessManager().restore().catch(() => {})
   await installApplicationMenu(app, () => mainWindow)
   if (shouldInstallTray(process.platform)) {
     trayController = await installTray({
@@ -1005,6 +1048,13 @@ app.on('before-quit', event => {
   // can strand its active turn across an immediate app restart.
   void (async () => {
     try {
+      try {
+        await publicAccessManager?.dispose()
+      } catch {
+        // Provider errors may contain credentials. A tunnel cleanup failure
+        // must never bypass the sidecar's graceful shutdown.
+        console.error('[desktop] public access cleanup failed during quit')
+      }
       await getServerRuntime().stopAllAndWait()
     } catch (error) {
       console.error('[desktop] graceful server shutdown failed', error)

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
-import { Settings } from '../pages/Settings'
+import { DesktopSettings as Settings } from '../pages/Settings'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useUIStore } from '../stores/uiStore'
 import { useUpdateStore } from '../stores/updateStore'
@@ -640,6 +640,24 @@ describe('Settings > General tab', () => {
     })
   })
 
+  it.each([14400, 43200, 2147483])('saves a long request timeout of %i seconds', async (seconds) => {
+    render(<Settings />)
+    fireEvent.click(screen.getByText('General'))
+    const timeoutInput = screen.getByLabelText('AI request timeout')
+    fireEvent.change(timeoutInput, { target: { value: String(seconds) } })
+    fireEvent.blur(timeoutInput)
+    expect(timeoutInput).toHaveValue(seconds)
+    const saveButton = screen.getAllByRole('button', { name: 'Save' })[0]!
+    expect(saveButton).not.toBeDisabled()
+
+    await act(async () => {
+      fireEvent.click(saveButton)
+    })
+    expect(useSettingsStore.getState().setNetwork).toHaveBeenCalledWith(expect.objectContaining({
+      aiRequestTimeoutMs: seconds * 1000,
+    }))
+  })
+
   it('validates typed provider network timeout and supports precise step controls', () => {
     render(<Settings />)
 
@@ -647,8 +665,8 @@ describe('Settings > General tab', () => {
     const timeoutInput = screen.getByLabelText('AI request timeout')
     const saveButton = screen.getAllByRole('button', { name: 'Save' })[0]!
 
-    fireEvent.change(timeoutInput, { target: { value: '2000' } })
-    expect(screen.getByText('Enter a whole number from 30 to 1800 seconds.')).toBeInTheDocument()
+    fireEvent.change(timeoutInput, { target: { value: '2147484' } })
+    expect(screen.getByText('Enter a whole number from 30 to 2147483 seconds.')).toBeInTheDocument()
     expect(saveButton).toBeDisabled()
 
     fireEvent.change(timeoutInput, { target: { value: '90' } })

@@ -5,6 +5,21 @@ import { createElectronHost } from './electronHost'
 import type { WorkspaceBrowserMenuOptions } from './types'
 
 describe('electron desktop host', () => {
+  it('routes public access through validated local IPC without exposing management in browsers', async () => {
+    const invoke = vi.fn().mockResolvedValue({ hasCredential: true })
+    const host = createElectronHost({ invoke, subscribe: vi.fn() })
+    await host.publicAccess.saveCredential('fixture-ngrok-token')
+    await host.publicAccess.start(1)
+    await host.publicAccess.setAutoStart(false)
+    await host.publicAccess.stop()
+    expect(invoke).toHaveBeenNthCalledWith(1, ELECTRON_IPC_CHANNELS.publicAccessSaveCredential, 'fixture-ngrok-token')
+    expect(invoke).toHaveBeenNthCalledWith(2, ELECTRON_IPC_CHANNELS.publicAccessStart, 1)
+    expect(invoke).toHaveBeenNthCalledWith(3, ELECTRON_IPC_CHANNELS.publicAccessSetAutoStart, false)
+    expect(invoke).toHaveBeenNthCalledWith(4, ELECTRON_IPC_CHANNELS.publicAccessStop, undefined)
+    const { browserHost } = await import('./browserHost')
+    await expect(browserHost.publicAccess.getStatus()).rejects.toThrow('desktop app runtime')
+  })
+
   it('carries a terminal startup identity through the production IPC validator and early events', async () => {
     const handlers = new Map<string, (event: unknown) => void>()
     const host = createElectronHost({

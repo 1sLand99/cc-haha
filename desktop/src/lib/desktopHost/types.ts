@@ -4,6 +4,9 @@ import type {
 } from '../../types/settings'
 import type { Locale } from '../../i18n/locale'
 
+// Version 2 adds remote provider management and selected General settings.
+export const PUBLIC_ACCESS_CONSENT_VERSION = 2
+
 export type DesktopHostKind = 'browser' | 'electron'
 
 export type DesktopHostCapability =
@@ -367,7 +370,24 @@ export type AppModeSetInput = {
   portableDir: string | null
 }
 
+export type DesktopPublicAccessStatus = {
+  state: 'unconfigured' | 'disabled' | 'connecting' | 'online' | 'reconnecting' | 'failed'
+  hasCredential: boolean
+  publicUrl: string | null
+  error: 'auth' | 'quota' | 'network' | 'configuration' | null
+  autoStart: boolean
+  consentVersion: number
+}
+
 export type DesktopHost = {
+  publicAccess: {
+    getStatus(): Promise<DesktopPublicAccessStatus>
+    saveCredential(token: string): Promise<DesktopPublicAccessStatus>
+    deleteCredential(): Promise<DesktopPublicAccessStatus>
+    start(consentVersion: number): Promise<DesktopPublicAccessStatus>
+    stop(): Promise<DesktopPublicAccessStatus>
+    setAutoStart(enabled: boolean): Promise<DesktopPublicAccessStatus>
+  }
   kind: DesktopHostKind
   isDesktop: boolean
   capabilities: DesktopHostCapabilities

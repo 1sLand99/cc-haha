@@ -1,4 +1,10 @@
 export const ELECTRON_IPC_CHANNELS = {
+  publicAccessGetStatus: 'desktop:public-access:get-status',
+  publicAccessSaveCredential: 'desktop:public-access:save-credential',
+  publicAccessDeleteCredential: 'desktop:public-access:delete-credential',
+  publicAccessStart: 'desktop:public-access:start',
+  publicAccessStop: 'desktop:public-access:stop',
+  publicAccessSetAutoStart: 'desktop:public-access:set-auto-start',
   appGetVersion: 'desktop:app:get-version',
   appGetLocalePreference: 'desktop:app:get-locale-preference',
   appSetLocalePreference: 'desktop:app:set-locale-preference',

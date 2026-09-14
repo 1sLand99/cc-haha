@@ -1473,7 +1473,7 @@ export function Sidebar({
         <div className="flex-1" aria-hidden="true" />
       )}
 
-      {!isMobile && (
+      {(
         <div
           data-testid="sidebar-settings-dock"
           className={`sidebar-settings-dock absolute bottom-0 left-0 right-0 border-t border-[var(--color-border)] p-3 ${expanded ? '' : 'flex justify-center'}`}

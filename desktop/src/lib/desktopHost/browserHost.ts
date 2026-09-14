@@ -38,6 +38,14 @@ const defaultAppMode: AppModeConfig = {
 const defaultPermissionState: NotificationPermissionState = 'default'
 
 export const browserHost: DesktopHost = {
+  publicAccess: {
+    async getStatus() { return unsupported('Public access management') },
+    async saveCredential() { return unsupported('Public access management') },
+    async deleteCredential() { return unsupported('Public access management') },
+    async start() { return unsupported('Public access management') },
+    async stop() { return unsupported('Public access management') },
+    async setAutoStart() { return unsupported('Public access management') },
+  },
   kind: 'browser',
   isDesktop: false,
   capabilities: browserCapabilities,
