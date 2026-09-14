@@ -621,15 +621,23 @@ export function TabBar() {
         against paper, it all but disappears on the trough (1.12:1 on 素白),
         which left the toolbar looking welded to the last tab.
       */}
+      /*
+        The frame owns the paper, not the header inside it. The drag gutter —
+        and, on Windows, the window controls — are the header's siblings in
+        here, and they are transparent: while the workspace is closed that is
+        invisible, because the whole strip is the sidebar's ground. Next to an
+        open panel it showed as a 16px strip of trough welded to the window's
+        top-right corner. One ground for everything above the panel.
+      */
       <div
         data-testid="workspace-header-frame"
         style={hasWorkspaceHeader ? { width: workspaceHeader.width, maxWidth: '100%' } : undefined}
-        className="flex min-w-0 shrink-0 items-stretch"
+        className={`flex min-w-0 shrink-0 items-stretch ${hasWorkspaceHeader ? 'bg-[var(--color-surface)]' : ''}`}
       >
       <div
         data-testid="workspace-window-header"
         className={hasWorkspaceHeader
-          ? 'flex min-w-0 flex-1 items-center gap-1 bg-[var(--color-surface)] pr-2'
+          ? 'flex min-w-0 flex-1 items-center gap-1 pr-2'
           : 'relative flex shrink-0 items-center gap-1 px-2 before:absolute before:left-0 before:top-1/2 before:h-4 before:w-px before:-translate-y-1/2 before:bg-[var(--color-tab-separator)]'}
       >
         {hasWorkspaceHeader ? <div ref={workspaceHeader.ref} data-testid="workspace-header-slot" className="tab-bar-interactive flex h-[52px] min-w-0 flex-1" /> : null}

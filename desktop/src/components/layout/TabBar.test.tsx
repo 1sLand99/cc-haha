@@ -1545,6 +1545,51 @@ describe('TabBar', () => {
     expect(tab).not.toHaveAttribute('data-desktop-drag-region')
   })
 
+  it('keeps the window gutter on the panel paper while the workspace is open', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useChatStore } = await import('../../stores/chatStore')
+    const { useWorkspaceStore } = await import('../../stores/workspaceStore')
+    // Imported here, not at the top of the file: `vi.resetModules()` hands the
+    // strip a fresh provider module, and a statically imported one would be a
+    // second React context that the strip can never see.
+    const { WorkspaceHeaderProvider } = await import('./WorkspaceHeaderContext')
+    const sessionId = 'gutter-session'
+
+    useTabStore.setState({
+      tabs: [{ sessionId, title: 'Gutter session', type: 'session', status: 'idle' }],
+      activeTabId: sessionId,
+    })
+    useChatStore.setState({
+      sessions: {},
+      disconnectSession: vi.fn(),
+    } as Partial<ReturnType<typeof useChatStore.getState>>)
+
+    await act(async () => {
+      // The window owns the header slot; without it the strip falls back to
+      // the dock and there is no header frame to paint.
+      render(<WorkspaceHeaderProvider><TabBar /></WorkspaceHeaderProvider>)
+    })
+
+    const frame = screen.getByTestId('workspace-header-frame')
+    const gutter = screen.getByTestId('tab-bar-drag-gutter')
+
+    // Closed, the trough runs to the window edge and the gutter disappears
+    // into it. Painting the frame unconditionally would paste a white block
+    // over the end of the strip instead.
+    expect(frame).not.toHaveClass('bg-[var(--color-surface)]')
+
+    // Open, everything above the panel is one ground. The gutter is a
+    // transparent sibling of the header, so whichever element paints paper has
+    // to contain it — otherwise the trough shows through the strip and the
+    // window's top-right corner carries a grey notch beside the panel.
+    await act(async () => {
+      useWorkspaceStore.getState().toggleWorkspace(sessionId)
+    })
+    expect(frame).toHaveClass('bg-[var(--color-surface)]')
+    expect(frame).toContainElement(gutter)
+  })
+
   it('lifts the active tab onto the paper ground without turning it into a pill', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')
