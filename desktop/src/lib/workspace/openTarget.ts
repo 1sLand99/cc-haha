@@ -43,6 +43,7 @@ export const workspaceOpen = {
     column?: number
     preview?: boolean
     background?: boolean
+    replaceBlankPlaceholder?: boolean
     origin?: WorkspaceOrigin
   }) {
     return openWorkspaceTarget({
@@ -56,6 +57,7 @@ export const workspaceOpen = {
       },
       ...(options?.preview ? { preview: true } : {}),
       ...(options?.background ? { background: true } : {}),
+      ...(options?.replaceBlankPlaceholder ? { replaceBlankPlaceholder: true } : {}),
       ...(options?.origin ? { origin: options.origin } : {}),
     })
   },

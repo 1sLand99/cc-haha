@@ -179,10 +179,11 @@ export type WorkspaceOpenOptions = {
    */
   requestedBy?: 'user' | 'agent'
   /**
-   * Let this open take over a blank new-tab page instead of adding a tab.
+   * Let this open take over a blank placeholder tab instead of adding a tab.
    *
-   * Only the content picker sets it. The rule is narrow on purpose: a browser
-   * tab counts as "blank" until the host reports a committed URL, so between
+   * The rule is narrow on purpose: only the *active* tab is eligible, a browser
+   * tab counts as "blank" until the host reports a committed URL, and a file
+   * tab counts as "blank" while no path is chosen (the Files launcher). Between
    * pressing Enter in the address bar and the page committing, *any* other open
    * would otherwise destroy the page that is mid-load.
    */
@@ -230,9 +231,14 @@ export function isReviewTab(tab: WorkspaceTab): tab is WorkspaceReviewTab {
   return tab.kind === 'review'
 }
 
-/** A blank browser tab is the one placeholder another kind may replace. */
+/** A blank browser tab is one placeholder another kind may replace. */
 export function isBlankBrowserTab(tab: WorkspaceTab): boolean {
   return tab.kind === 'browser' && !tab.url
+}
+
+/** The Files launcher with nothing chosen yet is the other placeholder. */
+export function isBlankFileTab(tab: WorkspaceTab): boolean {
+  return tab.kind === 'file' && tab.path === ''
 }
 
 export function basenameOf(path: string): string {

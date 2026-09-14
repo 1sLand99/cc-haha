@@ -14,8 +14,8 @@ export type WorkspaceFileTreePaneProps = {
   sessionId: string
   /** Highlighted row; the path of whatever the content area is showing. */
   selectedPath: string | null
-  /** Single click previews (replaceable tab), double click pins. */
-  onOpen: (path: string, options: { preview: boolean }) => void
+  /** Every activation opens its own tab; repeat opens of one path dedup in the store. */
+  onOpen: (path: string) => void
   autoFocus?: boolean
 }
 
@@ -95,7 +95,6 @@ export function WorkspaceFileTreePane({
       controller.abort()
     }
   }, [filter, sessionId])
-  const clickTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const loadTree = useWorkspaceContentStore((state) => state.loadTree)
   const toggleDirectory = useWorkspaceContentStore((state) => state.toggleDirectory)
   const treeByKey = useWorkspaceContentStore((state) => state.treeByKey)
@@ -119,11 +118,6 @@ export function WorkspaceFileTreePane({
     // Follow a new active file, not every tree update: collapsing its parent or
     // scrolling elsewhere must remain under the user's control.
   }, [filter, loadTree, selectedTreePath, sessionId, toggleDirectory])
-
-  useEffect(() => () => {
-    for (const timer of clickTimers.current.values()) clearTimeout(timer)
-    clickTimers.current.clear()
-  }, [sessionId])
 
   const expanded = useMemo(
     () => new Set(expandedBySession[sessionId] ?? []),
@@ -229,21 +223,7 @@ export function WorkspaceFileTreePane({
       void toggleDirectory(sessionId, row.path)
       return
     }
-    // Defer the preview open by one double-click window so a double click
-    // pins instead of previewing-then-pinning, which would otherwise load the
-    // file twice.
-    const pending = clickTimers.current.get(row.path)
-    if (pending) {
-      clearTimeout(pending)
-      clickTimers.current.delete(row.path)
-      onOpen(row.path, { preview: false })
-      return
-    }
-    const timer = setTimeout(() => {
-      clickTimers.current.delete(row.path)
-      onOpen(row.path, { preview: true })
-    }, 220)
-    clickTimers.current.set(row.path, timer)
+    onOpen(row.path)
   }
 
   const { activePath, handleKeyDown, registerRow, setFocusedPath } = useRovingTree(rows, {

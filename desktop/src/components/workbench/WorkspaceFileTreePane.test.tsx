@@ -276,26 +276,17 @@ describe('WorkspaceFileTreePane', () => {
     expect(screen.getByTestId('workspace-tree-row-README.md')).toBeInTheDocument()
   })
 
-  it('previews on a single click and pins on a double click', async () => {
-    vi.useFakeTimers()
+  it('opens on a single click, without waiting out a double-click window', async () => {
     const onOpen = vi.fn()
     render(<WorkspaceFileTreePane sessionId={SESSION} selectedPath={null} onOpen={onOpen} />)
     await act(async () => { await Promise.resolve() })
 
     fireEvent.click(screen.getByTestId('workspace-tree-row-README.md'))
-    act(() => { vi.advanceTimersByTime(300) })
-    expect(onOpen).toHaveBeenCalledWith('README.md', { preview: true })
 
-    onOpen.mockClear()
-    // A double click must pin *instead of* previewing first — otherwise the file
-    // is read twice and the tab flickers from italic to upright.
-    fireEvent.click(screen.getByTestId('workspace-tree-row-README.md'))
-    fireEvent.click(screen.getByTestId('workspace-tree-row-README.md'))
-    act(() => { vi.advanceTimersByTime(300) })
-
+    // Every click opens its own tab — a deferred preview that a second click
+    // replaces made ten picks collapse into one slot.
     expect(onOpen).toHaveBeenCalledTimes(1)
-    expect(onOpen).toHaveBeenCalledWith('README.md', { preview: false })
-    vi.useRealTimers()
+    expect(onOpen).toHaveBeenCalledWith('README.md')
   })
 
   it('marks the row the content area is showing', async () => {
@@ -406,7 +397,6 @@ describe('keyboard', () => {
   })
 
   it('opens the focused file with Enter and with Space', async () => {
-    vi.useFakeTimers()
     const onOpen = vi.fn()
     render(<WorkspaceFileTreePane sessionId={SESSION} selectedPath={null} onOpen={onOpen} />)
     await act(async () => { await Promise.resolve() })
@@ -414,14 +404,11 @@ describe('keyboard', () => {
     const readme = screen.getByTestId('workspace-tree-row-README.md')
     focusRow(readme)
     fireEvent.keyDown(readme, { key: 'Enter' })
-    act(() => { vi.advanceTimersByTime(300) })
-    expect(onOpen).toHaveBeenCalledWith('README.md', { preview: true })
+    expect(onOpen).toHaveBeenCalledWith('README.md')
 
     onOpen.mockClear()
     fireEvent.keyDown(readme, { key: ' ' })
-    act(() => { vi.advanceTimersByTime(300) })
-    expect(onOpen).toHaveBeenCalledWith('README.md', { preview: true })
-    vi.useRealTimers()
+    expect(onOpen).toHaveBeenCalledWith('README.md')
   })
 
   it('gives the tab stop to the row the content area is showing', async () => {

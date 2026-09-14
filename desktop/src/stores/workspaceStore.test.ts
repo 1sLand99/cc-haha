@@ -225,6 +225,25 @@ describe('preview and pinning', () => {
     expect(mocks.releaseWorkspaceBrowserTab).toHaveBeenCalledTimes(1)
   })
 
+  it('lets a tree pick take over the active empty Files tab', () => {
+    // The Files launcher with nothing chosen is the same kind of placeholder:
+    // the first pick loads into its slot instead of stranding an empty tab.
+    store().openTarget(SESSION, { kind: 'file', path: '' }, { preview: true })
+    store().openTarget(SESSION, { kind: 'file', path: 'a.ts' }, { replaceBlankPlaceholder: true })
+
+    expect(sideTabs()).toHaveLength(1)
+    expect(sideTabs()[0]).toMatchObject({ kind: 'file', path: 'a.ts', preview: false })
+  })
+
+  it('keeps the empty Files tab when the pick lands from a non-placeholder tab', () => {
+    openFile('a.ts')
+    store().openTarget(SESSION, { kind: 'file', path: '' }, { preview: true, background: true })
+    store().openTarget(SESSION, { kind: 'file', path: 'b.ts' }, { replaceBlankPlaceholder: true })
+
+    // The placeholder is not the active tab, so the open must add, not replace.
+    expect(sideTabs().map((tab) => (tab as { path: string }).path)).toEqual(['a.ts', '', 'b.ts'])
+  })
+
   it('leaves a blank browser tab alone for every other opener', () => {
     store().openTarget(SESSION, { kind: 'browser' })
     openFile('a.ts')

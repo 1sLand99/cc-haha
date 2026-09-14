@@ -20,11 +20,14 @@ vi.mock('../workspace/workspaceFileOpenTargets', () => ({ useWorkspaceFileOpenTa
 vi.mock('./WorkspaceFileTreePane', () => ({
   WorkspaceFileTreePane: ({ selectedPath, onOpen }: {
     selectedPath: string | null
-    onOpen: (path: string, options: { preview: boolean }) => void
+    onOpen: (path: string) => void
   }) => (
     <div data-testid="file-tree-pane" data-selected={selectedPath ?? ''}>
-      <button type="button" onClick={() => onOpen('src/other.ts', { preview: true })}>
+      <button type="button" onClick={() => onOpen('src/other.ts')}>
         tree row
+      </button>
+      <button type="button" onClick={() => onOpen('src/third.ts')}>
+        second tree row
       </button>
     </div>
   ),
@@ -306,14 +309,31 @@ describe('file tree', () => {
     expect(screen.getByTestId('file-tree-pane')).toBeInTheDocument()
   })
 
-  it('opens a tree row as a replaceable preview tab', () => {
+  it('opens every tree pick as a permanent tab of its own', () => {
     renderTab('src/a.ts')
+
+    fireEvent.click(screen.getByRole('button', { name: 'tree row' }))
+    fireEvent.click(screen.getByRole('button', { name: 'second tree row' }))
+
+    // Ten picks must mean ten tabs: the old preview slot replaced the previous
+    // pick, so a row of files collapsed into whichever was clicked last.
+    const tabs = useWorkspaceStore.getState().getTabs(SESSION, 'side')
+    expect(tabs).toHaveLength(2)
+    expect(tabs.map((tab) => tab.kind === 'file' && tab.path)).toEqual(['src/other.ts', 'src/third.ts'])
+    expect(tabs.every((tab) => !tab.preview)).toBe(true)
+  })
+
+  it('lets the first pick take over the empty Files tab instead of adding beside it', () => {
+    // Seed the launcher tab the way the "+" menu does, so the store has an
+    // active blank tab that the pick is expected to replace.
+    useWorkspaceStore.getState().openTarget(SESSION, { kind: 'file', path: '' }, { preview: true })
+    renderTab('')
 
     fireEvent.click(screen.getByRole('button', { name: 'tree row' }))
 
     const tabs = useWorkspaceStore.getState().getTabs(SESSION, 'side')
     expect(tabs).toHaveLength(1)
-    expect(tabs[0]).toMatchObject({ kind: 'file', path: 'src/other.ts', preview: true })
+    expect(tabs[0]).toMatchObject({ kind: 'file', path: 'src/other.ts', preview: false })
   })
 })
 

@@ -6,6 +6,7 @@ import {
   DEFAULT_REVIEW_SOURCE,
   basenameOf,
   isBlankBrowserTab,
+  isBlankFileTab,
   reviewSourceKey,
   type WorkspaceBrowserTab,
   type WorkspaceClosedGroup,
@@ -526,14 +527,15 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       }
 
       // --- Creation --------------------------------------------------------
-      // A preview open takes over the existing preview slot. A blank browser
-      // page is the other replaceable tab: picking a different kind from the
-      // launcher should not leave an empty new-tab page behind.
+      // A preview open takes over the existing preview slot. Placeholder tabs
+      // are the other replaceable kind: picking a file while the empty Files
+      // launcher is showing, or picking a different kind on a blank browser
+      // page, should not leave the empty tab behind.
       const previewVictim = preview
         ? dockTabs.find((tab) => tab.preview)
         : undefined
       const blankVictim = options.replaceBlankPlaceholder === true && !preview && target.kind !== 'browser'
-        ? dockTabs.find((tab) => tab.id === activeId && isBlankBrowserTab(tab))
+        ? dockTabs.find((tab) => tab.id === activeId && (isBlankBrowserTab(tab) || isBlankFileTab(tab)))
         : undefined
       const replaceTabId = previewVictim?.id ?? blankVictim?.id
 

@@ -329,8 +329,11 @@ export function WorkspaceFileTab({ sessionId, tab }: WorkspaceFileTabProps) {
             sessionId={sessionId}
             selectedPath={path || null}
             autoFocus={!path}
-            onOpen={(nextPath, options) =>
-              workspaceOpen.file(sessionId, nextPath, { preview: options.preview })}
+            onOpen={(nextPath) =>
+              // A pick from the tree is a permanent tab of its own. Only the
+              // empty Files launcher this tree is hosted in gets replaced —
+              // everything else adds, so ten picks mean ten tabs.
+              workspaceOpen.file(sessionId, nextPath, { replaceBlankPlaceholder: true })}
           />
       </WorkspaceTreeSidebar>
       </div>
