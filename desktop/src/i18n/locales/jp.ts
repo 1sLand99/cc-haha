@@ -620,6 +620,7 @@ export const jp: Record<TranslationKey, string> = {
   'assistantOutputs.kind.localhost': 'Localhost',
   'assistantOutputs.moreOutputs': '+{count} 件',
   'assistantOutputs.open': '開く',
+  'assistantOutputs.openAria': '{title} を開く',
 
   // ─── Workspace Panel ───────────────────────────────
   'workspace.changedFiles': '変更されたファイル',

@@ -620,6 +620,7 @@ export const kr: Record<TranslationKey, string> = {
   'assistantOutputs.kind.localhost': 'Localhost',
   'assistantOutputs.moreOutputs': '+{count}개',
   'assistantOutputs.open': '열기',
+  'assistantOutputs.openAria': '{title} 열기',
 
   // ─── Workspace Panel ───────────────────────────────
   'workspace.changedFiles': '변경된 파일',

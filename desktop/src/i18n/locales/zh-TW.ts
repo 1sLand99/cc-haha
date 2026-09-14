@@ -620,6 +620,7 @@ export const zh: Record<TranslationKey, string> = {
   'assistantOutputs.kind.localhost': '本地服務',
   'assistantOutputs.moreOutputs': '+{count} 個輸出',
   'assistantOutputs.open': '開啟',
+  'assistantOutputs.openAria': '開啟 {title}',
 
   // ─── Workspace Panel ───────────────────────────────
   'workspace.changedFiles': '已更改檔案',

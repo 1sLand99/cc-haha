@@ -617,6 +617,7 @@ export const en = {
   'assistantOutputs.kind.localhost': 'Localhost',
   'assistantOutputs.moreOutputs': '+{count} more',
   'assistantOutputs.open': 'Open',
+  'assistantOutputs.openAria': 'Open {title}',
 
   // ─── Workspace Panel ───────────────────────────────
   'workspace.changedFiles': 'Changed files',

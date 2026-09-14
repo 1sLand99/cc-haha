@@ -116,6 +116,38 @@ describe('AssistantOutputTargetCard', () => {
     expect(openBrowser).toHaveBeenCalledWith('s1', 'http://localhost:5173/')
   })
 
+  // The trailing icon button is a discoverability affordance, not the hit area:
+  // clicking the file name / path anywhere on the row must open the target.
+  it('opens the workspace preview when the row body is clicked', () => {
+    render(<AssistantOutputTargetCard target={markdownTarget} sessionId="s1" />)
+    fireEvent.click(screen.getByText('readme.md'))
+    expect(openPreviewFn).toHaveBeenCalledWith('s1', 'docs/readme.md', {})
+  })
+
+  it('opens the in-app browser when a localhost row body is clicked', () => {
+    render(<AssistantOutputTargetCard target={localhostTarget} sessionId="s1" />)
+    // The badge sits inside the row body too — clicking it is not a dead zone.
+    fireEvent.click(screen.getByText('assistantOutputs.kind.localhost'))
+    expect(openBrowser).toHaveBeenCalledWith('s1', 'http://localhost:5173/')
+  })
+
+  it('exposes the row body as a pointer-cursor button, since button cursors default to the arrow', () => {
+    render(<AssistantOutputTargetCard target={markdownTarget} sessionId="s1" />)
+    const row = screen.getByLabelText('assistantOutputs.openAria')
+    expect(row.tagName).toBe('BUTTON')
+    expect(row).toHaveClass('cursor-pointer')
+  })
+
+  // The open-with control sits next to the row's own hit area; a full-row click
+  // handler that swallows it would open the file instead of the menu.
+  it('opens the open-with menu without opening the target when its trigger is clicked', async () => {
+    render(<AssistantOutputTargetCard target={localhostTarget} sessionId="s1" />)
+    fireEvent.click(screen.getByLabelText('openWith.title'))
+    expect(await screen.findByText('openWith.systemBrowser')).toBeInTheDocument()
+    expect(openBrowser).not.toHaveBeenCalled()
+    expect(openPreviewFn).not.toHaveBeenCalled()
+  })
+
   it('does not render a copy button for output target cards', () => {
     render(<AssistantOutputTargetCard target={markdownTarget} sessionId="s1" />)
     expect(screen.queryByLabelText('assistantOutputs.copy')).not.toBeInTheDocument()
