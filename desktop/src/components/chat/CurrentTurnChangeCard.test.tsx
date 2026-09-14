@@ -114,7 +114,7 @@ function makeCheckpoint(
     code: {
       available: true,
       filesChanged,
-      insertions: 10,
+      insertions: filesChanged.length > 0 ? 10 : 0,
       deletions: 0,
     },
     target: {
@@ -179,11 +179,14 @@ describe('CurrentTurnChangeCard – disclosure', () => {
     expect(onUndo).toHaveBeenCalledOnce()
   })
 
-  it('offers undo without an empty disclosure for untracked changes', () => {
-    renderCard([], true, true, ['Bash'])
-    expect(screen.queryByRole('button', { name: /chat.turnChangesExpand/ })).not.toBeInTheDocument()
-    expect(screen.getByText('chat.turnChangesPartialCoverageSubtitle')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'chat.turnChangesLatestUndoAria' })).toBeEnabled()
+  it.each([
+    [true, true, []],
+    [true, true, ['Bash']],
+    [false, true, ['Bash']],
+    [true, false, ['Bash']],
+  ] as const)('hides an empty file-change card (latest=%s, restorable=%s, sources=%j)', (isLatest, restoreAvailable, sources) => {
+    const { container } = renderCard([], isLatest, restoreAvailable, [...sources])
+    expect(container).toBeEmptyDOMElement()
   })
 
   it('starts collapsed and preserves undo and change totals', () => {
@@ -198,6 +201,26 @@ describe('CurrentTurnChangeCard – disclosure', () => {
     expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toContainElement(screen.getByText('main.ts'))
     fireEvent.click(toggle)
     expect(screen.queryByText('main.ts')).not.toBeInTheDocument()
+  })
+
+  it('updates visibility when checkpoint files arrive or become empty', () => {
+    const props = {
+      sessionId: 's1',
+      workDir: '/w/proj',
+      error: null,
+      isUndoing: false,
+      isLatest: true,
+      expanded: true,
+      onExpandedChange: vi.fn(),
+      onUndo: vi.fn(),
+    }
+    const view = render(<CurrentTurnChangeCard {...props} checkpoint={makeCheckpoint([])} />)
+    expect(view.container).toBeEmptyDOMElement()
+    view.rerender(<CurrentTurnChangeCard {...props} checkpoint={makeCheckpoint(['/w/proj/src/main.ts'], true, ['Bash'])} />)
+    expect(screen.getByText('main.ts')).toBeInTheDocument()
+    expect(screen.getByText('chat.turnChangesPartialCoverageSubtitle')).toBeInTheDocument()
+    view.rerender(<CurrentTurnChangeCard {...props} checkpoint={makeCheckpoint([], true, ['Bash'])} />)
+    expect(view.container).toBeEmptyDOMElement()
   })
 })
 

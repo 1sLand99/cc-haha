@@ -7000,7 +7000,7 @@ describe('MessageList nested tool calls', () => {
     expect(reloadHistory).toHaveBeenCalledWith(ACTIVE_TAB)
   })
 
-  it('keeps Bash-only undo reachable when the completed turn has no checkpointed files', async () => {
+  it('hides the file-change card after a Bash-only turn completes without checkpointed files', async () => {
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
       checkpoints: [
         {
@@ -7020,33 +7020,6 @@ describe('MessageList nested tool calls', () => {
         },
       ],
     })
-    const rewind = vi.spyOn(sessionsApi, 'rewind').mockResolvedValue({
-      target: {
-        targetUserMessageId: 'transcript-user-1',
-        userMessageIndex: 0,
-        userMessageCount: 1,
-      },
-      conversation: {
-        messagesRemoved: 4,
-        removedMessageIds: [
-          'transcript-user-1',
-          'transcript-tool-1',
-          'transcript-result-1',
-          'transcript-assistant-1',
-        ],
-      },
-      code: {
-        available: true,
-        filesChanged: [],
-        insertions: 0,
-        deletions: 0,
-      },
-      restoreAvailable: true,
-      unverifiedChangeSources: ['Bash'],
-      mode: 'both',
-    })
-    vi.spyOn(sessionsApi, 'getMessages').mockResolvedValue({ messages: [] })
-
     render(<MessageList />)
 
     // Drive the first turn through the same store actions and server events as
@@ -7055,7 +7028,7 @@ describe('MessageList nested tool calls', () => {
     // make the regression self-consistent by construction.
     const store = useChatStore.getState()
     act(() => {
-      store.sendMessage(ACTIVE_TAB, 'write only with Bash')
+      store.sendMessage(ACTIVE_TAB, 'read the calendar')
       store.handleServerMessage(ACTIVE_TAB, {
         type: 'content_start',
         blockType: 'tool_use',
@@ -7066,7 +7039,7 @@ describe('MessageList nested tool calls', () => {
         type: 'tool_use_complete',
         toolName: 'Bash',
         toolUseId: 'bash-only-1',
-        input: { command: "printf 'bash-only\\n' > qa/rewind-bash-only.txt" },
+        input: { command: 'lark-cli calendar list' },
       })
       store.handleServerMessage(ACTIVE_TAB, {
         type: 'tool_result',
@@ -7085,35 +7058,16 @@ describe('MessageList nested tool calls', () => {
       store.handleServerMessage(ACTIVE_TAB, { type: 'status', state: 'idle' })
     })
 
-    const undoButton = await screen.findByRole('button', { name: 'Undo current turn changes' })
-    expect((undoButton as HTMLButtonElement).disabled).toBe(false)
-    expect(screen.getByText(
-      'Undo restores the files above; changes from Bash were not checkpointed and will remain',
-    )).toBeTruthy()
-
-    fireEvent.click(undoButton)
-    const dialog = await screen.findByRole('dialog', { name: 'Undo current turn?' })
-    expect(within(dialog).getByText(
-      'Note: file changes made by Bash were not checkpointed, so undo will not revert them.',
-    )).toBeTruthy()
-    expect((
-      within(dialog).getByRole('button', { name: 'Roll back conversation only' }) as HTMLButtonElement
-    ).disabled).toBe(false)
-
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Undo current turn' }))
-
     await waitFor(() => {
-      expect(rewind).toHaveBeenCalledWith(ACTIVE_TAB, {
-        targetUserMessageId: 'transcript-user-1',
-        userMessageIndex: 0,
-        expectedContent: 'write only with Bash',
-        mode: 'both',
-      })
+      expect(sessionsApi.getTurnCheckpoints).toHaveBeenCalled()
     })
-    expect(useUIStore.getState().toasts.at(-1)).toMatchObject({
-      type: 'warning',
-      message: 'Rewound 4 messages and restored the checkpointed files; changes from Bash were not checkpointed and remain on disk.',
-    })
+    expect(await screen.findByText('BASH_ONLY_DONE')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Undo current turn changes' })).toBeNull()
+    expect(screen.queryByLabelText('Turn changed files')).toBeNull()
+    expect(screen.queryByText('0 files changed')).toBeNull()
+    expect(screen.queryByText(
+      'Undo restores the files above; changes from Bash were not checkpointed and will remain',
+    )).toBeNull()
   })
 
   it('rewinds a failed continue through the authoritative conversation-only target', async () => {
@@ -7349,7 +7303,7 @@ describe('MessageList nested tool calls', () => {
     expect(await screen.findByRole('button', { name: 'Roll back conversation' })).toBeTruthy()
   })
 
-  it('does not render cards for turns without file changes', async () => {
+  it.each([{ sources: [] }, { sources: ['Bash'] }])('does not render cards for turns without file changes (sources=$sources)', async ({ sources }) => {
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
       checkpoints: [
         {
@@ -7377,6 +7331,7 @@ describe('MessageList nested tool calls', () => {
             insertions: 0,
             deletions: 0,
           },
+          unverifiedChangeSources: sources,
         },
       ],
     })

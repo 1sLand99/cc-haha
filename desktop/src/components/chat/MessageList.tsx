@@ -1253,14 +1253,12 @@ function buildTurnCardInsertionMap(
 
   const cardsByRenderIndex = new Map<number, TurnChangeCardModel[]>()
   turnChangeCards.forEach((card) => {
-    // An unverified-only turn has no structured files to list, but still needs
-    // the card for conversation rewind and the warning about changes left on disk.
-    // A conversation-only turn also has no files, but gets a lightweight action
-    // instead of pretending to be a file-change card.
+    // Tool usage alone does not establish a file change. Omit empty change
+    // cards even when Bash coverage is unverified; conversation-only targets
+    // keep their separate lightweight action.
     if (
       card.checkpoint.code.available &&
-      card.checkpoint.code.filesChanged.length === 0 &&
-      (card.checkpoint.unverifiedChangeSources?.length ?? 0) === 0
+      card.checkpoint.code.filesChanged.length === 0
     ) return
     const renderIndex =
       lastResponseIndexByTurnId.get(card.target.messageId) ??

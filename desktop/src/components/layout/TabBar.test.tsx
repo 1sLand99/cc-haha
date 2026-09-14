@@ -1545,6 +1545,50 @@ describe('TabBar', () => {
     expect(tab).not.toHaveAttribute('data-desktop-drag-region')
   })
 
+  it('renders mixed tab types without stray text consuming the window header', async () => {
+    const { TabBar } = await import('./TabBar')
+    const { useTabStore } = await import('../../stores/tabStore')
+    const { useWorkspaceStore } = await import('../../stores/workspaceStore')
+    const { WorkspaceHeaderProvider } = await import('./WorkspaceHeaderContext')
+    useTabStore.setState({
+      tabs: [
+        { sessionId: 'header-session', title: 'Header session', type: 'session', status: 'idle' },
+        { sessionId: '__settings__', title: 'Settings', type: 'settings', status: 'idle' },
+        { sessionId: '__terminal__1', title: 'Terminal', type: 'terminal', status: 'idle' },
+        { sessionId: '__market__', title: 'Market', type: 'market', status: 'idle' },
+      ],
+      activeTabId: 'header-session',
+    })
+    await act(async () => {
+      render(<WorkspaceHeaderProvider><TabBar /></WorkspaceHeaderProvider>)
+    })
+
+    const expectNoHeaderText = () => {
+      // A bare /* ... */ between JSX elements becomes an anonymous flex item.
+      // jsdom still finds every tab even when that text collapses their width
+      // in a browser, so check the rendered text nodes, not just tab presence.
+      const strayText = [...screen.getByTestId('tab-bar').childNodes]
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => node.textContent?.trim())
+        .filter(Boolean)
+      expect(strayText).toEqual([])
+    }
+    expectNoHeaderText()
+    for (const [title, id] of [
+      ['Localized Settings', '__settings__'],
+      ['Terminal', '__terminal__1'],
+      ['Extension Market', '__market__'],
+      ['Header session', 'header-session'],
+    ] as const) {
+      fireEvent.click(screen.getByText(title))
+      expect(useTabStore.getState().activeTabId).toBe(id)
+    }
+    await act(async () => {
+      useWorkspaceStore.getState().toggleWorkspace('header-session')
+    })
+    expectNoHeaderText()
+  })
+
   it('keeps the window gutter on the panel paper while the workspace is open', async () => {
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')

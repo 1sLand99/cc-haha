@@ -134,6 +134,8 @@ export function CurrentTurnChangeCard({
     })()
   }, [openWith, sessionId, t, files])
 
+  if (files.length === 0) return null
+
   const cardLabel = isLatest
     ? t('chat.turnChangesLatestCardLabel')
     : t('chat.turnChangesHistoricalCardLabel')
@@ -162,32 +164,26 @@ export function CurrentTurnChangeCard({
       aria-label={cardLabel}
     >
       <div className="flex flex-wrap items-center justify-between gap-2 bg-[var(--color-surface-container-low)] px-3 py-2">
-        {files.length > 0 ? (
-          <button
-            type="button"
-            data-chat-disclosure="true"
-            data-turn-change-disclosure="true"
-            aria-expanded={expanded}
-            aria-controls={filesId}
-            aria-label={t(expanded ? 'chat.turnChangesCollapse' : 'chat.turnChangesExpand', { count: files.length })}
-            onClick={() => {
-              setOpenWith(null)
-              onExpandedChange(!expanded)
-            }}
-            className="flex min-h-8 min-w-0 flex-1 basis-40 flex-wrap items-center gap-2 rounded-[var(--radius-md)] text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-          >
-            {expanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
-            <span className="font-semibold text-[var(--color-text-primary)]">
-              {t('chat.turnChangesTitle', { count: files.length })}
-            </span>
-            <span className="font-mono text-xs font-semibold text-[var(--color-diff-added-text)]">+{checkpoint.code.insertions}</span>
-            <span className="font-mono text-xs font-semibold text-[var(--color-diff-removed-text)]">-{checkpoint.code.deletions}</span>
-          </button>
-        ) : (
-          <span className="text-sm font-semibold text-[var(--color-text-primary)]">
+        <button
+          type="button"
+          data-chat-disclosure="true"
+          data-turn-change-disclosure="true"
+          aria-expanded={expanded}
+          aria-controls={filesId}
+          aria-label={t(expanded ? 'chat.turnChangesCollapse' : 'chat.turnChangesExpand', { count: files.length })}
+          onClick={() => {
+            setOpenWith(null)
+            onExpandedChange(!expanded)
+          }}
+          className="flex min-h-8 min-w-0 flex-1 basis-40 flex-wrap items-center gap-2 rounded-[var(--radius-md)] text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
+        >
+          {expanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
+          <span className="font-semibold text-[var(--color-text-primary)]">
             {t('chat.turnChangesTitle', { count: files.length })}
           </span>
-        )}
+          <span className="font-mono text-xs font-semibold text-[var(--color-diff-added-text)]">+{checkpoint.code.insertions}</span>
+          <span className="font-mono text-xs font-semibold text-[var(--color-diff-removed-text)]">-{checkpoint.code.deletions}</span>
+        </button>
 
         {/* Never disabled: rolling the conversation back is always possible, even
             when the files are not restorable. The dialog picks what to touch. */}
