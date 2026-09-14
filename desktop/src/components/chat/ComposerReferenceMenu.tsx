@@ -1,13 +1,15 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { ChevronRight, File, Folder, Package, Sparkles } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { filesystemApi } from '@/api/filesystem'
 import { useTranslation } from '@/i18n'
 import { safeMentionIcon, type NewComposerMention } from '@/lib/composerMentions'
+import { publicAssetPath } from '@/lib/publicAsset'
 import type { ComposerReferenceCandidate } from '@/types/composerReference'
+import { referenceFallbackIcon, skillSourceLabelKey } from './referencePresentation'
 
 type FileEntry = { name: string, path: string, isDirectory: boolean, relativePath?: string }
-type Row = { key: string, label: string, description: string, mention: NewComposerMention, file?: FileEntry }
+type Row = { key: string, label: string, description: string, source?: string, mention: NewComposerMention, file?: FileEntry }
 export type ComposerReferenceMenuHandle = { handleKeyDown(event: KeyboardEvent): void }
 type Props = {
   id: string
@@ -62,7 +64,7 @@ export const ComposerReferenceMenu = forwardRef<ComposerReferenceMenuHandle, Pro
     const query = filter.trim().toLocaleLowerCase()
     const matches = references.filter(item => !query.endsWith('/') && query.split(/\s+/).every(word => `${item.displayName} ${item.name} ${item.description}`.toLocaleLowerCase().includes(word)))
     const referenceRow = (item: ComposerReferenceCandidate): Row => ({
-      key: `${item.kind}:${item.id}`, label: item.displayName || item.name, description: item.description,
+      key: `${item.kind}:${item.id}`, label: item.displayName || item.name, description: item.description, source: item.source,
       mention: { kind: item.kind, id: item.id, label: item.displayName || item.name, path: item.path ?? '', isDirectory: false, description: item.description, icon: safeMentionIcon(item.icon), modelText: item.modelText },
     })
     const files: Row[] = (currentResult?.entries ?? []).map(entry => {
@@ -120,16 +122,18 @@ export const ComposerReferenceMenu = forwardRef<ComposerReferenceMenuHandle, Pro
             <div className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--color-text-tertiary)]">{group.label}</div>
             {group.rows.map((row, position) => {
               const index = start + position
-              const Icon = row.file ? (row.file.isDirectory ? Folder : File) : row.mention.kind === 'plugin' ? Package : Sparkles
+              const Icon = referenceFallbackIcon(row.file ? (row.file.isDirectory ? 'directory' : 'file') : row.mention.kind ?? 'skill')
+              const sourceLabel = row.file ? null : skillSourceLabelKey(row.source)
               return <div key={row.key} id={getComposerReferenceOptionId(id, index)} role="option" tabIndex={-1} aria-selected={activeIndex === index} aria-labelledby={`${id}-label-${index}`} aria-describedby={`${id}-description-${index}`}
                 onMouseEnter={() => highlight(row)} onClick={event => {
                   if ((event.target as Element).closest('[data-navigate-directory]')) navigate(row)
                   else onSelect(row.mention)
                 }}
                 className={`flex min-w-0 cursor-default items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${activeIndex === index ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'}`}>
-                {row.mention.icon ? <img src={row.mention.icon} alt="" className="h-5 w-5 shrink-0 object-contain" /> : <Icon aria-hidden="true" className="h-5 w-5 shrink-0 text-[var(--color-text-secondary)]" strokeWidth={1.7} />}
+                {row.mention.icon ? <img src={publicAssetPath(row.mention.icon)} alt="" className="h-5 w-5 shrink-0 object-contain" /> : <Icon aria-hidden="true" className="h-5 w-5 shrink-0 text-[var(--color-text-secondary)]" strokeWidth={1.7} />}
                 <span id={`${id}-label-${index}`} className="max-w-[45%] shrink-0 truncate text-sm font-medium text-[var(--color-text-primary)]">{row.label}</span>
                 <span id={`${id}-description-${index}`} className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-tertiary)]">{row.description}</span>
+                {sourceLabel ? <span className="shrink-0 text-xs text-[var(--color-text-tertiary)]">{t(sourceLabel)}</span> : null}
                 {row.file?.isDirectory ? <span data-navigate-directory title={t('fileSearch.openFolder')} className="-my-2 -mr-2 flex h-8 w-8 shrink-0 items-center justify-center"><ChevronRight aria-hidden="true" className="h-4 w-4 text-[var(--color-text-tertiary)]" /></span> : null}
               </div>
             })}

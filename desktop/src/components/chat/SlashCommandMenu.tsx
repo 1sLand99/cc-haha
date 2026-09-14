@@ -1,7 +1,6 @@
 import { forwardRef, type MutableRefObject } from 'react'
 import {
   Bot,
-  Box,
   Bug,
   CircleDollarSign,
   CircleGauge,
@@ -25,9 +24,10 @@ import {
 } from 'lucide-react'
 import { useTranslation } from '@/i18n'
 import type { SlashCommandGroups } from './composerUtils'
-import type { SlashCommandSource } from '@/types/slashCommand'
 import type { ComposerReferenceCandidate } from '@/types/composerReference'
 import { safeMentionIcon } from '@/lib/composerMentions'
+import { publicAssetPath } from '@/lib/publicAsset'
+import { referenceFallbackIcon, skillSourceLabelKey } from './referencePresentation'
 
 const SYSTEM_SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
   agent: Bot,
@@ -59,17 +59,6 @@ const SYSTEM_SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
 function getSystemSlashCommandIcon(commandName: string): LucideIcon {
   const rootCommand = commandName.trim().split(/\s+/, 1)[0] ?? ''
   return SYSTEM_SLASH_COMMAND_ICONS[rootCommand] ?? CommandIcon
-}
-
-function getSkillSourceLabelKey(source: SlashCommandSource) {
-  switch (source) {
-    case 'project':
-      return 'chat.slashSkillProject' as const
-    case 'plugin':
-      return 'chat.slashSkillPlugin' as const
-    case 'user':
-      return 'chat.slashSkillPersonal' as const
-  }
 }
 
 export function getSlashCommandOptionId(menuId: string, index: number): string {
@@ -167,17 +156,18 @@ export const SlashCommandMenu = forwardRef<HTMLDivElement, SlashCommandMenuProps
                 const index = group.offset + position
                 const candidate = references.find(item => item.kind === group.kind && (item.name === command.name || item.id === command.name))
                 const icon = safeMentionIcon(candidate?.icon)
-                const Icon = group.kind === 'plugin' ? Package : Box
+                const Icon = referenceFallbackIcon(group.kind)
+                const sourceLabel = skillSourceLabelKey(command.source)
                 return <div
                   id={getSlashCommandOptionId(id, index)} key={command.name} role="option" tabIndex={-1}
                   aria-selected={index === selectedIndex} aria-labelledby={`${id}-label-${index}`} aria-describedby={`${id}-description-${index}`}
                   ref={element => { itemRefs.current[index] = element }}
                   onClick={() => onSelect(command.name)} onMouseEnter={() => onHighlight(index)}
                   className={`flex w-full cursor-default items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] ${index === selectedIndex ? 'bg-[var(--color-surface-hover)]' : 'hover:bg-[var(--color-surface-hover)]'}`}>
-                  {icon ? <img src={icon} alt="" className="h-5 w-5 shrink-0 object-contain" /> : <Icon aria-hidden="true" className="h-5 w-5 shrink-0 text-[var(--color-text-secondary)]" strokeWidth={1.8} />}
+                  {icon ? <img src={publicAssetPath(icon)} alt="" className="h-5 w-5 shrink-0 object-contain" /> : <Icon aria-hidden="true" className="h-5 w-5 shrink-0 text-[var(--color-text-secondary)]" strokeWidth={1.8} />}
                   <span id={`${id}-label-${index}`} className="min-w-0 max-w-[45%] shrink-0 truncate text-sm font-medium text-[var(--color-text-primary)]">{candidate?.displayName || command.name}</span>
                   <span id={`${id}-description-${index}`} className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-tertiary)]">{command.description}</span>
-                  {command.source ? <span className="shrink-0 text-xs text-[var(--color-text-tertiary)]">{t(getSkillSourceLabelKey(command.source))}</span> : null}
+                  {sourceLabel ? <span className="shrink-0 text-xs text-[var(--color-text-tertiary)]">{t(sourceLabel)}</span> : null}
                 </div>
               })}
             </div>

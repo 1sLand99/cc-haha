@@ -166,14 +166,24 @@ it('still requires every setup field when a stored credential is being replaced'
   expect(perform).not.toHaveBeenCalled()
   expect(screen.getByLabelText('Workspace')).toHaveAttribute('aria-invalid', 'true')
 })
-it('opens configuration details from add without automatically sending credentials', () => {
+it('opens configuration details from the row action without automatically sending credentials', () => {
   useConnectorStore.setState({ items: [{ ...remote, installed: false, status: 'not-installed' }] })
   render(<Connectors />)
-  fireEvent.click(screen.getByRole('button', { name: 'connectors.action.prepare' }))
+  fireEvent.click(screen.getByRole('button', { name: 'connectors.details' }))
   expect(screen.getByRole('dialog')).toBeInTheDocument()
   expect(perform).not.toHaveBeenCalled()
-  fireEvent.click(screen.getAllByRole('button', { name: 'connectors.action.prepare' }).at(-1)!)
+  fireEvent.click(screen.getByRole('button', { name: 'connectors.action.prepare' }))
   expect(perform).toHaveBeenCalledWith('remote-search', 'prepare', {})
+})
+it('opens details from the row action without installing a connector that needs no configuration', () => {
+  const plain: ConnectorDto = { ...remote, id: 'plain-service', displayName: 'Plain Service', setupFields: undefined }
+  useConnectorStore.setState({ items: [{ ...plain, installed: false, status: 'not-installed' }] })
+  render(<Connectors />)
+  fireEvent.click(screen.getByRole('button', { name: 'connectors.details' }))
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
+  expect(perform).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'connectors.action.prepare' }))
+  expect(perform).toHaveBeenCalledWith('plain-service', 'prepare', {})
 })
 it('renders a stable skeleton instead of empty catalog while loading', () => {
   useConnectorStore.setState({ items: [], loading: true })

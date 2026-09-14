@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { IconButton } from '@/components/ui/IconButton'
 
-export function ConnectorRow({ id, name, description, kind, status, actionLabel, added, disabled, onDetails, onAction, action }: {
+export function ConnectorRow({ id, name, description, kind, status, actionLabel, added, onDetails, onAction, action }: {
   action?: ReactNode
   id: string
   name: string
@@ -10,7 +10,6 @@ export function ConnectorRow({ id, name, description, kind, status, actionLabel,
   status?: string
   actionLabel: string
   added: boolean
-  disabled?: boolean
   onDetails: () => void
   onAction: () => void
 }) {
@@ -26,6 +25,6 @@ export function ConnectorRow({ id, name, description, kind, status, actionLabel,
         {status && <span className="mt-1 block text-[10px] leading-4 text-[var(--color-text-tertiary)]">{status}</span>}
       </span>
     </button>
-    {action ?? <IconButton label={actionLabel} size="md" shape="circle" tone="secondary" bordered disabled={disabled} onClick={onAction} icon={<svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{added ? <path d="m7 5 5 5-5 5" /> : <path d="M10 4v12M4 10h12" />}</svg>} />}
+    {action ?? <IconButton label={actionLabel} size="md" shape="circle" tone="secondary" bordered onClick={onAction} icon={<svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{added ? <path d="m7 5 5 5-5 5" /> : <path d="M10 4v12M4 10h12" />}</svg>} />}
   </article>
 }

@@ -25,7 +25,7 @@ it('unifies plugin, skill and file groups with structured selection and active o
   const onActiveChange = vi.fn()
   render(<ComposerReferenceMenu ref={ref} id="references" cwd="/work" references={references} onSelect={onSelect} onActiveChange={onActiveChange} />)
   await screen.findByRole('option', { name: 'app.ts' })
-  expect(screen.getAllByRole('option').map(row => row.textContent)).toEqual(['HyperFramesVideo creation', 'DesignCreate interfaces', 'src', 'app.ts'])
+  expect(screen.getAllByRole('option').map(row => row.textContent)).toEqual(['HyperFramesVideo creationPlugin', 'DesignCreate interfacesPersonal', 'src', 'app.ts'])
   expect(onActiveChange).toHaveBeenLastCalledWith('references-option-0')
   act(() => { ref.current!.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' })) })
   expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'plugin', id: 'hyperframes', modelText: 'Use HyperFrames', path: '', isDirectory: false }))
@@ -79,6 +79,27 @@ it('keeps plugin matches usable when file loading fails without exposing raw err
   expect(document.querySelector('img')).toBeNull()
   fireEvent.click(screen.getByRole('option', { name: 'HyperFrames' }))
   expect(onSelect).toHaveBeenCalled()
+})
+
+it('uses the shared fallback vocabulary and labels where each reference came from', async () => {
+  const { container } = render(<ComposerReferenceMenu id="shared" cwd="/work" references={references} onSelect={vi.fn()} />)
+  await screen.findByRole('option', { name: 'app.ts' })
+  // The skill row must use the same outline box the slash menu uses; the
+  // decorative sparkle it used to render made the two menus disagree.
+  expect(container.querySelector('.lucide-box')).toBeInTheDocument()
+  expect(container.querySelector('.lucide-sparkles')).toBeNull()
+  expect(screen.getByRole('option', { name: 'HyperFrames' })).toHaveTextContent('Plugin')
+  expect(screen.getByRole('option', { name: 'Design' })).toHaveTextContent('Personal')
+  expect(screen.getByRole('option', { name: 'src' })).not.toHaveTextContent('Personal')
+})
+
+it('resolves brand icons against the packaged asset base instead of the document root', async () => {
+  vi.stubEnv('BASE_URL', './')
+  try {
+    render(<ComposerReferenceMenu id="brand" cwd="/work" references={references} onSelect={vi.fn()} />)
+    const option = await screen.findByRole('option', { name: 'HyperFrames' })
+    expect(option.querySelector('img')).toHaveAttribute('src', './connectors/hyperframes.svg')
+  } finally { vi.unstubAllEnvs() }
 })
 
 it('browses explicit path filters and reports no active descendant for empty results', async () => {

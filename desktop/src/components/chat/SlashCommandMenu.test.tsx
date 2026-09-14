@@ -59,6 +59,21 @@ it('uses safe skill branding and keeps the description beside its name without c
   expect(onSelect).toHaveBeenCalledWith('video')
 })
 
+it('resolves brand icons against the packaged asset base instead of the document root', () => {
+  vi.stubEnv('BASE_URL', './')
+  try {
+    render(<SlashCommandMenu id="brand-base" groups={{ system: [], skills: [{ name: 'video', description: 'Make a video', kind: 'skill' }], ordered: [] }} selectedIndex={0} itemRefs={{ current: [] }} onSelect={vi.fn()} onHighlight={vi.fn()} showKeyboardHints={false} references={[{ kind: 'skill', id: 'video', name: 'video', displayName: 'Video', description: 'Make a video', source: 'plugin', modelText: '/video', icon: '/connectors/hyperframes.svg' }]} />)
+    expect(screen.getByRole('option').querySelector('img')).toHaveAttribute('src', './connectors/hyperframes.svg')
+  } finally { vi.unstubAllEnvs() }
+})
+
+it('falls back to the shared icon vocabulary so skills match the mention menu', () => {
+  const { container } = render(<SlashCommandMenu id="fallback-slash" groups={{ system: [], plugins: [{ name: 'hyperframes', description: 'Videos', kind: 'plugin' }], skills: [{ name: 'video', description: 'Make a video', kind: 'skill', source: 'user' }], ordered: [] }} selectedIndex={0} itemRefs={{ current: [] }} onSelect={vi.fn()} onHighlight={vi.fn()} showKeyboardHints={false} references={[]} />)
+  expect(container.querySelector('.lucide-package')).toBeInTheDocument()
+  expect(container.querySelector('.lucide-box')).toBeInTheDocument()
+  expect(screen.getByText('Personal')).toBeInTheDocument()
+})
+
 it('uses the same command-plugin-skill order for option ids and keyboard references', () => {
   const onSelect = vi.fn()
   const itemRefs = { current: [] as (HTMLElement | null)[] }
