@@ -6331,6 +6331,54 @@ describe('Sessions API', () => {
     expect(await fs.readFile(filePath, 'utf8')).toBe('created in the first turn\n')
   })
 
+  it('does not report carried files as changed on the last turn when their backups are migrated hard links', async () => {
+    const sessionId = crypto.randomUUID()
+    const workDir = path.join(tmpDir, `migrated-link-checkpoints-${sessionId}`)
+    const filePath = path.join(workDir, 'doc.md')
+    const firstUserId = crypto.randomUUID()
+    const secondUserId = crypto.randomUUID()
+    await fs.mkdir(workDir, { recursive: true })
+    await fs.writeFile(filePath, 'turn one\n')
+    await writeFileHistoryBackup(sessionId, 'doc-before@v1', 'before turn one\n')
+    await writeFileHistoryBackup(sessionId, 'doc-after-first@v2', 'turn one\n')
+    // Resume migration hard-links backups from the previous session's directory
+    // into this one, leaving the carried backup with nlink > 1.
+    const migratedDir = path.join(tmpDir, 'file-history', crypto.randomUUID())
+    await fs.mkdir(migratedDir, { recursive: true })
+    await fs.link(
+      path.join(tmpDir, 'file-history', sessionId, 'doc-after-first@v2'),
+      path.join(migratedDir, 'doc-after-first@v2'),
+    )
+
+    await writeSessionFile('-tmp-migrated-link-checkpoints', sessionId, [
+      makeSessionMetaEntry(workDir),
+      makeFileHistorySnapshotEntry(firstUserId, {
+        'doc.md': { backupFileName: 'doc-before@v1', version: 1, backupTime: '2026-01-01T00:00:00.000Z' },
+      }),
+      { ...makeUserEntry('write the doc', firstUserId), cwd: workDir, sessionId },
+      makeAssistantToolUseEntry([{
+        id: 'Write:migrated-link-0',
+        name: 'Write',
+        input: { file_path: filePath, content: 'turn one\n' },
+      }], firstUserId),
+      makeToolResultUserEntry('Write:migrated-link-0', 'success', undefined, undefined, sessionId),
+      makeAssistantEntry('Done.', firstUserId),
+      makeFileHistorySnapshotEntry(secondUserId, {
+        'doc.md': { backupFileName: 'doc-after-first@v2', version: 2, backupTime: '2026-01-01T00:01:00.000Z' },
+      }),
+      { ...makeUserEntry('just talk about it', secondUserId), cwd: workDir, sessionId },
+      makeAssistantEntry('No files this turn.', secondUserId),
+    ])
+
+    const response = await fetch(`${baseUrl}/api/sessions/${sessionId}/turn-checkpoints`)
+    expect(response.status).toBe(200)
+    const body = await response.json() as { checkpoints: Array<{ code: { filesChanged: string[] } }> }
+    // The last (discussion-only) turn must not inherit the carried file. Before
+    // the heal, its unreadable linked before-backup diffed against live disk as
+    // "changed", and every carried file leaked into the last turn's list.
+    expect(body.checkpoints.map((checkpoint) => checkpoint.code.filesChanged)).toEqual([[filePath], []])
+  })
+
   it('preserves fresh snapshot-only evidence after a recorded Write turn', async () => {
     const sessionId = '99999999-bbbb-cccc-dddd-000000001306'
     const workDir = path.join(tmpDir, 'mixed-snapshot-only-checkpoints')

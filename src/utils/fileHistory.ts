@@ -881,13 +881,86 @@ async function inspectSafeBackupDirectory(
   return entries
 }
 
+/**
+ * Session resume migrates backups with `link()`, so a migrated backup has
+ * nlink > 1 while both session directories name the same inode. The nlink
+ * guard in assertSafeRegularFile then refuses to read it, which silently
+ * breaks every checkpoint built on migrated backups: a last-turn preview diffs
+ * an unreadable before-state against live disk and reports every carried file
+ * as newly changed, and restore refuses the same backups outright.
+ *
+ * Rather than weaken the guard, sever the link on first access: atomically
+ * replace the name with a private copy (temp write + rename in the same
+ * directory). The other directory keeps the old inode; this name gets nlink = 1
+ * and future tampering through a new foreign link is detected again. Past
+ * tampering through the shared inode is undetectable either way — refusing
+ * forever only made resumed sessions unusable.
+ */
+async function severMigratedBackupLinks(
+  backupPath: string,
+  stats: Stats,
+): Promise<Stats> {
+  const temporaryPath = `${backupPath}.${randomUUID()}.tmp`
+  let source: FileHandle | undefined
+  let destination: FileHandle | undefined
+  try {
+    source = await open(
+      backupPath,
+      process.platform === 'win32'
+        ? fsConstants.O_RDONLY
+        : fsConstants.O_RDONLY | O_NOFOLLOW,
+    )
+    const sourceStats = await source.stat()
+    if (!sameFileIdentity(stats, sourceStats)) {
+      throw new Error(
+        `FileHistory: Refusing a backup that changed while opening: ${backupPath}`,
+      )
+    }
+    destination = await open(
+      temporaryPath,
+      fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        (process.platform === 'win32' ? 0 : O_NOFOLLOW),
+      stats.mode,
+    )
+    await copyBetweenFileHandles(source, destination)
+    await destination.chmod(stats.mode)
+    await destination.sync()
+    await destination.close()
+    destination = undefined
+    await source.close()
+    source = undefined
+    await rename(temporaryPath, backupPath)
+    logForDebugging(`FileHistory: Severed migrated backup hard link: ${backupPath}`)
+    return await lstat(backupPath)
+  } finally {
+    await source?.close().catch(() => {})
+    await destination?.close().catch(() => {})
+    await unlink(temporaryPath).catch(() => {})
+  }
+}
+
+/**
+ * lstat a backup, first severing cross-session hard links left by resume
+ * migration. Symlinks and non-files are returned as-is so the caller's guard
+ * still refuses them.
+ */
+async function lstatBackupPath(backupPath: string): Promise<Stats> {
+  const stats = await lstat(backupPath)
+  if (!stats.isSymbolicLink() && stats.isFile() && stats.nlink > 1) {
+    return severMigratedBackupLinks(backupPath, stats)
+  }
+  return stats
+}
+
 export async function readBackupFileSafely(
   backupFileName: string,
   sessionId?: string,
 ): Promise<{ content: Buffer; mode: number }> {
   const directoryEntries = await inspectSafeBackupDirectory(sessionId)
   const backupPath = resolveBackupPath(backupFileName, sessionId)
-  const pathStats = await lstat(backupPath)
+  const pathStats = await lstatBackupPath(backupPath)
   assertSafeRegularFile(pathStats, backupPath, 'restore')
   const fileHandle = await open(
     backupPath,
@@ -1052,7 +1125,7 @@ async function restoreBackup(
 
   let backupPathStats: Stats
   try {
-    backupPathStats = await lstat(backupPath)
+    backupPathStats = await lstatBackupPath(backupPath)
     assertSafeRegularFile(backupPathStats, backupPath, 'restore')
   } catch (e: unknown) {
     if (isENOENT(e)) {

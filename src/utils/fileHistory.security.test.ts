@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { randomUUID, type UUID } from 'crypto'
 import {
   link,
+  lstat,
   mkdir,
   mkdtemp,
   open,
@@ -368,6 +369,92 @@ describe('file history rewind link safety', () => {
     expect(getState().snapshots[0]?.trackedFileBackups[trackedPath]).toBeDefined()
     expect(getState().snapshots[0]?.trackedFileBackups['../project-sibling/tracked.txt'])
       .toBeUndefined()
+  })
+})
+
+describe('migrated backup hard links', () => {
+  // Session resume migrates backups with link(), so a resumed session's backup
+  // shares its inode with the previous session's directory (nlink > 1). The
+  // first read must sever the link into a private copy instead of refusing —
+  // refusing made every checkpoint/restore on a resumed session see the
+  // carried backups as unreadable.
+  async function linkBackupIntoPreviousSessionDir(backupName: string) {
+    const backupPath = join(
+      process.env.CLAUDE_CONFIG_DIR!,
+      'file-history',
+      getSessionId(),
+      backupName,
+    )
+    const previousDir = join(
+      process.env.CLAUDE_CONFIG_DIR!,
+      'file-history',
+      randomUUID(),
+    )
+    await mkdir(previousDir, { recursive: true })
+    const migratedPath = join(previousDir, backupName)
+    await link(backupPath, migratedPath)
+    return { backupPath, migratedPath }
+  }
+
+  test('reads a migrated (hard-linked) backup and severs the link', async () => {
+    const targetMessageId = randomUUID() as UUID
+    const trackedPath = join(getOriginalCwd(), 'tracked.txt')
+    await writeFile(trackedPath, 'snapshot content')
+    const { getState, updateState } = createHistoryState(targetMessageId)
+    await fileHistoryTrackEdit(updateState, trackedPath, targetMessageId)
+    const backupName =
+      getState().snapshots.at(-1)!.trackedFileBackups['tracked.txt']!.backupFileName!
+    const { backupPath, migratedPath } = await linkBackupIntoPreviousSessionDir(backupName)
+    expect((await lstat(backupPath)).nlink).toBe(2)
+    const migratedStats = await lstat(migratedPath)
+
+    const { content } = await readBackupFileSafely(backupName)
+    expect(content.toString()).toBe('snapshot content')
+
+    const healed = await lstat(backupPath)
+    expect(healed.nlink).toBe(1)
+    expect(await readFile(backupPath, 'utf8')).toBe('snapshot content')
+    // The previous session's directory keeps the original inode and content.
+    expect((await lstat(migratedPath)).ino).toBe(migratedStats.ino)
+    expect(await readFile(migratedPath, 'utf8')).toBe('snapshot content')
+  })
+
+  test('rewinds through a migrated (hard-linked) backup', async () => {
+    const targetMessageId = randomUUID() as UUID
+    const trackedPath = join(getOriginalCwd(), 'tracked.txt')
+    await writeFile(trackedPath, 'snapshot content')
+    const { getState, updateState } = createHistoryState(targetMessageId)
+    await fileHistoryTrackEdit(updateState, trackedPath, targetMessageId)
+    const backupName =
+      getState().snapshots.at(-1)!.trackedFileBackups['tracked.txt']!.backupFileName!
+    await linkBackupIntoPreviousSessionDir(backupName)
+
+    await writeFile(trackedPath, 'modified content')
+    await fileHistoryRewind(updateState, targetMessageId)
+
+    expect(await readFile(trackedPath, 'utf8')).toBe('snapshot content')
+  })
+
+  test('still refuses a symlinked backup', async () => {
+    const targetMessageId = randomUUID() as UUID
+    const trackedPath = join(getOriginalCwd(), 'tracked.txt')
+    await writeFile(trackedPath, 'snapshot content')
+    const { getState, updateState } = createHistoryState(targetMessageId)
+    await fileHistoryTrackEdit(updateState, trackedPath, targetMessageId)
+    const backupName =
+      getState().snapshots.at(-1)!.trackedFileBackups['tracked.txt']!.backupFileName!
+    const backupPath = join(
+      process.env.CLAUDE_CONFIG_DIR!,
+      'file-history',
+      getSessionId(),
+      backupName,
+    )
+    const outsideBackup = join(testRoot!, 'outside-backup.txt')
+    await writeFile(outsideBackup, 'outside backup content')
+    await unlink(backupPath)
+    await symlink(outsideBackup, backupPath)
+
+    await expect(readBackupFileSafely(backupName)).rejects.toThrow(/unsafe linked/)
   })
 })
 
