@@ -2669,6 +2669,7 @@ export const kr: Record<TranslationKey, string> = {
   'question.customResponse': '또는 직접 응답을 입력하세요:',
   'question.typePlaceholder': '답변 입력...',
   'question.submit': '제출',
+  'question.next': '다음',
   'question.answeredPrefix': '응답: ',
   'question.resultPrefix': '결과: ',
   'question.chatAboutThis': 'Claude와 상의하기',

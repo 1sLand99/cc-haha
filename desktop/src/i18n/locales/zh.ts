@@ -2667,6 +2667,7 @@ export const zh: Record<TranslationKey, string> = {
   'question.customResponse': '或输入自定义回复:',
   'question.typePlaceholder': '输入你的回答...',
   'question.submit': '提交',
+  'question.next': '下一题',
   'question.answeredPrefix': '已回答: ',
   'question.resultPrefix': '结果: ',
   'question.chatAboutThis': '和 Claude 聊聊',
