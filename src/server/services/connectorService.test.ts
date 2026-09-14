@@ -24,6 +24,30 @@ function fixture(overrides: Partial<ConnectorAdapter> = {}) {
       removeConnectorPlugin: async () => { calls.push('remove-plugin') }, isConnectorPluginReady: async () => true, reloadConnectorSessions: async () => { calls.push('reload') } } }
   return { service: new ConnectorService(deps), deps, calls, cleanup: () => rmSync(root, { recursive: true, force: true }) }
 }
+
+test('remote authorization verifies chat tools before publishing ready and fails closed on refresh failure', async () => {
+  const f = fixture()
+  try {
+    f.deps.definitions = [{ ...definition, transport: 'mcp' }]
+    f.service.action('feishu', 'prepare')
+    await settled(f.service)
+    const refreshes: Array<[string | undefined, unknown]> = []
+    let ready = true
+    f.deps.bridge.reloadConnectorSessions = async (sessionId, requiredServer) => {
+      refreshes.push([sessionId, requiredServer])
+      if (requiredServer && !ready) throw new Error('Chat still needs auth')
+    }
+    f.service.action('feishu', 'authenticate', { sessionId: 'active-chat', acknowledgeSharedCredentials: true })
+    await settled(f.service)
+    expect(refreshes).toEqual([['active-chat', undefined], ['active-chat', { ...definition, transport: 'mcp' }]])
+    expect(f.service.get('feishu')).toMatchObject({ status: 'ready', runtime: 'ready' })
+    ready = false
+    f.service.action('feishu', 'check', { sessionId: 'active-chat' })
+    await settled(f.service)
+    expect(f.service.get('feishu')).toMatchObject({ status: 'error', runtime: 'error', enabled: false, failedPhase: 'refreshing-sessions' })
+    expect(refreshes.at(-1)).toEqual(['active-chat', undefined])
+  } finally { f.cleanup() }
+})
 test('installation, shared authorization and runtime readiness remain independent; restart invalidates readiness', async () => {
   const f = fixture()
   try {

@@ -15,7 +15,7 @@ type Bridge = {
   setConnectorPluginEnabled(def: ConnectorDefinition, enabled: boolean): Promise<void>
   removeConnectorPlugin(def: ConnectorDefinition): Promise<void>
   isConnectorPluginReady(def: ConnectorDefinition): Promise<boolean>
-  reloadConnectorSessions(sessionId?: string): Promise<void>
+  reloadConnectorSessions(sessionId?: string, requiredConnector?: ConnectorDefinition): Promise<void>
 }
 export type ConnectorServiceDependencies = {
   definitions: readonly ConnectorDefinition[]
@@ -160,7 +160,7 @@ export class ConnectorService {
           progress('enabling-plugin')
           await bridge.setConnectorPluginEnabled(def, true)
           assertActive()
-          await bridge.reloadConnectorSessions(options.sessionId)
+          await bridge.reloadConnectorSessions(options.sessionId, def)
           assertActive()
           if (!await bridge.isConnectorPluginReady(def)) throw new Error('Skill package could not load')
           assertActive()
@@ -195,7 +195,7 @@ export class ConnectorService {
           assertActive()
           progress('refreshing-sessions')
           assertActive()
-          await bridge.reloadConnectorSessions(options.sessionId)
+          await bridge.reloadConnectorSessions(options.sessionId, def)
           assertActive()
           progress('verifying-runtime')
           assertActive()
@@ -230,7 +230,7 @@ export class ConnectorService {
           const oldDefinition = this.installedDefinition(def, previous)
           await bridge.installConnectorPlugin(oldDefinition, previous.installation)
           await bridge.setConnectorPluginEnabled(oldDefinition, previous.enabled ?? false)
-          await bridge.reloadConnectorSessions(options.sessionId)
+          await bridge.reloadConnectorSessions(options.sessionId, previous.enabled ? oldDefinition : undefined)
           restored = true
         } catch { /* failed rollback must remain disabled */ }
       }

@@ -140,3 +140,46 @@ test('every check and authentication verifies the installed bytes before executi
     expect(executions).toBe(1)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+for (const definition of CONNECTORS) {
+  test(`${definition.id} checks and authorizes the same managed executable and account environment`, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'connector account fixture '))
+    const invocations: Array<{ command: string, args: string[], env?: Record<string, string> }> = []
+    const dependencies: RuntimeDependencies = {
+      platform: 'darwin', arch: 'arm64',
+      binaryIntegrity: () => 'sha256-' + createHash('sha256').update('binary').digest('hex'),
+      readBinary: async () => Buffer.from('binary'),
+      download: async () => { throw new Error('Unexpected download') },
+      extract: async () => { throw new Error('Unexpected extraction') },
+      async run(command, args, options) {
+        invocations.push({ command, args, env: options.env })
+        return result(definition.id === 'wecom' ? 'authorized' : definition.id === 'feishu'
+          ? { ok: true, identity: 'user', verified: true }
+          : { success: true, authenticated: true })
+      },
+    }
+    try {
+      const installation = managedInstallation(definition, root, dependencies)
+      const adapter = createConnectorAdapter(definition, root, dependencies)
+      const signal = new AbortController().signal
+      expect((await adapter.check(installation, signal)).authenticated).toBe(true)
+      await adapter.authenticate(installation, signal, () => {})
+      expect((await adapter.check(installation, signal)).authenticated).toBe(true)
+      expect(invocations.length).toBeGreaterThanOrEqual(3)
+      for (const invocation of invocations) {
+        expect(invocation.command).toBe(installation.command)
+        expect(invocation.env).toEqual(installation.env)
+      }
+      if (definition.id === 'dingtalk') {
+        expect(installation.env).toEqual({
+          DWS_CONFIG_DIR: join(root, 'accounts', 'dingtalk', 'dws'),
+          DWS_KEYCHAIN_DIR: join(root, 'accounts', 'dingtalk', 'keychain'),
+          DWS_DISABLE_KEYCHAIN: '1',
+        })
+      } else {
+        // Feishu and WeCom deliberately share the desktop user's account.
+        expect(installation.env).toEqual({})
+      }
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+}

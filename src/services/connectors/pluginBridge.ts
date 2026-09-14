@@ -255,13 +255,16 @@ export function removeConnectorPlugin(definition: ConnectorDefinition): Promise<
   })
 }
 
-export async function reloadConnectorSessions(sessionId?: string): Promise<void> {
+export async function reloadConnectorSessions(sessionId?: string, requiredConnector?: ConnectorDefinition): Promise<void> {
+  const name = requiredConnector ? pluginName(requiredConnector) : undefined
+  const requiredPlugin = requiredConnector ? { pluginId: requiredConnector.pluginId, skillName: `${name}:${name}` } : undefined
+  const requiredMcpServer = requiredConnector?.transport === 'mcp' ? `plugin:${name}:service` : undefined
   const { conversationService } = await import('../../server/services/conversationService.js')
   const { reloadSessionComponents } = await import('../../server/services/sessionComponentReloadService.js')
   const sessions = new Set(conversationService.getActiveSessions())
   if (sessionId && conversationService.hasSession(sessionId)) sessions.add(sessionId)
-  const results = await Promise.all([...sessions].map(id => reloadSessionComponents(id)))
+  const results = await Promise.all([...sessions].map(id => reloadSessionComponents(id, requiredMcpServer, requiredPlugin)))
   if (results.some(result => result.reason === 'failed' || result.errors > 0)) {
-    throw new Error('Connector changed on disk, but an active task could not refresh its skills. Retry the connection check before use.')
+    throw new Error('Connector changed on disk, but an active task could not refresh its tools and skills. Retry the connection check before use.')
   }
 }
