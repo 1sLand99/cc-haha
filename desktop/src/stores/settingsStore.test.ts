@@ -338,10 +338,10 @@ describe('settingsStore network persistence', () => {
     window.localStorage.clear()
   })
 
-  it('defaults old user settings to 600s system network settings', async () => {
+  it.each([undefined, 14_400_000, 43_200_000, 2_147_483_000])('loads old defaults or a long saved request timeout (%s ms)', async timeoutMs => {
     vi.doMock('../api/settings', () => ({
       settingsApi: {
-        getUser: vi.fn().mockResolvedValue({}),
+        getUser: vi.fn().mockResolvedValue(timeoutMs === undefined ? {} : { network: { aiRequestTimeoutMs: timeoutMs } }),
         updateUser: vi.fn(),
         getPermissionMode: vi.fn().mockResolvedValue({ mode: 'default' }),
         setPermissionMode: vi.fn(),
@@ -379,7 +379,7 @@ describe('settingsStore network persistence', () => {
     await useSettingsStore.getState().fetchAll()
 
     expect(useSettingsStore.getState().network).toEqual({
-      aiRequestTimeoutMs: 600_000,
+      aiRequestTimeoutMs: timeoutMs ?? 1_800_000,
       proxy: {
         mode: 'system',
         url: '',
@@ -503,7 +503,7 @@ describe('settingsStore network persistence', () => {
     })
   })
 
-  it('persists trimmed manual network proxy and clamps timeout', async () => {
+  it.each([[14_400_000, 14_400_000], [43_200_000, 43_200_000], [2_147_483_000, 2_147_483_000], [Number.MAX_SAFE_INTEGER, 2_147_483_000]])('persists long request budgets and clamps timer overflow (%s ms)', async (inputMs, expectedMs) => {
     const updateUser = vi.fn().mockResolvedValue({})
     vi.doMock('../api/settings', () => ({
       settingsApi: {
@@ -536,7 +536,7 @@ describe('settingsStore network persistence', () => {
     const { useSettingsStore } = await import('./settingsStore')
 
     await useSettingsStore.getState().setNetwork({
-      aiRequestTimeoutMs: 9_999_999,
+      aiRequestTimeoutMs: inputMs,
       proxy: {
         mode: 'manual',
         url: '  http://127.0.0.1:7890  ',
@@ -544,7 +544,7 @@ describe('settingsStore network persistence', () => {
     })
 
     expect(useSettingsStore.getState().network).toEqual({
-      aiRequestTimeoutMs: 1_800_000,
+      aiRequestTimeoutMs: expectedMs,
       proxy: {
         mode: 'manual',
         url: 'http://127.0.0.1:7890',
@@ -552,7 +552,7 @@ describe('settingsStore network persistence', () => {
     })
     expect(updateUser).toHaveBeenCalledWith({
       network: {
-        aiRequestTimeoutMs: 1_800_000,
+        aiRequestTimeoutMs: expectedMs,
         proxy: {
           mode: 'manual',
           url: 'http://127.0.0.1:7890',

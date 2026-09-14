@@ -1948,7 +1948,7 @@ export const kr: Record<TranslationKey, string> = {
   'settings.general.networkProxyUrlRequired': '프록시 URL을 입력하세요.',
   'settings.general.networkTimeout': 'AI 요청 시간 초과',
   'settings.general.networkTimeoutValue': '{seconds}초',
-  'settings.general.networkTimeoutHint': '공급자 요청, 스트리밍 첫 응답, 공급자 연결 테스트에 적용됩니다. 30~1800초를 지원합니다. 큰 컨텍스트에서는 첫 스트리밍 바이트까지 몇 분이 걸릴 수 있습니다. 값을 늘리면 단일 스트리밍 응답의 총 시간 상한도 함께 늘어납니다(최소 600초).',
+  'settings.general.networkTimeoutHint': '공급자 요청, 스트리밍 첫 응답, 공급자 연결 테스트에 적용됩니다. 최소 30초입니다. 로컬 모델의 생각 시간이 길면 14400초(4시간) 이상으로 설정할 수 있습니다. 값을 늘리면 단일 스트리밍 응답의 총 시간 상한도 함께 늘어납니다(최소 600초).',
   'settings.general.networkTimeoutUnit': '초',
   'settings.general.networkTimeoutDecrease': '30초 줄이기',
   'settings.general.networkTimeoutIncrease': '30초 늘리기',

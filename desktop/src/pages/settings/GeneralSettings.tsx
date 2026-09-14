@@ -8,6 +8,7 @@ import {
   UI_ZOOM_STEP,
   DEFAULT_CLEANUP_PERIOD_DAYS,
   MAX_CLEANUP_PERIOD_DAYS,
+  NETWORK_TIMEOUT_MAX_SECONDS,
 } from '../../stores/settingsStore'
 import { settingsApi } from '../../api/settings'
 import { useTranslation, type TranslationKey } from '../../i18n'
@@ -44,7 +45,6 @@ import { MODEL_REASONING_EFFORTS } from '../../../../src/shared/modelReasoning'
  */
 
 const NETWORK_TIMEOUT_MIN_SECONDS = 30
-const NETWORK_TIMEOUT_MAX_SECONDS = 1800
 const NETWORK_TIMEOUT_STEP_SECONDS = 30
 const BUILT_IN_OUTPUT_STYLE_TRANSLATION_KEYS = {
   default: {

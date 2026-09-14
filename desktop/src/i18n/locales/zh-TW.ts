@@ -1947,7 +1947,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.general.networkProxyUrlRequired': '請輸入代理地址。',
   'settings.general.networkTimeout': 'AI 請求超時',
   'settings.general.networkTimeoutValue': '{seconds} 秒',
-  'settings.general.networkTimeoutHint': '用於服務商請求、流式首個響應，以及服務商連線測試。支援 30-1800 秒；部分服務商在大上下文下首個流式位元組可能需要等待數分鐘。調大後，單次流式回應的總時長上限同步放寬（不低於 600 秒）。',
+  'settings.general.networkTimeoutHint': '用於服務商請求、流式首個響應，以及服務商連線測試。至少 30 秒；本地模型長時間思考時，可設為 14400 秒（4 小時）或更長。調大後，單次流式回應的總時長上限同步放寬（不低於 600 秒）。',
   'settings.general.networkTimeoutUnit': '秒',
   'settings.general.networkTimeoutDecrease': '減少 30 秒',
   'settings.general.networkTimeoutIncrease': '增加 30 秒',

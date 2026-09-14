@@ -1945,7 +1945,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'settings.general.networkProxyUrlRequired': 'Enter a proxy URL.',
   'settings.general.networkTimeout': 'AI request timeout',
   'settings.general.networkTimeoutValue': '{seconds}s',
-  'settings.general.networkTimeoutHint': 'Applies to provider requests, streaming first responses, and provider connection tests. Supports 30-1800 seconds; slow providers may need several minutes before the first streamed byte. Raising it also extends the overall time limit for a single streamed response (never below 600 seconds).',
+  'settings.general.networkTimeoutHint': 'Applies to provider requests, streaming first responses, and provider connection tests. Minimum 30 seconds; for local models with long thinking times, set 14400 seconds (4 hours) or longer. Raising it also extends the overall time limit for a single streamed response (never below 600 seconds).',
   'settings.general.networkTimeoutUnit': 'sec',
   'settings.general.networkTimeoutDecrease': 'Decrease by 30 seconds',
   'settings.general.networkTimeoutIncrease': 'Increase by 30 seconds',

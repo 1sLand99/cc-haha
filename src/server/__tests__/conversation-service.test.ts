@@ -257,7 +257,7 @@ describe('ConversationService', () => {
       // trickles content deltas (a large tool_use input_json_delta) just under
       // 240s apart keeps it alive forever. The overall-duration cap is NOT reset
       // by chunks and is what actually frees that case (#766).
-      expect(env.CLAUDE_STREAM_MAX_DURATION_MS).toBe('600000')
+      expect(env.CLAUDE_STREAM_MAX_DURATION_MS).toBe('1800000')
       // Tool JSON gets a shorter inactivity budget. Progress resets it, while
       // the overall response cap still bounds a stream that trickles forever.
       expect(env.CLAUDE_STREAM_TOOL_INPUT_MAX_DURATION_MS).toBe('120000')
@@ -475,12 +475,12 @@ describe('ConversationService', () => {
     }
   })
 
-  test('buildChildEnv raises the overall stream cap with the user request timeout so an active long response is not killed (#1307)', async () => {
+  test.each([1_800_000, 14_400_000, 21_600_000])('buildChildEnv raises all request budgets for a long local-model response (%i ms, #1307)', async timeoutMs => {
     const prev = process.env.CLAUDE_STREAM_MAX_DURATION_MS
     delete process.env.CLAUDE_STREAM_MAX_DURATION_MS
     await fs.writeFile(
       path.join(tmpDir, 'settings.json'),
-      JSON.stringify({ network: { aiRequestTimeoutMs: 1_800_000 } }),
+      JSON.stringify({ network: { aiRequestTimeoutMs: timeoutMs } }),
       'utf-8',
     )
     try {
@@ -491,7 +491,9 @@ describe('ConversationService', () => {
       // keeps streaming thinking_delta events past it is killed mid-response.
       // Raising "请求超时" must therefore extend the cap too — otherwise the
       // user's timeout setting is silently capped at 600s (#1307).
-      expect(env.CLAUDE_STREAM_MAX_DURATION_MS).toBe('1800000')
+      expect(env.API_TIMEOUT_MS).toBe(String(timeoutMs))
+      expect(env.CLAUDE_STREAM_FIRST_TOKEN_TIMEOUT_MS).toBe(String(timeoutMs))
+      expect(env.CLAUDE_STREAM_MAX_DURATION_MS).toBe(String(timeoutMs))
     } finally {
       if (prev === undefined) delete process.env.CLAUDE_STREAM_MAX_DURATION_MS
       else process.env.CLAUDE_STREAM_MAX_DURATION_MS = prev
@@ -774,8 +776,8 @@ describe('ConversationService', () => {
         https_proxy: 'http://127.0.0.1:17890',
         ALL_PROXY: 'http://127.0.0.1:17890',
         all_proxy: 'http://127.0.0.1:17890',
-        API_TIMEOUT_MS: '600000',
-        CLAUDE_STREAM_FIRST_TOKEN_TIMEOUT_MS: '600000',
+        API_TIMEOUT_MS: '1800000',
+        CLAUDE_STREAM_FIRST_TOKEN_TIMEOUT_MS: '1800000',
       })
       expect(update.variables.NO_PROXY).toContain('127.0.0.1')
       expect(update.variables.no_proxy).toContain('localhost')
@@ -831,7 +833,7 @@ describe('ConversationService', () => {
     expect(JSON.parse(sent[1]!).type).toBe('user')
   })
 
-  test('sendMessage hot-applies a raised request timeout to the stream cap so a running session is not stuck at 600s (#1307)', async () => {
+  test.each([1_800_000, 14_400_000, 21_600_000])('sendMessage hot-applies all raised request budgets in the same conversation (%i ms, #1307)', async timeoutMs => {
     await fs.writeFile(
       path.join(tmpDir, 'settings.json'),
       JSON.stringify({
@@ -851,7 +853,7 @@ describe('ConversationService', () => {
       path.join(tmpDir, 'settings.json'),
       JSON.stringify({
         network: {
-          aiRequestTimeoutMs: 1_800_000,
+          aiRequestTimeoutMs: timeoutMs,
           proxy: { mode: 'direct', url: '' },
         },
       }),
@@ -865,7 +867,9 @@ describe('ConversationService', () => {
     // The reported path is: user hits the 600s error, raises the timeout, and
     // retries in the SAME conversation. The live CLI re-reads this per request,
     // so it has to be pushed down — otherwise the retry dies at 600s again.
-    expect(update.variables.CLAUDE_STREAM_MAX_DURATION_MS).toBe('1800000')
+    expect(update.variables.API_TIMEOUT_MS).toBe(String(timeoutMs))
+    expect(update.variables.CLAUDE_STREAM_FIRST_TOKEN_TIMEOUT_MS).toBe(String(timeoutMs))
+    expect(update.variables.CLAUDE_STREAM_MAX_DURATION_MS).toBe(String(timeoutMs))
     expect(JSON.parse(sent[1]!).type).toBe('user')
   })
 

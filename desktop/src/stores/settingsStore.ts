@@ -162,8 +162,11 @@ const DEFAULT_UPDATE_PROXY_SETTINGS: UpdateProxySettings = {
   url: '',
 }
 
+// Keep milliseconds within the signed 32-bit timer limit, matching the server.
+export const NETWORK_TIMEOUT_MAX_SECONDS = Math.floor(2_147_483_647 / 1000)
+
 const DEFAULT_NETWORK_SETTINGS: NetworkSettings = {
-  aiRequestTimeoutMs: 600_000,
+  aiRequestTimeoutMs: 1_800_000,
   proxy: {
     mode: 'system',
     url: '',
@@ -749,7 +752,7 @@ function normalizeNetworkSettings(
   settings: NetworkSettingsInput | undefined,
 ): NetworkSettings {
   const timeout = typeof settings?.aiRequestTimeoutMs === 'number' && Number.isFinite(settings.aiRequestTimeoutMs)
-    ? Math.min(Math.max(Math.round(settings.aiRequestTimeoutMs), 30_000), 1_800_000)
+    ? Math.min(Math.max(Math.round(settings.aiRequestTimeoutMs), 30_000), NETWORK_TIMEOUT_MAX_SECONDS * 1000)
     : DEFAULT_NETWORK_SETTINGS.aiRequestTimeoutMs
   const proxyMode = settings?.proxy?.mode === 'manual'
     ? 'manual'
