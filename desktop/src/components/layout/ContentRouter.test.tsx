@@ -1,3 +1,5 @@
+vi.mock('../../pages/ExtensionMarket', () => ({ ExtensionMarket: () => <div data-testid="extension-market-page" /> }))
+vi.mock('../../pages/Connectors', () => ({ Connectors: () => <div data-testid="connectors-page" /> }))
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -256,7 +258,7 @@ describe('ContentRouter tab surfaces', () => {
 
     render(<ContentRouter />)
 
-    expect(screen.getByTestId('market-page')).toBeInTheDocument()
+    expect(screen.getByTestId('extension-market-page')).toBeInTheDocument()
     expect(screen.queryByTestId('active-session')).not.toBeInTheDocument()
   })
 
@@ -298,4 +300,10 @@ describe('ContentRouter tab surfaces', () => {
     expect(screen.getByTestId('settings-page')).toBeInTheDocument()
     expect(useTabStore.getState().tabs.find(tab => tab.sessionId === 'session-1')).toMatchObject({ type: 'session' })
   })
+})
+
+it('routes the independent connectors tab', () => {
+  useTabStore.setState({ tabs: [{ sessionId: '__connectors__', title: 'Connectors', type: 'connectors', status: 'idle' }], activeTabId: '__connectors__' })
+  render(<ContentRouter />)
+  expect(screen.getByTestId('extension-market-page')).toBeInTheDocument()
 })

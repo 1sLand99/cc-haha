@@ -275,3 +275,13 @@ describe('composerUtils', () => {
     expect(mcpCmd?.description).not.toBe('slashCmd.mcp.description')
   })
 })
+
+it('orders plugin mentions between commands and skills without changing their canonical ids', () => {
+  const groups = groupSlashCommands([
+    { name: 'skill:video', description: 'Video', kind: 'skill' },
+    { name: 'plugin:hyperframes', description: 'HyperFrames', kind: 'plugin' },
+    { name: 'help', description: 'Help', kind: 'command' },
+  ])
+  expect(groups.plugins?.map(item => item.name)).toEqual(['plugin:hyperframes'])
+  expect(groups.ordered.map(item => item.name)).toEqual(['help', 'plugin:hyperframes', 'skill:video'])
+})

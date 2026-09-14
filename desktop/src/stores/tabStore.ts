@@ -11,6 +11,7 @@ const TAB_STORAGE_KEY = 'cc-haha-open-tabs'
 
 export const SETTINGS_TAB_ID = '__settings__'
 export const SCHEDULED_TAB_ID = '__scheduled__'
+export const CONNECTORS_TAB_ID = '__connectors__'
 export const MARKET_TAB_ID = '__market__'
 export const TRACE_LIST_TAB_ID = '__traces__'
 export const TERMINAL_TAB_PREFIX = '__terminal__'
@@ -20,8 +21,8 @@ export const SUBAGENT_TAB_PREFIX = '__subagent__'
 export const TEAM_TAB_PREFIX = '__team__'
 export const TEAM_MEMBER_TAB_PREFIX = 'team-member:'
 
-export type TabType = 'session' | 'settings' | 'scheduled' | 'market' | 'terminal' | 'trace' | 'traces' | 'workbench' | 'subagent' | 'team' | 'team-member'
-type PersistentSpecialTabType = 'settings' | 'scheduled' | 'market' | 'traces'
+export type TabType = 'session' | 'settings' | 'scheduled' | 'connectors' | 'market' | 'terminal' | 'trace' | 'traces' | 'workbench' | 'subagent' | 'team' | 'team-member'
+type PersistentSpecialTabType = 'settings' | 'scheduled' | 'connectors' | 'market' | 'traces'
 
 export type Tab = {
   sessionId: string
@@ -89,16 +90,18 @@ const PERSISTENT_SPECIAL_TAB_IDS: Record<PersistentSpecialTabType, string> = {
   settings: SETTINGS_TAB_ID,
   scheduled: SCHEDULED_TAB_ID,
   market: MARKET_TAB_ID,
+  connectors: CONNECTORS_TAB_ID,
   traces: TRACE_LIST_TAB_ID,
 }
 
 function getPersistentSpecialTabType(tab: Pick<Tab, 'sessionId'> & { type?: TabType }): PersistentSpecialTabType | null {
   if (tab.sessionId === SETTINGS_TAB_ID) return 'settings'
   if (tab.sessionId === SCHEDULED_TAB_ID) return 'scheduled'
+  if (tab.sessionId === CONNECTORS_TAB_ID) return 'market'
   if (tab.sessionId === MARKET_TAB_ID) return 'market'
   if (tab.sessionId === TRACE_LIST_TAB_ID) return 'traces'
-  if (tab.type === 'settings' || tab.type === 'scheduled' || tab.type === 'market' || tab.type === 'traces') {
-    return tab.type
+  if (tab.type === 'connectors' || tab.type === 'settings' || tab.type === 'scheduled' || tab.type === 'market' || tab.type === 'traces') {
+    return tab.type === 'connectors' ? 'market' : tab.type
   }
   return null
 }
@@ -118,6 +121,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
   activeTabId: null,
 
   openTab: (sessionId, title, type) => {
+    if (sessionId === CONNECTORS_TAB_ID || type === 'connectors') { sessionId = MARKET_TAB_ID; type = 'market' }
     const { tabs } = get()
     const existing = tabs.find((t) => t.sessionId === sessionId)
     if (existing) {
@@ -511,17 +515,19 @@ export const useTabStore = create<TabStore>((set, get) => ({
           }
         })
 
-      if (validTabs.length === 0) {
+      const uniqueTabs = validTabs.filter((tab, index) => validTabs.findIndex(other => other.sessionId === tab.sessionId) === index)
+      if (uniqueTabs.length === 0) {
         set({ tabs: [], activeTabId: null })
         localStorage.removeItem(TAB_STORAGE_KEY)
         return
       }
 
-      const activeId = data.activeTabId && validTabs.some((t) => t.sessionId === data.activeTabId)
-        ? data.activeTabId
-        : validTabs[0]!.sessionId
+      const legacyActive = data.openTabs.find(tab => tab.sessionId === data.activeTabId)
+      const activeType = legacyActive && getPersistentSpecialTabType(legacyActive)
+      const normalizedActive = activeType ? PERSISTENT_SPECIAL_TAB_IDS[activeType] : data.activeTabId
+      const activeId = normalizedActive && uniqueTabs.some(tab => tab.sessionId === normalizedActive) ? normalizedActive : uniqueTabs[0]!.sessionId
 
-      set({ tabs: validTabs, activeTabId: activeId })
+      set({ tabs: uniqueTabs, activeTabId: activeId })
     } catch { /* noop */ }
   },
 }))

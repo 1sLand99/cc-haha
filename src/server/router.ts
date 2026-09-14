@@ -106,6 +106,9 @@ export async function handleApiRequest(req: Request, url: URL): Promise<Response
     case 'mcp':
       return handleMcpApi(req, url, segments)
 
+    case 'connectors':
+      return (await import('./api/connectors.js')).handleConnectorsApi(req, url, segments)
+
     case 'plugins':
       return handlePluginsApi(req, url, segments)
 

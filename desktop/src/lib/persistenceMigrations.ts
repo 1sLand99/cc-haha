@@ -10,7 +10,7 @@ import {
   normalizeAppZoomLevel,
 } from './appZoom'
 
-export const CURRENT_DESKTOP_PERSISTENCE_SCHEMA_VERSION = 3
+export const CURRENT_DESKTOP_PERSISTENCE_SCHEMA_VERSION = 4
 export const DESKTOP_PERSISTENCE_VERSION_KEY = 'cc-haha.persistence.schemaVersion'
 
 type DesktopMigrationReport = {
@@ -27,11 +27,12 @@ const LIGHT_THEME_STORAGE_KEY = 'cc-haha-light-theme'
 const DARK_THEME_STORAGE_KEY = 'cc-haha-dark-theme'
 const LOCALE_STORAGE_KEY = 'cc-haha-locale'
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
-const PERSISTED_SPECIAL_TAB_TYPES = ['settings', 'scheduled', 'market', 'traces'] as const
+const PERSISTED_SPECIAL_TAB_TYPES = ['settings', 'scheduled', 'market', 'connectors', 'traces'] as const
 const PERSISTED_SPECIAL_TAB_IDS: Record<(typeof PERSISTED_SPECIAL_TAB_TYPES)[number], string> = {
   settings: '__settings__',
   scheduled: '__scheduled__',
   market: '__market__',
+  connectors: '__connectors__',
   traces: '__traces__',
 }
 const SUPPORTED_LOCALES = ['en', 'zh', 'zh-TW', 'jp', 'kr']
@@ -54,9 +55,10 @@ function isPersistedSpecialTabType(value: unknown): value is (typeof PERSISTED_S
 function getPersistedSpecialTabType(tab: Record<string, unknown>): (typeof PERSISTED_SPECIAL_TAB_TYPES)[number] | null {
   if (tab.sessionId === '__settings__') return 'settings'
   if (tab.sessionId === '__scheduled__') return 'scheduled'
+  if (tab.sessionId === '__connectors__') return 'market'
   if (tab.sessionId === '__market__') return 'market'
   if (tab.sessionId === '__traces__') return 'traces'
-  return isPersistedSpecialTabType(tab.type) ? tab.type : null
+  return isPersistedSpecialTabType(tab.type) ? tab.type === 'connectors' ? 'market' : tab.type : null
 }
 
 function writeJson(storage: StorageLike, key: string, value: unknown): void {
@@ -86,11 +88,15 @@ function migrateTabs(storage: StorageLike, report: DesktopMigrationReport): void
           type: specialType ?? 'session',
         }
       })
+      .filter((tab, index, tabs) => tabs.findIndex(other => other.sessionId === tab.sessionId) === index)
+    const legacyActive = isRecord(parsed) ? rawTabs.find(tab => isRecord(tab) && tab.sessionId === parsed.activeTabId) : undefined
+    const activeType = isRecord(legacyActive) ? getPersistedSpecialTabType(legacyActive) : null
+    const normalizedActive = activeType ? PERSISTED_SPECIAL_TAB_IDS[activeType] : isRecord(parsed) ? parsed.activeTabId : null
     const activeTabId =
       isRecord(parsed) &&
-      typeof parsed.activeTabId === 'string' &&
-      openTabs.some((tab) => tab.sessionId === parsed.activeTabId)
-        ? parsed.activeTabId
+      typeof normalizedActive === 'string' &&
+      openTabs.some((tab) => tab.sessionId === normalizedActive)
+        ? normalizedActive
         : (openTabs[0]?.sessionId ?? null)
 
     if (openTabs.length === 0) {

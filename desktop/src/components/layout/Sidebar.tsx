@@ -27,7 +27,7 @@ import {
 } from './sidebarTaskGroups'
 import { sessionsApi } from '../../api/sessions'
 import type { SessionListItem } from '../../types/session'
-import { useTabStore, SETTINGS_TAB_ID, SCHEDULED_TAB_ID, MARKET_TAB_ID } from '../../stores/tabStore'
+import { useTabStore, SETTINGS_TAB_ID, SCHEDULED_TAB_ID, MARKET_TAB_ID, CONNECTORS_TAB_ID } from '../../stores/tabStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
 import {
@@ -1054,19 +1054,20 @@ export function Sidebar({
         )}
         {!isMobile && (
           <NavItem
-            active={activeTabId === MARKET_TAB_ID}
+            active={activeTabId === MARKET_TAB_ID || activeTabId === CONNECTORS_TAB_ID}
             collapsed={!expanded}
-            label={t('sidebar.market')}
+            label={t('sidebar.extensions')}
             touchFriendly={isMobile}
             onClick={() => {
-              useTabStore.getState().openTab(MARKET_TAB_ID, t('sidebar.market'), 'market')
+              useTabStore.getState().openTab(MARKET_TAB_ID, t('sidebar.extensions'), 'market')
               closeMobileDrawer()
             }}
             icon={<StorefrontIcon />}
           >
-            {t('sidebar.market')}
+            {t('sidebar.extensions')}
           </NavItem>
         )}
+
       </div>
 
       {expanded ? (

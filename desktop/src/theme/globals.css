@@ -1757,6 +1757,36 @@ button, input, textarea, select, a, [role="button"] {
   margin-right: 1px;
 }
 
+.composer-mention--skill,
+.composer-mention--plugin {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  line-height: 1.35;
+  vertical-align: baseline;
+  cursor: pointer;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.composer-mention--skill {
+  color: var(--color-on-info-container);
+  background: var(--color-info-container);
+}
+
+.composer-mention-brand-icon {
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.composer-mention[role="button"]:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
 /* The editor reports `contenteditable="false"` when the workspace is gone;
    keep the old textarea's dimmed disabled look. */
 .composer-pm[contenteditable="false"] {

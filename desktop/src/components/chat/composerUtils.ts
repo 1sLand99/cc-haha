@@ -151,6 +151,7 @@ export function getLocalizedFallbackCommands(t: (key: TranslationKey) => string)
 export type SlashCommandGroups = {
   system: SlashCommandOption[]
   skills: SlashCommandOption[]
+  plugins?: SlashCommandOption[]
   ordered: SlashCommandOption[]
 }
 
@@ -159,9 +160,12 @@ export function groupSlashCommands(
 ): SlashCommandGroups {
   const system: SlashCommandOption[] = []
   const skills: SlashCommandOption[] = []
+  const plugins: SlashCommandOption[] = []
 
   for (const command of commands) {
-    if (command.kind === 'skill') {
+    if (command.kind === 'plugin') {
+      plugins.push(command)
+    } else if (command.kind === 'skill') {
       skills.push(command)
     } else {
       system.push(command)
@@ -171,7 +175,8 @@ export function groupSlashCommands(
   return {
     system,
     skills,
-    ordered: [...system, ...skills],
+    plugins,
+    ordered: [...system, ...plugins, ...skills],
   }
 }
 

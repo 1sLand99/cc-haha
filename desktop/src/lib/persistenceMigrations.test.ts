@@ -28,6 +28,27 @@ describe('desktop persistence migrations', () => {
     expect(window.localStorage.getItem(DESKTOP_PERSISTENCE_VERSION_KEY)).toBe(String(CURRENT_DESKTOP_PERSISTENCE_SCHEMA_VERSION))
   })
 
+  test.each([undefined, 'session', 'connectors'])('preserves connector identities from legacy startup fixtures with type %s', (type) => {
+    window.localStorage.setItem('cc-haha-open-tabs', JSON.stringify({
+      openTabs: [
+        { sessionId: 'session-1', title: 'Task' },
+        { sessionId: '__connectors__', title: 'Connectors', ...(type ? { type } : {}) },
+      ],
+      activeTabId: '__connectors__',
+    }))
+    runDesktopPersistenceMigrations()
+    const expected = {
+      openTabs: [
+        { sessionId: 'session-1', title: 'Task', type: 'session' },
+        { sessionId: '__market__', title: 'Connectors', type: 'market' },
+      ],
+      activeTabId: '__market__',
+    }
+    expect(JSON.parse(window.localStorage.getItem('cc-haha-open-tabs')!)).toEqual(expected)
+    runDesktopPersistenceMigrations()
+    expect(JSON.parse(window.localStorage.getItem('cc-haha-open-tabs')!)).toEqual(expected)
+  })
+
   test('preserves persisted market tabs during startup migration', () => {
     window.localStorage.setItem('cc-haha-open-tabs', JSON.stringify({
       openTabs: [
@@ -366,4 +387,21 @@ describe('desktop persistence migrations', () => {
     expect(window.localStorage.getItem('cc-haha.workspace')).toBeNull()
   })
 
+})
+
+test('merges legacy connector and skill market tabs while preserving the active market and unrelated user state', () => {
+  localStorage.clear()
+  localStorage.setItem(DESKTOP_PERSISTENCE_VERSION_KEY, '3')
+  localStorage.setItem('custom-user-state', JSON.stringify({ selectedSkill: 'my-skill' }))
+  localStorage.setItem('cc-haha-open-tabs', JSON.stringify({ openTabs: [
+    { sessionId: 'session-1', title: 'Work', type: 'session' },
+    { sessionId: '__market__', title: 'Skills', type: 'market' },
+    { sessionId: '__connectors__', title: 'Connectors', type: 'connectors' },
+  ], activeTabId: '__connectors__' }))
+  runDesktopPersistenceMigrations()
+  expect(JSON.parse(localStorage.getItem('cc-haha-open-tabs')!)).toEqual({ openTabs: [
+    { sessionId: 'session-1', title: 'Work', type: 'session' },
+    { sessionId: '__market__', title: 'Skills', type: 'market' },
+  ], activeTabId: '__market__' })
+  expect(JSON.parse(localStorage.getItem('custom-user-state')!)).toEqual({ selectedSkill: 'my-skill' })
 })

@@ -143,6 +143,7 @@ vi.mock('../../api/sessions', () => ({
 vi.mock('../../i18n', () => ({
   useTranslation: () => (key: string, params?: Record<string, string | number>) => {
     const translations: Record<string, string> = {
+      'sidebar.extensions': 'Extension Market',
       'tabs.close': 'Close',
       'tabs.closeOthers': 'Close Others',
       'tabs.closeLeft': 'Close Left',
@@ -1131,7 +1132,7 @@ describe('TabBar', () => {
     // message: "this tab is not a conversation".
     expect(screen.getByText('Idle Session').previousElementSibling?.textContent).toBe('')
     expect(screen.getByText('Terminal').previousElementSibling?.textContent).toBe('terminal')
-    expect(screen.getByText('Skill Market').previousElementSibling?.textContent).toBe('storefront')
+    expect(screen.getByText('Extension Market').previousElementSibling?.textContent).toBe('storefront')
     expect(screen.queryByText('chat_bubble')).not.toBeInTheDocument()
   })
 
@@ -2383,7 +2384,7 @@ describe('TabBar', () => {
       render(<TabBar />)
     })
 
-    fireEvent.click(screen.getByLabelText('Close Market'))
+    fireEvent.click(screen.getByLabelText('Close Extension Market'))
 
     expect(disconnectSession).not.toHaveBeenCalled()
     expect(useTabStore.getState().tabs.map((tab) => tab.sessionId)).toEqual(['tab-1'])

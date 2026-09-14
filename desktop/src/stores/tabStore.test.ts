@@ -3,7 +3,7 @@ import { sessionsApi } from '../api/sessions'
 import { ApiError } from '../api/client'
 import { useSessionRuntimeStore } from './sessionRuntimeStore'
 import { useSessionStore } from './sessionStore'
-import { SETTINGS_TAB_ID, MARKET_TAB_ID, useTabStore } from './tabStore'
+import { SETTINGS_TAB_ID, MARKET_TAB_ID, CONNECTORS_TAB_ID, useTabStore } from './tabStore'
 
 vi.mock('../api/sessions', () => ({
   sessionsApi: {
@@ -34,6 +34,14 @@ function historicalSummary(id = 'historical-session') {
 }
 
 describe('tabStore', () => {
+  it('migrates an untyped connector tab identity and restores it without a server session', async () => {
+    localStorage.setItem('cc-haha-open-tabs', JSON.stringify({ openTabs: [{ sessionId: CONNECTORS_TAB_ID, title: 'Connectors' }], activeTabId: CONNECTORS_TAB_ID }))
+    await useTabStore.getState().restoreTabs()
+    expect(useTabStore.getState().tabs[0]).toMatchObject({ sessionId: MARKET_TAB_ID, type: 'market' })
+    useTabStore.getState().saveTabs()
+    expect(JSON.parse(localStorage.getItem('cc-haha-open-tabs')!).openTabs[0].type).toBe('market')
+  })
+
   beforeEach(() => {
     useTabStore.setState({ tabs: [], activeTabId: null })
     useSessionStore.setState({ ...initialSessionState, sessions: [], historicalSessionIds: new Set() })
@@ -521,4 +529,26 @@ describe('tabStore', () => {
     ])
     expect(useTabStore.getState().activeTabId).toBe(SETTINGS_TAB_ID)
   })
+})
+
+it('maps both legacy market entry points to one canonical tab', () => {
+  useTabStore.setState({ tabs: [], activeTabId: null })
+  useTabStore.getState().openTab(MARKET_TAB_ID, 'Skills', 'market')
+  useTabStore.getState().openTab(CONNECTORS_TAB_ID, 'Extensions', 'connectors')
+  expect(useTabStore.getState().tabs).toHaveLength(1)
+  expect(useTabStore.getState().tabs[0]).toMatchObject({ sessionId: MARKET_TAB_ID, type: 'market' })
+  expect(useTabStore.getState().activeTabId).toBe(MARKET_TAB_ID)
+})
+
+it('restores duplicate legacy markets as one tab and retains their active selection', async () => {
+  useTabStore.setState({ tabs: [], activeTabId: null })
+  vi.mocked(sessionsApi.list).mockResolvedValue({ sessions: [] } as never)
+  localStorage.setItem('cc-haha-open-tabs', JSON.stringify({ openTabs: [
+    { sessionId: SETTINGS_TAB_ID, title: 'Settings', type: 'settings' },
+    { sessionId: MARKET_TAB_ID, title: 'Skills', type: 'market' },
+    { sessionId: CONNECTORS_TAB_ID, title: 'Connectors', type: 'connectors' },
+  ], activeTabId: CONNECTORS_TAB_ID }))
+  await useTabStore.getState().restoreTabs()
+  expect(useTabStore.getState().tabs.map(tab => tab.sessionId)).toEqual([SETTINGS_TAB_ID, MARKET_TAB_ID])
+  expect(useTabStore.getState().activeTabId).toBe(MARKET_TAB_ID)
 })

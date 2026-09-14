@@ -4,6 +4,7 @@ import {
   SCHEDULED_TAB_ID,
   SETTINGS_TAB_ID,
   MARKET_TAB_ID,
+  CONNECTORS_TAB_ID,
   SUBAGENT_TAB_PREFIX,
   TEAM_MEMBER_TAB_PREFIX,
   TEAM_TAB_PREFIX,
@@ -66,6 +67,7 @@ const TAB_TYPE_ICON: Partial<Record<TabType, string>> = {
   settings: 'settings',
   scheduled: 'schedule',
   market: 'storefront',
+  connectors: 'link',
   terminal: 'terminal',
   trace: 'account_tree',
   traces: 'account_tree',
@@ -97,6 +99,7 @@ function isSessionTabId(tabId: string | null) {
   return tabId !== SETTINGS_TAB_ID &&
     tabId !== SCHEDULED_TAB_ID &&
     tabId !== MARKET_TAB_ID &&
+    tabId !== CONNECTORS_TAB_ID &&
     tabId !== TRACE_LIST_TAB_ID &&
     !tabId.startsWith(TERMINAL_TAB_PREFIX) &&
     !tabId.startsWith(TRACE_TAB_PREFIX) &&
@@ -584,7 +587,7 @@ export function TabBar() {
         {tabs.map((tab, index) => {
           const displayTitle = tab.type === 'settings'
             ? t('settings.title')
-            : (tab.title || t('tabs.untitled'))
+            : tab.type === 'market' || tab.type === 'connectors' ? t('sidebar.extensions') : (tab.title || t('tabs.untitled'))
           return (
             <TabItem
               key={tab.sessionId}

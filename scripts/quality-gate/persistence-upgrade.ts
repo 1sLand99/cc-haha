@@ -9,6 +9,10 @@ type Check = {
 const rootDir = process.cwd()
 const checks: Check[] = [
   {
+    title: 'Connector installation state migrations',
+    command: ['bun', 'test', './src/server/services/connectorsPersistence.test.ts'],
+  },
+  {
     title: 'Local index schema compatibility after protocol rollback',
     command: [
       'bun', 'test', './src/server/services/localIndex/database.test.ts',
