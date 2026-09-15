@@ -4,14 +4,11 @@ import { useTranslation } from '@/i18n'
 import { Button } from '@/components/ui/Button'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Connectors } from '@/pages/Connectors'
-import { useMarketStore } from '@/stores/marketStore'
 import { Market } from '@/pages/Market'
 import { InstalledSkills } from '@/pages/InstalledSkills'
 
 export function ExtensionMarket() {
   const t = useTranslation()
-  const query = useMarketStore(state => state.query)
-  const installedFilter = useMarketStore(state => state.filters.installed)
   const [section, setSection] = useState<'plugins' | 'skills'>('plugins')
   const [managing, setManaging] = useState(false)
   const myLabel = t(section === 'plugins' ? 'extensions.myPlugins' : 'extensions.mySkills')
@@ -26,9 +23,12 @@ export function ExtensionMarket() {
       </div>
     </header>
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* Curated skill packages are not offered for now. Their catalog, lock
+          file and installer stay in src/services/connectors, so restoring the
+          previous featured row is a change to the skills branch below. */}
       {managing
         ? section === 'plugins' ? <Connectors key="installed" management /> : <div className="h-full overflow-y-auto"><div className="mx-auto max-w-7xl px-5 py-6 lg:px-8"><InstalledSkills /></div></div>
-        : section === 'plugins' ? <Connectors key="catalog" mode="plugins" /> : <Market featured={<Connectors mode="skills" embedded externalQuery={query} installedFilter={installedFilter} />} />}
+        : section === 'plugins' ? <Connectors key="catalog" mode="plugins" /> : <Market />}
     </div>
   </section>
 }
