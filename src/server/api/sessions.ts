@@ -68,6 +68,13 @@ import { PET_SESSION_LIMIT } from '../petAccessPolicy.js'
 
 const DEFAULT_GIT_INFO_COMMAND_TIMEOUT_MS = 3_000
 
+/**
+ * Budget for the polling `get_session_usage` control. Shorter than the inspection's basic
+ * control timeout because the caller retries on its own cadence: a slow answer is worth less
+ * than a stale one that blocks the next poll.
+ */
+const USAGE_ONLY_CONTROL_TIMEOUT_MS = 2_500
+
 const workspaceService = new WorkspaceService(
   async (sessionId) => (
     conversationService.getSessionWorkDir(sessionId) ||
@@ -987,6 +994,10 @@ async function getSessionSlashCommands(sessionId: string): Promise<Response> {
 async function getSessionInspection(req: Request, sessionId: string, url: URL): Promise<Response> {
   const includeContext = url.searchParams.get('includeContext') !== '0'
   const contextOnly = includeContext && url.searchParams.get('contextOnly') === '1'
+  // Lightweight polling mode for the context panel: one `get_session_usage` control and
+  // nothing else. The full inspection also scans the skills directory and re-reads the whole
+  // transcript to cross-check usage, which is far too much work to repeat every few seconds.
+  const usageOnly = !includeContext && url.searchParams.get('usageOnly') === '1'
   let transcriptSnapshot: Awaited<ReturnType<typeof sessionService.getInspectionTranscriptSnapshot>> | undefined
   const getTranscriptSnapshot = async () => {
     if (transcriptSnapshot !== undefined) return transcriptSnapshot
@@ -1011,17 +1022,21 @@ async function getSessionInspection(req: Request, sessionId: string, url: URL): 
     [...conversationService.getRecentSdkMessages(sessionId)]
     .reverse()
     .find((message) => message?.type === 'system' && message.subtype === 'init')
-  const transcriptMetadata = !active || !initMessage
+  const transcriptMetadata = !usageOnly && (!active || !initMessage)
     ? (await getTranscriptSnapshot())?.metadata ?? null
     : null
   const cachedSlashCommands = getSlashCommands(sessionId)
   const hasCliSlashCommands = cachedSlashCommands.length > 0
-  const skillSlashCommands = await listSkillSlashCommands(workDir, {
-    includeCompiledIn: !hasCliSlashCommands,
-  })
-  const fallbackSlashCommands = hasCliSlashCommands
-    ? mergeSessionSlashCommands(cachedSlashCommands, skillSlashCommands)
-    : skillSlashCommands
+  // `listSkillSlashCommands` walks every skill directory on disk with no cache. The usage
+  // poll does not need a command count, so it must not pay for one.
+  const fallbackSlashCommands = usageOnly
+    ? []
+    : hasCliSlashCommands
+      ? mergeSessionSlashCommands(
+          cachedSlashCommands,
+          await listSkillSlashCommands(workDir, { includeCompiledIn: false }),
+        )
+      : await listSkillSlashCommands(workDir, { includeCompiledIn: true })
   const slashCommandCount = Array.isArray(initMessage?.slash_commands)
     ? initMessage.slash_commands.length
     : fallbackSlashCommands.length
@@ -1063,6 +1078,28 @@ async function getSessionInspection(req: Request, sessionId: string, url: URL): 
   }
 
   const errors: Record<string, string> = {}
+  if (usageOnly) {
+    // No `mcp_status`, no skills scan, and deliberately no transcript cross-check: the
+    // transcript re-read is what made this endpoint too expensive to poll. The CLI's own
+    // running totals are the authoritative numbers for a live session anyway.
+    try {
+      response.usage = {
+        ...(await conversationService.requestControl(
+          sessionId,
+          { subtype: 'get_session_usage' },
+          USAGE_ONLY_CONTROL_TIMEOUT_MS,
+          req.signal,
+        )),
+        source: 'current_process',
+      }
+    } catch (error) {
+      throwIfRequestAborted(req)
+      errors.usage = error instanceof Error ? error.message : String(error)
+    }
+    response.errors = errors
+    return Response.json(response)
+  }
+
   if (contextOnly) {
     try {
       response.context = await conversationService.requestControl(

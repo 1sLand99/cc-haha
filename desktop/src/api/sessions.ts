@@ -167,6 +167,14 @@ export type SessionUsageSnapshot = {
   costDisplay: string
   hasUnknownModelCost: boolean
   totalAPIDuration: number
+  /**
+   * Milliseconds the model spent emitting tokens, excluding prefill and tool execution.
+   * Absent or 0 means unknown (transcript source, aborted turn, non-streaming fallback) —
+   * never "instant", so a tokens/sec reading must be withheld rather than computed.
+   */
+  totalDecodeDuration?: number
+  /** Milliseconds spent waiting for the first token, summed over the session's requests. */
+  totalTtftDuration?: number
   totalDuration: number
   totalLinesAdded: number
   totalLinesRemoved: number
@@ -477,6 +485,17 @@ export const sessionsApi = {
     return api.get<SessionInspectionResponse>(`/api/sessions/${sessionId}/inspection${suffix}`, {
       timeout: options?.timeout ?? (options?.includeContext ? 45_000 : 25_000),
     })
+  },
+
+  /**
+   * Running session totals only — one CLI control, no skills scan, no transcript re-read.
+   * Cheap enough to poll while the context panel is open.
+   */
+  getSessionUsage(sessionId: string, signal?: AbortSignal) {
+    return api.get<SessionInspectionResponse>(
+      `/api/sessions/${sessionId}/inspection?includeContext=0&usageOnly=1`,
+      { timeout: 6_000, signal },
+    )
   },
 
   getWorkspaceStatus(sessionId: string, signal?: AbortSignal) {

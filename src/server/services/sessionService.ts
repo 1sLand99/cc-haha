@@ -69,7 +69,11 @@ import type {
 } from './localIndex/sessionIndex.js'
 import type { LocalIndexStatus } from './localIndex/types.js'
 import { diagnosticsService } from './diagnosticsService.js'
-import { isForkInheritedUsageRecord } from '../../utils/usageAccounting.js'
+import {
+  isBillableUsageRecord,
+  isForkInheritedUsageRecord,
+  usageRecordKey,
+} from '../../utils/usageAccounting.js'
 import {
   ProjectSessionHistory,
   type ProjectHistoryOptions,
@@ -214,6 +218,15 @@ export type MessageEntry = {
   timestamp: string
   model?: string
   usage?: MessageUsage
+  /**
+   * Identity of the API response `usage` belongs to, when it has one.
+   *
+   * A single assistant reply is persisted as one line per content block, each repeating the
+   * whole `usage` object, so any consumer that totals usage must count a given key once.
+   * Computed here (rather than by each consumer) so the rule lives in one place; absent when
+   * the line carries no message id, which by the same convention means "always count it".
+   */
+  usageKey?: string
   parentUuid?: string
   parentToolUseId?: string
   isSidechain?: boolean
@@ -257,6 +270,8 @@ export type TranscriptUsageSnapshot = {
   costDisplay: string
   hasUnknownModelCost: boolean
   totalAPIDuration: number
+  totalDecodeDuration: number
+  totalTtftDuration: number
   totalDuration: number
   totalLinesAdded: number
   totalLinesRemoved: number
@@ -376,6 +391,35 @@ type TranscriptContextAccumulator = {
   estimatedTokensFromMessages: number
   estimatedTokensAfterUsage: number
   transcriptHasMediaInput: boolean
+}
+
+/**
+ * Whether this line's `usage` is the first sighting of its reply.
+ *
+ * Claude Code writes one JSONL line per content block of an assistant message and repeats the
+ * complete `usage` object on every one — a reply with thinking, text and 12 tool_use blocks is
+ * 14 lines carrying the same numbers. Summing raw lines overstated real transcripts by 2.2x,
+ * which is why `stats.ts` and the activity index both deduplicate; the inspector paths had
+ * inherited only the fork check and so reported inflated totals to the context panel.
+ *
+ * Rules (and the key shape) come from `usageAccounting.ts` so every reader of a transcript
+ * agrees about what one session cost.
+ */
+function claimUsageRecord(entry: RawEntry, countedKeys: Set<string>): boolean {
+  const record = entry as unknown as Record<string, unknown>
+  const identity = {
+    version: record.version,
+    sessionId: record.sessionId,
+    requestId: record.requestId,
+    messageId: entry.message?.id,
+    forkedFrom: record.forkedFrom,
+  }
+  if (!isBillableUsageRecord(identity)) return false
+  const key = usageRecordKey(identity)
+  if (key === null) return true
+  if (countedKeys.has(key)) return false
+  countedKeys.add(key)
+  return true
 }
 
 function createTranscriptContextAccumulator(): TranscriptContextAccumulator {
@@ -1727,6 +1771,14 @@ export class SessionService {
     const usage = isForkInheritedUsageRecord(entry)
       ? undefined
       : normalizeMessageUsage(msg.usage)
+    const usageKey = usage
+      ? usageRecordKey({
+          version: entry.version,
+          sessionId: entry.sessionId,
+          requestId: entry.requestId,
+          messageId: entry.message?.id,
+        }) ?? undefined
+      : undefined
 
     return {
       id: entry.uuid || crypto.randomUUID(),
@@ -1736,6 +1788,7 @@ export class SessionService {
       timestamp: entry.timestamp || new Date().toISOString(),
       model: msg.model,
       ...(usage ? { usage } : {}),
+      ...(usageKey ? { usageKey } : {}),
       parentUuid: entry.parentUuid ?? undefined,
       parentToolUseId,
       isSidechain: entry.isSidechain,
@@ -2883,9 +2936,13 @@ export class SessionService {
     let firstUsageAt: number | null = null
     let lastUsageAt: number | null = null
 
+    const countedUsageKeys = new Set<string>()
+
     for (const entry of entries) {
       currentRuntimeHint = this.applyRuntimeContextMetadata(currentRuntimeHint, entry)
-      if (isForkInheritedUsageRecord(entry)) continue
+      // Fork-inherited lines and the repeated usage objects of a multi-block reply are the
+      // same class of over-count; `claimUsageRecord` rejects both.
+      if (!claimUsageRecord(entry, countedUsageKeys)) continue
       const usage = entry.message?.usage
       const model = entry.message?.model
       if (!usage || typeof model !== 'string') continue
@@ -3016,6 +3073,7 @@ export class SessionService {
     let lastUsageAt: number | null = null
 
     const contextState = createTranscriptContextAccumulator()
+    const countedUsageKeys = new Set<string>()
 
     await this.streamJsonlFile(found.filePath, (entry) => {
       if (typeof entry.message?.model === 'string') {
@@ -3098,9 +3156,9 @@ export class SessionService {
         ? usage.server_tool_use.web_search_requests
         : 0
 
-      // Inherited fork history still describes the current context, but its API usage belongs to
-      // the source session and must not be included in this fork's cumulative usage or cost.
-      if (isForkInheritedUsageRecord(entry)) return
+      // Fork-inherited lines and the repeated usage objects of a multi-block reply are the
+      // same class of over-count; `claimUsageRecord` rejects both.
+      if (!claimUsageRecord(entry, countedUsageKeys)) return
 
       if (
         inputTokens === 0 &&
@@ -3200,6 +3258,11 @@ export class SessionService {
           costDisplay: this.formatCost(totalCostUSD),
           hasUnknownModelCost,
           totalAPIDuration: 0,
+          // Generation timings live only in the CLI process (and the resume snapshot it
+          // writes to project config); a transcript has no per-response span to rebuild
+          // them from, so callers must treat 0 as "unknown" rather than "instant".
+          totalDecodeDuration: 0,
+          totalTtftDuration: 0,
           totalDuration:
             firstUsageAt !== null && lastUsageAt !== null
               ? Math.max(0, Math.round((lastUsageAt - firstUsageAt) / 1000))

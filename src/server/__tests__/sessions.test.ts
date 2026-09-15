@@ -3587,6 +3587,99 @@ describe('Sessions API', () => {
     expect(inspection.status.permissionMode).toBe('bypassPermissions')
   })
 
+  it('counts a multi-block assistant reply once when rebuilding transcript usage', async () => {
+    const workDir = await fs.mkdtemp(path.join(tmpDir, 'api-session-usage-dedup-'))
+    const sessionId = '11111111-2222-3333-4444-555555555555'
+    const projectDir = '-tmp-api-session-usage-dedup'
+    const messageId = 'msg_shared_reply'
+    const replyUsage = {
+      input_tokens: 100,
+      output_tokens: 250,
+      cache_read_input_tokens: 1_000,
+      cache_creation_input_tokens: 20,
+    }
+    // Claude Code writes one JSONL line per content block of a reply and repeats the complete
+    // `usage` object on every one. Three lines here stand for one reply with thinking + text +
+    // tool_use; summing them raw is the 2.2x inflation `usageAccounting.ts` documents.
+    const blockLine = () => ({
+      parentUuid: null,
+      isSidechain: false,
+      type: 'assistant',
+      message: {
+        model: 'claude-opus-4-7',
+        id: messageId,
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'block' }],
+        usage: replyUsage,
+      },
+      uuid: crypto.randomUUID(),
+      timestamp: '2026-01-01T00:02:00.000Z',
+      sessionId,
+      cwd: workDir,
+    })
+    await writeSessionFile(projectDir, sessionId, [
+      makeSessionMetaEntry(workDir),
+      makeUserEntry('go', crypto.randomUUID()),
+      blockLine(),
+      blockLine(),
+      blockLine(),
+    ])
+
+    const res = await fetch(`${baseUrl}/api/sessions/${sessionId}/inspection?includeContext=0`)
+    expect(res.status).toBe(200)
+    const body = await res.json() as {
+      usage?: {
+        totalInputTokens: number
+        totalOutputTokens: number
+        totalCacheReadInputTokens: number
+        totalCacheCreationInputTokens: number
+      }
+    }
+
+    expect(body.usage?.totalInputTokens).toBe(100)
+    expect(body.usage?.totalOutputTokens).toBe(250)
+    expect(body.usage?.totalCacheReadInputTokens).toBe(1_000)
+    expect(body.usage?.totalCacheCreationInputTokens).toBe(20)
+  })
+
+  it('still totals separate assistant replies separately after dedup', async () => {
+    // The negative control for the test above: a dedup key that collapsed too much would make
+    // every reply after the first free, which is a far worse error than the inflation it fixes.
+    const workDir = await fs.mkdtemp(path.join(tmpDir, 'api-session-usage-distinct-'))
+    const sessionId = '22222222-3333-4444-5555-666666666666'
+    const projectDir = '-tmp-api-session-usage-distinct'
+    const reply = (messageId: string, outputTokens: number) => ({
+      parentUuid: null,
+      isSidechain: false,
+      type: 'assistant',
+      message: {
+        model: 'claude-opus-4-7',
+        id: messageId,
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'reply' }],
+        usage: { input_tokens: 10, output_tokens: outputTokens },
+      },
+      uuid: crypto.randomUUID(),
+      timestamp: '2026-01-01T00:02:00.000Z',
+      sessionId,
+      cwd: workDir,
+    })
+    await writeSessionFile(projectDir, sessionId, [
+      makeSessionMetaEntry(workDir),
+      makeUserEntry('go', crypto.randomUUID()),
+      reply('msg_first', 300),
+      reply('msg_second', 70),
+    ])
+
+    const res = await fetch(`${baseUrl}/api/sessions/${sessionId}/inspection?includeContext=0`)
+    const body = await res.json() as { usage?: { totalInputTokens: number; totalOutputTokens: number } }
+
+    expect(body.usage?.totalOutputTokens).toBe(370)
+    expect(body.usage?.totalInputTokens).toBe(20)
+  })
+
   it('GET /api/sessions/repository-context should return branch launch metadata', async () => {
     const workDir = await createCleanGitRepo(tmpDir)
     const res = await fetch(

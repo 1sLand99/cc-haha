@@ -2072,10 +2072,19 @@ function summarizeTokenUsageFromHistory(messages: MessageEntry[]): TokenUsage | 
   let outputTokens = 0
   let cacheReadTokens = 0
   let cacheCreationTokens = 0
+  // A reply with thinking + text + a dozen tool_use blocks arrives as fourteen lines that each
+  // repeat the whole `usage` object. Summing per line is the 2.2x inflation the transcript
+  // readers carry; the server stamps `usageKey` so this only has to dedupe on it. Lines with
+  // no key are always counted, matching the transcript readers.
+  const countedUsageKeys = new Set<string>()
 
   for (const message of messages) {
     const usage = message.usage
     if (!usage) continue
+    if (message.usageKey) {
+      if (countedUsageKeys.has(message.usageKey)) continue
+      countedUsageKeys.add(message.usageKey)
+    }
     inputTokens += readUsageToken(usage.input_tokens)
     outputTokens += readUsageToken(usage.output_tokens)
     cacheReadTokens += readUsageToken(usage.cache_read_input_tokens)
