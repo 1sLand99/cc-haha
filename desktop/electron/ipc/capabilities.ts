@@ -1,3 +1,4 @@
+import { PUBLIC_ACCESS_CONSENT_VERSION } from '../../src/lib/desktopHost/types'
 import { ELECTRON_IPC_CHANNELS, type ElectronIpcChannel } from './channels'
 
 type Validator = (payload: unknown) => boolean
@@ -318,7 +319,9 @@ export const ELECTRON_IPC_VALIDATORS = {
   [ELECTRON_IPC_CHANNELS.publicAccessGetStatus]: noPayload,
   [ELECTRON_IPC_CHANNELS.publicAccessSaveCredential]: value => typeof value === 'string' && value.trim().length > 0 && value.length <= 4096 && !/\s/.test(value.trim()),
   [ELECTRON_IPC_CHANNELS.publicAccessDeleteCredential]: noPayload,
-  [ELECTRON_IPC_CHANNELS.publicAccessStart]: value => value === 1,
+  // Tracks the shared consent constant so a version bump cannot silently
+  // invalidate the payload the renderer actually sends.
+  [ELECTRON_IPC_CHANNELS.publicAccessStart]: value => value === PUBLIC_ACCESS_CONSENT_VERSION,
   [ELECTRON_IPC_CHANNELS.publicAccessStop]: noPayload,
   [ELECTRON_IPC_CHANNELS.publicAccessSetAutoStart]: booleanPayload,
   [ELECTRON_IPC_CHANNELS.runtimeGetServerUrl]: noPayload,

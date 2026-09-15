@@ -2,18 +2,18 @@ import { describe, expect, it, vi } from 'vitest'
 import { ELECTRON_EVENT_CHANNELS, ELECTRON_IPC_CHANNELS, type ElectronIpcChannel } from '../../../electron/ipc/channels'
 import { validateElectronIpcPayload } from '../../../electron/ipc/capabilities'
 import { createElectronHost } from './electronHost'
-import type { WorkspaceBrowserMenuOptions } from './types'
+import { PUBLIC_ACCESS_CONSENT_VERSION, type WorkspaceBrowserMenuOptions } from './types'
 
 describe('electron desktop host', () => {
   it('routes public access through validated local IPC without exposing management in browsers', async () => {
     const invoke = vi.fn().mockResolvedValue({ hasCredential: true })
     const host = createElectronHost({ invoke, subscribe: vi.fn() })
     await host.publicAccess.saveCredential('fixture-ngrok-token')
-    await host.publicAccess.start(1)
+    await host.publicAccess.start(PUBLIC_ACCESS_CONSENT_VERSION)
     await host.publicAccess.setAutoStart(false)
     await host.publicAccess.stop()
     expect(invoke).toHaveBeenNthCalledWith(1, ELECTRON_IPC_CHANNELS.publicAccessSaveCredential, 'fixture-ngrok-token')
-    expect(invoke).toHaveBeenNthCalledWith(2, ELECTRON_IPC_CHANNELS.publicAccessStart, 1)
+    expect(invoke).toHaveBeenNthCalledWith(2, ELECTRON_IPC_CHANNELS.publicAccessStart, PUBLIC_ACCESS_CONSENT_VERSION)
     expect(invoke).toHaveBeenNthCalledWith(3, ELECTRON_IPC_CHANNELS.publicAccessSetAutoStart, false)
     expect(invoke).toHaveBeenNthCalledWith(4, ELECTRON_IPC_CHANNELS.publicAccessStop, undefined)
     const { browserHost } = await import('./browserHost')
