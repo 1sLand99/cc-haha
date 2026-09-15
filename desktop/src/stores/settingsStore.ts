@@ -61,6 +61,7 @@ type SettingsStore = {
   effortLevel: EffortLevel
   thinkingEnabled: boolean
   workflowKeywordTriggerEnabled: boolean
+  agentTeamsEnabled: boolean
   autoDreamEnabled: boolean
   autoModeOptInAccepted: boolean
   availableModels: ModelInfo[]
@@ -105,6 +106,7 @@ type SettingsStore = {
   setEffort: (level: EffortLevel) => Promise<void>
   setThinkingEnabled: (enabled: boolean) => Promise<void>
   setWorkflowKeywordTriggerEnabled: (enabled: boolean) => Promise<void>
+  setAgentTeamsEnabled: (enabled: boolean) => Promise<void>
   setAutoDreamEnabled: (enabled: boolean) => Promise<void>
   acceptAutoModeOptIn: () => Promise<void>
   setLocale: (locale: Locale) => void
@@ -197,6 +199,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   effortLevel: 'max',
   thinkingEnabled: true,
   workflowKeywordTriggerEnabled: true,
+  agentTeamsEnabled: true,
   autoDreamEnabled: false,
   autoModeOptInAccepted: false,
   availableModels: [],
@@ -274,6 +277,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         effortLevel: level,
         thinkingEnabled: userSettings.alwaysThinkingEnabled !== false,
         workflowKeywordTriggerEnabled: userSettings.workflowKeywordTriggerEnabled !== false,
+        agentTeamsEnabled: userSettings.agentTeamsEnabled !== false,
         autoDreamEnabled: userSettings.autoDreamEnabled === true,
         autoModeOptInAccepted: userSettings.skipAutoPermissionPrompt === true,
         chatSendBehavior: normalizeChatSendBehavior(userSettings.chatSendBehavior),
@@ -354,6 +358,17 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       await settingsApi.updateUser({ workflowKeywordTriggerEnabled: enabled })
     } catch (error) {
       set({ workflowKeywordTriggerEnabled: prev })
+      throw error
+    }
+  },
+
+  setAgentTeamsEnabled: async (enabled) => {
+    const prev = get().agentTeamsEnabled
+    set({ agentTeamsEnabled: enabled })
+    try {
+      await settingsApi.updateUser({ agentTeamsEnabled: enabled })
+    } catch (error) {
+      set({ agentTeamsEnabled: prev })
       throw error
     }
   },

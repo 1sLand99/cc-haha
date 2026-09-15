@@ -10,6 +10,7 @@ import {
 import { ProviderService } from '../services/providerService.js'
 import { updateTraceCaptureSettings } from '../services/traceCaptureService.js'
 import { resetTerminalShellEnvironmentCacheForTests } from '../../utils/terminalShellEnvironment.js'
+import { createSandboxedTestEnvironment } from '../../../scripts/pr/test-environment.js'
 
 describe('ConversationService', () => {
   let tmpDir: string
@@ -395,6 +396,81 @@ describe('ConversationService', () => {
     expect(env.ANTHROPIC_BASE_URL).toBeUndefined()
     expect(env.ANTHROPIC_MODEL).toBeUndefined()
   })
+
+  for (const entrypoint of ['sdk-cli', 'claude-desktop']) {
+    for (const { settingsFile, setting, preference } of [
+      { settingsFile: 'settings.json', setting: undefined, preference: undefined },
+      { settingsFile: 'settings.json', setting: '0', preference: undefined },
+      { settingsFile: 'cc-haha/settings.json', setting: 'false', preference: undefined },
+      { settingsFile: 'cc-haha/settings.json', setting: 'false', preference: true },
+      { settingsFile: 'settings.json', setting: '1', preference: false },
+    ]) {
+      test(`desktop team tools survive child startup (${entrypoint}, ${settingsFile}=${setting ?? 'unset'}, preference=${preference ?? 'unset'})`, async () => {
+        if (setting !== undefined) {
+          const legacyPath = path.join(tmpDir, settingsFile)
+          await fs.mkdir(path.dirname(legacyPath), { recursive: true })
+          await fs.writeFile(legacyPath, JSON.stringify({
+            env: { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: setting },
+          }))
+        }
+        if (preference !== undefined) {
+          await fs.writeFile(path.join(tmpDir, 'settings.json'), JSON.stringify({
+            agentTeamsEnabled: preference,
+            env: { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: setting },
+          }))
+        }
+        const service = new ConversationService() as any
+        service.shouldMarkManagedOAuth = () => entrypoint === 'claude-desktop'
+        service.buildOfficialOAuthEnv = async () => ({ CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' })
+        const childEnv = await service.buildChildEnv(tmpDir, 'ws://127.0.0.1:3456/sdk/test')
+        const probeHome = path.join(tmpDir, 'team-probe')
+        const probeEnv = createSandboxedTestEnvironment(probeHome, {
+          CLAUDE_CODE_ENTRYPOINT: childEnv.CLAUDE_CODE_ENTRYPOINT ?? 'sdk-cli',
+          ANTHROPIC_API_KEY: 'fake-team-probe-key',
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+          DISABLE_TELEMETRY: '1',
+        })
+        // Pass the host's real team defaults across a fresh process boundary,
+        // without inheriting provider credentials or any user configuration.
+        for (const key of ['CC_HAHA_AGENT_TEAMS_DEFAULT', 'CC_HAHA_AGENT_TEAMS_ENABLED', 'CLAUDE_CODE_ENABLE_TASKS']) {
+          if (childEnv[key] !== undefined) probeEnv[key] = childEnv[key]
+        }
+        if (setting !== undefined) {
+          const settingsPath = path.join(probeEnv.CLAUDE_CONFIG_DIR!, settingsFile)
+          await fs.mkdir(path.dirname(settingsPath), { recursive: true })
+          await fs.writeFile(settingsPath, JSON.stringify({
+            env: { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: setting },
+          }))
+        }
+        const repoRoot = path.resolve(import.meta.dir, '../../..')
+        const probe = Bun.spawn([process.execPath, '--no-env-file', '--preload', path.join(repoRoot, 'preload.ts'), '-e', `
+          const { applySafeConfigEnvironmentVariables, applyConfigEnvironmentVariables } = await import(${JSON.stringify(path.join(repoRoot, 'src/utils/managedEnv.ts'))})
+          applySafeConfigEnvironmentVariables()
+          applyConfigEnvironmentVariables()
+          const { getAllBaseTools } = await import(${JSON.stringify(path.join(repoRoot, 'src/tools.ts'))})
+          const { default: teamCommand } = await import(${JSON.stringify(path.join(repoRoot, 'src/commands/team.ts'))})
+          const names = getAllBaseTools().filter(tool => tool.isEnabled()).map(tool => tool.name)
+          console.log('TEAM_PROBE:' + JSON.stringify({
+            tools: names.filter(name => ['TeamCreate', 'TeamDelete', 'SendMessage', 'TaskCreate'].includes(name)),
+            command: teamCommand.isEnabled(),
+          }))
+        `], { cwd: probeHome, env: probeEnv, stdout: 'pipe', stderr: 'pipe' })
+        const [stdout, stderr, code] = await Promise.all([
+          new Response(probe.stdout).text(),
+          new Response(probe.stderr).text(),
+          probe.exited,
+        ])
+        expect({ code, stderr }).toEqual({ code: 0, stderr: '' })
+        const report = JSON.parse(stdout.split('\n').find(line => line.startsWith('TEAM_PROBE:'))!.slice('TEAM_PROBE:'.length))
+        expect(report.tools).toContain('TaskCreate')
+        const expected = preference ?? (setting === undefined)
+        expect(report.command).toBe(expected)
+        for (const name of ['TeamCreate', 'TeamDelete', 'SendMessage']) {
+          expect(report.tools.includes(name)).toBe(expected)
+        }
+      })
+    }
+  }
 
   test('buildChildEnv injects General network timeout and manual proxy for CLI requests', async () => {
     await fs.writeFile(

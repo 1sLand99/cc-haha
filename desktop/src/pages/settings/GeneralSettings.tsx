@@ -70,6 +70,8 @@ export function GeneralSettings() {
     setThinkingEnabled,
     workflowKeywordTriggerEnabled,
     setWorkflowKeywordTriggerEnabled,
+    agentTeamsEnabled,
+    setAgentTeamsEnabled,
     permissionMode,
     setPermissionMode,
     autoDreamEnabled,
@@ -129,6 +131,7 @@ export function GeneralSettings() {
   const [notificationActionRunning, setNotificationActionRunning] = useState(false)
   const [autoDreamConfirmOpen, setAutoDreamConfirmOpen] = useState(false)
   const [autoDreamActionRunning, setAutoDreamActionRunning] = useState(false)
+  const [agentTeamsSaving, setAgentTeamsSaving] = useState(false)
   const [modeSwitchConfirmOpen, setModeSwitchConfirmOpen] = useState(false)
   const [pendingMode, setPendingMode] = useState<AppMode | null>(null)
   const [pendingPortableDir, setPendingPortableDir] = useState<string | null>(null)
@@ -584,6 +587,18 @@ export function GeneralSettings() {
       setRetentionSaveError(error instanceof Error ? error.message : String(error))
     } finally {
       setRetentionActionRunning(false)
+    }
+  }
+
+  const handleAgentTeamsChange = async (enabled: boolean) => {
+    if (agentTeamsSaving) return
+    setAgentTeamsSaving(true)
+    try {
+      await setAgentTeamsEnabled(enabled)
+    } catch {
+      addToast({ type: 'error', message: t('settings.general.agentTeamsSaveFailed') })
+    } finally {
+      setAgentTeamsSaving(false)
     }
   }
 
@@ -1105,6 +1120,22 @@ export function GeneralSettings() {
             onChange={(enabled) => void setWorkflowKeywordTriggerEnabled(enabled)}
             label={t('settings.general.workflowKeywordEnabled')}
             description={t('settings.general.workflowKeywordHint')}
+          />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        className="mt-8"
+        title={t('settings.general.agentTeamsTitle')}
+        description={t('settings.general.agentTeamsDescription')}
+      >
+        <div className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3">
+          <Switch
+            checked={agentTeamsEnabled}
+            onChange={(enabled) => void handleAgentTeamsChange(enabled)}
+            disabled={agentTeamsSaving}
+            label={t('settings.general.agentTeamsEnabled')}
+            description={t('settings.general.agentTeamsHint')}
           />
         </div>
       </SettingsSection>

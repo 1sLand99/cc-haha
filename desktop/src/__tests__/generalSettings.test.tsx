@@ -249,6 +249,7 @@ describe('Settings > General tab', () => {
       autoModeOptInAccepted: false,
       thinkingEnabled: true,
       workflowKeywordTriggerEnabled: true,
+      agentTeamsEnabled: true,
       autoDreamEnabled: false,
       skipWebFetchPreflight: true,
       desktopNotificationsEnabled: true,
@@ -1265,6 +1266,52 @@ describe('Settings > General tab', () => {
       })
       expect(toggle).toBeChecked()
       expect(updateUser).toHaveBeenLastCalledWith({ workflowKeywordTriggerEnabled: true })
+    } finally {
+      updateUser.mockRestore()
+    }
+  })
+
+  it('saves Agent Teams changes and explains when they take effect', async () => {
+    const updateUser = vi.spyOn(settingsApi, 'updateUser').mockResolvedValue({ ok: true })
+    try {
+      render(<Settings />)
+      fireEvent.click(screen.getByText('General'))
+      const toggle = screen.getByRole('switch', { name: 'Enable Agent Teams' })
+      expect(toggle).toBeChecked()
+      expect(screen.getByText('Applies to new sessions. Restart the app to apply changes to existing sessions.')).toBeVisible()
+
+      await act(async () => { fireEvent.click(toggle) })
+      expect(toggle).not.toBeChecked()
+      expect(updateUser).toHaveBeenLastCalledWith({ agentTeamsEnabled: false })
+      await act(async () => { fireEvent.click(toggle) })
+      expect(toggle).toBeChecked()
+      expect(updateUser).toHaveBeenLastCalledWith({ agentTeamsEnabled: true })
+    } finally {
+      updateUser.mockRestore()
+    }
+  })
+
+  it('disables Agent Teams while saving and reports failure after rolling back', async () => {
+    let rejectSave!: (error: Error) => void
+    const updateUser = vi.spyOn(settingsApi, 'updateUser').mockImplementation(() => new Promise((_, reject) => {
+      rejectSave = reject
+    }))
+    try {
+      render(<Settings />)
+      fireEvent.click(screen.getByText('General'))
+      const toggle = screen.getByRole('switch', { name: 'Enable Agent Teams' })
+      fireEvent.click(toggle)
+      expect(toggle).toBeDisabled()
+      expect(toggle).not.toBeChecked()
+      expect(updateUser).toHaveBeenCalledTimes(1)
+
+      await act(async () => { rejectSave(new Error('disk full')) })
+      expect(toggle).toBeEnabled()
+      expect(toggle).toBeChecked()
+      expect(useUIStore.getState().toasts.at(-1)).toMatchObject({
+        type: 'error',
+        message: 'Failed to save Agent Teams settings. Please try again.',
+      })
     } finally {
       updateUser.mockRestore()
     }

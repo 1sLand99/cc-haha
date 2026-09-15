@@ -1081,6 +1081,75 @@ describe('settingsStore workflow keyword persistence', () => {
   })
 })
 
+describe('settingsStore Agent Teams persistence', () => {
+  const updateUser = vi.fn()
+  const getUser = vi.fn()
+
+  beforeEach(() => {
+    vi.resetModules()
+    vi.clearAllMocks()
+    window.localStorage.clear()
+    updateUser.mockReset().mockResolvedValue({ ok: true })
+    getUser.mockReset().mockResolvedValue({})
+    vi.doMock('../api/settings', () => ({
+      settingsApi: {
+        getUser,
+        updateUser,
+        getPermissionMode: vi.fn().mockResolvedValue({ mode: 'default' }),
+      },
+    }))
+    vi.doMock('../api/models', () => ({
+      modelsApi: {
+        list: vi.fn().mockResolvedValue({ models: [] }),
+        getCurrent: vi.fn().mockResolvedValue({ model: null }),
+        getEffort: vi.fn().mockResolvedValue({ level: 'medium' }),
+      },
+    }))
+    vi.doMock('../api/h5Access', () => ({
+      h5AccessApi: { get: vi.fn().mockResolvedValue({ settings: {} }) },
+    }))
+    vi.doMock('../api/traces', () => ({
+      tracesApi: { getSettings: vi.fn().mockResolvedValue({ enabled: true, storageDir: '/tmp/test-traces' }) },
+    }))
+  })
+
+  it.each([
+    [{}, true],
+    [{ agentTeamsEnabled: true }, true],
+    [{ agentTeamsEnabled: false }, false],
+  ])('loads Agent Teams from user settings %j', async (settings, expected) => {
+    getUser.mockResolvedValue(settings)
+    const { useSettingsStore } = await import('./settingsStore')
+    expect(useSettingsStore.getState().agentTeamsEnabled).toBe(true)
+    await useSettingsStore.getState().fetchAll()
+    expect(useSettingsStore.getState().agentTeamsEnabled).toBe(expected)
+  })
+
+  it('persists disabling and re-enabling Agent Teams', async () => {
+    const { useSettingsStore } = await import('./settingsStore')
+    await useSettingsStore.getState().setAgentTeamsEnabled(false)
+    expect(useSettingsStore.getState().agentTeamsEnabled).toBe(false)
+    await useSettingsStore.getState().setAgentTeamsEnabled(true)
+    expect(updateUser).toHaveBeenNthCalledWith(1, { agentTeamsEnabled: false })
+    expect(updateUser).toHaveBeenNthCalledWith(2, { agentTeamsEnabled: true })
+    expect(useSettingsStore.getState().agentTeamsEnabled).toBe(true)
+  })
+
+  it.each([true, false])('rolls back an optimistic update from %s and rejects on save failure', async (previous) => {
+    const { useSettingsStore } = await import('./settingsStore')
+    useSettingsStore.setState({ agentTeamsEnabled: previous })
+    const deferred = createDeferred<{ ok: boolean }>()
+    updateUser.mockReturnValueOnce(deferred.promise)
+    const saving = useSettingsStore.getState().setAgentTeamsEnabled(!previous)
+    expect(useSettingsStore.getState().agentTeamsEnabled).toBe(!previous)
+    const failure = new Error('disk full')
+    const rejected = expect(saving).rejects.toBe(failure)
+    deferred.reject(failure)
+    await rejected
+    expect(useSettingsStore.getState().agentTeamsEnabled).toBe(previous)
+  })
+})
+
 describe('settingsStore Auto-dream persistence', () => {
   beforeEach(() => {
     vi.resetModules()
