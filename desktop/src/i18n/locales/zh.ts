@@ -1306,6 +1306,8 @@ export const zh: Record<TranslationKey, string> = {
   'settings.providers.apiFormatAnthropic': 'Anthropic Messages (原生)',
   'settings.providers.apiFormatOpenaiChat': 'OpenAI Chat Completions (代理转换)',
   'settings.providers.apiFormatOpenaiResponses': 'OpenAI Responses API (代理转换)',
+  'settings.providers.multiProtocolBadge': '多协议',
+  'settings.providers.apiFormatPerModelHint': '该预设按模型自动选择协议，此项由预设决定',
   'settings.providers.proxyHint': '请求将通过本地代理转换协议格式',
   'settings.providers.authStrategy': '认证变量',
   'settings.providers.authStrategyApiKey': 'API Key (ANTHROPIC_API_KEY)',

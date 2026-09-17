@@ -1308,6 +1308,8 @@ export const jp: Record<TranslationKey, string> = {
   'settings.providers.apiFormatAnthropic': 'Anthropic Messages（ネイティブ）',
   'settings.providers.apiFormatOpenaiChat': 'OpenAI Chat Completions（プロキシ）',
   'settings.providers.apiFormatOpenaiResponses': 'OpenAI Responses API（プロキシ）',
+  'settings.providers.multiProtocolBadge': 'マルチプロトコル',
+  'settings.providers.apiFormatPerModelHint': 'このプリセットはモデルごとにプロトコルを選ぶため、この項目は固定です',
   'settings.providers.proxyHint': 'リクエストはローカルプロキシ経由で変換されます',
   'settings.providers.authStrategy': '認証変数',
   'settings.providers.authStrategyApiKey': 'API キー (ANTHROPIC_API_KEY)',

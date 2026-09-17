@@ -2406,6 +2406,7 @@ function triggerTitleGeneration(
         text,
         runtimeProviderId,
         titleLanguagePreference,
+        sessionId,
       )
       if (generationSeq !== state.generationSeq) return
       if (aiTitle) {

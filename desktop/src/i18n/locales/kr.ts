@@ -1308,6 +1308,8 @@ export const kr: Record<TranslationKey, string> = {
   'settings.providers.apiFormatAnthropic': 'Anthropic Messages (네이티브)',
   'settings.providers.apiFormatOpenaiChat': 'OpenAI Chat Completions (프록시)',
   'settings.providers.apiFormatOpenaiResponses': 'OpenAI Responses API (프록시)',
+  'settings.providers.multiProtocolBadge': '멀티 프로토콜',
+  'settings.providers.apiFormatPerModelHint': '이 프리셋은 모델별로 프로토콜을 선택하므로 이 항목은 고정됩니다',
   'settings.providers.proxyHint': '요청은 로컬 프록시를 통해 변환됩니다',
   'settings.providers.authStrategy': '인증 변수',
   'settings.providers.authStrategyApiKey': 'API 키 (ANTHROPIC_API_KEY)',

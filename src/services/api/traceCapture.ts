@@ -34,7 +34,11 @@ const TRACE_INDEX_PARSER_VERSION = 1
 const TRACE_FINGERPRINT_WINDOW_BYTES = 64 * 1024
 // `token(?!s)` keeps secret-bearing keys (token, access_token, api_token) redacted while
 // letting token-count fields (input_tokens, max_tokens, prompt_tokens) through.
-const SENSITIVE_KEY_RE = /authorization|api[-_]?key|secret|token(?!s)|cookie|password|bearer/i
+// `session` covers stable per-conversation identifiers (x-opencode-session,
+// x-session-affinity) that gateways take as routing keys: not credentials, but the
+// same value the local transcript and trace files are named after, and traces are
+// meant to be shareable when reporting a bug.
+const SENSITIVE_KEY_RE = /authorization|api[-_]?key|secret|token(?!s)|cookie|password|bearer|session/i
 
 export type TraceCaptureSettings = {
   enabled: boolean

@@ -1305,6 +1305,8 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'settings.providers.apiFormatAnthropic': 'Anthropic Messages (native)',
   'settings.providers.apiFormatOpenaiChat': 'OpenAI Chat Completions (proxy)',
   'settings.providers.apiFormatOpenaiResponses': 'OpenAI Responses API (proxy)',
+  'settings.providers.multiProtocolBadge': 'Multi-protocol',
+  'settings.providers.apiFormatPerModelHint': 'This preset picks the protocol per model, so the choice is fixed by it',
   'settings.providers.proxyHint': 'Requests will be translated via the local proxy',
   'settings.providers.authStrategy': 'Auth Variable',
   'settings.providers.authStrategyApiKey': 'API Key (ANTHROPIC_API_KEY)',
