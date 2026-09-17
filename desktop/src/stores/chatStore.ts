@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { wsManager } from '../api/websocket'
 import { sessionsApi } from '../api/sessions'
+import { ApiResponseParseError } from '../api/client'
 import { subagentsApi } from '../api/subagents'
 import { useTeamStore } from './teamStore'
 import { useSessionStore } from './sessionStore'
@@ -2174,6 +2175,18 @@ function sessionOwnedActivityToolUseIds(session: PerSessionState | undefined): S
   return ids
 }
 
+/**
+ * A parse failure on a 200 has no status to show, and its raw text
+ * ("Unexpected end of JSON input") says nothing a reader can act on. Say what
+ * actually happened instead.
+ */
+function describeHistoryLoadError(error: unknown): string {
+  if (error instanceof ApiResponseParseError) {
+    return error.tooLarge ? t('session.historyTooLarge') : t('session.historyLoadFailed')
+  }
+  return error instanceof Error ? error.message : String(error)
+}
+
 async function fetchAndMapSessionHistory(
   sessionId: string,
   existingOwnedToolUseIds = new Set<string>(),
@@ -3658,7 +3671,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           return {
             sessions: updateSessionIn(state.sessions, sessionId, () => ({
               historyStatus: 'error',
-              historyError: error instanceof Error ? error.message : String(error),
+              historyError: describeHistoryLoadError(error),
               ...pendingFailureUpdate,
             })),
           }

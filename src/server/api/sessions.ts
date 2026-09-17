@@ -448,7 +448,10 @@ async function listSessions(req: Request, url: URL): Promise<Response> {
 }
 
 async function getSession(sessionId: string): Promise<Response> {
-  const detail = await sessionService.getSession(sessionId)
+  // Browser/HTTP callers render the timeline, where the linked subagent tool
+  // stream is fetched per Agent card. Merging it in here is what pushed a real
+  // session past the 536,870,888-character response limit.
+  const detail = await sessionService.getSession(sessionId, { includeSubagents: false })
   if (!detail) {
     throw ApiError.notFound(`Session not found: ${sessionId}`)
   }
@@ -457,7 +460,7 @@ async function getSession(sessionId: string): Promise<Response> {
 
 async function getSessionMessages(sessionId: string): Promise<Response> {
   const [messages, taskNotifications] = await Promise.all([
-    sessionService.getSessionMessages(sessionId),
+    sessionService.getSessionMessages(sessionId, { includeSubagents: false }),
     sessionService.getSessionTaskNotifications(sessionId),
   ])
   return Response.json({ messages, taskNotifications })

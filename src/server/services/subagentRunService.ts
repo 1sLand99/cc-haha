@@ -28,8 +28,16 @@ export type SubagentRunResponse = {
   outputFile?: string
   usage?: SubagentRunUsage
   messages: MessageEntry[]
-  /** Complete, untruncated transcript projection used to rebuild Activity. */
-  activityMessages: MessageEntry[]
+  /**
+   * Complete, untruncated transcript projection used to rebuild Activity.
+   *
+   * Only sent when `truncated` is true — that is, only when it actually
+   * differs from `messages`. Below the truncation threshold the two fields held
+   * the same array, so every run payload shipped its contents twice (measured:
+   * exactly 2× on a synthetic fixture). Clients already fall back to
+   * `messages`, which is identical in that case.
+   */
+  activityMessages?: MessageEntry[]
   taskNotifications: SessionTaskNotification[]
   /** Notifications whose nested Agent ids match `activityMessages`. */
   activityTaskNotifications: SessionTaskNotification[]
@@ -682,7 +690,7 @@ export async function getSubagentRunByAgentId(
     status,
     ...(usage ? { usage } : {}),
     messages: truncated.messages,
-    activityMessages: activity.messages,
+    ...(truncated.truncated ? { activityMessages: activity.messages } : {}),
     taskNotifications: transcript.taskNotifications,
     activityTaskNotifications: activity.taskNotifications,
     truncated: truncated.truncated,
@@ -699,8 +707,11 @@ export async function getSubagentRunByTool(
   toolUseId: string,
   liveTaskId?: string,
 ): Promise<SubagentRunResponse | null> {
+  // Only the root-level `Agent` tool call is resolved here — its child
+  // transcript is read separately below. Pulling the merged view instead would
+  // re-materialize every linked subagent on each card open.
   const [parentMessages, taskNotifications] = await Promise.all([
-    sessionService.getSessionMessages(sessionId),
+    sessionService.getSessionMessages(sessionId, { includeSubagents: false }),
     sessionService.getSessionTaskNotifications(sessionId),
   ])
   const resolvedToolRef = await resolveRunFromToolRef(sessionId, parentMessages, toolUseId)
@@ -795,7 +806,7 @@ export async function getSubagentRunByTool(
     ...(notification?.outputFile ? { outputFile: notification.outputFile } : {}),
     ...(usage ? { usage } : {}),
     messages: truncated.messages,
-    activityMessages: activity.messages,
+    ...(truncated.truncated ? { activityMessages: activity.messages } : {}),
     taskNotifications: transcript.taskNotifications,
     activityTaskNotifications: activity.taskNotifications,
     truncated: truncated.truncated,

@@ -16,7 +16,11 @@ import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBlock } from './ToolCallBlock'
-import { ToolCallGroup, type OpenAgentRunPayload } from './ToolCallGroup'
+import {
+  ToolCallGroup,
+  type OpenAgentRunPayload,
+  type ResolveAgentActivityTarget,
+} from './ToolCallGroup'
 import type { ActivityStep } from './activityGroupModel'
 import { ToolResultBlock } from './ToolResultBlock'
 import { PermissionDialog } from './PermissionDialog'
@@ -1527,6 +1531,12 @@ type MessageListProps = {
   compact?: boolean
   mobileLayout?: boolean
   onOpenAgentRun?: (payload: OpenAgentRunPayload) => void
+  /**
+   * Lets a host that renders the list under a non-session id (an agent run's
+   * own tab) tell an Agent card which session and tool ref its detail endpoint
+   * lives behind. Defaults to the card's own ids.
+   */
+  resolveAgentActivityTarget?: ResolveAgentActivityTarget
 }
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 48
@@ -2229,6 +2239,7 @@ export function MessageList({
   compact = false,
   mobileLayout = false,
   onOpenAgentRun,
+  resolveAgentActivityTarget,
 }: MessageListProps = {}) {
   const activeTabId = useTabStore((s) => s.activeTabId)
   const resolvedSessionId = sessionId ?? activeTabId
@@ -3475,6 +3486,7 @@ export function MessageList({
           <ToolCallGroup
             sessionId={resolvedSessionId}
             onOpenAgentRun={onOpenAgentRun}
+            resolveAgentActivityTarget={resolveAgentActivityTarget}
             toolCalls={item.toolCalls}
             steps={item.steps}
             resultMap={toolResultMap}

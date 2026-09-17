@@ -166,6 +166,8 @@ vi.mock('./cliTaskStore', () => ({
 }))
 
 import { sessionsApi } from '../api/sessions'
+import { ApiResponseParseError } from '../api/client'
+import { t } from '../i18n'
 import type { ServerMessage } from '../types/chat'
 import { useSettingsStore } from './settingsStore'
 import { runsForOwner, runsForSession, useWorkflowStore } from './workflowStore'
@@ -11089,6 +11091,28 @@ describe('chatStore history mapping', () => {
       type: 'user_text',
       content: 'A newer externally started turn',
     }))
+  })
+
+  it('explains an oversized history response instead of a bare parse error', async () => {
+    vi.mocked(sessionsApi.getMessages).mockRejectedValueOnce(
+      new ApiResponseParseError({
+        bytes: 541_817_705,
+        readChars: 0,
+        contentType: 'application/json',
+      }),
+    )
+    useChatStore.setState({
+      sessions: { [TEST_SESSION_ID]: makeSession({ chatState: 'idle' }) },
+    })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.historyStatus).toBe('error')
+    // Chromium turns a body past its string limit into an empty string, so the
+    // raw failure reads "Unexpected end of JSON input" — which tells nobody
+    // anything. Say what happened instead.
+    expect(session?.historyError).toBe(t('session.historyTooLarge'))
   })
 
   it('flushes a cached stop failure when a task start makes history stale', async () => {

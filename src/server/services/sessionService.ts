@@ -238,6 +238,21 @@ export type SessionMessagesWithEvidence = {
   transcriptEvidenceComplete: boolean
 }
 
+/**
+ * Callers that render the session timeline want the root transcript only: the
+ * linked subagent tool stream is fetched per Agent card from
+ * `/subagents/by-tool`, and merging it here made one real session 542 MB —
+ * past the 536,870,888-character string limit, where Chromium silently hands
+ * back an empty body and the app shows `Unexpected end of JSON input`.
+ *
+ * Server-side consumers (rewind checkpoints, team task anchors, workspace
+ * change attribution) still need the merged view, which is why the default
+ * stays `true`.
+ */
+export type SessionMessagesOptions = {
+  includeSubagents?: boolean
+}
+
 type SubagentMessagesResult = {
   messages: MessageEntry[]
   subagentEvidenceComplete: boolean
@@ -3829,7 +3844,10 @@ export class SessionService {
   /**
    * Get full session detail including all messages.
    */
-  async getSession(sessionId: string): Promise<SessionDetail | null> {
+  async getSession(
+    sessionId: string,
+    options?: SessionMessagesOptions,
+  ): Promise<SessionDetail | null> {
     const found = await this.findSessionFile(sessionId)
     if (!found) return null
 
@@ -3837,11 +3855,10 @@ export class SessionService {
     const stat = await fs.stat(filePath)
     const entries = await this.readJsonlFile(filePath)
 
-    const { messages } = await this.appendSubagentToolMessages(
-      projectDir,
-      sessionId,
-      this.entriesToMessages(entries),
-    )
+    const rootMessages = this.entriesToMessages(entries)
+    const messages = options?.includeSubagents === false
+      ? rootMessages
+      : (await this.appendSubagentToolMessages(projectDir, sessionId, rootMessages)).messages
     const title = this.extractTitle(entries)
     const workDir = this.resolveWorkDirFromEntries(entries, projectDir)
     const permissionMode = this.resolvePermissionModeFromEntries(entries)
@@ -3882,12 +3899,16 @@ export class SessionService {
   /**
    * Get only the messages for a session (lighter than full detail).
    */
-  async getSessionMessages(sessionId: string): Promise<MessageEntry[]> {
-    return (await this.getSessionMessagesWithEvidence(sessionId)).messages
+  async getSessionMessages(
+    sessionId: string,
+    options?: SessionMessagesOptions,
+  ): Promise<MessageEntry[]> {
+    return (await this.getSessionMessagesWithEvidence(sessionId, options)).messages
   }
 
   async getSessionMessagesWithEvidence(
     sessionId: string,
+    options?: SessionMessagesOptions,
   ): Promise<SessionMessagesWithEvidence> {
     const found = await this.findSessionFile(sessionId)
     if (!found) {
@@ -3902,15 +3923,19 @@ export class SessionService {
     }
 
     const rootTranscript = await this.readJsonlFileWithDiagnostics(found.filePath)
+    const rootMessages = this.entriesToMessages(rootTranscript.entries)
+    const rootEvidenceComplete = rootTranscript.exists && rootTranscript.parseComplete
+    if (options?.includeSubagents === false) {
+      return { messages: rootMessages, transcriptEvidenceComplete: rootEvidenceComplete }
+    }
     const subagentResult = await this.appendSubagentToolMessages(
       found.projectDir,
       sessionId,
-      this.entriesToMessages(rootTranscript.entries),
+      rootMessages,
     )
     return {
       messages: subagentResult.messages,
-      transcriptEvidenceComplete: rootTranscript.exists &&
-        rootTranscript.parseComplete &&
+      transcriptEvidenceComplete: rootEvidenceComplete &&
         subagentResult.subagentEvidenceComplete,
     }
   }

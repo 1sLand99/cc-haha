@@ -21,7 +21,9 @@ import {
 } from './virtualHeightCache'
 import { relativizeWorkspacePath } from './CurrentTurnChangeCard'
 import { sessionsApi } from '../../api/sessions'
+import { subagentsApi, type SubagentRunResponse } from '../../api/subagents'
 import { teamsApi } from '../../api/teams'
+import { resetAgentRunActivityCache } from './useAgentRunActivity'
 import { useChatStore } from '../../stores/chatStore'
 import { useWorkspaceChatContextStore } from '../../stores/workspaceChatContextStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
@@ -32,6 +34,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { useTeamStore } from '../../stores/teamStore'
 import { formatExactMessageTimestamp, formatMessageHoverTime } from '../../lib/formatMessageTimestamp'
 import type { UIMessage } from '../../types/chat'
+import type { MessageEntry } from '../../types/session'
 import type { PerSessionState } from '../../stores/chatStore'
 import { FindInPageModal } from '../search/FindInPageModal'
 
@@ -8864,5 +8867,203 @@ describe('Agent Teams chat projection', () => {
       title: 'reused-team',
       teamLeadSessionId: ACTIVE_TAB,
     }))
+  })
+})
+
+describe('MessageList agent card activity', () => {
+  const AGENT_TOOL_USE_ID = 'agent-1'
+
+  const runWithActivity = (activityMessages: MessageEntry[]): SubagentRunResponse => ({
+    sessionId: ACTIVE_TAB,
+    toolUseId: AGENT_TOOL_USE_ID,
+    agentId: 'agent-abc',
+    status: 'completed',
+    messages: [],
+    activityMessages,
+    truncated: false,
+    source: 'subagent-jsonl',
+  })
+
+  const CHILD_ACTIVITY: MessageEntry[] = [
+    {
+      id: 'child-tool',
+      type: 'tool_use',
+      content: [
+        { type: 'tool_use', id: 'Read:0', name: 'Read', input: { file_path: '/tmp/alpha.txt' } },
+      ],
+      timestamp: '2026-01-01T00:00:01.000Z',
+    },
+    {
+      id: 'child-result',
+      type: 'tool_result',
+      content: [
+        { type: 'tool_result', tool_use_id: 'Read:0', content: 'alpha body' },
+      ],
+      timestamp: '2026-01-01T00:00:02.000Z',
+    },
+  ]
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    resetAgentRunActivityCache()
+    resetSessionScrollSnapshotsForTests()
+    useSettingsStore.setState({ locale: 'en' })
+    useUIStore.setState({ pendingSettingsTab: null })
+    useTabStore.setState({
+      activeTabId: ACTIVE_TAB,
+      tabs: [{ sessionId: ACTIVE_TAB, title: 'Test', type: 'session' as const, status: 'idle' }],
+    })
+    useSessionStore.setState({ sessions: [], activeSessionId: null, isLoading: false, error: null })
+    useTeamStore.getState().clearTeam()
+    useWorkspaceChatContextStore.setState(useWorkspaceChatContextStore.getInitialState(), true)
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState(), true)
+    vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockImplementation(
+      () => new Promise(() => {}),
+    )
+    vi.spyOn(sessionsApi, 'getWorkspaceStatus').mockResolvedValue({
+      state: 'ok',
+      workDir: '/tmp/example-project',
+      repoName: 'example-project',
+      branch: null,
+      isGitRepo: false,
+      changedFiles: [],
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    resetAgentRunActivityCache()
+  })
+
+  function renderDispatchedAgent() {
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          messages: [
+            {
+              id: 'tool-agent',
+              type: 'tool_use',
+              toolName: 'Agent',
+              toolUseId: AGENT_TOOL_USE_ID,
+              input: { description: 'Inspect alpha' },
+              timestamp: 1,
+            },
+          ],
+        }),
+      },
+    })
+    return render(<MessageList sessionId={ACTIVE_TAB} />)
+  }
+
+  /** The card lives one disclosure level below the agent group header. */
+  function openAgentCard() {
+    fireEvent.click(screen.getByRole('button', { name: /dispatched an agent/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Expand agent/ }))
+  }
+
+  it('fetches a run’s tool stream only once its Agent card is expanded', async () => {
+    const getRunByTool = vi.spyOn(subagentsApi, 'getRunByTool')
+      .mockResolvedValue(runWithActivity(CHILD_ACTIVITY))
+
+    renderDispatchedAgent()
+
+    // Expanding the group mounts the card — that alone must not fetch.
+    fireEvent.click(screen.getByRole('button', { name: /dispatched an agent/ }))
+    expect(screen.getByRole('button', { name: /Expand agent/ })).toBeTruthy()
+    expect(getRunByTool).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /Expand agent/ }))
+    await waitFor(() => {
+      expect(getRunByTool).toHaveBeenCalledWith(ACTIVE_TAB, AGENT_TOOL_USE_ID, undefined)
+    })
+    expect(await screen.findByTestId('agent-call-activity')).toBeTruthy()
+    expect(screen.getByText('alpha.txt')).toBeTruthy()
+  })
+
+  it('renders the live child stream instead of fetching when the card already has one', async () => {
+    const getRunByTool = vi.spyOn(subagentsApi, 'getRunByTool')
+      .mockResolvedValue(runWithActivity(CHILD_ACTIVITY))
+
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          messages: [
+            {
+              id: 'tool-agent',
+              type: 'tool_use',
+              toolName: 'Agent',
+              toolUseId: AGENT_TOOL_USE_ID,
+              input: { description: 'Inspect alpha' },
+              timestamp: 1,
+            },
+            {
+              id: 'child-tool',
+              type: 'tool_use',
+              toolName: 'Read',
+              toolUseId: 'Read:0',
+              parentToolUseId: AGENT_TOOL_USE_ID,
+              input: { file_path: '/tmp/live-child.txt' },
+              timestamp: 2,
+            },
+          ],
+        }),
+      },
+    })
+    render(<MessageList sessionId={ACTIVE_TAB} />)
+    openAgentCard()
+
+    // Live runs stream their children into the timeline; that stays the source
+    // of truth, and the run's own endpoint is not asked again.
+    expect(screen.getByText('live-child.txt')).toBeTruthy()
+    expect(getRunByTool).not.toHaveBeenCalled()
+  })
+
+  it('keeps the run’s tool stream out of the request once it has been fetched', async () => {
+    const getRunByTool = vi.spyOn(subagentsApi, 'getRunByTool')
+      .mockResolvedValue(runWithActivity(CHILD_ACTIVITY))
+
+    renderDispatchedAgent()
+    openAgentCard()
+    await screen.findByTestId('agent-call-activity')
+
+    fireEvent.click(screen.getByRole('button', { name: /Collapse agent/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Expand agent' }))
+    await screen.findByTestId('agent-call-activity')
+
+    expect(getRunByTool).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers a retry when the run’s tool stream cannot be loaded', async () => {
+    const getRunByTool = vi.spyOn(subagentsApi, 'getRunByTool')
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce(runWithActivity(CHILD_ACTIVITY))
+
+    renderDispatchedAgent()
+    openAgentCard()
+
+    const failed = await screen.findByTestId('agent-call-activity-error')
+    fireEvent.click(within(failed).getByRole('button', { name: /Retry/ }))
+
+    expect(await screen.findByTestId('agent-call-activity')).toBeTruthy()
+    expect(getRunByTool).toHaveBeenCalledTimes(2)
+  })
+
+  it('trims an oversized run and says so', async () => {
+    const manyMessages: MessageEntry[] = Array.from({ length: 1001 }, (_, index) => ({
+      id: `child-${index}`,
+      type: 'tool_use' as const,
+      content: [
+        { type: 'tool_use', id: `Read:${index}`, name: 'Read', input: { file_path: `/tmp/f${index}.txt` } },
+      ],
+      timestamp: '2026-01-01T00:00:01.000Z',
+    }))
+    vi.spyOn(subagentsApi, 'getRunByTool').mockResolvedValue(runWithActivity(manyMessages))
+
+    renderDispatchedAgent()
+    openAgentCard()
+
+    expect(await screen.findByTestId('agent-call-activity')).toBeTruthy()
+    expect(screen.getByText(/Showing the start and end of this run/)).toBeTruthy()
   })
 })

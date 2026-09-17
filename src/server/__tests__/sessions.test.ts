@@ -1641,6 +1641,101 @@ describe('SessionService', () => {
     ])
   })
 
+  it('should omit linked subagent tool messages when the caller reads the root transcript', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const projectDir = '-tmp-project'
+    const agentId = 'abc123'
+
+    await writeSessionFile(projectDir, sessionId, [
+      makeSnapshotEntry(),
+      makeUserEntry('Dispatch an agent'),
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'Agent:0',
+              name: 'Agent',
+              input: { description: 'Inspect alpha' },
+            },
+          ],
+        },
+        uuid: crypto.randomUUID(),
+        timestamp: '2026-01-01T00:00:02.000Z',
+      },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'Agent:0',
+              content: [
+                {
+                  type: 'text',
+                  text: `alpha summary\nagentId: ${agentId} (use SendMessage with to: '${agentId}' to continue this agent)\n<usage>total_tokens: 10\ntool_uses: 2\nduration_ms: 30</usage>`,
+                },
+              ],
+            },
+          ],
+        },
+        uuid: crypto.randomUUID(),
+        timestamp: '2026-01-01T00:00:03.000Z',
+      },
+    ])
+    await writeSubagentTranscriptFile(projectDir, sessionId, agentId, [
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'Read:0',
+              name: 'Read',
+              input: { file_path: '/tmp/alpha.txt' },
+            },
+          ],
+        },
+        uuid: crypto.randomUUID(),
+        timestamp: '2026-01-01T00:00:04.000Z',
+      },
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'Read:0',
+              content: 'alpha body',
+            },
+          ],
+        },
+        uuid: crypto.randomUUID(),
+        timestamp: '2026-01-01T00:00:05.000Z',
+      },
+    ])
+
+    const merged = await service.getSessionMessages(sessionId)
+    expect(merged.filter((message) => message.parentToolUseId === 'Agent:0')).toHaveLength(2)
+
+    // A real session merges 500 MB+ of child tool output into this response —
+    // past the 536,870,888-character limit, where Chromium hands back an empty
+    // body. HTTP callers ask for the root transcript and read each run from
+    // `/subagents/by-tool` instead; the server-side consumers keep the merge.
+    const rootOnly = await service.getSessionMessages(sessionId, { includeSubagents: false })
+    expect(rootOnly.filter((message) => message.parentToolUseId === 'Agent:0')).toHaveLength(0)
+    expect(JSON.stringify(rootOnly)).toContain('"Agent:0"')
+
+    const detail = await service.getSession(sessionId, { includeSubagents: false })
+    expect(detail?.messages.filter((message) => message.parentToolUseId === 'Agent:0'))
+      .toHaveLength(0)
+  })
+
   it('should include linked subagent transcript changes in the message signature', async () => {
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     const projectDir = '-tmp-project'

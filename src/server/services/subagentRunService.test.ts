@@ -379,7 +379,11 @@ describe('getSubagentRunByTool', () => {
       content: [{ type: 'text', text: 'Found the service seam' }],
       usage: { input_tokens: 13, output_tokens: 17 },
     })
-    expect(result?.activityMessages).toEqual(result?.messages)
+    // Below the truncation threshold the Activity projection IS `messages`, so
+    // the server omits it rather than shipping the same array twice. The text
+    // check catches a re-introduced duplicate even if the field name changes.
+    expect(result?.activityMessages).toBeUndefined()
+    expect(JSON.stringify(result).split('Found the service seam')).toHaveLength(2)
   })
 
   it('keeps Activity complete when the conversation projection crosses 1000 messages', async () => {
@@ -1217,7 +1221,7 @@ describe('getSubagentRunByTool', () => {
       `${latestAgentId}/${nestedToolUseId}`,
     ]
     expect(agentIds(result?.messages)).toEqual(scopedIds)
-    expect(agentIds(result?.activityMessages)).toEqual(scopedIds)
+    expect(agentIds(result?.activityMessages ?? result?.messages)).toEqual(scopedIds)
     const resultIds = result?.messages.flatMap((message) => (
       Array.isArray(message.content)
         ? message.content.flatMap((block) => (
