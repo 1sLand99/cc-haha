@@ -2395,6 +2395,7 @@ export const kr: Record<TranslationKey, string> = {
   'chat.placeholder': '편집, 디버그 또는 설명을 Claude에 요청...',
   'chat.placeholderMissing': '이 세션은 없는 작업 공간을 가리킵니다. 새 세션을 만들거나 다른 프로젝트를 선택하세요.',
   'chat.placeholderWorktreeRemoved': '이 세션의 임시 작업 공간이 정리되었습니다. 원래 프로젝트에서 새 세션을 시작해 계속하세요.',
+  'chat.placeholderQuestionPending': '위 질문에 먼저 답해 주세요. Claude가 기다리고 있습니다.',
   'chat.addFiles': '파일 또는 사진 추가',
   'chat.composerTools': '입력 도구 열기',
   'chat.dropFilesTitle': '여기에 파일을 드롭하세요',
@@ -2689,6 +2690,10 @@ export const kr: Record<TranslationKey, string> = {
   'question.chatAboutThisHint': '적합한 선택지가 없나요? Claude가 다시 물어보도록 넘깁니다. 이미 입력한 답변도 함께 전달됩니다',
   'question.chatRequested': '대화로 전환했습니다. Claude가 이어서 물어봅니다',
   'question.chatBadge': '상의 중',
+  'question.expiredBadge': '만료됨',
+  'question.expiredNotice': '이 질문은 더 이상 답변을 기다리지 않습니다. 보내면 Claude에게 새 메시지로 전달됩니다.',
+  'question.sendAsMessage': '새 메시지로 보내기',
+  'question.sentAsMessagePrefix': '새 메시지로 전송됨: ',
 
   // ─── Thinking Block ──────────────────────────────────────
   'thinking.label': '사고 중',

@@ -94,6 +94,12 @@ type RenderModel = {
   renderItems: RenderItem[]
   toolResultMap: Map<string, ToolResult>
   childToolCallsByParent: Map<string, ToolCall[]>
+  /**
+   * Unresolved AskUserQuestion tool_use ids followed by a user message. The user
+   * has already spoken past that question, so no live permission request can
+   * still be on its way to it — the card is history, not a prompt.
+   */
+  supersededAskUserQuestionIds: ReadonlySet<string>
 }
 
 type RewindTurnTarget = {
@@ -896,6 +902,13 @@ export function buildRenderModel(
     (msg.toolName === 'TeamCreate' || msg.toolName === 'TeamDelete') &&
     lifecycleToolSucceeded(toolResultMap.get(msg.toolUseId))
   ))
+  // Two passes on purpose: a question is superseded by a user message *after*
+  // it, so the last user message has to be known before judging any of them.
+  let lastUserTextIndex = -1
+  messages.forEach((msg, index) => {
+    if (msg.type === 'user_text') lastUserTextIndex = index
+  })
+  const supersededAskUserQuestionIds = new Set<string>()
   messages.forEach((msg, index) => {
     if (
       msg.type === 'tool_use' &&
@@ -904,6 +917,7 @@ export function buildRenderModel(
     ) {
       lastUnresolvedAskUserQuestionIndexByToolUseId.set(msg.toolUseId, index)
       lastUnresolvedAskUserQuestionIndex = index
+      if (lastUserTextIndex > index) supersededAskUserQuestionIds.add(msg.toolUseId)
     }
   })
 
@@ -1064,7 +1078,7 @@ export function buildRenderModel(
   }
 
   flushGroup()
-  return { renderItems: items, toolResultMap, childToolCallsByParent }
+  return { renderItems: items, toolResultMap, childToolCallsByParent, supersededAskUserQuestionIds }
 }
 
 function coordinationToolSummary(toolCall: ToolCall): string | null {
@@ -2784,7 +2798,12 @@ export function MessageList({
     return () => observer.disconnect()
   }, [requestLiveFollow])
 
-  const { toolResultMap, childToolCallsByParent, renderItems } = useMemo(
+  const {
+    toolResultMap,
+    childToolCallsByParent,
+    renderItems,
+    supersededAskUserQuestionIds,
+  } = useMemo(
     () => buildRenderModel(messages, activeAskUserQuestionToolUseId, {
       hideTeamCoordinationTools: !isDirectAgentSession,
       teamMemberNames,
@@ -3511,6 +3530,7 @@ export function MessageList({
             turnChangedFiles={changedFilesByRenderIndex.get(index)}
             isTurnOutputOwner={turnOutputOwnerIndexes.has(index)}
             turnCompletion={turnCompletionByMessageId.get(item.message.id)}
+            supersededAskUserQuestionIds={supersededAskUserQuestionIds}
           />
         )}
 
@@ -3713,6 +3733,7 @@ export const MessageBlock = memo(function MessageBlock({
   turnChangedFiles,
   isTurnOutputOwner,
   turnCompletion,
+  supersededAskUserQuestionIds,
 }: {
   sessionId?: string | null
   message: UIMessage
@@ -3728,6 +3749,7 @@ export const MessageBlock = memo(function MessageBlock({
   turnChangedFiles?: string[]
   isTurnOutputOwner?: boolean
   turnCompletion?: TurnCompletion
+  supersededAskUserQuestionIds?: ReadonlySet<string>
 }) {
   const t = useTranslation()
   const teammateVisual = message.type === 'user_text' && message.teammateFrom && team
@@ -3795,6 +3817,7 @@ export const MessageBlock = memo(function MessageBlock({
             toolUseId={message.toolUseId}
             input={message.input}
             result={toolResult?.content}
+            supersededByUserMessage={supersededAskUserQuestionIds?.has(message.toolUseId)}
           />
         )
       }

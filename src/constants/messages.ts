@@ -37,3 +37,14 @@ export const ASK_USER_QUESTION_CLARIFY_MESSAGE = `The user wants to clarify thes
 export const ASK_USER_QUESTION_CLARIFY_WITH_QUESTIONS_PREFIX = `${ASK_USER_QUESTION_CLARIFY_MESSAGE}
 
     Questions asked:\n`
+
+// AskUserQuestion's fourth shape, and the only one that is not a denial: the
+// question outlived its live permission request (the renderer was away, the CLI
+// was reclaimed, the turn was interrupted), so the desktop has no prompt left to
+// answer. The answers are still worth delivering, and the only channel left is an
+// ordinary user message — but arriving as one, they read as a fresh turn unless
+// the model is told they belong to the question it asked earlier. Suffixed with
+// the same `- "question"\n  Answer: …` block the other two paths use.
+export const ASK_USER_QUESTION_EXPIRED_ANSWER_PREFIX = `The user is answering the questions you asked earlier.
+    That prompt had already stopped waiting for an answer, so these answers are arriving as this message.
+    Treat them as their answers to those questions and continue.`

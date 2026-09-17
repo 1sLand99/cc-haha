@@ -310,6 +310,19 @@ export function listPendingPermissions(
   return session ? Object.values(getPendingPermissionRecord(session)) : []
 }
 
+/**
+ * Whether this session is blocked on an AskUserQuestion the user has to answer.
+ * The composer and the question card both read this: while it is true, the card
+ * is the only way forward, because nothing else can reach the model until the
+ * tool call resolves.
+ */
+export function hasPendingAskUserQuestion(
+  session: Pick<PerSessionState, 'pendingPermission' | 'pendingPermissions'> | undefined,
+): boolean {
+  return listPendingPermissions(session)
+    .some((permission) => permission.toolName === 'AskUserQuestion')
+}
+
 export function getPendingPermission(
   session: Pick<PerSessionState, 'pendingPermission' | 'pendingPermissions'> | undefined,
   requestId: string,
@@ -322,9 +335,39 @@ export function getPendingPermission(
   )
 }
 
+/**
+ * What the user had filled into an AskUserQuestion card, kept so switching tabs
+ * (which unmounts the whole session page) or scrolling the card out of the
+ * virtualized window does not throw the answers away.
+ *
+ * Deliberately a top-level store slice rather than part of `PerSessionState`:
+ * MessageList and ChatInput both subscribe to the whole session object, so a
+ * write there would re-render the message list on every keystroke.
+ */
+export type AskUserQuestionDraft = {
+  activeTab: number
+  selections: Record<number, string[]>
+  freeTexts: Record<number, string>
+  /**
+   * Terminal states only this renderer knows about. The server records neither,
+   * so without them a remount would resurrect an answerable form — and let the
+   * same answer be delivered twice.
+   */
+  sentAsMessage?: boolean
+  handedOff?: boolean
+}
+
 type ChatStore = {
   sessions: Record<string, PerSessionState>
+  /** sessionId → toolUseId → draft. In-memory, like `composerDraft`. */
+  askUserQuestionDrafts: Record<string, Record<string, AskUserQuestionDraft>>
 
+  setAskUserQuestionDraft: (
+    sessionId: string,
+    toolUseId: string,
+    draft: AskUserQuestionDraft,
+  ) => void
+  clearAskUserQuestionDraft: (sessionId: string, toolUseId: string) => void
   getSession: (sessionId: string) => PerSessionState
   connectToSession: (
     sessionId: string,
@@ -2569,6 +2612,39 @@ function shouldPrewarmSession(sessionId: string): boolean {
 
 export const useChatStore = create<ChatStore>((set, get) => ({
   sessions: {},
+  askUserQuestionDrafts: {},
+
+  setAskUserQuestionDraft: (sessionId, toolUseId, draft) => {
+    set((state) => {
+      const forSession = { ...(state.askUserQuestionDrafts[sessionId] ?? {}) }
+      // The card writes on every mount, so an unfinished card must not leave an
+      // entry behind for every question the user never touched.
+      const isEmpty = Object.keys(draft.selections).length === 0 &&
+        Object.keys(draft.freeTexts).length === 0 &&
+        !draft.sentAsMessage &&
+        !draft.handedOff
+      if (isEmpty) {
+        delete forSession[toolUseId]
+      } else {
+        forSession[toolUseId] = draft
+      }
+      return {
+        askUserQuestionDrafts: { ...state.askUserQuestionDrafts, [sessionId]: forSession },
+      }
+    })
+  },
+
+  clearAskUserQuestionDraft: (sessionId, toolUseId) => {
+    set((state) => {
+      const forSession = state.askUserQuestionDrafts[sessionId]
+      if (!forSession || !(toolUseId in forSession)) return {}
+      const next = { ...forSession }
+      delete next[toolUseId]
+      return {
+        askUserQuestionDrafts: { ...state.askUserQuestionDrafts, [sessionId]: next },
+      }
+    })
+  },
 
   getSession: (sessionId) => get().sessions[sessionId] ?? createDefaultSessionState(),
 
@@ -2825,7 +2901,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     wsManager.disconnect(sessionId)
     set((s) => {
       const { [sessionId]: _, ...rest } = s.sessions
-      return { sessions: rest }
+      const { [sessionId]: _drafts, ...remainingDrafts } = s.askUserQuestionDrafts
+      return { sessions: rest, askUserQuestionDrafts: remainingDrafts }
     })
   },
 

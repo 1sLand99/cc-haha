@@ -2395,6 +2395,7 @@ export const jp: Record<TranslationKey, string> = {
   'chat.placeholder': '編集、デバッグ、説明を Claude に依頼...',
   'chat.placeholderMissing': 'このセッションは見つからないワークスペースを指しています。新しいセッションを作成するか、別のプロジェクトを選択してください。',
   'chat.placeholderWorktreeRemoved': 'このセッションの一時ワークスペースはクリーンアップされました。元のプロジェクトで新しいセッションを開始してください。',
+  'chat.placeholderQuestionPending': '先に上の質問に回答してください。Claude が回答を待っています。',
   'chat.addFiles': 'ファイルまたは写真を追加',
   'chat.composerTools': '入力ツールを開く',
   'chat.dropFilesTitle': 'ここにファイルをドロップ',
@@ -2689,6 +2690,10 @@ export const jp: Record<TranslationKey, string> = {
   'question.chatAboutThisHint': '選択肢が合わない場合は Claude に聞き返してもらいます。入力済みの回答も一緒に渡されます',
   'question.chatRequested': '相談に切り替えました。Claude が確認します',
   'question.chatBadge': '相談中',
+  'question.expiredBadge': '無効',
+  'question.expiredNotice': 'この質問は回答待ちではなくなりました。送信すると Claude への新しいメッセージとして届きます。',
+  'question.sendAsMessage': '新しいメッセージとして送信',
+  'question.sentAsMessagePrefix': '新しいメッセージとして送信しました: ',
 
   // ─── Thinking Block ──────────────────────────────────────
   'thinking.label': '思考中',

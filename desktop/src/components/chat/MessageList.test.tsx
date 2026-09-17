@@ -1205,6 +1205,29 @@ describe('MessageList nested tool calls', () => {
     })
   })
 
+  // A question the user has already spoken past cannot still be waiting on a live
+  // permission request, so the card has to read as history even while the new turn
+  // it was superseded by is still running.
+  it('marks an unresolved AskUserQuestion superseded once a user message follows it', () => {
+    const askMessage = (toolUseId: string, timestamp: number): UIMessage => ({
+      id: `ask-${toolUseId}`,
+      type: 'tool_use',
+      toolName: 'AskUserQuestion',
+      toolUseId,
+      input: { questions: [{ question: 'Which scope?', options: [{ label: 'A' }, { label: 'B' }] }] },
+      timestamp,
+    })
+
+    const { supersededAskUserQuestionIds } = buildRenderModel([
+      askMessage('abandoned-tool', 1),
+      { id: 'user-1', type: 'user_text', content: 'never mind, do it this way', timestamp: 2 },
+      askMessage('latest-tool', 3),
+    ])
+
+    expect(supersededAskUserQuestionIds.has('abandoned-tool')).toBe(true)
+    expect(supersededAskUserQuestionIds.has('latest-tool')).toBe(false)
+  })
+
   it('keeps resolved AskUserQuestion history visible when filtering active duplicates', () => {
     const messages: UIMessage[] = [
       {

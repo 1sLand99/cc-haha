@@ -3,7 +3,11 @@ import { useDismissable } from '@/hooks/useDismissable'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { useTranslation } from '../../i18n'
-import { useChatStore, type RepositoryLaunchDraftState } from '../../stores/chatStore'
+import {
+  hasPendingAskUserQuestion,
+  useChatStore,
+  type RepositoryLaunchDraftState,
+} from '../../stores/chatStore'
 import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSessionStore } from '../../stores/sessionStore'
@@ -207,6 +211,12 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const launchBranch = repositoryLaunchDraft?.branch ?? null
   const launchUseWorktree = repositoryLaunchDraft?.useWorktree ?? false
   const chatState = sessionState?.chatState ?? 'idle'
+  // While a question is waiting, the card is the only way to reach the model: it
+  // is blocked inside the AskUserQuestion tool call, so a message typed here
+  // would sit in the queue until the question resolves — and reading that as
+  // "I already replied" is how questions get abandoned.
+  const questionPending = useChatStore((s) =>
+    activeTabId ? hasPendingAskUserQuestion(s.sessions[activeTabId]) : false)
   const isPreparingTurn = Boolean(sessionState?.isPreparingTurn)
   const slashCommands = sessionState?.slashCommands ?? []
   const composerPrefill = sessionState?.composerPrefill ?? null
@@ -272,6 +282,10 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const hasRunningSubagents = hasRunningSubagentTasks(sessionState?.backgroundAgentTasks)
   const workspaceState = getSessionWorkspaceState(activeSession)
   const isWorkspaceMissing = workspaceState !== 'available'
+  // Both composer branches (hero and inline) and the drop handler share this:
+  // they used to spell the condition out separately, which is how one branch
+  // ends up locked while the other keeps accepting text.
+  const composerDisabled = isWorkspaceMissing || launchTransitioning || isPreparingTurn || questionPending
   const hasWorkspaceReferences = !isMemberSession && workspaceReferences.length > 0
   const isHeroComposer = variant === 'hero' && !isMemberSession && !compact
   const resolvedWorkDir = activeSession?.workDir || gitInfo?.workDir || undefined
@@ -755,6 +769,9 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   }, [activeTabId, replaceEmptySession, t, updateRepositoryLaunchDraft])
 
   const handleSubmit = async () => {
+    // Belt and braces: the composer is disabled too, but every send path (Enter,
+    // slash-Enter, programmatic) funnels through here.
+    if (questionPending) return
     const text = input.trim()
     if ((!text && ((!attachments.length && !hasWorkspaceReferences) || isMemberSession)) || isWorkspaceMissing) return
 
@@ -1026,7 +1043,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   }, [setComposerAttachments])
 
   const { isDragActive, dragHandlers } = useComposerFileDrop({
-    disabled: isMemberSession || isWorkspaceMissing,
+    disabled: isMemberSession || composerDisabled,
     panelRef,
     onAttachments: appendAttachments,
     onError: (error) => {
@@ -1107,9 +1124,11 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
         ? workspaceState === 'worktree_removed'
           ? t('chat.placeholderWorktreeRemoved')
           : t('chat.placeholderMissing')
-        : isMemberSession
-          ? t('teams.memberPlaceholder')
-          : t('chat.placeholder')
+        : questionPending
+          ? t('chat.placeholderQuestionPending')
+          : isMemberSession
+            ? t('teams.memberPlaceholder')
+            : t('chat.placeholder')
 
   const addFilesLabel = isHeroComposer ? t('empty.addFiles') : t('chat.addFiles')
   const slashCommandsLabel = isHeroComposer ? t('empty.slashCommands') : t('chat.slashCommands')
@@ -1301,10 +1320,13 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                         <span className="min-w-0 flex-1 truncate font-medium" title={message.displayContent}>
                           {message.displayContent}
                         </span>
-                        {/* The accent action of the three, per the handoff. */}
+                        {/* The accent action of the three, per the handoff. Blocked
+                            while a question is waiting: sending now would race the
+                            prompt the model is blocked on. */}
                         <Button
                           variant="link"
                           size="sm"
+                          disabled={questionPending}
                           onClick={() => sendQueuedUserMessage(activeTabId, message.id)}
                           aria-label={t('chat.pendingMessageGuideNow')}
                           title={t('chat.pendingMessageGuideNow')}
@@ -1360,7 +1382,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                 onCompositionStart={() => { composingRef.current = true }}
                 onCompositionEnd={() => { composingRef.current = false }}
                 placeholder={composerPlaceholder}
-                disabled={isWorkspaceMissing || launchTransitioning || isPreparingTurn}
+                disabled={composerDisabled}
                 className="flex-1"
                 editorClassName="max-h-[200px] overflow-y-auto py-2 leading-relaxed text-[var(--color-text-primary)]"
                 aria={{
@@ -1387,7 +1409,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
               onCompositionStart={() => { composingRef.current = true }}
               onCompositionEnd={() => { composingRef.current = false }}
               placeholder={composerPlaceholder}
-              disabled={isWorkspaceMissing || launchTransitioning || isPreparingTurn}
+              disabled={composerDisabled}
               editorClassName={`max-h-[200px] overflow-y-auto text-sm leading-relaxed text-[var(--color-text-primary)] ${
                 useCompactChrome ? 'py-1.5' : 'py-2'
               }`}

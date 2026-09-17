@@ -2392,6 +2392,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'chat.placeholder': 'Ask Claude to edit, debug or explain...',
   'chat.placeholderMissing': 'This session points to a missing workspace. Create a new session or pick another project.',
   'chat.placeholderWorktreeRemoved': 'This temporary workspace was cleaned up. Start a new session in the original project to continue.',
+  'chat.placeholderQuestionPending': 'Answer the question above first — Claude is waiting on it.',
   'chat.addFiles': 'Add files or photos',
   'chat.composerTools': 'Open composer tools',
   'chat.dropFilesTitle': 'Drop files here',
@@ -2686,6 +2687,10 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'question.chatAboutThisHint': 'None of these fit? Hand it back to Claude to follow up — anything already filled in comes along.',
   'question.chatRequested': 'Handed back to Claude, which will follow up',
   'question.chatBadge': 'Handed off',
+  'question.expiredBadge': 'Expired',
+  'question.expiredNotice': 'This question is no longer waiting for an answer, so sending delivers it to Claude as a new message.',
+  'question.sendAsMessage': 'Send as new message',
+  'question.sentAsMessagePrefix': 'Sent as a new message: ',
 
   // ─── Thinking Block ──────────────────────────────────────
   'thinking.label': 'Thinking',

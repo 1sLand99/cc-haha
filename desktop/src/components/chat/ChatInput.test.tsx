@@ -727,6 +727,98 @@ describe('ChatInput file mentions', () => {
     expect(guidedMessages).toHaveLength(1)
   })
 
+  describe('while a question is waiting for an answer', () => {
+    /**
+     * The model is blocked inside the AskUserQuestion tool call, so nothing typed
+     * here can reach it until the question resolves. Letting the composer take a
+     * message anyway reads as "I already replied" and is how questions get
+     * abandoned — the card is the only way forward.
+     */
+    const setQuestionPending = (pending: boolean) => {
+      act(() => {
+        useChatStore.setState((state) => ({
+          sessions: {
+            ...state.sessions,
+            [sessionId]: {
+              ...state.sessions[sessionId]!,
+              chatState: pending ? 'permission_pending' : 'idle',
+              pendingPermission: pending
+                ? {
+                    requestId: 'ask-1',
+                    toolName: 'AskUserQuestion',
+                    toolUseId: 'question-1',
+                    input: {},
+                  }
+                : null,
+            },
+          },
+        }))
+      })
+    }
+
+    // The assertion is made without dispatching any transaction: `editable` is
+    // only re-read when ProseMirror updates the view, so a disabled flip with no
+    // document change used to leave the editor typing-editable.
+    it('locks the composer and explains why', () => {
+      setQuestionPending(true)
+
+      render(<ChatInput compact />)
+
+      expect(getComposerElement()).toHaveAttribute('contenteditable', 'false')
+      expect(getComposerElement()).toHaveAttribute(
+        'data-placeholder',
+        'Answer the question above first — Claude is waiting on it.',
+      )
+    })
+
+    it('drops a submit instead of queueing it behind the question', () => {
+      setQuestionPending(true)
+
+      render(<ChatInput compact />)
+
+      setComposerText('never mind, do it the other way', 32)
+      fireEvent.keyDown(getComposerElement(), { key: 'Enter' })
+
+      expect(mocks.wsSend).not.toHaveBeenCalledWith(sessionId, expect.objectContaining({
+        type: 'user_message',
+      }))
+      expect(useChatStore.getState().sessions[sessionId]?.queuedUserMessages ?? []).toEqual([])
+      expect(screen.queryByTestId('pending-user-message')).not.toBeInTheDocument()
+    })
+
+    it('blocks "Guide now" until the question is gone', () => {
+      setQuestionPending(true)
+      useChatStore.getState().queueUserMessage(sessionId, {
+        content: 'queued while the question was up',
+        displayContent: 'queued while the question was up',
+      })
+
+      render(<ChatInput compact />)
+
+      expect(screen.getByRole('button', { name: /Guide now/i })).toHaveProperty('disabled', true)
+
+      setQuestionPending(false)
+
+      expect(screen.getByRole('button', { name: /Guide now/i })).toHaveProperty('disabled', false)
+    })
+
+    it('unlocks once the question is answered or stopped', () => {
+      setQuestionPending(true)
+
+      render(<ChatInput compact />)
+
+      expect(getComposerElement()).toHaveAttribute('contenteditable', 'false')
+
+      setQuestionPending(false)
+
+      expect(getComposerElement()).toHaveAttribute('contenteditable', 'true')
+      expect(getComposerElement()).toHaveAttribute(
+        'data-placeholder',
+        'Ask Claude to edit, debug or explain...',
+      )
+    })
+  })
+
   it('edits and deletes queued prompts without sending them', async () => {
     useChatStore.setState({
       sessions: {

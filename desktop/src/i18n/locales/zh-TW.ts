@@ -2394,6 +2394,7 @@ export const zh: Record<TranslationKey, string> = {
   'chat.placeholder': '讓 Claude 編輯、除錯或解釋程式碼...',
   'chat.placeholderMissing': '此會話指向的工作目錄缺失。請新建會話或選擇其他專案。',
   'chat.placeholderWorktreeRemoved': '此會話的臨時工作區已清理。請在原專案中新建會話繼續。',
+  'chat.placeholderQuestionPending': '請先回答上面的問題，Claude 正在等你的回覆。',
   'chat.addFiles': '新增檔案或圖片',
   'chat.composerTools': '開啟輸入框工具',
   'chat.dropFilesTitle': '鬆手新增檔案',
@@ -2688,6 +2689,10 @@ export const zh: Record<TranslationKey, string> = {
   'question.chatAboutThisHint': '選項都不合適？交給 Claude 追問，已填的答案會一併帶上',
   'question.chatRequested': '已轉為對話，Claude 會接著追問',
   'question.chatBadge': '已轉對話',
+  'question.expiredBadge': '已失效',
+  'question.expiredNotice': '這個問題已不再等待回答，傳送後會以新訊息交給 Claude。',
+  'question.sendAsMessage': '作為新訊息傳送',
+  'question.sentAsMessagePrefix': '已作為新訊息傳送: ',
 
   // ─── Thinking Block ──────────────────────────────────────
   'thinking.label': '思考中',

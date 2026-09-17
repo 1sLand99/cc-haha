@@ -15366,3 +15366,53 @@ describe('chatStore activity state survival across reload paths', () => {
   })
 
 })
+
+describe('chatStore AskUserQuestion drafts', () => {
+  beforeEach(() => {
+    sendMock.mockReset()
+    connectionStateHandlers.clear()
+    vi.mocked(sessionsApi.getMessages).mockReset()
+    vi.mocked(sessionsApi.getMessages).mockResolvedValue({ messages: [] })
+    vi.mocked(sessionsApi.getSlashCommands).mockReset()
+    vi.mocked(sessionsApi.getSlashCommands).mockResolvedValue({ commands: [] })
+    useChatStore.setState({ ...initialState, sessions: {}, askUserQuestionDrafts: {} })
+  })
+
+  it('keeps a filled draft and drops the entry once it is empty again', () => {
+    const store = useChatStore.getState()
+    store.setAskUserQuestionDraft('session-drafts', 'tool-1', {
+      activeTab: 1,
+      selections: { 0: ['Yes'] },
+      freeTexts: { 1: 'custom' },
+    })
+    expect(useChatStore.getState().askUserQuestionDrafts['session-drafts']?.['tool-1'])
+      .toMatchObject({ activeTab: 1, freeTexts: { 1: 'custom' } })
+
+    store.clearAskUserQuestionDraft('session-drafts', 'tool-1')
+    expect(useChatStore.getState().askUserQuestionDrafts['session-drafts']?.['tool-1'])
+      .toBeUndefined()
+
+    // The card writes on every mount, including an empty one: that must not
+    // leave an entry behind for every question the user never answered.
+    store.setAskUserQuestionDraft('session-drafts', 'tool-2', {
+      activeTab: 0,
+      selections: {},
+      freeTexts: {},
+    })
+    expect(useChatStore.getState().askUserQuestionDrafts['session-drafts']?.['tool-2'])
+      .toBeUndefined()
+  })
+
+  it('drops a session\'s drafts when the session goes away', () => {
+    const store = useChatStore.getState()
+    store.setAskUserQuestionDraft(TEST_SESSION_ID, 'tool-1', {
+      activeTab: 0,
+      selections: { 0: ['Yes'] },
+      freeTexts: {},
+    })
+
+    store.disconnectSession(TEST_SESSION_ID)
+
+    expect(useChatStore.getState().askUserQuestionDrafts[TEST_SESSION_ID]).toBeUndefined()
+  })
+})

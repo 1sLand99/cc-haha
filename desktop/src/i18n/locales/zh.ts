@@ -2393,6 +2393,7 @@ export const zh: Record<TranslationKey, string> = {
   'chat.placeholder': '让 Claude 编辑、调试或解释代码...',
   'chat.placeholderMissing': '此会话指向的工作目录缺失。请新建会话或选择其他项目。',
   'chat.placeholderWorktreeRemoved': '此会话的临时工作区已清理。请在原项目中新建会话继续。',
+  'chat.placeholderQuestionPending': '请先回答上面的问题，Claude 正在等你的答复。',
   'chat.addFiles': '添加文件或图片',
   'chat.composerTools': '打开输入框工具',
   'chat.dropFilesTitle': '松手添加文件',
@@ -2687,6 +2688,10 @@ export const zh: Record<TranslationKey, string> = {
   'question.chatAboutThisHint': '选项都不合适？交给 Claude 追问，已填的答案会一并带上',
   'question.chatRequested': '已转为对话，Claude 会接着追问',
   'question.chatBadge': '已转对话',
+  'question.expiredBadge': '已失效',
+  'question.expiredNotice': '这个问题已不再等待回答，发送后会作为新消息交给 Claude。',
+  'question.sendAsMessage': '作为新消息发送',
+  'question.sentAsMessagePrefix': '已作为新消息发送: ',
 
   // ─── Thinking Block ──────────────────────────────────────
   'thinking.label': '思考中',
