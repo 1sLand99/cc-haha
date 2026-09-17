@@ -824,10 +824,11 @@ describe('ContextUsageIndicator session usage', () => {
 
     fireEvent.click(screen.getByTestId('context-usage-indicator'))
 
-    // 1000 input + 9000 cache read + 2400 output; the cached tokens are counted once.
-    expect(await screen.findByTestId('session-total-tokens')).toHaveTextContent('12.4K')
+    // 1000 uncached input + 2400 output. Cache hits stay in the hit-rate row, not the headline.
+    expect(await screen.findByTestId('session-total-tokens')).toHaveTextContent('3.4K')
     expect(screen.getByTestId('session-cache-hit')).toHaveTextContent('90.0%')
-    expect(screen.getByTestId('session-speed')).toHaveTextContent('200')
+    // 2400 output / 42s API time, including prefill — not the 12s decode span (200 tok/s).
+    expect(screen.getByTestId('session-speed')).toHaveTextContent('57')
     expect(screen.getByTestId('session-speed')).toHaveTextContent('tok/s')
     expect(sessionsApiMock.getSessionUsage).toHaveBeenCalledWith('session-1', expect.anything())
   })
@@ -851,11 +852,12 @@ describe('ContextUsageIndicator session usage', () => {
     expect(screen.getByTestId('session-cache-hit')).not.toHaveTextContent('100%')
   })
 
-  it('withholds the speed reading when the session reported no decode span', async () => {
-    // Transcript-sourced usage has no generation timing. Showing a number here would mean
-    // dividing by wall clock, which includes tool execution.
+  it('withholds the speed reading when the session reported no API duration', async () => {
+    // Transcript-sourced usage has no request timing. Showing a number here would mean
+    // dividing by session wall clock, which includes tool execution.
     sessionsApiMock.getSessionUsage.mockResolvedValue(usageInspection({
       ...baseUsage,
+      totalAPIDuration: 0,
       totalDecodeDuration: 0,
     }))
 
@@ -871,7 +873,7 @@ describe('ContextUsageIndicator session usage', () => {
     expect(screen.getByTestId('session-speed')).not.toHaveTextContent('tok/s')
   })
 
-  it('hides the block entirely for a session that has spent nothing', async () => {
+  it('hides the block entirely for a session that has produced nothing', async () => {
     sessionsApiMock.getSessionUsage.mockResolvedValue(usageInspection({
       ...baseUsage,
       totalInputTokens: 0,

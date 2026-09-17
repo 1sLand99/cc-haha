@@ -169,8 +169,8 @@ export type SessionUsageSnapshot = {
   totalAPIDuration: number
   /**
    * Milliseconds the model spent emitting tokens, excluding prefill and tool execution.
-   * Absent or 0 means unknown (transcript source, aborted turn, non-streaming fallback) —
-   * never "instant", so a tokens/sec reading must be withheld rather than computed.
+   * The panel's tok/s uses `totalAPIDuration` instead: decode-only rates ignore TTFT and
+   * read as a peak the user never felt. Kept so resume snapshots still round-trip.
    */
   totalDecodeDuration?: number
   /** Milliseconds spent waiting for the first token, summed over the session's requests. */

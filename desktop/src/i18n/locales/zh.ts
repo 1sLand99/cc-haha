@@ -2590,7 +2590,7 @@ export const zh: Record<TranslationKey, string> = {
   'contextIndicator.updatedMinutes': '{count} 分钟前更新',
   'contextIndicator.estimate': '估算',
   'contextIndicator.sessionUsage': '此次会话',
-  'contextIndicator.sessionTotalTokens': '总 token',
+  'contextIndicator.sessionTotalTokens': '新生成',
   'contextIndicator.sessionCacheHit': '缓存命中',
   'contextIndicator.sessionSpeed': '生成速度',
   'contextIndicator.sessionApiDuration': 'API 耗时',

@@ -2592,7 +2592,7 @@ export const kr: Record<TranslationKey, string> = {
   'contextIndicator.updatedMinutes': '{count}분 전 업데이트됨',
   'contextIndicator.estimate': '추정',
   'contextIndicator.sessionUsage': '이 세션',
-  'contextIndicator.sessionTotalTokens': '총 토큰',
+  'contextIndicator.sessionTotalTokens': '신규 토큰',
   'contextIndicator.sessionCacheHit': '캐시 적중',
   'contextIndicator.sessionSpeed': '생성 속도',
   'contextIndicator.sessionApiDuration': 'API 시간',

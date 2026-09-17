@@ -2591,7 +2591,7 @@ export const zh: Record<TranslationKey, string> = {
   'contextIndicator.updatedMinutes': '{count} 分鐘前更新',
   'contextIndicator.estimate': '估算',
   'contextIndicator.sessionUsage': '此次工作階段',
-  'contextIndicator.sessionTotalTokens': '總 token',
+  'contextIndicator.sessionTotalTokens': '新產生',
   'contextIndicator.sessionCacheHit': '快取命中',
   'contextIndicator.sessionSpeed': '生成速度',
   'contextIndicator.sessionApiDuration': 'API 耗時',

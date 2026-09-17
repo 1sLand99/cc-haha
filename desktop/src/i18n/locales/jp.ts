@@ -2592,7 +2592,7 @@ export const jp: Record<TranslationKey, string> = {
   'contextIndicator.updatedMinutes': '{count} 分前に更新',
   'contextIndicator.estimate': '推定',
   'contextIndicator.sessionUsage': 'このセッション',
-  'contextIndicator.sessionTotalTokens': '合計トークン',
+  'contextIndicator.sessionTotalTokens': '新規トークン',
   'contextIndicator.sessionCacheHit': 'キャッシュヒット',
   'contextIndicator.sessionSpeed': '生成速度',
   'contextIndicator.sessionApiDuration': 'API 時間',

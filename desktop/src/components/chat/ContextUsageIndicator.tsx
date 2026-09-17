@@ -442,7 +442,7 @@ export function ContextUsageIndicator({
   const sessionStats = useMemo<ContextUsageSessionStats | null>(() => {
     if (!displayUsage) return null
     const metrics = deriveSessionUsageMetrics(displayUsage)
-    // A session with nothing spent yet has no honest answer for any of these rows; showing an
+    // A session with nothing produced yet has no honest answer for any of these rows; showing an
     // empty block (or a 0 tok/s) would read as a measurement rather than an absence.
     if (metrics.totalTokens === 0) return null
     return {

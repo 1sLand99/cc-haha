@@ -2589,7 +2589,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'contextIndicator.updatedMinutes': 'Updated {count}m ago',
   'contextIndicator.estimate': 'Estimate',
   'contextIndicator.sessionUsage': 'This session',
-  'contextIndicator.sessionTotalTokens': 'Total tokens',
+  'contextIndicator.sessionTotalTokens': 'New tokens',
   'contextIndicator.sessionCacheHit': 'Cache hit',
   'contextIndicator.sessionSpeed': 'Speed',
   'contextIndicator.sessionApiDuration': 'API time',

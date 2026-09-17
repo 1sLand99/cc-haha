@@ -13,7 +13,7 @@ type ContextCategory = {
 /**
  * Lifetime figures for the whole session, as opposed to `categories` which describe only what
  * currently occupies the context window. Kept as raw numbers so the formatting rules (never
- * rounding a cache hit up to 100%, withholding a speed with no decode span) stay in one place.
+ * rounding a cache hit up to 100%, withholding a speed with no API duration) stay in one place.
  */
 export type ContextUsageSessionStats = {
   totalTokens: number
@@ -61,7 +61,7 @@ function formatNumber(value: number) {
 
 /**
  * Lifetime session totals. Rendered below the window breakdown because the two answer different
- * questions: the bars say what is in the context right now, this says what the session has spent.
+ * questions: the bars say what is in the context right now, this says what the session produced.
  */
 function SessionUsage({
   stats,
