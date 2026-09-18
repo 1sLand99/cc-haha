@@ -468,7 +468,7 @@ async function getSessionMessages(sessionId: string): Promise<Response> {
 
 async function getSessionTrace(sessionId: string): Promise<Response> {
   const [trace, sessionMeta, messageSignature] = await Promise.all([
-    traceCaptureService.getSessionTrace(sessionId),
+    traceCaptureService.getSessionTraceOverview(sessionId),
     getSessionTraceMeta(sessionId),
     sessionService.getSessionMessagesSignature(sessionId),
   ])

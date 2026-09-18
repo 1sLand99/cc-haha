@@ -33,6 +33,10 @@ export type TraceCallLocator = {
   failed: boolean
   inputTokens: number
   outputTokens: number
+  /** Body facts surfaced on the trace tree without reading the JSONL. */
+  requestBytes?: number | null
+  responseBytes?: number | null
+  responseStatus?: number | null
   revision?: number
 }
 
@@ -47,6 +51,8 @@ export type TraceEventLocator = {
   callId: string | null
   source: string | null
   model: string | null
+  title?: string | null
+  message?: string | null
   revision?: number
 }
 
@@ -170,6 +176,9 @@ type CallRow = {
   failed: number
   input_tokens: number
   output_tokens: number
+  request_bytes: number | null
+  response_bytes: number | null
+  response_status: number | null
 }
 
 type EventRow = {
@@ -184,6 +193,8 @@ type EventRow = {
   call_id: string | null
   source: string | null
   model: string | null
+  title: string | null
+  message: string | null
 }
 
 const SOURCE_COLUMNS = `
@@ -251,8 +262,9 @@ const UPSERT_CALL_SQL = `
 INSERT INTO trace_calls (
   session_id, call_id, ordinal, first_ordinal, byte_start, byte_length, revision,
   started_at, completed_at, status, source, model, duration_ms,
-  failed, input_tokens, output_tokens
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  failed, input_tokens, output_tokens,
+  request_bytes, response_bytes, response_status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id, call_id) DO UPDATE SET
   ordinal = excluded.ordinal,
   byte_start = excluded.byte_start,
@@ -266,14 +278,17 @@ ON CONFLICT(session_id, call_id) DO UPDATE SET
   duration_ms = excluded.duration_ms,
   failed = excluded.failed,
   input_tokens = excluded.input_tokens,
-  output_tokens = excluded.output_tokens
+  output_tokens = excluded.output_tokens,
+  request_bytes = excluded.request_bytes,
+  response_bytes = excluded.response_bytes,
+  response_status = excluded.response_status
 `
 
 const INSERT_EVENT_SQL = `
 INSERT INTO trace_events (
   session_id, ordinal, event_id, byte_start, byte_length, revision,
-  timestamp, phase, severity, call_id, source, model
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  timestamp, phase, severity, call_id, source, model, title, message
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id, ordinal) DO UPDATE SET
   event_id = excluded.event_id,
   byte_start = excluded.byte_start,
@@ -284,7 +299,9 @@ ON CONFLICT(session_id, ordinal) DO UPDATE SET
   severity = excluded.severity,
   call_id = excluded.call_id,
   source = excluded.source,
-  model = excluded.model
+  model = excluded.model,
+  title = excluded.title,
+  message = excluded.message
 `
 
 function sourceFromRow(row: SourceRow): TraceSourceRecord {
@@ -321,6 +338,9 @@ function callFromRow(row: CallRow): TraceCallLocator {
     failed: row.failed === 1,
     inputTokens: row.input_tokens,
     outputTokens: row.output_tokens,
+    requestBytes: row.request_bytes,
+    responseBytes: row.response_bytes,
+    responseStatus: row.response_status,
     revision: row.revision,
   }
 }
@@ -337,6 +357,8 @@ function eventFromRow(row: EventRow): TraceEventLocator {
     callId: row.call_id,
     source: row.source,
     model: row.model,
+    title: row.title,
+    message: row.message,
     revision: row.revision,
   }
 }
@@ -526,6 +548,9 @@ function writeCall(
     call.failed ? 1 : 0,
     call.inputTokens,
     call.outputTokens,
+    call.requestBytes ?? null,
+    call.responseBytes ?? null,
+    call.responseStatus ?? null,
   )
 }
 
@@ -549,6 +574,8 @@ function writeEvent(
     event.callId,
     event.source,
     event.model,
+    event.title ?? null,
+    event.message ?? null,
   )
 }
 
@@ -573,17 +600,20 @@ function adjustModelCount(
     )
     return
   }
+  // Delete-before-decrement: the call_count > 0 CHECK rejects an UPDATE that
+  // lands on zero, so rows reaching zero must be removed, not updated.
+  operation.run(
+    `DELETE FROM trace_session_models
+     WHERE session_id = ? AND model = ? AND call_count + ? <= 0`,
+    sessionId,
+    model,
+    delta,
+  )
   operation.run(
     `UPDATE trace_session_models
      SET call_count = call_count + ?
      WHERE session_id = ? AND model = ?`,
     delta,
-    sessionId,
-    model,
-  )
-  operation.run(
-    `DELETE FROM trace_session_models
-     WHERE session_id = ? AND model = ? AND call_count <= 0`,
     sessionId,
     model,
   )

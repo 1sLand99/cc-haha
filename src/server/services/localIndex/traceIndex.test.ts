@@ -285,7 +285,7 @@ describe('trace index', () => {
     const index = createTraceIndex(database)
 
     expect(database.read(operation => operation.get<{ user_version: number }>('PRAGMA user_version')))
-      .toEqual({ user_version: 4 })
+      .toEqual({ user_version: 5 })
     expect(index.getSession('frozen')).toMatchObject({
       revision: 7,
       lastResetRevision: 3,
@@ -300,7 +300,7 @@ describe('trace index', () => {
     })
   })
 
-  test('migrates frozen v2 and v3 databases to v4 with safe ordering reconstruction', async () => {
+  test('migrates frozen v2 and v3 databases forward with safe ordering reconstruction', async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'trace-index-v2-v3-'))
 
     for (const version of [2, 3]) {
@@ -356,6 +356,11 @@ describe('trace index', () => {
         ALTER TABLE trace_session_models DROP COLUMN first_started_at;
         ALTER TABLE trace_session_models DROP COLUMN first_ordinal;
         ALTER TABLE trace_calls DROP COLUMN first_ordinal;
+        ALTER TABLE trace_calls DROP COLUMN request_bytes;
+        ALTER TABLE trace_calls DROP COLUMN response_bytes;
+        ALTER TABLE trace_calls DROP COLUMN response_status;
+        ALTER TABLE trace_events DROP COLUMN title;
+        ALTER TABLE trace_events DROP COLUMN message;
         ${version === 2 ? 'ALTER TABLE trace_sessions DROP COLUMN reset_token;' : ''}
         PRAGMA user_version = ${version};
       `)
@@ -365,14 +370,14 @@ describe('trace index', () => {
       const migrated = createTraceIndex(candidate)
       expect(candidate.read(operation => operation.get<{ user_version: number }>(
         'PRAGMA user_version',
-      ))).toEqual({ user_version: 4 })
+      ))).toEqual({ user_version: 5 })
       expect(migrated.getSummary(`frozen-v${version}`)?.summary.models).toEqual([
         { model: 'z-model', calls: 1 },
         { model: 'a-model', calls: 1 },
       ])
       expect(migrated.getSource(`frozen-v${version}`)).toMatchObject({
         state: 'degraded',
-        lastErrorCode: 'TRACE_INDEX_V4_REBUILD_REQUIRED',
+        lastErrorCode: 'TRACE_INDEX_V5_REBUILD_REQUIRED',
       })
       expect(candidate.read(operation => operation.all<{
         ordinal: number

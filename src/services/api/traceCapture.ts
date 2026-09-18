@@ -257,6 +257,11 @@ type TraceScopeContext = {
 const traceWriteQueues = new Map<string, Promise<void>>()
 const traceReadCache = new Map<string, TraceReadCacheEntry>()
 const canonicalTraceRevisions = new Map<string, CanonicalTraceRevisionState>()
+const traceBackfillScheduled = new Set<string>()
+let traceBackfillQueue: Promise<void> = Promise.resolve()
+// One page of list rows is the most we ever schedule; the queue is serialized
+// so a directory full of unindexed GB-scale files rebuilds one at a time.
+const TRACE_BACKFILL_MAX_PENDING = 200
 type TraceIndexState = {
   path: string
   database: TraceIndexDatabase
@@ -499,14 +504,16 @@ function isTraceRecord(value: unknown): value is TraceJsonRecord {
 export async function drainTraceCaptureForTests(): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt++) {
     const pending = [...traceWriteQueues.values()]
-    if (pending.length === 0) return
-    await Promise.allSettled(pending)
+    if (pending.length === 0 && traceBackfillScheduled.size === 0) return
+    await Promise.allSettled([...pending, traceBackfillQueue])
   }
 }
 export function clearTraceCaptureStateForTests(): void {
   traceWriteQueues.clear()
   traceReadCache.clear()
   canonicalTraceRevisions.clear()
+  traceBackfillScheduled.clear()
+  traceBackfillQueue = Promise.resolve()
   for (const state of traceIndexStates.values()) state.database.close()
   traceIndexStates.clear()
   unavailableTraceIndexPaths.clear()
@@ -623,6 +630,23 @@ class TraceCaptureService {
       calls,
       events,
     }
+  }
+
+  /**
+   * Trace page read path. Unlike `getSessionTrace`, this never reads the whole
+   * JSONL: calls come back as locator shells (identity/timing/status/body
+   * sizes only) and the detail pane fetches one full call at a time through
+   * `getSessionTraceCall`. Falls back to the canonical full read when the
+   * index is off or the projection cannot be served.
+   */
+  async getSessionTraceOverview(sessionId: string): Promise<TraceSession> {
+    const mode = syncTraceIndexMode()
+    const context = currentTraceScopeContext()
+    if (mode === 'on') {
+      const projected = await readProjectedSessionTrace(sessionId, context)
+      if (projected) return projected
+    }
+    return this.getSessionTrace(sessionId)
   }
 
   async getSessionTraceCall(sessionId: string, callId: string): Promise<TraceCallRecord | null> {
@@ -810,22 +834,28 @@ class TraceCaptureService {
         ))
         trace = canonical
       } else {
-        const projection = await ensureTraceProjection(
-          sessionId,
-          file.path,
-          file.stat,
-          0,
-          target,
-        )
-        trace = projection
-          ? { sessionId, summary: projection.summary }
-          : {
-              sessionId,
-              summary: summarizeCalls((await readTraceEntries(
-                sessionId,
-                context,
-              )).calls),
-            }
+        // Read-only: never rebuild a projection on the request path. A page
+        // containing unindexed GB-scale JSONL must answer from SQLite (or an
+        // empty summary) immediately; the serialized background queue fills
+        // the projection in and the next poll picks it up. In-process appends
+        // update the index synchronously, so a size/mtime mismatch means an
+        // external write the writer path never saw.
+        const index = getTraceIndex(target)
+        const source = index?.getSource(sessionId) ?? null
+        const projection = source && index ? index.getSummary(sessionId) : null
+        if (projection) {
+          trace = { sessionId, summary: projection.summary }
+          if (
+            source.state !== 'ready' ||
+            source.size !== file.size ||
+            source.mtimeMs !== file.stat.mtimeMs
+          ) {
+            scheduleTraceProjectionBackfill(sessionId, file.path, file.stat, target)
+          }
+        } else {
+          scheduleTraceProjectionBackfill(sessionId, file.path, file.stat, target)
+          trace = { sessionId, summary: emptyTraceSummary() }
+        }
       }
       const updatedAt = trace.summary.updatedAt ?? file.updatedAt
       items.push({
@@ -1380,6 +1410,9 @@ function toTraceCallLocator(
       || (hydrated.response?.status ?? 200) >= 400,
     inputTokens: hydrated.usage?.inputTokens ?? 0,
     outputTokens: hydrated.usage?.outputTokens ?? 0,
+    requestBytes: hydrated.request.body.bytes,
+    responseBytes: hydrated.response?.body.bytes ?? null,
+    responseStatus: hydrated.response?.status ?? null,
   }
 }
 
@@ -1400,6 +1433,8 @@ function toTraceEventLocator(
     callId: event.callId ?? null,
     source: event.source ?? null,
     model: event.model ?? null,
+    title: event.title ?? null,
+    message: event.message ?? null,
   }
 }
 
@@ -2163,6 +2198,203 @@ async function readTraceEntries(
   }
 
   return { calls, events: sortedEvents }
+}
+
+function emptyTraceSummary(): TraceSessionSummary {
+  return {
+    apiCalls: 0,
+    failedCalls: 0,
+    totalDurationMs: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    models: [],
+    updatedAt: null,
+  }
+}
+
+function emptyTraceBodySnapshot(bytes: number): TraceBodySnapshot {
+  return {
+    contentType: 'empty',
+    bytes,
+    sha256: '',
+    preview: '',
+    truncated: bytes > 0,
+  }
+}
+
+/**
+ * The trace tree only needs per-call identity, timing, status and body sizes.
+ * Bodies stay on disk: the detail panel fetches a single call through
+ * `getSessionTraceCall`, which reads just that call's byte range.
+ */
+function shellTraceCallFromLocator(
+  sessionId: string,
+  locator: TraceCallLocator,
+): TraceCallRecord {
+  return {
+    id: locator.id,
+    sessionId,
+    source: locator.source as TraceCallRecord['source'],
+    startedAt: locator.startedAt,
+    ...(locator.completedAt ? { completedAt: locator.completedAt } : {}),
+    ...(locator.durationMs !== null ? { durationMs: locator.durationMs } : {}),
+    status: locator.status as TraceCallRecord['status'],
+    ...(locator.model ? { model: locator.model } : {}),
+    ...(locator.inputTokens > 0 || locator.outputTokens > 0
+      ? {
+          usage: {
+            inputTokens: locator.inputTokens,
+            outputTokens: locator.outputTokens,
+          },
+        }
+      : {}),
+    request: {
+      method: '',
+      url: '',
+      headers: {},
+      body: emptyTraceBodySnapshot(locator.requestBytes ?? 0),
+    },
+    ...(locator.responseStatus != null || locator.responseBytes != null
+      ? {
+          response: {
+            status: locator.responseStatus ?? 0,
+            headers: {},
+            body: emptyTraceBodySnapshot(locator.responseBytes ?? 0),
+          },
+        }
+      : {}),
+  }
+}
+
+/**
+ * Events are small (no request/response bodies), but the detail pane shows
+ * their message and metadata, which the locator does not store. Read just the
+ * event byte ranges through one handle instead of the whole JSONL.
+ */
+async function readTraceEventRecords(
+  filePath: string,
+  locators: TraceEventLocator[],
+): Promise<TraceEventRecord[] | null> {
+  if (locators.length === 0) return []
+  const handle = await fs.open(filePath, 'r')
+  try {
+    const events: TraceEventRecord[] = []
+    for (const locator of locators) {
+      const buffer = Buffer.allocUnsafe(locator.byteLength)
+      let offset = 0
+      while (offset < locator.byteLength) {
+        const { bytesRead } = await handle.read(
+          buffer,
+          offset,
+          locator.byteLength - offset,
+          locator.byteStart + offset,
+        )
+        if (bytesRead < 1) return null
+        offset += bytesRead
+      }
+      let entry: unknown
+      try {
+        entry = JSON.parse(buffer.toString('utf-8'))
+      } catch {
+        return null
+      }
+      const event = entry &&
+          typeof entry === 'object' &&
+          (entry as { type?: unknown }).type === 'event'
+        ? (entry as { event?: unknown }).event
+        : entry
+      if (!isTraceEventRecordLike(event) || event.id !== locator.id) return null
+      events.push(event)
+    }
+    return events
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * Index-backed session trace: SQLite summary + shell calls + event records
+ * read by byte range. Never reads the full JSONL; returns null when the
+ * projection is unavailable so callers can fall back to the canonical read.
+ */
+async function readProjectedSessionTrace(
+  sessionId: string,
+  context = currentTraceScopeContext(),
+): Promise<TraceSession | null> {
+  const { target } = context
+  const normalizedSessionId = sanitizeTraceFileName(sessionId)
+  const filePath = getTraceFilePath(normalizedSessionId, context)
+  let stat: Stats
+  try {
+    stat = await fs.stat(filePath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return {
+        sessionId: normalizedSessionId,
+        summary: emptyTraceSummary(),
+        calls: [],
+        events: [],
+      }
+    }
+    throw error
+  }
+
+  const projection = await ensureTraceProjection(
+    normalizedSessionId,
+    filePath,
+    stat,
+    0,
+    target,
+  )
+  const index = getTraceIndex(target)
+  if (!projection || !index) return null
+  const projected = index.getSession(normalizedSessionId)
+  if (!projected) return null
+  const fingerprint = storedTraceFingerprint(projected)
+  if (!fingerprint) return null
+  if ((await detectTraceSourceChange(filePath, fingerprint)).kind !== 'unchanged') {
+    return null
+  }
+
+  const events = await readTraceEventRecords(filePath, projected.events)
+  if (!events) return null
+  // The file is append-only, so event ranges stayed valid; a rewrite between
+  // the projection check and the reads is caught here before serving shells.
+  if ((await detectTraceSourceChange(filePath, fingerprint)).kind !== 'unchanged') {
+    return null
+  }
+
+  return {
+    sessionId: normalizedSessionId,
+    summary: projected.summary,
+    calls: projected.calls.map((locator) =>
+      shellTraceCallFromLocator(normalizedSessionId, locator)
+    ),
+    events,
+  }
+}
+
+function scheduleTraceProjectionBackfill(
+  sessionId: string,
+  filePath: string,
+  stat: Stats,
+  target: TraceIndexTarget,
+): void {
+  const key = `${target.path}\0${sessionId}`
+  if (traceBackfillScheduled.has(key)) return
+  if (traceBackfillScheduled.size >= TRACE_BACKFILL_MAX_PENDING) return
+  traceBackfillScheduled.add(key)
+  traceBackfillQueue = traceBackfillQueue
+    .catch(() => {})
+    .then(async () => {
+      try {
+        await ensureTraceProjection(sessionId, filePath, stat, 0, target)
+      } catch {
+        // The list row already served an empty summary; the next poll retries.
+      } finally {
+        traceBackfillScheduled.delete(key)
+      }
+    })
 }
 
 function isTraceCallRecordLike(value: unknown): value is TraceCallRecord {

@@ -11,6 +11,7 @@ import {
   clearTraceCaptureStateForTests,
   createTraceCallId,
   createTraceBodySnapshot,
+  drainTraceCaptureForTests,
   getTraceCaptureDiagnosticsForTests,
   readResponseTraceSnapshot,
   setTraceAppendBeforeWriteHookForTests,
@@ -1337,7 +1338,7 @@ describe('session trace API', () => {
     expect(body.events).toEqual([])
   })
 
-  test('trims call body previews in the session trace list response without touching stored data', async () => {
+  test('serves the session trace overview from the index without rereading the JSONL', async () => {
     const recorded = await traceCaptureService.recordCall({
       sessionId: 'session-trim-api',
       source: 'anthropic',
@@ -1363,40 +1364,153 @@ describe('session trace API', () => {
         },
       },
     })
+    const stored = await traceCaptureService.getSessionTrace('session-trim-api')
+    expect(stored.calls[0].request.body.preview.length).toBeGreaterThan(2048)
 
+    clearTraceCaptureStateForTests()
     const req = new Request('http://localhost:3456/api/sessions/session-trim-api/trace')
     const res = await handleApiRequest(req, new URL(req.url))
     const body = await res.json() as {
+      summary: { apiCalls: number; totalInputTokens: number; totalOutputTokens: number }
       calls: Array<{
+        id: string
+        status?: string
         usage?: { inputTokens: number; outputTokens: number }
         request: {
           body: { preview: string; truncated: boolean; bytes: number; sha256: string }
           semantic?: unknown
         }
-        response?: { body: { preview: string; truncated: boolean; bytes: number; sha256: string } }
+        response?: { status: number; body: { preview: string; bytes: number } }
       }>
     }
 
     expect(res.status).toBe(200)
     expect(body.calls).toHaveLength(1)
-    expect(body.calls[0].request.body.preview.length).toBe(2048)
-    expect(body.calls[0].request.body.truncated).toBe(true)
-    expect(body.calls[0].response?.body.preview.length).toBe(2048)
-    expect(body.calls[0].response?.body.truncated).toBe(true)
-    expect(body.calls[0].usage).toEqual({ inputTokens: 10, outputTokens: 20 })
-    expect(body.calls[0].request.semantic).toBeUndefined()
-
-    const stored = await traceCaptureService.getSessionTrace('session-trim-api')
-    expect(stored.calls[0].request.semantic?.request.messages).toHaveLength(1)
-    expect(stored.calls[0].request.body.preview.length).toBeGreaterThan(2048)
-    expect(stored.calls[0].request.body.truncated).toBe(false)
-    expect(stored.calls[0].response?.body.preview.length).toBeGreaterThan(2048)
-    expect(stored.calls[0].response?.body.truncated).toBe(false)
+    // Shells carry identity, timing, status and body sizes — never the body
+    // itself. The detail pane fetches one full call at a time.
+    expect(body.calls[0].id).toBe(recorded!.id)
+    expect(body.calls[0].status).toBe('ok')
+    expect(body.calls[0].request.body.preview).toBe('')
     expect(body.calls[0].request.body.bytes).toBe(stored.calls[0].request.body.bytes)
-    expect(body.calls[0].request.body.sha256).toBe(stored.calls[0].request.body.sha256)
+    expect(body.calls[0].request.body.truncated).toBe(true)
+    expect(body.calls[0].request.semantic).toBeUndefined()
+    expect(body.calls[0].response?.status).toBe(200)
     expect(body.calls[0].response?.body.bytes).toBe(stored.calls[0].response?.body.bytes)
-    expect(body.calls[0].response?.body.sha256).toBe(stored.calls[0].response?.body.sha256)
-    expect(recorded).not.toBeNull()
+    expect(body.calls[0].usage).toEqual({ inputTokens: 10, outputTokens: 20 })
+    expect(body.summary).toMatchObject({
+      apiCalls: 1,
+      totalInputTokens: 10,
+      totalOutputTokens: 20,
+    })
+    expect(getTraceCaptureDiagnosticsForTests().fullJsonlBytesRead).toBe(0)
+  })
+
+  test('serves the session trace overview for a cold giant file with a one-time index rebuild', async () => {
+    const sessionId = 'session-cold-overview'
+    const traceDir = path.join(tmpDir, 'cc-haha', 'traces')
+    await fs.mkdir(traceDir, { recursive: true })
+    const callLine = JSON.stringify({
+      type: 'call',
+      record: {
+        id: 'cold-call',
+        sessionId,
+        source: 'proxy',
+        model: 'gpt-5.5',
+        status: 'ok',
+        startedAt: '2026-06-09T08:00:00.000Z',
+        completedAt: '2026-06-09T08:00:01.000Z',
+        durationMs: 1000,
+        request: {
+          method: 'POST',
+          url: 'https://api.example.test/v1/messages',
+          headers: {},
+          body: {
+            contentType: 'json',
+            bytes: 5000,
+            sha256: 'a'.repeat(64),
+            preview: 'x'.repeat(5000),
+            truncated: false,
+          },
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: {
+            contentType: 'json',
+            bytes: 3000,
+            sha256: 'b'.repeat(64),
+            preview: JSON.stringify({ usage: { input_tokens: 3, output_tokens: 4 } }),
+            truncated: false,
+          },
+        },
+      },
+    })
+    await fs.writeFile(path.join(traceDir, `${sessionId}.jsonl`), `${callLine}\n`)
+
+    const first = await traceCaptureService.getSessionTraceOverview(sessionId)
+    expect(first.calls).toHaveLength(1)
+    expect(first.calls[0].request.body.preview).toBe('')
+    expect(first.calls[0].request.body.bytes).toBe(5000)
+    expect(first.calls[0].response?.status).toBe(200)
+    expect(first.calls[0].usage).toEqual({ inputTokens: 3, outputTokens: 4 })
+    expect(first.summary).toMatchObject({ apiCalls: 1, totalInputTokens: 3 })
+
+    // The second read comes straight from the index.
+    clearTraceCaptureStateForTests()
+    const second = await traceCaptureService.getSessionTraceOverview(sessionId)
+    expect(second.calls[0].id).toBe('cold-call')
+    expect(second.summary.apiCalls).toBe(1)
+    expect(getTraceCaptureDiagnosticsForTests().fullJsonlBytesRead).toBe(0)
+  })
+
+  test('lists trace sessions from the index and backfills unindexed files in the background', async () => {
+    await traceCaptureService.recordCall({
+      sessionId: 'session-list-indexed',
+      source: 'proxy',
+      model: 'gpt-5.5',
+      startedAt: '2026-06-09T08:00:00.000Z',
+      completedAt: '2026-06-09T08:00:00.015Z',
+      durationMs: 15,
+      request: { body: { model: 'gpt-5.5' } },
+      response: { status: 200, body: { ok: true } },
+    })
+    // An unindexed JSONL: present on disk, absent from the index.
+    const traceDir = path.join(tmpDir, 'cc-haha', 'traces')
+    const coldSessionId = 'session-list-cold'
+    await fs.writeFile(
+      path.join(traceDir, `${coldSessionId}.jsonl`),
+      `${JSON.stringify({
+        type: 'call',
+        record: {
+          id: 'cold-list-call',
+          sessionId: coldSessionId,
+          source: 'proxy',
+          status: 'ok',
+          startedAt: '2026-06-09T08:00:00.000Z',
+          completedAt: '2026-06-09T08:00:01.000Z',
+          request: {
+            method: 'POST',
+            url: 'https://api.example.test/v1/messages',
+            headers: {},
+            body: { contentType: 'json', bytes: 12, sha256: 'c'.repeat(64), preview: '{}', truncated: false },
+          },
+        },
+      })}\n`,
+    )
+
+    clearTraceCaptureStateForTests()
+    const firstList = await traceCaptureService.listSessionTraces()
+    const indexedRow = firstList.traces.find(row => row.sessionId === 'session-list-indexed')
+    const coldRow = firstList.traces.find(row => row.sessionId === coldSessionId)
+    expect(indexedRow?.summary.apiCalls).toBe(1)
+    // The unindexed row is served immediately with an empty summary...
+    expect(coldRow?.summary.apiCalls).toBe(0)
+    // ...and the request path read no full JSONL for either row.
+    expect(getTraceCaptureDiagnosticsForTests().fullJsonlBytesRead).toBe(0)
+
+    await drainTraceCaptureForTests()
+    const secondList = await traceCaptureService.listSessionTraces()
+    expect(secondList.traces.find(row => row.sessionId === coldSessionId)?.summary.apiCalls).toBe(1)
   })
 
   test('returns the full untrimmed call record from the trace call detail endpoint', async () => {
@@ -1897,7 +2011,11 @@ describe('trace read cache', () => {
       'small',
     )
     await fs.writeFile(filePath, prefix)
-    expect((await traceCaptureService.listSessionTraces()).traces[0].summary.apiCalls).toBe(1)
+    // The list endpoint never projects on the request path; the detail
+    // overview does it synchronously.
+    expect((await traceCaptureService.getSessionTraceOverview(
+      'session-projection-external-append',
+    )).summary.apiCalls).toBe(1)
     clearTraceCaptureStateForTests()
 
     await fs.appendFile(filePath, appended)
@@ -1943,7 +2061,9 @@ describe('trace read cache', () => {
     expect(Buffer.byteLength(oldLine)).toBe(Buffer.byteLength(newLine))
 
     await fs.writeFile(filePath, prefix)
-    expect((await traceCaptureService.listSessionTraces()).traces[0].summary.apiCalls).toBe(1)
+    expect((await traceCaptureService.getSessionTraceOverview(
+      'session-projection-append-race',
+    )).summary.apiCalls).toBe(1)
     clearTraceCaptureStateForTests()
 
     await fs.appendFile(filePath, oldLine)
@@ -2051,16 +2171,12 @@ describe('trace read cache', () => {
 
     await fs.writeFile(filePath, original)
     await fs.utimes(filePath, fixedTime, fixedTime)
-    const initial = (await traceCaptureService.listSessionTraces({
-      sessionIds: [sessionId],
-    })).traces[0]!.summary.models
+    const initial = (await traceCaptureService.getSessionTraceOverview(sessionId)).summary.models
     await new Promise(resolve => setTimeout(resolve, 5))
     await fs.writeFile(filePath, rewritten)
     await fs.utimes(filePath, fixedTime, fixedTime)
 
-    const projected = (await traceCaptureService.listSessionTraces({
-      sessionIds: [sessionId],
-    })).traces[0]!.summary.models
+    const projected = (await traceCaptureService.getSessionTraceOverview(sessionId)).summary.models
     process.env.CC_HAHA_LOCAL_INDEX = 'off'
     const canonical = (await traceCaptureService.listSessionTraces({
       sessionIds: [sessionId],
@@ -2100,9 +2216,7 @@ describe('trace read cache', () => {
       await fs.utimes(filePath, fixedTime, fixedTime)
     })
 
-    const projected = (await traceCaptureService.listSessionTraces({
-      sessionIds: [sessionId],
-    })).traces[0]!.summary.models
+    const projected = (await traceCaptureService.getSessionTraceOverview(sessionId)).summary.models
     process.env.CC_HAHA_LOCAL_INDEX = 'off'
     const canonical = (await traceCaptureService.listSessionTraces({
       sessionIds: [sessionId],
@@ -2122,13 +2236,15 @@ describe('trace read cache', () => {
     expect(Buffer.byteLength(lineA)).toBe(Buffer.byteLength(lineB))
 
     await fs.writeFile(filePath, `${lineA}${buildTraceCallLine('call-ccc', 'session-projection-rewrite')}`)
-    const initial = await traceCaptureService.listSessionTraces()
-    expect(initial.traces[0].summary.apiCalls).toBe(2)
+    expect((await traceCaptureService.getSessionTraceOverview(
+      'session-projection-rewrite',
+    )).summary.apiCalls).toBe(2)
     const initialRevision = await traceCaptureService.getSessionTraceRevision('session-projection-rewrite')
 
     await fs.writeFile(filePath, lineB)
     const later = new Date('2026-06-09T08:01:00.000Z')
     await fs.utimes(filePath, later, later)
+    await traceCaptureService.getSessionTraceOverview('session-projection-rewrite')
     const rewritten = await traceCaptureService.listSessionTraces()
     const rewrittenRevision = await traceCaptureService.getSessionTraceRevision('session-projection-rewrite')
 
@@ -2146,10 +2262,16 @@ describe('trace read cache', () => {
     const lineB = buildTraceCallLine('call-tail-b', 'session-projection-tail')
 
     await fs.writeFile(filePath, `${lineA}{"type":"call"`)
-    expect((await traceCaptureService.listSessionTraces()).traces[0].summary.apiCalls).toBe(1)
+    expect((await traceCaptureService.getSessionTraceOverview(
+      'session-projection-tail',
+    )).summary.apiCalls).toBe(1)
     clearTraceCaptureStateForTests()
 
     await fs.appendFile(filePath, `\n${lineB}`)
+    // The list only schedules the projection; the serialized background queue
+    // runs it, and the next list serves it.
+    await traceCaptureService.listSessionTraces()
+    await drainTraceCaptureForTests()
     const afterAppend = await traceCaptureService.listSessionTraces()
     expect(afterAppend.traces[0].summary.apiCalls).toBe(2)
     const diagnostics = getTraceCaptureDiagnosticsForTests() as Record<string, number>
@@ -2159,7 +2281,7 @@ describe('trace read cache', () => {
     )
   })
 
-  test('falls back to canonical JSONL when the independent trace database is corrupt', async () => {
+  test('keeps the trace list cheap when the index is corrupt and still reads the canonical trace detail', async () => {
     await traceCaptureService.recordCall({
       id: 'call-corrupt-index',
       sessionId: 'session-corrupt-index',
@@ -2176,7 +2298,10 @@ describe('trace read cache', () => {
     const list = await traceCaptureService.listSessionTraces()
     const trace = await traceCaptureService.getSessionTrace('session-corrupt-index')
 
-    expect(list.traces[0].summary.apiCalls).toBe(1)
+    // A broken index must never push the list back into full JSONL reads; the
+    // row degrades to an empty summary until the backfill can rebuild. The
+    // per-session detail read stays canonical and keeps working.
+    expect(list.traces[0].summary.apiCalls).toBe(0)
     expect(trace.calls.map(call => call.id)).toEqual(['call-corrupt-index'])
   })
 
@@ -2249,8 +2374,10 @@ describe('trace read cache', () => {
     const duringCooldown = await traceCaptureService.listSessionTraces({
       sessionIds: ['session-busy-open'],
     })
-    expect(first.traces[0]?.summary.apiCalls).toBe(1)
-    expect(duringCooldown.traces[0]?.summary.apiCalls).toBe(1)
+    // With the index locked away, list rows degrade to empty summaries instead
+    // of falling back to full JSONL reads on the request path.
+    expect(first.traces[0]?.summary.apiCalls).toBe(0)
+    expect(duringCooldown.traces[0]?.summary.apiCalls).toBe(0)
     expect(elapsedMs).toBeLessThan(250)
 
     process.env.CC_HAHA_LOCAL_INDEX = 'off'
@@ -2298,20 +2425,23 @@ describe('trace read cache', () => {
       })}\n`,
     )
 
+    const fullReadsBefore = getTraceCaptureDiagnosticsForTests().fullJsonlBytesRead
     const fallback = await traceCaptureService.listSessionTraces({
       sessionIds: ['session-busy-operation'],
     })
     writer.exec('ROLLBACK')
     writer.close()
-    expect(fallback.traces[0]?.summary.apiCalls).toBe(2)
+    // The index is locked by the external writer: the row serves the last
+    // projected (stale) summary and the backfill fails into cooldown — the
+    // request path never falls back to a full JSONL read.
+    expect(fallback.traces[0]?.summary.apiCalls).toBe(1)
+    expect(getTraceCaptureDiagnosticsForTests().fullJsonlBytesRead).toBe(fullReadsBefore)
 
-    const duringCooldown = await traceCaptureService.listSessionTraces({
-      sessionIds: ['session-busy-operation'],
-    })
-    expect(duringCooldown.traces[0]?.summary.apiCalls).toBe(2)
     process.env.CC_HAHA_LOCAL_INDEX = 'off'
     await traceCaptureService.listSessionTraces({ sessionIds: ['session-busy-operation'] })
     process.env.CC_HAHA_LOCAL_INDEX = 'on'
+    await traceCaptureService.listSessionTraces({ sessionIds: ['session-busy-operation'] })
+    await drainTraceCaptureForTests()
     const recovered = await traceCaptureService.listSessionTraces({
       sessionIds: ['session-busy-operation'],
     })
@@ -2470,9 +2600,11 @@ describe('trace read cache', () => {
     for (const suffix of ['', '-wal', '-shm']) {
       await fs.rm(`${getTraceIndexDatabasePath()}${suffix}`, { force: true })
     }
-    const projected = (await traceCaptureService.listSessionTraces({
-      sessionIds: ['session-rebuild-lww-order'],
-    })).traces[0]!.summary
+    // The detail overview rebuilds synchronously; the list then serves the
+    // rebuilt projection.
+    const projected = (await traceCaptureService.getSessionTraceOverview(
+      'session-rebuild-lww-order',
+    )).summary
     process.env.CC_HAHA_LOCAL_INDEX = 'off'
     const canonical = (await traceCaptureService.listSessionTraces({
       sessionIds: ['session-rebuild-lww-order'],
