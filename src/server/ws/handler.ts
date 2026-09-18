@@ -1867,13 +1867,45 @@ async function requestStopBackgroundTask(
   }
 
   try {
-    await conversationService.requestControl(sessionId, {
+    const response = await conversationService.requestControl(sessionId, {
       subtype: 'stop_task',
       task_id: taskId,
     })
+    if (response?.reason === 'not_found') {
+      convergeEvictedBackgroundTaskStop(sessionId, taskId)
+    }
   } catch (error) {
     reportBackgroundTaskStopFailure(sessionId, ws, taskId, error)
   }
+}
+
+/**
+ * The CLI evicts a shell task the turn after it terminates (and a process
+ * restart clears the registry outright), so a Stop that lands late is
+ * answered with `not_found`. That is the stop's goal state, not a failure:
+ * drop the task from local tracking and send the terminal notification
+ * clients need to converge an entry they still show as running. Reporting
+ * `No task found with ID` here only re-arms the stop button for a task that
+ * can never be stopped again.
+ */
+function convergeEvictedBackgroundTaskStop(sessionId: string, taskId: string): void {
+  const tracked = activeNonAgentTasks.get(sessionId)?.get(taskId)
+  untrackCliBackgroundTask(sessionId, taskId)
+  const description = tracked?.description
+  sendToSession(sessionId, {
+    type: 'system_notification',
+    subtype: 'task_notification',
+    message: description ? `${description} stopped` : 'Background task stopped',
+    data: {
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: taskId,
+      tool_use_id: tracked?.toolUseId,
+      status: 'stopped',
+      summary: description ? `${description} stopped` : 'Background task stopped',
+      timestamp: new Date().toISOString(),
+    },
+  })
 }
 
 const AGENT_STOP_CONTROL_TIMEOUT_MS = 3_000

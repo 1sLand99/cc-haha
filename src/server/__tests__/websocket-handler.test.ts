@@ -25,6 +25,7 @@ import { computerUseApprovalService } from '../services/computerUseApprovalServi
 import { sessionService } from '../services/sessionService.js'
 import * as titleService from '../services/titleService.js'
 import { SettingsService } from '../services/settingsService.js'
+import { activeBackgroundTaskIds } from '../ws/agentTaskState.js'
 import * as teleportApi from '../../utils/teleport/api.js'
 import { resetSettingsCache, setSessionSettingsCache } from '../../utils/settings/settingsCache.js'
 
@@ -3860,6 +3861,77 @@ describe('WebSocket handler session isolation', () => {
       taskId: 'bash-task-1',
       message: 'Task is not running',
     })
+  })
+
+  it('still reports a failure when a legacy CLI rejects with the plain not_found message', async () => {
+    // Only the structured `{ reason: 'not_found' }` success converges. A CLI
+    // without the idempotent stop keeps the explicit failure path — the
+    // server never string-matches error text across the process boundary.
+    const sessionId = `stop-background-legacy-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+    spyOn(conversationService, 'requestControl')
+      .mockRejectedValue(new Error('No task found with ID: bash-task-1'))
+    handleWebSocket.open(ws)
+
+    handleWebSocket.message(ws, JSON.stringify({
+      type: 'stop_background_task',
+      taskId: 'bash-task-1',
+    }))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(ws.sent.map((payload) => JSON.parse(payload))).toContainEqual({
+      type: 'background_task_stop_failed',
+      taskId: 'bash-task-1',
+      message: 'No task found with ID: bash-task-1',
+    })
+  })
+
+  it('converges a stale running entry when the CLI reports the task already gone', async () => {
+    const sessionId = `stop-background-evicted-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+    let outputCallback: ((cliMsg: any) => void) | null = null
+    spyOn(conversationService, 'hasSession').mockReturnValue(true)
+    spyOn(conversationService, 'onOutput').mockImplementation((_sid, callback) => {
+      outputCallback = callback
+    })
+    const requestControl = spyOn(conversationService, 'requestControl')
+      .mockResolvedValue({ stopped: false, reason: 'not_found' })
+    handleWebSocket.open(ws)
+
+    // The client still shows the task as running from an earlier task_started.
+    outputCallback?.({
+      type: 'system',
+      subtype: 'task_started',
+      task_id: 'bash-evicted-1',
+      tool_use_id: 'bash-evicted-tool-1',
+      description: 'Watch the release build',
+      task_type: 'local_bash',
+    })
+    await flushMicrotasks()
+    expect(activeBackgroundTaskIds.get(sessionId)?.has('bash-evicted-1')).toBe(true)
+    ws.sent.length = 0
+
+    handleWebSocket.message(ws, JSON.stringify({
+      type: 'stop_background_task',
+      taskId: 'bash-evicted-1',
+    }))
+    await flushMicrotasks()
+
+    const sent = ws.sent.map((payload) => JSON.parse(payload))
+    expect(sent.some((payload) => payload.type === 'background_task_stop_failed')).toBe(false)
+    expect(sent).toContainEqual(expect.objectContaining({
+      type: 'system_notification',
+      subtype: 'task_notification',
+      data: expect.objectContaining({
+        task_id: 'bash-evicted-1',
+        tool_use_id: 'bash-evicted-tool-1',
+        status: 'stopped',
+      }),
+    }))
+    // The task is untracked server-side, so reconnect snapshots no longer
+    // list it as active and the terminal state survives a refresh.
+    expect(activeBackgroundTaskIds.get(sessionId)?.has('bash-evicted-1') ?? false).toBe(false)
   })
 
   it('rejects malformed background task ids without throwing from the async handler', async () => {
