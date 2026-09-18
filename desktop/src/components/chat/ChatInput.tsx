@@ -65,7 +65,7 @@ import {
   type ComposerMention,
 } from '../../lib/composerMentions'
 import type { PermissionMode } from '../../types/settings'
-import { getSessionWorkspaceState } from '../../lib/sessionWorkspace'
+import { getSessionWorkspaceState, getSessionSeedWorkDir } from '../../lib/sessionWorkspace'
 import { hasRunningSubagentTasks } from '../../lib/backgroundTasks'
 
 type GitInfo = SessionGitInfo
@@ -533,7 +533,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
 
   useEffect(() => {
     if (!activeTabId || !showLaunchControls) return
-    const nextWorkDir = activeSession?.workDir || gitInfo?.workDir || ''
+    const nextWorkDir = getSessionSeedWorkDir(activeSession) || gitInfo?.workDir || ''
     const chatStore = useChatStore.getState()
     const current = chatStore.sessions[activeTabId]?.repositoryLaunchDraft
     if (current?.workDir === nextWorkDir) return
@@ -543,7 +543,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
       useWorktree: false,
     })
     setLaunchReady(!nextWorkDir)
-  }, [activeSession?.workDir, activeTabId, gitInfo?.workDir, showLaunchControls])
+  }, [activeSession?.workDir, activeSession?.projectRoot, activeSession?.workspaceState, activeTabId, gitInfo?.workDir, showLaunchControls])
 
   useDismissable({
     open: plusMenuOpen,
