@@ -548,6 +548,17 @@ describe('EmptySession', () => {
     expect(getComposerText()).toBe('')
   })
 
+  // Same guard as the ChatInput hero test: this flex row is what the new-tab
+  // page renders, and an unbreakable run (long URL, hash) would otherwise
+  // grow the composer past the panel border.
+  it('keeps min-w-0 on the composer wrapper so unbreakable runs cannot widen it', () => {
+    render(<EmptySession />)
+
+    const wrapper = getComposerElement().parentElement
+    expect(wrapper).toHaveClass('flex-1')
+    expect(wrapper).toHaveClass('min-w-0')
+  })
+
   it('shows /save-workflow help without creating or sending a session', async () => {
     useSettingsStore.setState({ chatSendBehavior: 'enter' })
 

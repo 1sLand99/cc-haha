@@ -2363,6 +2363,23 @@ describe('ChatInput file mentions', () => {
     expect(screen.getByTestId('chat-input-toolbar')).toHaveClass('-mx-3')
   })
 
+  // The hero row is `flex`, and a paragraph holding an unbreakable run (a
+  // long URL, a hash) has a huge min-content size that `overflow-wrap:
+  // break-word` does not shrink. Without `min-w-0` the flex item refuses to
+  // shrink below it, so the whole editor grows past the panel's right border
+  // and every line stops wrapping at the panel edge.
+  it('keeps min-w-0 on the hero composer wrapper so unbreakable runs cannot widen it', async () => {
+    render(<ChatInput variant="hero" />)
+
+    await waitFor(() => {
+      expect(mocks.getGitInfo).toHaveBeenCalledWith(sessionId)
+    })
+
+    const wrapper = getComposerElement().parentElement
+    expect(wrapper).toHaveClass('flex-1')
+    expect(wrapper).toHaveClass('min-w-0')
+  })
+
   it('uses Shift+Enter for a newline when Enter is the configured send shortcut', async () => {
     useSettingsStore.setState({
       chatSendBehavior: 'enter',

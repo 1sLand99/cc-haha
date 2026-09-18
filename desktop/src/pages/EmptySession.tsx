@@ -799,7 +799,9 @@ export function EmptySession() {
                   onKeyDown={handleComposerKeyDown}
                   onPaste={handleComposerPaste}
                   placeholder={t('empty.placeholder')}
-                  className="flex-1"
+                  // `min-w-0`: see ChatInput — an unbreakable long run (URL,
+                  // hash) otherwise grows this flex item past the panel.
+                  className="flex-1 min-w-0"
                   editorClassName={`overflow-y-auto leading-relaxed text-[var(--color-text-primary)] ${
                     isMobileComposer ? 'max-h-[132px] min-h-[72px] py-1.5 text-base' : 'max-h-[200px] py-2'
                   }`}

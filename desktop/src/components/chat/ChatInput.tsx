@@ -1383,7 +1383,11 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                 onCompositionEnd={() => { composingRef.current = false }}
                 placeholder={composerPlaceholder}
                 disabled={composerDisabled}
-                className="flex-1"
+                // `min-w-0`: a paragraph holding an unbreakable run (a long URL,
+                // a hash) has a huge min-content size, and `overflow-wrap:
+                // break-word` does not shrink it. Without this the flex item
+                // refuses to shrink and the whole editor paints past the panel.
+                className="flex-1 min-w-0"
                 editorClassName="max-h-[200px] overflow-y-auto py-2 leading-relaxed text-[var(--color-text-primary)]"
                 aria={{
                   role: isSlashMenuVisible || isReferenceMenuVisible ? 'combobox' : 'textbox',
