@@ -1501,6 +1501,8 @@ type RecentProjectEntry = {
 // In-memory cache for recent projects (TTL: 30s)
 let recentProjectsCache: {
   scope: string
+  /** How many sessions were scanned to build `projects` — see getRecentProjects. */
+  scanLimit: number
   projects: RecentProjectEntry[]
   timestamp: number
 } | null = null
@@ -1521,12 +1523,18 @@ function isDesktopWorktreeBranchName(branch: string | null): boolean {
 
 async function getRecentProjects(url: URL): Promise<Response> {
   const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '10', 10) || 10, 1), 500)
-  const sessionScanLimit = Math.min(Math.max(limit * 16, 100), 500)
+  const scanParam = parseInt(url.searchParams.get('scan') || '', 10)
+  const sessionScanLimit = Number.isFinite(scanParam)
+    ? Math.min(Math.max(scanParam, 100), 5000)
+    : Math.min(Math.max(limit * 16, 100), 500)
   const scope = path.resolve(getClaudeConfigHomeDir())
 
-  // Return cached response if fresh
+  // Return cached response if fresh. The cache is only valid for requests whose
+  // scan depth it already covers — a shallow (small-limit) scan must not serve
+  // a deeper one, or older projects would be silently truncated away.
   if (
     recentProjectsCache?.scope === scope &&
+    recentProjectsCache.scanLimit >= sessionScanLimit &&
     Date.now() - recentProjectsCache.timestamp < RECENT_PROJECTS_CACHE_TTL
   ) {
     return Response.json({ projects: recentProjectsCache.projects.slice(0, limit) })
@@ -1635,6 +1643,6 @@ async function getRecentProjects(url: URL): Promise<Response> {
   // Sort by most recent
   projects.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))
 
-  recentProjectsCache = { scope, projects, timestamp: Date.now() }
+  recentProjectsCache = { scope, scanLimit: sessionScanLimit, projects, timestamp: Date.now() }
   return Response.json({ projects: projects.slice(0, limit) })
 }

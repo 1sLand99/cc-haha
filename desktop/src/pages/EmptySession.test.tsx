@@ -121,6 +121,12 @@ vi.mock('@/components/composite/DirectoryPicker', () => ({
   ),
 }))
 
+// The launch controls' project editor is out of scope here; its folder field
+// would pull the mocked picker module back in.
+vi.mock('@/components/layout/ProjectEditorModal', () => ({
+  ProjectEditorModal: () => null,
+}))
+
 vi.mock('../components/controls/PermissionModeSelector', () => ({
   PermissionModeSelector: ({ compact, value, onChange }: { compact?: boolean; value?: string; onChange?: (mode: string) => void }) => (
     <button

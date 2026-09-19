@@ -453,8 +453,11 @@ export const sessionsApi = {
     return api.patch<{ ok: true }>(`/api/sessions/${sessionId}`, { title })
   },
 
-  getRecentProjects(limit?: number) {
-    const query = typeof limit === 'number' ? `?limit=${limit}` : ''
+  getRecentProjects(limit?: number, scan?: number) {
+    const params = new URLSearchParams()
+    if (typeof limit === 'number') params.set('limit', String(limit))
+    if (typeof scan === 'number') params.set('scan', String(scan))
+    const query = params.size > 0 ? `?${params.toString()}` : ''
     return api.get<{ projects: RecentProject[] }>(`/api/sessions/recent-projects${query}`)
   },
 

@@ -2937,6 +2937,8 @@ export const zh: Record<TranslationKey, string> = {
   'dirPicker.chooseProjectFolder': '选择项目文件夹',
   'dirPicker.useThisFolder': '使用此文件夹',
   'dirPicker.noSubdirs': '无子目录',
+  'dirPicker.searchProjects': '搜索项目…',
+  'dirPicker.noMatches': '没有匹配的项目',
 
   // ─── File Search ──────────────────────────────────────
   'fileSearch.searching': '搜索中...',

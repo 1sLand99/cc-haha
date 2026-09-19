@@ -3941,6 +3941,50 @@ describe('Sessions API', () => {
     expect(secondRecent.projects.some(project => project.realPath === firstRealWorkDir)).toBe(false)
   })
 
+  it('GET /api/sessions/recent-projects should not serve a deep scan from a shallow cached response', async () => {
+    // The response cache lives for 30s. If a small-limit request (shallow
+    // session scan) is cached and a deeper request then hits that entry, the
+    // deep response would silently drop every project beyond the shallow scan.
+    const oldWorkDir = path.join(tmpDir, 'recent-scan-depth', 'old-project')
+    const busyWorkDir = path.join(tmpDir, 'recent-scan-depth', 'busy-project')
+    await fs.mkdir(oldWorkDir, { recursive: true })
+    await fs.mkdir(busyWorkDir, { recursive: true })
+    const oldRealPath = await fs.realpath(oldWorkDir)
+
+    const oldSessionId = 'd1000000-bbbb-cccc-dddd-eeeeeeeeeeee'
+    await writeSessionFile('-tmp-recent-scan-depth-old', oldSessionId, [
+      { ...makeUserEntry('Old project session'), cwd: oldWorkDir, sessionId: oldSessionId },
+    ])
+
+    // `modifiedAt` comes from the newest entry timestamp in the transcript, so
+    // ordering is pinned by content, not file mtime. A default limit=10 request
+    // scans min(max(10*16,100),500) = 160 sessions; 170 newer sessions push the
+    // old project past that horizon.
+    const busyBase = Date.parse('2026-06-01T00:00:00.000Z')
+    for (let i = 0; i < 170; i++) {
+      const sessionId = `d2000000-bbbb-cccc-dddd-${String(i).padStart(12, '0')}`
+      await writeSessionFile('-tmp-recent-scan-depth-busy', sessionId, [
+        {
+          ...makeUserEntry(`Busy session ${i}`),
+          timestamp: new Date(busyBase + i * 60_000).toISOString(),
+          cwd: busyWorkDir,
+          sessionId,
+        },
+      ])
+    }
+
+    const shallowRes = await fetch(`${baseUrl}/api/sessions/recent-projects?limit=10`)
+    expect(shallowRes.status).toBe(200)
+    const shallow = await shallowRes.json() as { projects: Array<{ realPath: string }> }
+    expect(shallow.projects.some((project) => project.realPath === oldRealPath)).toBe(false)
+
+    // Within the cache TTL this used to return the same shallow list.
+    const deepRes = await fetch(`${baseUrl}/api/sessions/recent-projects?limit=500&scan=5000`)
+    expect(deepRes.status).toBe(200)
+    const deep = await deepRes.json() as { projects: Array<{ realPath: string }> }
+    expect(deep.projects.some((project) => project.realPath === oldRealPath)).toBe(true)
+  })
+
   it('GET /api/sessions/:id should return session detail', async () => {
     // Create a session file
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'

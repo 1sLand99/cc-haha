@@ -2936,6 +2936,8 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'dirPicker.chooseProjectFolder': 'Choose project folder',
   'dirPicker.useThisFolder': 'Use this folder',
   'dirPicker.noSubdirs': 'No subdirectories',
+  'dirPicker.searchProjects': 'Search projects…',
+  'dirPicker.noMatches': 'No matching projects',
 
   // ─── File Search ──────────────────────────────────────
   'fileSearch.searching': 'Searching...',

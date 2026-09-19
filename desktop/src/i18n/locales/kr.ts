@@ -2939,6 +2939,8 @@ export const kr: Record<TranslationKey, string> = {
   'dirPicker.chooseProjectFolder': '프로젝트 폴더 선택',
   'dirPicker.useThisFolder': '이 폴더 사용',
   'dirPicker.noSubdirs': '하위 디렉터리가 없습니다',
+  'dirPicker.searchProjects': '프로젝트 검색…',
+  'dirPicker.noMatches': '일치하는 프로젝트가 없습니다',
 
   // ─── File Search ──────────────────────────────────────
   'fileSearch.searching': '검색 중...',

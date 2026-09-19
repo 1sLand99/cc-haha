@@ -2939,6 +2939,8 @@ export const jp: Record<TranslationKey, string> = {
   'dirPicker.chooseProjectFolder': 'プロジェクトフォルダを選択',
   'dirPicker.useThisFolder': 'このフォルダを使用',
   'dirPicker.noSubdirs': 'サブディレクトリがありません',
+  'dirPicker.searchProjects': 'プロジェクトを検索…',
+  'dirPicker.noMatches': '一致するプロジェクトがありません',
 
   // ─── File Search ──────────────────────────────────────
   'fileSearch.searching': '検索中...',

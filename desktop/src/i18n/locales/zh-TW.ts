@@ -2938,6 +2938,8 @@ export const zh: Record<TranslationKey, string> = {
   'dirPicker.chooseProjectFolder': '選擇專案資料夾',
   'dirPicker.useThisFolder': '使用此資料夾',
   'dirPicker.noSubdirs': '無子目錄',
+  'dirPicker.searchProjects': '搜尋專案…',
+  'dirPicker.noMatches': '沒有符合的專案',
 
   // ─── File Search ──────────────────────────────────────
   'fileSearch.searching': '搜尋中...',
