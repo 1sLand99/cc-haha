@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boundActivityText, boundChatHistory, CHAT_HISTORY_MAX_ROWS } from './chatHistoryBudget'
+import { boundActivityText, boundChatHistory, previewHistoryPage, CHAT_HISTORY_MAX_ROWS } from './chatHistoryBudget'
 import type { UIMessage } from '../types/chat'
 
 function text(id: number, content = 'message'): UIMessage {
@@ -7,6 +7,16 @@ function text(id: number, content = 'message'): UIMessage {
 }
 
 describe('chat history retention', () => {
+  it('uses spare page space for ordinary replies while bounding an oversized tool body', () => {
+    const normal = Array.from({ length: 100 }, (_, index) => text(index, 'A complete readable response. '.repeat(20)))
+    const huge = text(100, 'x'.repeat(2_000_000))
+    const result = previewHistoryPage([...normal, huge], 256 * 1024)
+    expect(result).toHaveLength(101)
+    for (let index = 0; index < normal.length; index++) expect(result[index]).toBe(normal[index])
+    expect(result.at(-1)).toMatchObject({ id: '100' })
+    expect(JSON.stringify(result).length * 2).toBeLessThan(256 * 1024)
+  })
+
   it('bounds many small rows and keeps the recent window', () => {
     const result = boundChatHistory(Array.from({ length: 2000 }, (_, index) => text(index)))
     expect(result.messages).toHaveLength(CHAT_HISTORY_MAX_ROWS)

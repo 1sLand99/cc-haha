@@ -1,15 +1,20 @@
+import { createHash } from 'node:crypto'
 import { open } from 'node:fs/promises'
 import { ApiError } from '../middleware/errorHandler.js'
 
-export const HISTORY_SCAN_BYTES = 4 * 1024 * 1024
+export const HISTORY_SCAN_BYTES = 16 * 1024 * 1024
+export const HISTORY_SEMANTIC_RECORD_BYTES = 8 * 1024 * 1024
 export const HISTORY_RECORD_BYTES = 1024 * 1024
-export const HISTORY_PAGE_BYTES = 1536 * 1024
-export const HISTORY_PAGE_RECORDS = 100
+export const HISTORY_PAGE_BYTES = 256 * 1024
+export const HISTORY_PAGE_RECORDS = 200
+export const HISTORY_PAGE_ROWS = 500
 
-type Cursor = { version: 1; dev: string; ino: string; size: number; mtime: string; offset: number; skipping: boolean }
+type Cursor = { version: 1; dev: string; ino: string; size: number; mtime: string; offset: number; skipping: boolean; direction?: 'older' | 'newer'; fingerprints?: { prefix: string; tail: string; boundary: string } }
 export type HistoryPageInfo = {
+  previousCursor?: string | null
   nextCursor: string | null
   hasMore: boolean
+  contentTruncated?: boolean
   historyComplete: boolean
   sourceVersion: string
   scannedBytes: number
@@ -66,9 +71,43 @@ function decodeCursor(value: string): Cursor {
     if (value.length > 2048) throw new Error('long cursor')
     const cursor = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Cursor
     if (cursor.version !== 1 || typeof cursor.dev !== 'string' || typeof cursor.ino !== 'string' || typeof cursor.mtime !== 'string' ||
-      !Number.isSafeInteger(cursor.size) || cursor.size < 0 || !Number.isSafeInteger(cursor.offset) || cursor.offset < 0 || cursor.offset > cursor.size || typeof cursor.skipping !== 'boolean') throw new Error('invalid cursor')
+      !Number.isSafeInteger(cursor.size) || cursor.size < 0 || !Number.isSafeInteger(cursor.offset) || cursor.offset < 0 || cursor.offset > cursor.size || typeof cursor.skipping !== 'boolean' || (cursor.direction !== undefined && cursor.direction !== 'older' && cursor.direction !== 'newer')) throw new Error('invalid cursor')
+    if (cursor.fingerprints && !['prefix', 'tail', 'boundary'].every(key => /^[a-f0-9]{64}$/.test((cursor.fingerprints as Record<string, string>)[key] ?? ''))) throw new Error('invalid cursor fingerprints')
     return cursor
   } catch { throw ApiError.badRequest('Invalid history cursor') }
+}
+
+/** Produce a display preview without dropping a message's identity. Durable
+ * replay and semantic state reducers always receive the original record. */
+function displayPreview(entry: Record<string, unknown>): Record<string, unknown> {
+  let truncated = false
+  let remaining = 48 * 1024
+  let nodes = 2048
+  const preview = (value: unknown, depth: number): unknown => {
+    if (typeof value === 'string') {
+      const limit = Math.max(0, Math.min(16 * 1024, remaining))
+      remaining -= Math.min(value.length, limit)
+      if (value.length > limit) { truncated = true; return value.slice(0, limit) + '\n… [truncated preview]' }
+      return value
+    }
+    if (!value || typeof value !== 'object') return value
+    if (--nodes < 0) { truncated = true; return '[truncated preview]' }
+    if (depth > 12) { truncated = true; return '[truncated preview]' }
+    if (Array.isArray(value)) {
+      if (value.length > 256) truncated = true
+      return value.slice(0, 256).map(item => preview(item, depth + 1))
+    }
+    const pairs = Object.entries(value)
+    if (pairs.length > 256) truncated = true
+    return Object.fromEntries(pairs.slice(0, 256).map(([key, child]) => [key,
+      ['id', 'type', 'role', 'name', 'tool_use_id', 'agentId', 'backgroundTaskId', 'background_task_id'].includes(key) && typeof child === 'string' && child.length <= 4096
+        ? child : preview(child, depth + 1)]))
+  }
+  // Structural ids and usage are independent of the potentially huge body.
+  const message = entry.message as Record<string, unknown> | undefined
+  const result = { ...entry, ...(entry.content !== undefined ? { content: preview(entry.content, 0) } : {}), ...(message ? { message: { ...message, content: preview(message.content, 0) } } : {}),
+    ...(entry.toolUseResult !== undefined ? { toolUseResult: preview(entry.toolUseResult, 0) } : {}) }
+  return truncated ? { ...result, bodyTruncated: true } : result
 }
 
 export async function readBoundedHistoryPage(filePath: string, options: { cursor?: string; limit?: number; signal?: AbortSignal } = {}): Promise<{ entries: BoundedHistoryEntry[]; page: HistoryPageInfo }> {
@@ -80,79 +119,153 @@ export async function readBoundedHistoryPage(filePath: string, options: { cursor
       const stat = await handle.stat({ bigint: true })
       const current = { dev: String(stat.dev), ino: String(stat.ino), size: Number(stat.size), mtime: String(stat.mtimeNs) }
       const cursor: Cursor = options.cursor ? decodeCursor(options.cursor) : { version: 1, ...current, offset: current.size, skipping: false }
-      if (cursor.dev !== current.dev || cursor.ino !== current.ino || current.size < cursor.size || (current.size === cursor.size && current.mtime !== cursor.mtime)) {
-        throw new ApiError(409, 'Session history changed; reload the newest page', 'HISTORY_CHANGED')
+      if (cursor.dev !== current.dev || cursor.ino !== current.ino || current.size < cursor.size || (current.size === cursor.size && current.mtime !== cursor.mtime)) throw new ApiError(409, 'Session history changed; reload the newest page', 'HISTORY_CHANGED')
+      let scannedBytes = 0
+      // Hash fixed-size anchors, never the whole transcript. Anchors include the
+      // original EOF and the requested boundary so truncate/regrow cannot be
+      // silently accepted merely because inode is unchanged and size increased.
+      const fingerprint = async (start: number): Promise<string> => {
+        const bytes = Buffer.alloc(Math.min(4096, cursor.size - start))
+        let read = 0
+        while (read < bytes.length) {
+          aborted(options.signal)
+          const part = await handle.read(bytes, read, bytes.length - read, start + read)
+          if (!part.bytesRead) throw new ApiError(409, 'Session history changed during validation', 'HISTORY_CHANGED')
+          read += part.bytesRead
+        }
+        scannedBytes += read
+        return createHash('sha256').update(bytes).digest('hex')
       }
+      const sourceFingerprints = async () => ({ prefix: await fingerprint(0), tail: await fingerprint(Math.max(0, cursor.size - 4096)) })
+      const boundaryFingerprint = (offset: number) => fingerprint(Math.max(0, Math.min(offset - 2048, cursor.size - 4096)))
+      if (!cursor.fingerprints && options.cursor && current.size > cursor.size) throw new ApiError(409, 'Legacy history cursor cannot validate append; reload the newest page', 'HISTORY_CHANGED')
+      const sourceAnchors = await sourceFingerprints()
+      if (cursor.fingerprints && (cursor.fingerprints.prefix !== sourceAnchors.prefix || cursor.fingerprints.tail !== sourceAnchors.tail || cursor.fingerprints.boundary !== await boundaryFingerprint(cursor.offset))) throw new ApiError(409, 'Session history was rewritten; reload the newest page', 'HISTORY_CHANGED')
+      const newer = cursor.direction === 'newer'
       const sourceVersion = `${cursor.dev}:${cursor.ino}:${cursor.size}:${cursor.mtime}`
-      const length = Math.min(HISTORY_SCAN_BYTES, cursor.offset)
-      const start = cursor.offset - length
-      const buffer = Buffer.allocUnsafe(length)
-      let read = 0
-      while (read < length) {
-        aborted(options.signal)
-        const result = await handle.read(buffer, read, length - read, start + read)
-        if (!result.bytesRead) throw new ApiError(409, 'Session history changed during read', 'HISTORY_CHANGED')
-        read += result.bytesRead
-      }
-      const limit = Math.max(1, Math.min(HISTORY_PAGE_RECORDS, Math.floor(options.limit ?? HISTORY_PAGE_RECORDS)))
-      const entries: BoundedHistoryEntry[] = []
-      let position = length
-      let outputBytes = 0
+      let position = cursor.offset
+      let buffer = Buffer.alloc(0)
+      let bufferStart = -1
+      let bufferEnd = -1
       let skipping = cursor.skipping
       let omitted = 0
-      while (position > 0 && entries.length < limit) {
+      let outputBytes = 0
+      let renderedRows = 0
+      const entries: BoundedHistoryEntry[] = []
+      const limit = Math.max(1, Math.min(HISTORY_PAGE_RECORDS, Math.floor(options.limit ?? HISTORY_PAGE_RECORDS)))
+      const load = async (): Promise<boolean> => {
+        // Reserve enough I/O for post-read source anchors and both outgoing
+        // boundary hashes; validation is part of the same request byte budget.
+        const capacity = Math.min(64 * 1024, HISTORY_SCAN_BYTES - 64 * 1024 - scannedBytes)
+        if (capacity <= 0) return false
+        const start = newer ? position : Math.max(0, position - capacity)
+        const end = newer ? Math.min(cursor.size, position + capacity) : position
+        if (end <= start) return false
+        buffer = Buffer.allocUnsafe(end - start)
+        let read = 0
+        while (read < buffer.length) {
+          aborted(options.signal)
+          const part = await handle.read(buffer, read, buffer.length - read, start + read)
+          if (!part.bytesRead) throw new ApiError(409, 'History changed during read', 'HISTORY_CHANGED')
+          read += part.bytesRead
+        }
+        scannedBytes += read
+        bufferStart = start; bufferEnd = end
+        return true
+      }
+      while ((newer ? position < cursor.size : position > 0) && entries.length < limit) {
         aborted(options.signal)
-        const lineEnd = buffer[position - 1] === 10 ? position - 1 : position
-        const newline = buffer.lastIndexOf(10, lineEnd - 1)
-        const lineStart = newline + 1
-        const lineLength = lineEnd - lineStart
-        if (newline < 0 && start > 0) {
-          // Retry a small boundary-straddling record on the next page. A record
-          // spanning the whole scan budget is skipped without ever assembling it.
-          if (!skipping && lineLength <= HISTORY_RECORD_BYTES && entries.length > 0) break
-          if (!skipping) omitted++
-          skipping = true
-          position = 0
+        const boundary = position
+        let parts: Buffer[] = []
+        let bytes = 0
+        let complete = false
+        let oversized = skipping
+        let end = position
+        let start = position
+        let first = true
+        while (!complete) {
+          if ((!buffer.length || (newer ? position >= bufferEnd : position <= bufferStart)) && !await load()) break
+          if (newer) {
+            const local = position - bufferStart
+            const newline = buffer.indexOf(10, local)
+            const stop = newline < 0 ? buffer.length : newline
+            const part = buffer.subarray(local, stop)
+            bytes += part.length
+            if (!oversized && bytes <= HISTORY_SEMANTIC_RECORD_BYTES) parts.push(part)
+            else if (!oversized) { oversized = true; parts = [] }
+            position = bufferStart + stop + (newline < 0 ? 0 : 1)
+            end = bufferStart + stop
+            complete = newline >= 0 || position === cursor.size
+          } else {
+            let local = position - bufferStart
+            if (first && local > 0 && buffer[local - 1] === 10) { local--; position--; end-- }
+            const newline = local > 0 ? buffer.lastIndexOf(10, local - 1) : -1
+            const stop = newline + 1
+            const part = buffer.subarray(stop, local)
+            bytes += part.length
+            if (!oversized && bytes <= HISTORY_SEMANTIC_RECORD_BYTES) parts.push(part)
+            else if (!oversized) { oversized = true; parts = [] }
+            position = bufferStart + stop
+            start = position
+            complete = newline >= 0 || position === 0
+          }
+          first = false
+        }
+        if (!complete) {
+          if (oversized) { if (!skipping) omitted++; skipping = true }
+          else position = boundary
           break
         }
-        if (skipping) {
-          skipping = false
-          position = lineStart
-          continue
+        if (oversized) { if (!skipping) omitted++; skipping = false; continue }
+        if (!bytes) continue
+        const raw = parts.length === 1 ? parts[0]! : Buffer.concat(newer ? parts : parts.reverse(), bytes)
+        let entry: Record<string, unknown>
+        try { entry = JSON.parse(raw.toString('utf8')) } catch { omitted++; continue }
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+        entry = displayPreview(entry)
+        let previewBytes = Buffer.byteLength(JSON.stringify(entry))
+        if (previewBytes > HISTORY_PAGE_BYTES) {
+          // Even an unusually broad structured body keeps its transcript row.
+          // The scalar envelope is enough to display an honest preview marker.
+          const message = entry.message as Record<string, unknown> | undefined
+          entry = { type: entry.type, uuid: entry.uuid, timestamp: entry.timestamp, parentUuid: entry.parentUuid,
+            parent_tool_use_id: entry.parent_tool_use_id, isSidechain: entry.isSidechain, bodyTruncated: true,
+            ...(message ? { message: { role: message.role, content: '[Message body exceeds preview budget]' } } : { content: '[Message body exceeds preview budget]' }) }
+          previewBytes = Buffer.byteLength(JSON.stringify(entry))
+          if (previewBytes > HISTORY_PAGE_BYTES) { omitted++; continue }
         }
-        if (lineLength > HISTORY_RECORD_BYTES) {
-          omitted++
-          position = lineStart
-          continue
-        }
-        if (lineLength && outputBytes + lineLength > HISTORY_PAGE_BYTES && entries.length) break
-        position = lineStart
-        if (!lineLength) continue
-        try {
-          const entry = JSON.parse(buffer.subarray(lineStart, lineEnd).toString('utf8'))
-          if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
-            entries.push({ entry, byteStart: start + lineStart, byteEnd: start + lineEnd })
-            outputBytes += lineLength
-          }
-        } catch { omitted++ }
-        // Each individual parse has a byte ceiling; also yield between records
-        // so a large page cannot monopolize the shared server event loop.
+        const content = (entry.message as { content?: unknown } | undefined)?.content
+        // Each assistant block/tool result may become a separate UI row. Stop
+        // before the complete record instead of clipping rows behind a cursor.
+        const rowCost = Array.isArray(content) ? Math.max(1, content.length) : 1
+        if ((outputBytes + previewBytes > HISTORY_PAGE_BYTES || renderedRows + rowCost > HISTORY_PAGE_ROWS) && entries.length) { position = boundary; break }
+        renderedRows += rowCost
+        entries.push({ entry, byteStart: newer ? boundary : start, byteEnd: end })
+        outputBytes += previewBytes
         await new Promise<void>(resolve => setImmediate(resolve))
       }
-      const offset = start + position
       const after = await handle.stat({ bigint: true })
       if (after.ino !== stat.ino || after.size < stat.size || (after.size === stat.size && after.mtimeNs !== stat.mtimeNs)) throw new ApiError(409, 'Session history changed during read', 'HISTORY_CHANGED')
-      const nextCursor = offset > 0 ? Buffer.from(JSON.stringify({ ...cursor, offset, skipping })).toString('base64url') : null
-      return {
-        entries: entries.reverse(),
-        page: { nextCursor, hasMore: offset > 0, historyComplete: !options.cursor && offset === 0 && omitted === 0, sourceVersion, scannedBytes: read, omittedOversizedEntries: omitted },
-      }
+      const lower = newer ? cursor.offset : position
+      const upper = newer ? position : cursor.offset
+      const afterAnchors = await sourceFingerprints()
+      if (sourceAnchors.prefix !== afterAnchors.prefix || sourceAnchors.tail !== afterAnchors.tail) throw new ApiError(409, 'Session history was rewritten during read', 'HISTORY_CHANGED')
+      const encode = async (offset: number, direction: 'older' | 'newer', continuation = false) => Buffer.from(JSON.stringify({ ...cursor, offset, direction, skipping: continuation, fingerprints: { ...sourceAnchors, boundary: await boundaryFingerprint(offset) } })).toString('base64url')
+      const nextCursor = lower > 0 ? await encode(lower, 'older', !newer && skipping) : null
+      const previousCursor = upper < cursor.size ? await encode(upper, 'newer', newer && skipping) : null
+      const contentTruncated = entries.some(item => item.entry.bodyTruncated === true)
+      return { entries: newer ? entries : entries.reverse(), page: {
+        nextCursor, previousCursor,
+        hasMore: lower > 0, historyComplete: lower === 0 && upper === cursor.size && omitted === 0 && !contentTruncated,
+        ...(contentTruncated ? { contentTruncated: true } : {}),
+        sourceVersion, scannedBytes, omittedOversizedEntries: omitted,
+      } }
     } finally { await handle.close() }
   })
 }
 
 /** Forward reducer source: never retain an unbounded JSONL line or source file. */
-export async function streamBoundedHistory(filePath: string, onEntry: (entry: Record<string, unknown>, completeLine: boolean, byteStart: number) => void, signal?: AbortSignal, options: { startOffset?: number; endOffset?: number; onSkipped?: () => void } = {}): Promise<{ sourceVersion: string; omittedRecords: number; oversizedRecords: number; scannedBytes: number; nextOffset: number }> {
+export async function streamBoundedHistory(filePath: string, onEntry: (entry: Record<string, unknown>, completeLine: boolean, byteStart: number) => void, signal?: AbortSignal, options: { startOffset?: number; endOffset?: number; onSkipped?: () => void; maxRecordBytes?: number } = {}): Promise<{ sourceVersion: string; omittedRecords: number; oversizedRecords: number; scannedBytes: number; nextOffset: number }> {
   const handle = await open(filePath, 'r')
   try {
     const stat = await handle.stat({ bigint: true })
@@ -191,7 +304,7 @@ export async function streamBoundedHistory(filePath: string, onEntry: (entry: Re
         const end = found >= 0 && found < bytesRead ? found : bytesRead
         if (!skipping) {
           length += end - start
-          if (length > HISTORY_RECORD_BYTES) { skipping = true; parts = [] }
+          if (length > (options.maxRecordBytes ?? HISTORY_RECORD_BYTES)) { skipping = true; parts = [] }
           else parts.push(Buffer.from(chunk.subarray(start, end)))
         }
         start = end + 1

@@ -2,7 +2,7 @@ import { Database } from 'bun:sqlite'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { streamBoundedHistory, withHistoryReadBudget } from './boundedSessionHistory.js'
+import { HISTORY_SEMANTIC_RECORD_BYTES, streamBoundedHistory, withHistoryReadBudget } from './boundedSessionHistory.js'
 import type { MessageEntry, SessionTaskNotification } from './sessionService.js'
 
 const RECOVERY_BYTES = 3 * 1024 * 1024
@@ -173,7 +173,7 @@ export async function recoverBoundedSessionHistory(options: {
         }
         if (workspaceResults.length) saveActivity({ ordinal, message: { ...base, content: workspaceResults, toolUseResult: message.toolUseResult } }, 'workspace')
         if (agentBlocks.length) saveActivity({ ordinal, message: { ...base, content: agentBlocks } })
-      }, options.signal)
+      }, options.signal, { maxRecordBytes: HISTORY_SEMANTIC_RECORD_BYTES })
       database.exec('COMMIT')
       const priority = [goalBase, goalStatus, lastTodo, lastTask?.message.id === lastTodo?.message.id ? undefined : lastTask, lastUser].filter((value): value is Evidence => Boolean(value))
       const messages = new Map(priority.map(evidence => [evidence.message.id, evidence]))

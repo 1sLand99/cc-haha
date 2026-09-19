@@ -62,3 +62,13 @@ test('bounds queued file builds and cleans a fully cancelled scan for subsequent
   await expect(readHistoryContexts({ filePath: files[5]!, sourceVersion: versions[5]!, offsets: [0], signal: controller.signal, classify: entry => { controller.abort(); return classify(entry) } })).rejects.toThrow()
   expect((await readHistoryContexts({ filePath: files[5]!, sourceVersion: versions[5]!, offsets: [0], classify })).contexts.get(0)?.suppressed).toBe(false)
 })
+
+
+test('rebuilds scalar context after an in-place rewrite grows beyond the cached snapshot', async () => {
+  await writeFile(file, row('notice', { notification: true }) + '\n')
+  await readHistoryContexts({ filePath: file, sourceVersion: await version(), offsets: [0], classify })
+  await writeFile(file, row('replacement', { reset: true }) + '\n' + row('more-records') + '\n')
+  const rebuilt = await readHistoryContexts({ filePath: file, sourceVersion: await version(), offsets: [0], classify })
+  expect(rebuilt.contexts.get(0)?.suppressed).toBe(false)
+  expect(rebuilt.scannedBytes).toBe(Number((await stat(file)).size))
+})

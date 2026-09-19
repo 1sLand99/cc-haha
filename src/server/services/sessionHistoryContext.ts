@@ -1,17 +1,37 @@
+import { createHash } from 'node:crypto'
 import { Database } from 'bun:sqlite'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdtemp, open, rm, stat } from 'node:fs/promises'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { streamBoundedHistory, withHistoryReadBudget } from './boundedSessionHistory.js'
+import { HISTORY_SEMANTIC_RECORD_BYTES, streamBoundedHistory, withHistoryReadBudget } from './boundedSessionHistory.js'
 import { ApiError } from '../middleware/errorHandler.js'
 
 type Context = { owner?: string; suppressed: boolean }
-type Cache = { database: Database; directory: string; identity: string; size: number; mtime: string; offset: number; suppressed: boolean | null }
+type Cache = { database: Database; directory: string; identity: string; size: number; mtime: string; offset: number; suppressed: boolean | null; fingerprint?: string }
 type Flight = { promise: Promise<void>; controller: AbortController; users: number }
 const cache = new Map<string, Cache>()
 const flights = new Map<string, Flight>()
 process.once('exit', () => { for (const entry of cache.values()) { entry.database.close(); rmSync(entry.directory, { recursive: true, force: true }) } })
+
+async function sourceAnchors(filePath: string, size: number, signal: AbortSignal): Promise<string> {
+  const handle = await open(filePath, 'r')
+  try {
+    const hash = createHash('sha256')
+    for (const offset of [0, Math.max(0, size - 4096)]) {
+      const bytes = Buffer.alloc(Math.min(4096, size - offset))
+      let read = 0
+      while (read < bytes.length) {
+        if (signal.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError')
+        const result = await handle.read(bytes, read, bytes.length - read, offset + read)
+        if (!result.bytesRead) throw new ApiError(409, 'History changed during context validation', 'HISTORY_CHANGED')
+        read += result.bytesRead
+      }
+      hash.update(bytes)
+    }
+    return hash.digest('hex')
+  } finally { await handle.close() }
+}
 
 /** Disk-backed visibility/ownership scalars. Payload records never enter this
  * index. Only append suffixes are scanned after the initial bounded build. */
@@ -33,7 +53,9 @@ export async function readHistoryContexts(options: {
       throw new ApiError(409, 'Session history changed during context lookup', 'HISTORY_CHANGED')
     }
     let state = cache.get(options.filePath)
-    if (state && (state.identity !== identity || Number(current.size) < state.size || (Number(current.size) === state.size && String(current.mtimeNs) !== state.mtime))) {
+    const rewrittenGrowth = state?.fingerprint && Number(current.size) > state.size
+      ? state.fingerprint !== await sourceAnchors(options.filePath, state.size, signal) : false
+    if (state && (rewrittenGrowth || state.identity !== identity || Number(current.size) < state.size || (Number(current.size) === state.size && String(current.mtimeNs) !== state.mtime))) {
       cache.delete(options.filePath)
       state.database.close()
       await rm(state.directory, { recursive: true, force: true })
@@ -63,6 +85,7 @@ export async function readHistoryContexts(options: {
     let suppressed = state.suppressed
     let completeSuppression = suppressed
     try {
+      const fingerprint = await sourceAnchors(options.filePath, targetSize, signal)
       state.database.exec('BEGIN')
       const result = await streamBoundedHistory(options.filePath, (entry, completeLine, offset) => {
         const classification = options.classify(entry)
@@ -76,15 +99,17 @@ export async function readHistoryContexts(options: {
         // Unknown sidechain ancestry is never promoted into the root transcript.
         saveContext.run(offset, owner ?? null, suppressed !== false || (entry.isSidechain === true && !owner) ? 1 : 0)
         if (completeLine) completeSuppression = suppressed
-      }, signal, { startOffset: originalOffset, endOffset: targetSize, onSkipped: () => { suppressed = null; completeSuppression = null } })
+      }, signal, { startOffset: originalOffset, endOffset: targetSize, maxRecordBytes: HISTORY_SEMANTIC_RECORD_BYTES, onSkipped: () => { suppressed = null; completeSuppression = null } })
+      if (fingerprint !== await sourceAnchors(options.filePath, targetSize, signal)) throw new ApiError(409, 'History was rewritten during context scan', 'HISTORY_CHANGED')
       state.database.exec('COMMIT')
+      state.fingerprint = fingerprint
       state.size = targetSize
       state.mtime = mtime!
       state.offset = result.nextOffset
       state.suppressed = completeSuppression
       scannedBytes += result.scannedBytes
     } catch (error) {
-      state.database.exec('ROLLBACK')
+      try { state.database.exec('ROLLBACK') } catch { /* Validation may fail before BEGIN. */ }
       // journal_mode=OFF cannot guarantee rollback restoration after a failed
       // build; discard this regenerable index entirely.
       cache.delete(options.filePath)

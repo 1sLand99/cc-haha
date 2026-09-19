@@ -1,12 +1,10 @@
 import type { TranslationKey } from './en'
 
 export const kr: Record<TranslationKey, string> = {
-  "chat.history.loadCheckpoints": "실행 취소 체크포인트 불러오기",
-  "chat.history.windowNotice": "일부 기록만 표시합니다. 긴 내용은 축약되며 전체 기록은 디스크에 보관됩니다.",
-  "chat.history.older": "이전 메시지",
-  "chat.history.latest": "최신 메시지",
-  "chat.history.recovering": "세션 상태 복원 중…",
-  "chat.history.recoveryIncomplete": "일부 세션 상태를 복원하지 못했습니다.",
+  "chat.history.loading": "메시지 불러오는 중…",
+  "chat.history.loadFailed": "메시지를 불러오지 못했습니다.",
+  "chat.history.retry": "다시 시도",
+
   "trace.windowNotice": "대화와 추적은 제한된 페이지로 불러옵니다.",
   "trace.windowLimited": "일부 기록이 표시 한도를 초과했습니다. 원본 파일은 유지됩니다.",
   "trace.windowFirst": "처음 / 실시간",

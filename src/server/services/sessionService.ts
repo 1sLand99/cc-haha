@@ -7,7 +7,7 @@ import { recoverBoundedSessionHistory, type SessionHistoryRecovery } from './ses
  * 确保 Desktop App 与 CLI 的数据完全互通。
  */
 
-import { readBoundedHistoryPage, streamBoundedHistory, withHistoryReadBudget, type HistoryPageInfo } from './boundedSessionHistory.js'
+import { HISTORY_SEMANTIC_RECORD_BYTES, readBoundedHistoryPage, streamBoundedHistory, withHistoryReadBudget, type HistoryPageInfo } from './boundedSessionHistory.js'
 import { constants, createReadStream, type Stats } from 'node:fs'
 import { createHash } from 'node:crypto'
 import * as fs from 'node:fs/promises'
@@ -216,6 +216,7 @@ export type MessageEntry = {
   id: string
   type: 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result'
   content: unknown
+  bodyTruncated?: boolean
   toolUseResult?: unknown
   timestamp: string
   model?: string
@@ -1288,7 +1289,7 @@ export class SessionService {
       const scan = await streamBoundedHistory(filePath, (entry, completeLine) => {
         apply(launch, entry as RawEntry)
         if (completeLine) apply(summary, entry as RawEntry)
-      })
+      }, undefined, { maxRecordBytes: HISTORY_SEMANTIC_RECORD_BYTES })
       const shared = (state: typeof summary) => ({
         ...(state.permissionMode ? { permissionMode: state.permissionMode } : {}),
         ...(state.runtimeProviderId !== undefined ? { runtimeProviderId: state.runtimeProviderId } : {}),
@@ -1846,6 +1847,7 @@ export class SessionService {
       id: entry.uuid || crypto.randomUUID(),
       type,
       content: msg.content,
+      ...(entry.bodyTruncated === true ? { bodyTruncated: true } : {}),
       ...(entry.toolUseResult !== undefined ? { toolUseResult: entry.toolUseResult } : {}),
       timestamp: entry.timestamp || new Date().toISOString(),
       model: msg.model,

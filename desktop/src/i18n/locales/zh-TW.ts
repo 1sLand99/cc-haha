@@ -1,12 +1,10 @@
 import type { TranslationKey } from './en'
 
 export const zh: Record<TranslationKey, string> = {
-  "chat.history.loadCheckpoints": "載入復原檢查點",
-  "chat.history.windowNotice": "目前僅顯示部分歷史，較長內容已縮短；完整記錄仍儲存在磁碟。",
-  "chat.history.older": "更早訊息",
-  "chat.history.latest": "最新訊息",
-  "chat.history.recovering": "正在還原工作階段狀態…",
-  "chat.history.recoveryIncomplete": "部分工作階段狀態尚未還原。",
+  "chat.history.loading": "正在載入訊息…",
+  "chat.history.loadFailed": "訊息載入失敗。",
+  "chat.history.retry": "重試",
+
   "trace.windowNotice": "聊天記錄與追蹤以有限視窗載入。",
   "trace.windowLimited": "部分記錄超過檢視上限，原始檔案保持完整。",
   "trace.windowFirst": "首頁 / 即時",

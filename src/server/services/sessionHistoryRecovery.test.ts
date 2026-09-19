@@ -62,7 +62,7 @@ test('recovery retains tool lifecycle ownership and does not revive child tools 
 })
 
 test('oversized evidence is explicitly incomplete and cancellation never returns an authoritative snapshot', async () => {
-  await writeFile(file, JSON.stringify(entry('assistant', 'huge', [{ type: 'text', text: 'x'.repeat(2 * 1024 * 1024) }])) + '\n')
+  await writeFile(file, JSON.stringify(entry('assistant', 'huge', [{ type: 'text', text: 'x'.repeat(9 * 1024 * 1024) }])) + '\n')
   const recovery = await service.getSessionHistoryRecovery(id)
   expect(recovery.status).toBe('incomplete')
   expect(recovery.omittedRecords).toBe(1)
@@ -133,4 +133,22 @@ test('recovery resolves sidechain ancestry through Agent calls without attaching
   ].map(value => JSON.stringify(value)).join('\n') + '\n')
   const recovered = await service.getSessionHistoryRecovery(id)
   expect(recovered.messages.map(message => message.id)).toEqual(['owner', 'root'])
+})
+
+
+test('a multi-megabyte foreground tool output preserves all small-session messages and does not degrade recovery', async () => {
+  await writeFile(file, [
+    entry('assistant', 'call', [{ type: 'tool_use', id: 'bash', name: 'Bash', input: { command: 'cat large-log' } }]),
+    entry('user', 'result', [{ type: 'tool_result', tool_use_id: 'bash', content: 'x'.repeat(4 * 1024 * 1024) }]),
+    ...Array.from({ length: 158 }, (_, index) => entry('assistant', `reply-${index}`, 'ok')),
+  ].map(value => JSON.stringify(value)).join('\n') + '\n')
+  const page = await service.getSessionHistoryPage(id)
+  expect(page.messages).toHaveLength(160)
+  expect(page.messages.find(message => message.id === 'result')?.bodyTruncated).toBe(true)
+  expect(page.page.nextCursor).toBeNull()
+  expect(page.page.omittedOversizedEntries).toBe(0)
+  const recovery = await service.getSessionHistoryRecovery(id)
+  expect(recovery.status).toBe('ready')
+  expect(recovery.omittedRecords).toBe(0)
+  expect((await service.getSessionLaunchInfo(id))?.transcriptMessageCount).toBe(160)
 })

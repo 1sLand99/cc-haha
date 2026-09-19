@@ -33,7 +33,9 @@ type MessagesResponse = {
 export type SessionHistoryPage = MessagesResponse & {
   page?: {
     nextCursor: string | null
+    previousCursor?: string | null
     hasMore: boolean
+    contentTruncated?: boolean
     historyComplete: boolean
     sourceVersion: string
     scannedBytes: number

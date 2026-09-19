@@ -14,14 +14,14 @@ export function copyChatPreview(value: string, maxChars: number, tail = false): 
   return new TextDecoder().decode(new TextEncoder().encode(slice))
 }
 
-function previewMessage(message: UIMessage) {
-  const cached = cache.get(message)
+function previewMessage(message: UIMessage, maxChars = MESSAGE_MAX_CHARS, maxNodes = 2048) {
+  const cached = maxChars === MESSAGE_MAX_CHARS && maxNodes === 2048 ? cache.get(message) : undefined
   if (cached) return cached
-  let remaining = MESSAGE_MAX_CHARS
+  let remaining = maxChars
   let nodes = 0
   let clipped = false
   function visit(value: unknown, depth: number): unknown {
-    if (++nodes > 2048 || depth > 16) {
+    if (++nodes > maxNodes || depth > 16) {
       clipped = true
       return null
     }
@@ -39,7 +39,7 @@ function previewMessage(message: UIMessage) {
     let changed = false
     for (const key in value) {
       if (!Object.prototype.hasOwnProperty.call(value, key)) continue
-      if (nodes > 2048 || remaining <= 0) { clipped = true; changed = true; break }
+      if (nodes > maxNodes || remaining <= 0) { clipped = true; changed = true; break }
       const before = (value as Record<string, unknown>)[key]
       const after = visit(before, depth + 1)
       const target = output as Record<string, unknown>
@@ -54,9 +54,11 @@ function previewMessage(message: UIMessage) {
   for (const key of ['content', 'input', 'modelContent', 'partialInput', 'summary', 'objective', 'message', 'tasks', 'attachments', 'task', 'files']) {
     if (key in result) result[key] = visit(result[key], 0)
   }
-  const entry = { message: clipped ? result : message, bytes: 256 + (MESSAGE_MAX_CHARS - remaining) * 2 + nodes * 32, clipped }
-  cache.set(message, entry)
-  cache.set(entry.message, entry)
+  const entry = { message: clipped ? result : message, bytes: 256 + (maxChars - remaining) * 2 + nodes * 32, clipped }
+  if (maxChars === MESSAGE_MAX_CHARS && maxNodes === 2048) {
+    cache.set(message, entry)
+    cache.set(entry.message, entry)
+  }
   return entry
 }
 
@@ -75,6 +77,30 @@ export function boundChatHistory(messages: UIMessage[], budget = CHAT_HISTORY_MA
   }
   retained.reverse()
   return { messages: start === 0 && retained.every((message, index) => message === messages[index]) ? messages : retained, bytes, dropped: start, clipped: clipped || start > 0 }
+}
+
+// A cursor describes a whole page. Preserve every row identity when tightening
+// a page's display budget, otherwise trimmed rows become unreachable by scrolling.
+export function previewHistoryPage(messages: UIMessage[], budget: number): UIMessage[] {
+  if (!messages.length) return messages
+  const entries = messages.map(message => previewMessage(message))
+  const result = entries.map(entry => entry.message)
+  if (entries.reduce((sum, entry) => sum + entry.bytes, 0) > budget) {
+    // Small messages keep their full content. Share the remaining allowance
+    // among larger payloads, rather than truncating every row to an equal size.
+    const order = entries.map((entry, index) => ({ entry, index })).sort((a, b) => a.entry.bytes - b.entry.bytes)
+    let remaining = budget
+    for (let index = 0; index < order.length; index++) {
+      const item = order[index]!
+      const allowance = Math.max(0, Math.floor(remaining / (order.length - index)))
+      if (item.entry.bytes <= allowance) { remaining -= item.entry.bytes; continue }
+      const payload = Math.max(0, allowance - 288)
+      const entry = previewMessage(item.entry.message, Math.min(MESSAGE_MAX_CHARS, Math.floor(payload / 4)), Math.max(1, Math.min(2048, Math.floor(payload / 64))))
+      result[item.index] = entry.message
+      remaining -= entry.bytes
+    }
+  }
+  return result.every((message, index) => message === messages[index]) ? messages : result
 }
 
 export const CHAT_TERMINAL_ACTIVITY_MAX_PER_SESSION = 500
