@@ -371,7 +371,10 @@ function ExitPlanModePermissionDialog({
       // Local echo so the composer pill reflects the switch immediately; the
       // server already received the override inside the permission_response,
       // so deliberately do NOT also send set_runtime_config.
-      useSessionRuntimeStore.getState().setSelection(sessionId, executionRuntime)
+      useSessionRuntimeStore.getState().setSelection(sessionId, {
+        providerId: executionRuntime.providerId,
+        modelId: executionRuntime.modelId,
+      })
     }
     respondToPermission(sessionId, requestId, true, {
       ...options,

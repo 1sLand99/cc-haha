@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentTaskNotification, UIMessage } from '../types/chat'
-import type { MessageEntry } from '../types/session'
+import type { MessageEntry, SessionListItem } from '../types/session'
 import type { SavedProvider } from '../types/provider'
 import {
   buildMainSessionActivityModel,
@@ -8973,6 +8973,63 @@ describe('chatStore history mapping', () => {
     expect(sendMock).not.toHaveBeenCalledWith(TEST_SESSION_ID, { type: 'prewarm_session' })
   })
 
+  it('keeps the selected runtime on reconnect after stopping and receiving stale list metadata', () => {
+    useChatStore.setState({ sessions: {
+      [TEST_SESSION_ID]: makeSession({ chatState: 'streaming' }),
+    } })
+    const oldMetadata = {
+      id: TEST_SESSION_ID, runtimeProviderId: null, runtimeModelId: 'k3[1m]',
+    }
+    useSessionRuntimeStore.getState().syncFromSessions([oldMetadata as SessionListItem])
+    useChatStore.getState().stopGeneration(TEST_SESSION_ID)
+    const next = { providerId: null, modelId: 'deepseek-v4-flash' }
+    useSessionRuntimeStore.getState().setSelection(TEST_SESSION_ID, next)
+    useChatStore.getState().setSessionRuntime(TEST_SESSION_ID, next)
+    useSessionRuntimeStore.getState().syncFromSessions([oldMetadata as SessionListItem])
+    useChatStore.getState().disconnectSession(TEST_SESSION_ID)
+    sendMock.mockClear()
+    useChatStore.getState().connectToSession(TEST_SESSION_ID)
+
+    expect(sendMock).toHaveBeenCalledWith(TEST_SESSION_ID, { type: 'set_runtime_config', ...next })
+    expect(sendMock).not.toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ modelId: 'k3[1m]' }))
+  })
+
+  it.each(['before-send', 'after-send', 'after-confirmation'] as const)(
+    'keeps the new model when stopping, switching, and sending despite an old response arriving %s',
+    (arrival) => {
+      useChatStore.setState({ sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'streaming' }),
+      } })
+      const runtime = useSessionRuntimeStore.getState()
+      const oldMetadata = {
+        id: TEST_SESSION_ID, runtimeProviderId: 'kimi-fixture', runtimeModelId: 'k3[1m]',
+      } as SessionListItem
+      runtime.syncFromSessions([oldMetadata])
+      sendMock.mockClear()
+      useChatStore.getState().stopGeneration(TEST_SESSION_ID)
+
+      const next = { providerId: 'deepseek-fixture', modelId: 'deepseek-v4-flash' }
+      runtime.setSelection(TEST_SESSION_ID, next)
+      useChatStore.getState().setSessionRuntime(TEST_SESSION_ID, next)
+      const pendingList = useSessionRuntimeStore.getState().selections
+      const deliverOldResponse = () => runtime.syncFromSessions([oldMetadata], pendingList)
+      if (arrival === 'before-send') deliverOldResponse()
+      useChatStore.getState().sendMessage(TEST_SESSION_ID, 'Continue with the selected model')
+      if (arrival === 'after-send') deliverOldResponse()
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'runtime_config_applied', ...next,
+      })
+      if (arrival === 'after-confirmation') deliverOldResponse()
+
+      expect(useSessionRuntimeStore.getState().selections[TEST_SESSION_ID]).toEqual(next)
+      expect(sendMock.mock.calls.map(([, message]) => message)).toEqual([
+        { type: 'stop_generation' },
+        { type: 'set_runtime_config', ...next },
+        { type: 'user_message', content: 'Continue with the selected model', attachments: undefined },
+      ])
+    },
+  )
+
   it('sends explicit runtime overrides over websocket', () => {
     useChatStore.getState().setSessionRuntime(TEST_SESSION_ID, {
       providerId: null,
@@ -8999,6 +9056,7 @@ describe('chatStore history mapping', () => {
         [TEST_SESSION_ID]: makeSession({ runtimeConfigReadyCount: 0 }),
       },
     })
+    const pendingRequest = useSessionRuntimeStore.getState().selections
 
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'runtime_config_applied',
@@ -9015,6 +9073,27 @@ describe('chatStore history mapping', () => {
       effortLevel: 'high',
     })
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.runtimeConfigReadyCount).toBe(1)
+    const remote = {
+      id: TEST_SESSION_ID, runtimeProviderId: 'provider-a', runtimeModelId: 'model-a', effortLevel: 'high',
+    } as SessionListItem
+    useSessionRuntimeStore.getState().syncFromSessions([remote], pendingRequest)
+    expect(useSessionRuntimeStore.getState().selections[TEST_SESSION_ID]?.modelId).toBe('model-b')
+    useSessionRuntimeStore.getState().syncFromSessions([remote], useSessionRuntimeStore.getState().selections)
+    expect(useSessionRuntimeStore.getState().selections[TEST_SESSION_ID]?.modelId).toBe('model-a')
+  })
+
+  it.each(['RUNTIME_CONFIG_INVALID', 'CLI_RESTART_FAILED'])('allows fresh metadata to correct a rejected selection (%s)', (code) => {
+    const runtime = useSessionRuntimeStore.getState()
+    runtime.setSelection(TEST_SESSION_ID, { providerId: null, modelId: 'rejected-model' })
+    const staleRequest = useSessionRuntimeStore.getState().selections
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'error', code, message: 'Fixture runtime switch failed',
+    })
+    const actual = { id: TEST_SESSION_ID, runtimeProviderId: null, runtimeModelId: 'k3' } as SessionListItem
+    runtime.syncFromSessions([actual], staleRequest)
+    expect(useSessionRuntimeStore.getState().selections[TEST_SESSION_ID]?.modelId).toBe('rejected-model')
+    runtime.syncFromSessions([actual], useSessionRuntimeStore.getState().selections)
+    expect(useSessionRuntimeStore.getState().selections[TEST_SESSION_ID]?.modelId).toBe('k3')
   })
 
   it('shows AskUserQuestion when permission arrives before the streamed tool block', () => {
