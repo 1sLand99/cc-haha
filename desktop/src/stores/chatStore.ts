@@ -394,6 +394,8 @@ type ChatStore = {
       updatedInput?: Record<string, unknown>
       denyMessage?: string
       permissionUpdates?: PermissionUpdate[]
+      /** Execution-model switch applied together with an ExitPlanMode approval. */
+      runtimeOverride?: RuntimeSelection
     },
   ) => void
   respondToComputerUsePermission: (
@@ -3114,6 +3116,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       ...(options?.updatedInput ? { updatedInput: options.updatedInput } : {}),
       ...(options?.denyMessage ? { denyMessage: options.denyMessage } : {}),
       ...(options?.permissionUpdates?.length ? { permissionUpdates: options.permissionUpdates } : {}),
+      ...(options?.runtimeOverride ? { runtimeOverride: options.runtimeOverride } : {}),
     })
     set((s) => ({
       sessions: updateSessionIn(s.sessions, sessionId, (session) => {
