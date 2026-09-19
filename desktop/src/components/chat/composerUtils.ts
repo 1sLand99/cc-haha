@@ -183,7 +183,7 @@ export function groupSlashCommands(
     system,
     skills,
     plugins,
-    ordered: [...system, ...plugins, ...skills],
+    ordered: [...system, ...skills, ...plugins],
   }
 }
 
@@ -330,9 +330,13 @@ export function filterSlashCommands(
 ): SlashCommandOption[] {
   const normalized = filter.trim().toLowerCase()
   if (!normalized.trim()) {
-    return FREQUENT_SLASH_COMMAND_NAMES.flatMap(name => commands.filter(command =>
-      command.name.trim().toLowerCase() === name && (!command.kind || command.kind === 'command'),
-    ))
+    return [
+      ...FREQUENT_SLASH_COMMAND_NAMES.flatMap(name => commands.filter(command =>
+        command.name.trim().toLowerCase() === name && (!command.kind || command.kind === 'command'),
+      )),
+      ...commands.filter(command => command.kind === 'skill'),
+      ...commands.filter(command => command.kind === 'plugin'),
+    ]
   }
 
   const matches = commands.map((command, index) => ({

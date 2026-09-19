@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { TranslationKey } from '@/i18n'
+import { translate, type TranslationKey } from '@/i18n'
 import type { AgentDefinition } from '@/api/agents'
 import type { ConnectorDto } from '@/types/connector'
 import type { ComposerReferenceCandidate } from '@/types/composerReference'
@@ -200,4 +200,17 @@ it('exposes every mentionable plugin even without a connected connector', () => 
   expect(connectors.count).toBe(1)
   expect(connectors.children!.some(item => item.key === 'connector:frontend-design')).toBe(false)
   expect(connectors.children!.some(item => item.key === 'connector:feishu')).toBe(true)
+})
+
+it.each([
+  ['zh', '操作电脑'],
+  ['zh-TW', '操作電腦'],
+  ['en', 'Computer use'],
+  ['jp', 'コンピューター操作'],
+  ['kr', '컴퓨터 조작'],
+] as const)('localizes the computer-use menu entry in %s', (locale, label) => {
+  const sections = buildCapabilitySections(buildInput({ t: (key, params) => translate(locale, key, params) }))
+  const entry = sections.flatMap(section => section.items).find(item => item.key === 'computer-use')!
+  expect(entry.label).toBe(label)
+  expect(entry.switch).toEqual({ checked: false, disabled: false })
 })

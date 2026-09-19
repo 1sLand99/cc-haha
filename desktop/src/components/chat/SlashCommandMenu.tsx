@@ -141,20 +141,23 @@ export const SlashCommandMenu = forwardRef<HTMLDivElement, SlashCommandMenuProps
         onMouseDown={event => event.preventDefault()}
         className="absolute bottom-full left-0 right-0 z-[var(--z-dropdown)] mb-2 overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] shadow-[var(--shadow-overlay)]"
       >
-        <div className="px-4 pb-1 pt-3 text-xs font-medium text-[var(--color-text-tertiary)]">
-          {t(isSearching ? 'chat.slashSearchResults' : 'chat.slashFrequent')}
-        </div>
+        {isSearching ? <div className="px-4 pb-1 pt-3 text-xs font-medium text-[var(--color-text-tertiary)]">
+          {t('chat.slashSearchResults')}
+        </div> : null}
         <div
           id={id}
           role="listbox"
           aria-label={t('chat.slashCommands')}
           className="max-h-[min(360px,45vh)] overflow-y-auto p-1.5"
         >
-          {groups.system.map(renderSystemCommand)}
+          {groups.system.length > 0 ? <div role="group" aria-label={t(isSearching ? 'chat.slashCommands' : 'chat.slashFrequent')}>
+            {!isSearching ? <div className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--color-text-tertiary)]">{t('chat.slashFrequent')}</div> : null}
+            {groups.system.map(renderSystemCommand)}
+          </div> : null}
 
           {([
-            { kind: 'plugin' as const, items: groups.plugins ?? [], label: t('chat.referencePlugins'), offset: groups.system.length },
-            { kind: 'skill' as const, items: groups.skills, label: t('sidebar.skills'), offset: groups.system.length + (groups.plugins?.length ?? 0) },
+            { kind: 'skill' as const, items: groups.skills, label: t('sidebar.skills'), offset: groups.system.length },
+            { kind: 'plugin' as const, items: groups.plugins ?? [], label: t('chat.referencePlugins'), offset: groups.system.length + groups.skills.length },
           ]).map(group => group.items.length > 0 ? (
             <div key={group.kind} role="group" aria-label={group.label}>
               <div className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--color-text-tertiary)]">{group.label}</div>
@@ -183,7 +186,7 @@ export const SlashCommandMenu = forwardRef<HTMLDivElement, SlashCommandMenuProps
         {!isSearching ? <div className="px-4 pb-2 text-xs text-[var(--color-text-tertiary)]">{t('chat.slashSearchHint')}</div> : null}
         {showKeyboardHints ? (
           <div className="flex items-center gap-1.5 border-t border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-tertiary)]">
-            <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1.5 py-0.5 font-mono text-[10px]">Up/Down</kbd>
+            <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1.5 py-0.5 font-mono text-[10px]">↑↓</kbd>
             <span>{t('chat.navigate')}</span>
             <kbd className="ml-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd>
             <span>{t('chat.select')}</span>

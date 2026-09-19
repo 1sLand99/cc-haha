@@ -1862,7 +1862,7 @@ describe('ChatInput file mentions', () => {
     })
   })
 
-  it.each(['@', '/', '+'] as const)('hides withdrawn bundled capabilities in %s while keeping personal skills and other plugins', async (entry) => {
+  it.each(['@', '/', '/empty', '+'] as const)('hides withdrawn bundled capabilities in %s while keeping personal skills and other plugins', async (entry) => {
     const withdrawnPackage = 'office-frontend-design@haha-connectors'
     mocks.listReferences.mockResolvedValue({
       plugins: [
@@ -1883,12 +1883,25 @@ describe('ChatInput file mentions', () => {
     if (entry === '+') {
       fireEvent.click(screen.getByLabelText('Open composer tools'))
       fireEvent.change(screen.getByRole('combobox', { name: 'Search skills, plugins, files…' }), { target: { value: 'design' } })
-    } else setComposerText(`${entry}design`, 7)
+    } else if (entry === '/empty') setComposerText('/', 1)
+    else setComposerText(`${entry}design`, 7)
     expect(await screen.findByRole('option', { name: 'Personal frontend design' })).toBeInTheDocument()
     expect(await screen.findByRole('option', { name: 'Design tools' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /Removed frontend/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /office-frontend-design/ })).not.toBeInTheDocument()
     expect(mocks.wsSend).not.toHaveBeenCalled()
+    if (entry === '/empty') {
+      const options = screen.getAllByRole('option')
+      const skillIndex = options.indexOf(screen.getByRole('option', { name: 'Personal frontend design' }))
+      const pluginIndex = options.indexOf(screen.getByRole('option', { name: 'Design tools' }))
+      expect(skillIndex).toBeGreaterThan(options.indexOf(screen.getByRole('option', { name: '/model' })))
+      expect(pluginIndex).toBeGreaterThan(skillIndex)
+      for (let index = 0; index < pluginIndex; index++) fireEvent.keyDown(getComposerElement(), { key: 'ArrowDown' })
+      expect(screen.getByRole('option', { name: 'Design tools' })).toHaveAttribute('aria-selected', 'true')
+      fireEvent.keyDown(getComposerElement(), { key: 'Enter' })
+      expect(document.querySelector('.composer-mention')).toHaveTextContent('Design tools')
+      expect(mocks.wsSend).not.toHaveBeenCalled()
+    }
   })
 
   it.each(['empty', 'replacement'] as const)('refreshes skills when opening plus and drops stale entries during a pending %s response', async (result) => {
@@ -1987,7 +2000,7 @@ describe('ChatInput file mentions', () => {
     render(<ChatInput compact />)
 
     fireEvent.click(screen.getByLabelText('Open composer tools'))
-    const row = await screen.findByRole('option', { name: /Computer Use/ })
+    const row = await screen.findByRole('option', { name: /Computer use/ })
     await waitFor(() => expect(row.querySelector('input[type="checkbox"]')).not.toBeChecked())
 
     fireEvent.click(row.querySelector('input[type="checkbox"]')!)

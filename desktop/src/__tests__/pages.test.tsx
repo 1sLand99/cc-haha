@@ -149,7 +149,7 @@ describe('Content-only pages render without errors', () => {
 
     expect(await screen.findByRole('option', { name: '/init' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: '/context' })).toBeInTheDocument()
-    expect(screen.queryByText('lark-mail')).not.toBeInTheDocument()
+    expect(await screen.findByText('lark-mail')).toBeInTheDocument()
     expect(screen.queryByText('internal-only')).not.toBeInTheDocument()
 
     // Dynamic skills remain searchable before a session has been created.

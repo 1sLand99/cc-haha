@@ -173,7 +173,7 @@ describe('composerUtils', () => {
     ])
   })
 
-  it('opens on a bounded set of frequent commands regardless of CLI registration order', () => {
+  it('opens with frequent commands followed by skills and plugins regardless of CLI registration order', () => {
     const commands = mergeSlashCommands([
       { name: 'update-config', description: 'Configure' },
       { name: 'debug', description: 'Debug' },
@@ -182,7 +182,7 @@ describe('composerUtils', () => {
       { name: 'draw', description: 'Draw diagrams', kind: 'plugin' },
     ])
     expect(filterSlashCommands(commands, '').map(command => command.name)).toEqual([
-      'compact', 'context', 'status', 'init', 'review', 'model',
+      'compact', 'context', 'status', 'init', 'review', 'model', 'video', 'draw',
     ])
     expect(filterSlashCommands(commands, '  ')).toEqual(filterSlashCommands(commands, ''))
     for (const name of ['update-config', 'debug', 'heapdump', 'video', 'draw', 'config', 'help']) {
@@ -190,8 +190,12 @@ describe('composerUtils', () => {
     }
   })
 
-  it('does not surface a skill merely because it shares a frequent command name', () => {
-    expect(filterSlashCommands([{ name: 'review', description: 'Custom review', kind: 'skill' }], '')).toEqual([])
+  it('keeps a same-named skill in its skill group without duplicating it as a frequent command', () => {
+    const skill = { name: 'review', description: 'Custom review', kind: 'skill' as const }
+    const groups = groupSlashCommands(filterSlashCommands([skill], ''))
+    expect(groups.system).toEqual([])
+    expect(groups.skills).toEqual([skill])
+    expect(groups.ordered).toEqual([skill])
   })
 
   it('keeps CLI-reported frequent commands available in the default list', () => {
@@ -349,5 +353,5 @@ it('orders plugin mentions between commands and skills without changing their ca
     { name: 'help', description: 'Help', kind: 'command' },
   ])
   expect(groups.plugins?.map(item => item.name)).toEqual(['plugin:hyperframes'])
-  expect(groups.ordered.map(item => item.name)).toEqual(['help', 'plugin:hyperframes', 'skill:video'])
+  expect(groups.ordered.map(item => item.name)).toEqual(['help', 'skill:video', 'plugin:hyperframes'])
 })
