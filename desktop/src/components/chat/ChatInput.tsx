@@ -30,6 +30,8 @@ import { ProjectContextChip } from '@/components/chat/ProjectContextChip'
 import { RepositoryLaunchControls } from '@/components/chat/RepositoryLaunchControls'
 import { ComposerReferenceMenu, type ComposerReferenceMenuHandle } from './ComposerReferenceMenu'
 import { ComposerReferenceDetail } from './ComposerReferenceDetail'
+import { ComposerCapabilityMenu } from './ComposerCapabilityMenu'
+import { useCapabilityMenu } from './useCapabilityMenu'
 import { composerReferencesApi } from '@/api/composerReferences'
 import type { ComposerReferenceCandidate } from '@/types/composerReference'
 import { LocalSlashCommandPanel, type LocalSlashCommandName } from './LocalSlashCommandPanel'
@@ -170,6 +172,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const slashItemRefs = useRef<(HTMLElement | null)[]>([])
   const slashMenuId = useId()
   const referenceMenuId = useId()
+  const capabilityMenuId = useId()
   const previousActiveTabIdRef = useRef<string | null>(null)
   const inputRef = useRef(input)
   const mentionsRef = useRef(mentions)
@@ -1117,6 +1120,48 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
     })
   }
 
+  // The "+" capability menu. The hook owns data loading and navigation
+  // actions; these handlers are only the composer-local edits (mention badge,
+  // slash text, prompt seed) plus the surfaces this composer already opens.
+  const capabilityMenu = useCapabilityMenu({
+    open: plusMenuOpen && !isMemberSession,
+    cwd: referenceCwd,
+    references: composerReferences,
+    handlers: {
+      onInsertMention: (reference) => {
+        const cursorPos = composerRef.current?.getSelectionOffsets().start ?? inputRef.current.length
+        const mention = composerReferenceToMention(reference)
+        const inserted = insertMentionIntoText(inputRef.current, mentionsRef.current, cursorPos, cursorPos, mention)
+        setComposerInput(inserted.text, inserted.mentions)
+        requestAnimationFrame(() => {
+          composerRef.current?.focus()
+          composerRef.current?.setSelectionOffsets(inserted.cursorPos)
+        })
+      },
+      onInsertSlashText: (command) => {
+        const cursorPos = composerRef.current?.getSelectionOffsets().start ?? inputRef.current.length
+        const replacement = replaceSlashToken(inputRef.current, cursorPos, command)
+        setComposerInput(replacement.value)
+        requestAnimationFrame(() => {
+          composerRef.current?.focus()
+          composerRef.current?.setSelectionOffsets(replacement.cursorPos)
+        })
+      },
+      onInsertPromptSeed: (text) => {
+        const next = inputRef.current.trim() ? `${inputRef.current}\n${text}` : text
+        setComposerInput(next)
+        requestAnimationFrame(() => {
+          composerRef.current?.focus()
+          composerRef.current?.setSelectionOffsets(next.length)
+        })
+      },
+      onAttachment: openAttachmentPicker,
+      onSlashTrigger: insertSlashCommand,
+      onSaveWorkflow: () => setLocalSlashPanel('save-workflow'),
+      onClose: () => setPlusMenuOpen(false),
+    },
+  })
+
   const composerPlaceholder =
     isHeroComposer
       ? t('empty.placeholder')
@@ -1129,9 +1174,6 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
           : isMemberSession
             ? t('teams.memberPlaceholder')
             : t('chat.placeholder')
-
-  const addFilesLabel = isHeroComposer ? t('empty.addFiles') : t('chat.addFiles')
-  const slashCommandsLabel = isHeroComposer ? t('empty.slashCommands') : t('chat.slashCommands')
 
   return (
     <div
@@ -1468,6 +1510,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                       type="button"
                       onClick={() => setPlusMenuOpen((value) => !value)}
                       aria-label={t('chat.composerTools')}
+                      aria-haspopup="menu"
                       aria-expanded={plusMenuOpen}
                       // Bordered on desktop so the tools affordance reads as a
                       // control at rest, not only on hover — it sits next to
@@ -1478,22 +1521,13 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
                     </button>
 
                     {plusMenuOpen && (
-                      <div className={`absolute bottom-full left-0 z-[var(--z-dropdown)] mb-2 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] p-1.5 shadow-[var(--shadow-overlay)] ${isMobileComposer ? 'w-[min(240px,calc(100vw-32px))]' : 'w-[240px]'}`}>
-                        <button
-                          onClick={openAttachmentPicker}
-                          className="flex w-full items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
-                        >
-                          <span className="material-symbols-outlined text-[18px] text-[var(--color-text-secondary)]">attach_file</span>
-                          <span className="text-sm text-[var(--color-text-primary)]">{addFilesLabel}</span>
-                        </button>
-                        <button
-                          onClick={insertSlashCommand}
-                          className="flex w-full items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
-                        >
-                          <span className="w-[24px] text-center text-[18px] font-bold text-[var(--color-text-secondary)]">/</span>
-                          <span className="text-sm text-[var(--color-text-primary)]">{slashCommandsLabel}</span>
-                        </button>
-                      </div>
+                      <ComposerCapabilityMenu
+                        id={capabilityMenuId}
+                        sections={capabilityMenu.sections}
+                        onAction={capabilityMenu.onAction}
+                        onClose={() => setPlusMenuOpen(false)}
+                        mobile={isMobileComposer}
+                      />
                     )}
                   </div>
 

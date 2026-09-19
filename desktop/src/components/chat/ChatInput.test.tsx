@@ -116,6 +116,7 @@ import { useTabStore } from '../../stores/tabStore'
 import { useWorkspaceChatContextStore } from '../../stores/workspaceChatContextStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { workflowsApi } from '../../api/workflows'
+import { computerUseApi } from '../../api/computerUse'
 import { browserHost } from '../../lib/desktopHost/browserHost'
 import { settingsApi } from '../../api/settings'
 import {
@@ -1859,6 +1860,63 @@ describe('ChatInput file mentions', () => {
     expect(mocks.wsSend).toHaveBeenCalledWith(sessionId, {
       type: 'user_message', content: 'Use the Skill tool with skill: "team:review" for this request.', attachments: [],
     })
+  })
+
+  it('inserts a skill mention badge from the capability menu', async () => {
+    mocks.listReferences.mockResolvedValue({ plugins: [], skills: [{
+      kind: 'skill', id: 'design', name: 'design', displayName: 'Design',
+      description: 'Create interfaces', source: 'user', modelText: 'Use the Skill tool with skill: "design" for this request.',
+    }] })
+    render(<ChatInput compact />)
+
+    fireEvent.click(screen.getByLabelText('Open composer tools'))
+    fireEvent.click(await screen.findByRole('option', { name: /^Skills/ }))
+    fireEvent.click(await screen.findByRole('option', { name: /Design/ }))
+
+    await waitFor(() => expect(document.querySelector('[data-mention-kind="skill"]')).toBeInTheDocument())
+    expect(mocks.wsSend).not.toHaveBeenCalled()
+    fireEvent.keyDown(getComposerElement(), { key: 'Enter' })
+    expect(mocks.wsSend).toHaveBeenCalledWith(sessionId, {
+      type: 'user_message', content: 'Use the Skill tool with skill: "design" for this request.', attachments: [],
+    })
+  })
+
+  it('inserts /agent text from the capability menu without sending', async () => {
+    mocks.listAgents.mockResolvedValue({
+      activeAgents: [{ agentType: 'debugger', description: 'Debug failures', source: 'userSettings', isActive: true }],
+      allAgents: [],
+    })
+    render(<ChatInput compact />)
+
+    fireEvent.click(screen.getByLabelText('Open composer tools'))
+    fireEvent.click(await screen.findByRole('option', { name: /^Agents/ }))
+    fireEvent.click(await screen.findByRole('option', { name: /debugger/ }))
+
+    await waitFor(() => expect(getComposerText()).toBe('/agent debugger '))
+    expect(mocks.wsSend).not.toHaveBeenCalled()
+  })
+
+  it('toggles Computer Use from the capability menu with a rollback on failure', async () => {
+    const getStatus = vi.spyOn(computerUseApi, 'getStatus').mockResolvedValue({
+      supported: true,
+    } as Awaited<ReturnType<typeof computerUseApi.getStatus>>)
+    vi.spyOn(computerUseApi, 'getAuthorizedApps').mockResolvedValue({
+      enabled: false,
+      authorizedApps: [],
+      grantFlags: { clipboardRead: false, clipboardWrite: false, systemKeyCombos: false },
+      pythonPath: null,
+    })
+    const setAuthorizedApps = vi.spyOn(computerUseApi, 'setAuthorizedApps').mockResolvedValue({ ok: true })
+    render(<ChatInput compact />)
+
+    fireEvent.click(screen.getByLabelText('Open composer tools'))
+    const row = await screen.findByRole('menuitemcheckbox', { name: /Computer Use/ })
+    await waitFor(() => expect(row).toHaveAttribute('aria-checked', 'false'))
+
+    fireEvent.click(row.querySelector('input[type="checkbox"]')!)
+    await waitFor(() => expect(setAuthorizedApps).toHaveBeenCalledWith({ enabled: true }))
+    await waitFor(() => expect(row).toHaveAttribute('aria-checked', 'true'))
+    expect(getStatus).toHaveBeenCalled()
   })
 
   it('inserts a selected @ file as an inline mention pill and sends its absolute path', async () => {
