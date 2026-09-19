@@ -85,3 +85,43 @@ it('uses the same command-plugin-skill order for option ids and keyboard referen
   expect(onSelect).toHaveBeenCalledWith('plugin:video')
   expect(itemRefs.current[2]).toBe(options[2])
 })
+
+
+it('explains default discovery and exposes command descriptions separately from option names', () => {
+  const props = {
+    id: 'frequent-slash',
+    groups: { system: [{ name: 'compact', description: 'Compact context' }], skills: [], ordered: [] },
+    selectedIndex: 0,
+    itemRefs: { current: [] },
+    onSelect: vi.fn(),
+    onHighlight: vi.fn(),
+    showKeyboardHints: false,
+  }
+  const { rerender } = render(<SlashCommandMenu {...props} />)
+  expect(screen.getByRole('option', { name: '/compact' })).toHaveAccessibleDescription('Compact context')
+  expect(screen.getByText(translate(useSettingsStore.getState().locale, 'chat.slashSearchHint'))).toBeInTheDocument()
+  rerender(<SlashCommandMenu {...props} isSearching />)
+  expect(screen.queryByText(translate(useSettingsStore.getState().locale, 'chat.slashSearchHint'))).not.toBeInTheDocument()
+  expect(screen.getByText(translate(useSettingsStore.getState().locale, 'chat.slashSearchResults'))).toBeInTheDocument()
+})
+
+it('keeps command rows on one line while preserving searchable argument hints and full hover details', () => {
+  const props = {
+    id: 'compact-layout',
+    groups: { system: [{ name: 'goal', description: 'Set a completion goal', argumentHint: '[<condition> | clear]' }], skills: [], ordered: [] },
+    selectedIndex: 0,
+    itemRefs: { current: [] },
+    onSelect: vi.fn(),
+    onHighlight: vi.fn(),
+    showKeyboardHints: false,
+  }
+  const { container, rerender } = render(<SlashCommandMenu {...props} />)
+  const option = screen.getByRole('option', { name: '/goal' })
+  expect(option).toHaveAttribute('title', '/goal — [<condition> | clear] — Set a completion goal')
+  expect(screen.queryByText('[<condition> | clear]')).not.toBeInTheDocument()
+  expect(screen.getByText('/goal').parentElement).toBe(screen.getByText('Set a completion goal').parentElement)
+  expect(container.firstElementChild).toHaveClass('left-0', 'right-0')
+  expect(container.firstElementChild).not.toHaveClass('max-w-[560px]')
+  rerender(<SlashCommandMenu {...props} isSearching />)
+  expect(screen.getByText('[<condition> | clear]')).toHaveAttribute('title', '[<condition> | clear]')
+})

@@ -1,3 +1,4 @@
+import { isComposerReferenceVisible, isComposerSlashCommandVisible } from '@/lib/composerCapabilityVisibility'
 import { useState, useRef, useEffect, useCallback, useMemo, useId } from 'react'
 import { useDismissable } from '@/hooks/useDismissable'
 import { Button } from '@/components/ui/Button'
@@ -310,18 +311,18 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
   const referenceCwd = activeLaunchWorkDir || resolvedWorkDir || ''
   const referenceContext = `${activeTabId ?? ''}\0${referenceCwd}`
   const referenceCurrent = referenceState?.context === referenceContext ? referenceState : null
-  const composerReferences = referenceCurrent?.items ?? EMPTY_COMPOSER_REFERENCES
+  const composerReferences = useMemo(() => (referenceCurrent?.items ?? EMPTY_COMPOSER_REFERENCES).filter(isComposerReferenceVisible), [referenceCurrent?.items])
   useEffect(() => {
     let active = true
     if (isMemberSession) return
-    setReferenceState(previous => ({ context: referenceContext, items: previous?.context === referenceContext ? previous.items : [], loading: true, error: false }))
+    setReferenceState({ context: referenceContext, items: [], loading: true, error: false })
     void composerReferencesApi.list(referenceCwd || undefined).then(data => {
       if (active) setReferenceState({ context: referenceContext, items: [...data.plugins, ...data.skills], loading: false, error: false })
     }).catch(() => {
       if (active) setReferenceState({ context: referenceContext, items: [], loading: false, error: true })
     })
     return () => { active = false }
-  }, [referenceContext, referenceCwd, isMemberSession, slashMenuOpen, fileSearchOpen])
+  }, [referenceContext, referenceCwd, isMemberSession, slashMenuOpen, fileSearchOpen, plusMenuOpen])
   useEffect(() => {
     setReferenceDetail(null)
     setReferenceOptionId(undefined)
@@ -589,7 +590,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
       names.add(name.toLowerCase())
       commands.push({ name, description: reference.description, kind: reference.kind })
     }
-    return commands
+    return commands.filter(isComposerSlashCommandVisible)
   }, [agentSlashCommands, slashCommands, composerReferences, t])
 
   const filteredCommandGroups = useMemo(() => {
@@ -1279,6 +1280,7 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
 
           {isSlashMenuVisible && (
             <SlashCommandMenu
+              isSearching={Boolean(slashFilter.trim())}
               ref={slashMenuRef}
               id={slashMenuId}
               groups={filteredCommandGroups}
@@ -1522,6 +1524,18 @@ export function ChatInput({ variant = 'default', compact = false }: ChatInputPro
 
                     {plusMenuOpen && (
                       <ComposerCapabilityMenu
+                        cwd={referenceCwd}
+                        referencesLoading={referenceCurrent?.loading ?? true}
+                        referencesError={referenceCurrent?.error}
+                        onSelectFile={mention => {
+                          const cursorPos = composerRef.current?.getSelectionOffsets().start ?? inputRef.current.length
+                          const inserted = insertMentionIntoText(inputRef.current, mentionsRef.current, cursorPos, cursorPos, mention)
+                          setComposerInput(inserted.text, inserted.mentions)
+                          requestAnimationFrame(() => {
+                            composerRef.current?.focus()
+                            composerRef.current?.setSelectionOffsets(inserted.cursorPos)
+                          })
+                        }}
                         id={capabilityMenuId}
                         sections={capabilityMenu.sections}
                         onAction={capabilityMenu.onAction}

@@ -7,7 +7,6 @@ import type { TeamSummary } from '@/types/team'
 import type { WorkflowDefinition } from '@/types/workflow'
 import {
   buildCapabilitySections,
-  filterCapabilitySections,
   type CapabilityMenuInput,
 } from './capabilityMenuModel'
 
@@ -100,15 +99,17 @@ function buildInput(overrides: Partial<CapabilityMenuInput> = {}): CapabilityMen
 
 function sectionsById(input: CapabilityMenuInput) {
   const sections = buildCapabilitySections(input)
-  return new Map(sections.map(section => [section.id, section]))
+  const items = sections.flatMap(section => section.items).flatMap(item => item.key === 'more' ? item.children! : [item])
+  return new Map([['capabilities', { items }]])
 }
 
 describe('buildCapabilitySections', () => {
-  it('leads with attachments, then capabilities, then commands', () => {
+  it('puts skills and plugins first and groups secondary tools under More', () => {
     const sections = buildCapabilitySections(buildInput())
-    expect(sections.map(section => section.id)).toEqual(['add', 'capabilities', 'commands'])
-    expect(sections[0]!.items[0]!.action).toEqual({ type: 'attachment' })
-    expect(sections[2]!.items[0]!.action).toEqual({ type: 'slashTrigger' })
+    expect(sections[0]!.items.map(item => item.key)).toEqual(['skills', 'plugins'])
+    expect(sections[1]!.items[0]!.action).toEqual({ type: 'attachment' })
+    expect(sections[2]!.items.map(item => item.key)).toEqual(['computer-use', 'more'])
+    expect(sections[2]!.items[1]!.children!.map(item => item.key)).toEqual(['connectors', 'agents', 'teams', 'workflows', 'slash-commands'])
   })
 
   it('lists skills as mention insertions with a manage footer', () => {
@@ -185,34 +186,18 @@ describe('buildCapabilitySections', () => {
   })
 })
 
-describe('filterCapabilitySections', () => {
-  it('returns sections untouched on an empty query', () => {
-    const sections = buildCapabilitySections(buildInput())
-    expect(filterCapabilitySections(sections, '  ')).toBe(sections)
-  })
+it('exposes every mentionable plugin even without a connected connector', () => {
+  const plugins = buildCapabilitySections(buildInput({ connectors: [] }))[0]!.items[1]!
+  expect(plugins.children![0]!.action).toEqual({ type: 'insertMention', reference: plugin })
+  expect(plugins.children!.at(-1)!.action).toEqual({ type: 'settings', tab: 'plugins' })
+})
 
-  it('promotes matching children to the top level with their action intact', () => {
-    const sections = buildCapabilitySections(buildInput())
-    const filtered = filterCapabilitySections(sections, 'nightly')
-    const items = filtered.flatMap(section => section.items)
-    expect(items).toHaveLength(1)
-    expect(items[0]).toMatchObject({
-      key: 'workflow:userSettings:nightly-review',
-      action: { type: 'insertSlashText', command: 'nightly-review' },
-    })
-  })
-
-  it('keeps children on a matched parent so it still drills in', () => {
-    const sections = buildCapabilitySections(buildInput())
-    const filtered = filterCapabilitySections(sections, sections[1]!.items[0]!.label)
-    const parent = filtered.flatMap(section => section.items).find(item => item.key === 'skills')
-    expect(parent?.children?.length).toBeGreaterThan(0)
-  })
-
-  it('drops sections with no matches', () => {
-    const sections = buildCapabilitySections(buildInput())
-    const filtered = filterCapabilitySections(sections, 'nightly')
-    expect(filtered.map(section => section.id)).not.toContain('add')
-    expect(filtered.map(section => section.id)).not.toContain('commands')
-  })
+ it('keeps withdrawn installed packages out of the secondary connector list', () => {
+  const hidden = { ...connectedConnector, id: 'frontend-design', pluginId: 'office-frontend-design@haha-connectors' } as ConnectorDto
+  const sections = buildCapabilitySections(buildInput({ connectors: [hidden, connectedConnector] }))
+  const more = sections.flatMap(section => section.items).find(item => item.key === 'more')!
+  const connectors = more.children!.find(item => item.key === 'connectors')!
+  expect(connectors.count).toBe(1)
+  expect(connectors.children!.some(item => item.key === 'connector:frontend-design')).toBe(false)
+  expect(connectors.children!.some(item => item.key === 'connector:feishu')).toBe(true)
 })

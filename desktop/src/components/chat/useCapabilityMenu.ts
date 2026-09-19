@@ -22,10 +22,11 @@ import {
  * both composers (ChatInput and EmptySession) so the two stay identical by
  * construction rather than by a parity test.
  *
- * Everything except skills/plugins (already in memory for the @-menu) is
- * lazy-loaded the first time the menu opens, and re-fetched on each open —
- * these lists change in Settings while a session is running, and the APIs are
- * cheap local reads. Fetches are dropped when the menu closes mid-flight.
+ * Parents refresh the shared skill/plugin references on each +, @ or slash
+ * menu opening and clear stale entries while loading. This hook lazy-loads
+ * the remaining capabilities and re-fetches them on each opening because
+ * Settings can change while a session is running. Fetches are dropped when
+ * the menu closes mid-flight.
  */
 
 export type CapabilityMenuComposerHandlers = {

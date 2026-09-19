@@ -1,8 +1,14 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 import { ComposerCapabilityMenu } from './ComposerCapabilityMenu'
+import { filesystemApi } from '@/api/filesystem'
 import type { CapabilityMenuSection } from './capabilityMenuModel'
+
+vi.mock('@/api/filesystem', () => ({ filesystemApi: { browse: vi.fn(), search: vi.fn() } }))
+beforeEach(() => {
+  vi.mocked(filesystemApi.search).mockResolvedValue({ currentPath: '/work', parentPath: '/', entries: [] })
+})
 
 function fixtureSections(): CapabilityMenuSection[] {
   return [
@@ -87,9 +93,9 @@ function searchInput(): HTMLElement {
 describe('ComposerCapabilityMenu', () => {
   it('renders section titles and dispatches a leaf action on click', () => {
     const { onAction } = renderMenu()
-    expect(screen.getByText('Add')).toBeInTheDocument()
-    expect(screen.getByText('Capabilities')).toBeInTheDocument()
-    expect(screen.getByText('Commands')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Add' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Capabilities' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Commands' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('option', { name: /Add files or photos/ }))
     expect(onAction).toHaveBeenCalledWith({ type: 'attachment' })
@@ -104,8 +110,8 @@ describe('ComposerCapabilityMenu', () => {
     expect(screen.getByRole('option', { name: /Design/ })).toBeInTheDocument()
 
     // Back navigation restores the top-level sections.
-    fireEvent.click(screen.getByRole('button', { name: /Skills/ }))
-    expect(screen.getByText('Commands')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.getByRole('group', { name: 'Commands' })).toBeInTheDocument()
 
     // Drilling again and picking a leaf fires its action.
     fireEvent.click(screen.getByRole('option', { name: /Skills/ }))
@@ -131,21 +137,77 @@ describe('ComposerCapabilityMenu', () => {
 
   it('toggles a switch row without double-firing from the row click', () => {
     const { onAction } = renderMenu()
-    const row = screen.getByRole('menuitemcheckbox')
-    expect(row).toHaveAttribute('aria-checked', 'false')
+    const row = screen.getByRole('option', { name: 'Computer Use: Disabled' })
+    expect(row).toHaveAccessibleName('Computer Use: Disabled')
 
     fireEvent.click(row.querySelector('input[type="checkbox"]')!)
     expect(onAction).toHaveBeenCalledTimes(1)
     expect(onAction).toHaveBeenCalledWith({ type: 'toggleComputerUse' })
   })
 
-  it('filters rows through the search box and flattens sub-list matches', () => {
+  it('filters rows through the search box and flattens sub-list matches', async () => {
     renderMenu()
     fireEvent.change(searchInput(), { target: { value: 'Design' } })
     expect(screen.getByRole('option', { name: /Design/ })).toBeInTheDocument()
     expect(screen.queryByText('Commands')).not.toBeInTheDocument()
 
     fireEvent.change(searchInput(), { target: { value: 'no-such-capability' } })
-    expect(screen.getByText('No matches')).toBeInTheDocument()
+    expect(await screen.findByText('No matching references')).toBeInTheDocument()
   })
+})
+
+// Searching a category previously produced an inert parent row.
+it('opens a searched category and scopes subsequent searches to its children', () => {
+  const { onAction } = renderMenu()
+  fireEvent.change(searchInput(), { target: { value: 'Skills' } })
+  fireEvent.keyDown(searchInput(), { key: 'Enter' })
+  expect(searchInput()).toHaveValue('')
+  expect(screen.getByRole('option', { name: 'Design' })).toBeInTheDocument()
+  fireEvent.change(searchInput(), { target: { value: 'Design' } })
+  fireEvent.keyDown(searchInput(), { key: 'Enter' })
+  expect(onAction).toHaveBeenCalledWith({ type: 'insertSlashText', command: 'design' })
+})
+
+it('keeps the root menu concise and exposes descriptions inside a category', () => {
+  renderMenu()
+  expect(screen.queryByText('Add a skill to this chat')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('option', { name: 'Skills' }))
+  expect(screen.getByText('Create interfaces')).toBeInTheDocument()
+})
+
+it('uses the shared reference search to insert a plugin without a connector', async () => {
+  const reference = { kind: 'plugin' as const, id: 'video', name: 'video', displayName: 'Video Studio', description: 'Create videos', source: 'plugin', modelText: 'Use video' }
+  const sections = fixtureSections()
+  sections[1]!.items.unshift({ key: 'plugins', label: 'Plugins', icon: { kind: 'slash' }, children: [{ key: 'plugin:video', label: 'Video Studio', icon: { kind: 'slash' }, action: { type: 'insertMention', reference } }] })
+  const { onAction } = renderMenu({ sections })
+  fireEvent.change(searchInput(), { target: { value: 'video' } })
+  const option = await screen.findByRole('option', { name: 'Video Studio' })
+  expect(searchInput()).toHaveAttribute('aria-activedescendant', option.id)
+  fireEvent.keyDown(searchInput(), { key: 'Enter' })
+  expect(onAction).toHaveBeenCalledWith({ type: 'insertMention', reference })
+})
+
+it('finds project files through the same search and preserves their structured path', async () => {
+  vi.mocked(filesystemApi.search).mockResolvedValue({ currentPath: '/work', parentPath: '/', entries: [{ name: 'README.md', path: '/work/README.md', isDirectory: false }] })
+  const onSelectFile = vi.fn()
+  const { onClose } = renderMenu({ cwd: '/work', onSelectFile })
+  fireEvent.change(searchInput(), { target: { value: 'README' } })
+  fireEvent.click(await screen.findByRole('option', { name: 'README.md' }))
+  expect(onSelectFile).toHaveBeenCalledWith({ label: 'README.md', path: '/work/README.md', isDirectory: false })
+  expect(onClose).toHaveBeenCalledTimes(1)
+})
+
+it('keeps nested tools accessible and backs up one level per Escape', () => {
+  const sections = fixtureSections()
+  const skills = sections[1]!.items[0]!
+  sections[1]!.items = [{ key: 'more', label: 'More tools', icon: { kind: 'slash' }, children: [skills] }]
+  const { onClose } = renderMenu({ sections })
+  fireEvent.click(screen.getByRole('option', { name: 'More tools' }))
+  fireEvent.click(screen.getByRole('option', { name: 'Skills' }))
+  expect(screen.getByRole('option', { name: 'Design' })).toBeInTheDocument()
+  fireEvent.keyDown(searchInput(), { key: 'Escape' })
+  expect(screen.getByRole('option', { name: 'Skills' })).toBeInTheDocument()
+  fireEvent.keyDown(searchInput(), { key: 'Escape' })
+  expect(screen.getByRole('option', { name: 'More tools' })).toBeInTheDocument()
+  expect(onClose).not.toHaveBeenCalled()
 })

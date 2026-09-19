@@ -339,6 +339,79 @@ describe('EmptySession', () => {
     expect(screen.getByTestId('empty-session-composer-panel')).toHaveClass('rounded-[var(--radius-2xl)]')
   })
 
+  it.each(['@', '/', '+'] as const)('hides withdrawn bundled capabilities in %s while keeping personal skills and other plugins', async (entry) => {
+    const withdrawnPackage = 'office-frontend-design@haha-connectors'
+    mocks.listReferences.mockResolvedValue({
+      plugins: [
+        { kind: 'plugin', id: withdrawnPackage, name: 'office-frontend-design', displayName: 'Removed frontend plugin', description: 'Design', source: withdrawnPackage, modelText: 'Use removed plugin' },
+        { kind: 'plugin', id: 'design-tools@community', name: 'design-tools', displayName: 'Design tools', description: 'Design', source: 'community', modelText: 'Use design tools' },
+      ],
+      skills: [
+        { kind: 'skill', id: 'office-frontend-design:frontend-design', name: 'frontend-design', displayName: 'Removed frontend skill', description: 'Design', source: withdrawnPackage, modelText: '/office-frontend-design:frontend-design' },
+        { kind: 'skill', id: 'frontend-design', name: 'frontend-design', displayName: 'Personal frontend design', description: 'Design', source: 'user', modelText: '/frontend-design' },
+      ],
+    })
+    const legacyCommands = [
+      { name: 'office-frontend-design:frontend-design', description: 'Removed frontend skill', kind: 'skill' as const, source: 'plugin' as const, userInvocable: true },
+      { name: 'frontend-design', description: 'Personal frontend design', kind: 'skill' as const, source: 'user' as const, userInvocable: true },
+    ]
+    mocks.listSkills.mockResolvedValue({ skills: legacyCommands })
+    render(<EmptySession />)
+    if (entry === '+') {
+      fireEvent.click(screen.getByLabelText('Open composer tools'))
+      fireEvent.change(screen.getByRole('combobox', { name: 'Search skills, plugins, files…' }), { target: { value: 'design' } })
+    } else setComposerText(`${entry}design`, 7)
+    expect(await screen.findByRole('option', { name: 'Personal frontend design' })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: 'Design tools' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Removed frontend/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /office-frontend-design/ })).not.toBeInTheDocument()
+    expect(mocks.wsSend).not.toHaveBeenCalled()
+  })
+
+  it.each(['empty', 'replacement'] as const)('refreshes skills when opening plus and drops stale entries during a pending %s response', async (result) => {
+    const oldSkill = { kind: 'skill' as const, id: 'old-skill', name: 'old-skill', displayName: 'Old skill', description: 'Previously enabled', source: 'user', modelText: '/old-skill' }
+    const newSkill = { ...oldSkill, id: 'new-skill', name: 'new-skill', displayName: 'New skill', modelText: '/new-skill' }
+    mocks.listReferences.mockResolvedValue({ plugins: [], skills: [oldSkill] })
+    render(<EmptySession />)
+    await act(async () => { await Promise.resolve() })
+    const initialCalls = mocks.listReferences.mock.calls.length
+    let resolveRefresh!: (value: { plugins: [], skills: typeof oldSkill[] }) => void
+    mocks.listReferences.mockImplementation(() => new Promise(resolve => { resolveRefresh = resolve }))
+
+    fireEvent.click(screen.getByLabelText('Open composer tools'))
+    await waitFor(() => expect(mocks.listReferences.mock.calls.length).toBeGreaterThan(initialCalls))
+    fireEvent.click(await screen.findByRole('option', { name: /^Skills/ }))
+    expect(screen.queryByRole('option', { name: 'Old skill' })).not.toBeInTheDocument()
+
+    await act(async () => resolveRefresh({ plugins: [], skills: result === 'replacement' ? [newSkill] : [] }))
+    expect(screen.queryByRole('option', { name: 'Old skill' })).not.toBeInTheDocument()
+    if (result === 'replacement') expect(await screen.findByRole('option', { name: 'New skill' })).toBeInTheDocument()
+    else expect(screen.queryByRole('option', { name: 'New skill' })).not.toBeInTheDocument()
+  })
+
+  it('inserts a structured project file mention selected through the plus menu search', async () => {
+    mocks.search.mockResolvedValue({
+      currentPath: '/workspace/project', parentPath: null, query: 'README',
+      entries: [{ name: 'README.md', path: '/workspace/project/README.md', relativePath: 'README.md', isDirectory: false }],
+    })
+    render(<EmptySession />)
+    await pickProject()
+    setComposerText('Please review ', 14)
+    fireEvent.click(screen.getByLabelText('Open composer tools'))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search skills, plugins, files…' }), { target: { value: 'README' } })
+    fireEvent.click(await screen.findByRole('option', { name: 'README.md' }))
+
+    await waitFor(() => {
+      expect(document.querySelector('.composer-mention')).toHaveAttribute('data-mention-path', '/workspace/project/README.md')
+    })
+    expect(document.querySelector('.composer-mention')).toHaveTextContent('@README.md')
+    expect(getComposerText()).toContain('Please review @README.md')
+    expect(mocks.search).toHaveBeenCalledWith('README', '/workspace/project')
+    expect(screen.queryByRole('combobox', { name: 'Search skills, plugins, files…' })).not.toBeInTheDocument()
+    expect(mocks.wsSend).not.toHaveBeenCalled()
+    expect(mocks.createSession).not.toHaveBeenCalled()
+  })
+
   it('keeps user-only skills as slash text when no mention capability is available', async () => {
     mocks.listSkills.mockResolvedValue({ skills: [{ name: 'manual-only', description: 'User invocation only', userInvocable: true, disableModelInvocation: true }] })
     render(<EmptySession />)
@@ -355,10 +428,10 @@ describe('EmptySession', () => {
       ? new Promise(resolve => { resolveProject = resolve })
       : Promise.resolve({ skills: [{ name: 'old-directory-skill', description: 'Old scope', userInvocable: true }] }))
     render(<EmptySession />)
-    setComposerText('/', 1)
+    setComposerText('/directory', 10)
     expect(await screen.findByText('old-directory-skill')).toBeInTheDocument()
     await pickProject()
-    setComposerText('/', 1)
+    setComposerText('/directory', 10)
     expect(screen.queryByText('old-directory-skill')).not.toBeInTheDocument()
     await act(async () => resolveProject({ skills: [{ name: 'new-directory-skill', description: 'New scope', userInvocable: true }] }))
     expect(await screen.findByText('new-directory-skill')).toBeInTheDocument()
@@ -484,11 +557,11 @@ describe('EmptySession', () => {
       expect(mocks.listSkills).toHaveBeenCalledTimes(1)
     })
 
-    setComposerText('/', 1)
+    setComposerText('/a', 2)
 
     const listbox = await screen.findByRole('listbox', { name: 'Slash commands' })
     const combobox = screen.getByRole('combobox')
-    const systemCommand = screen.getByText('mcp')
+    const systemCommand = screen.getByText('/status')
     const skillsHeading = screen.getByText('Skills')
     const projectSkill = screen.getByText('project-audit')
     const pluginSkill = screen.getByText('drawing:render')
@@ -530,7 +603,7 @@ describe('EmptySession', () => {
 
     setComposerText('/debug', 6)
 
-    const agentOption = await screen.findByText('agent debugger')
+    const agentOption = await screen.findByText('/agent debugger')
     fireEvent.click(agentOption)
 
     expect(getComposerText()).toBe('/agent debugger ')
@@ -607,7 +680,7 @@ describe('EmptySession', () => {
     const input = getComposerElement()
     setComposerText('/agent', 6)
 
-    await screen.findByText('agent debugger')
+    await screen.findByText('/agent debugger')
     fireEvent.keyDown(input, { key: 'ArrowDown' })
     fireEvent.keyDown(input, { key: 'Enter' })
 
@@ -1102,8 +1175,8 @@ describe('EmptySession', () => {
 
     const panel = screen.getByTestId('empty-session-composer-panel')
 
-    setComposerText('/', 1)
-    expect(await screen.findByText('mcp')).toBeInTheDocument()
+    setComposerText('/mcp', 4)
+    expect(await screen.findByRole('option', { name: '/mcp' })).toBeInTheDocument()
     expect(panel).toHaveClass('overflow-visible')
     expect(panel).not.toHaveClass('overflow-hidden')
 

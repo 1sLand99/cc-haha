@@ -2,6 +2,7 @@ import {
   Box,
   Bot,
   MonitorSmartphone,
+  Ellipsis,
   Paperclip,
   Plug,
   Settings2,
@@ -10,6 +11,7 @@ import {
   Workflow,
   type LucideIcon,
 } from 'lucide-react'
+import { isComposerPluginVisible } from '@/lib/composerCapabilityVisibility'
 import type { TranslationKey } from '@/i18n'
 import type { SettingsTab } from '@/stores/uiStore'
 import type { AgentDefinition } from '@/api/agents'
@@ -101,7 +103,7 @@ function referenceIcon(reference: ComposerReferenceCandidate): CapabilityIcon {
 }
 
 function connectorStatusCount(connectors: ConnectorDto[]): number {
-  return connectors.filter(connector => connector.connection === 'connected').length
+  return connectors.filter(connector => connector.connection === 'connected' && isComposerPluginVisible(connector.pluginId)).length
 }
 
 export function buildCapabilitySections(input: CapabilityMenuInput): CapabilityMenuSection[] {
@@ -121,7 +123,21 @@ export function buildCapabilitySections(input: CapabilityMenuInput): CapabilityM
     action: { type: 'settings', tab: 'skills' },
   })
 
-  const connected = input.connectors.filter(connector => connector.connection === 'connected')
+  const pluginChildren: CapabilityMenuItem[] = input.plugins.map(plugin => ({
+    key: `plugin:${plugin.id}`,
+    label: plugin.displayName || plugin.name,
+    description: plugin.description,
+    icon: referenceIcon(plugin),
+    action: { type: 'insertMention', reference: plugin },
+  }))
+  pluginChildren.push({
+    key: 'plugins:manage',
+    label: t('chat.capabilities.managePlugins'),
+    icon: { kind: 'lucide', icon: Settings2 },
+    action: { type: 'settings', tab: 'plugins' },
+  })
+
+  const connected = input.connectors.filter(connector => connector.connection === 'connected' && isComposerPluginVisible(connector.pluginId))
   const connectorChildren: CapabilityMenuItem[] = connected.map(connector => {
     // A connector backed by an installed plugin can be referenced as a mention;
     // anything else only has a management surface, so the row opens the catalog.
@@ -215,7 +231,7 @@ export function buildCapabilitySections(input: CapabilityMenuInput): CapabilityM
     action: { type: 'saveWorkflowPanel' },
   })
 
-  return [
+  const sections: CapabilityMenuSection[] = [
     {
       id: 'add',
       title: t('chat.capabilities.sectionAdd'),
@@ -284,38 +300,26 @@ export function buildCapabilitySections(input: CapabilityMenuInput): CapabilityM
       }],
     },
   ]
-}
-
-function itemMatches(item: CapabilityMenuItem, words: string[]): boolean {
-  const haystack = `${item.label} ${item.description ?? ''}`.toLocaleLowerCase()
-  return words.every(word => haystack.includes(word))
-}
-
-/**
- * Filter sections by a search query. Matches against both top-level rows and
- * sub-list rows; matched children are promoted to the top level (flattened,
- * with their action intact) so the result list stays a single linear menu.
- */
-export function filterCapabilitySections(
-  sections: CapabilityMenuSection[],
-  query: string,
-): CapabilityMenuSection[] {
-  const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
-  if (!words.length) return sections
-
-  const filtered: CapabilityMenuSection[] = []
-  for (const section of sections) {
-    const items: CapabilityMenuItem[] = []
-    for (const item of section.items) {
-      if (itemMatches(item, words)) {
-        // Keep children: a matched parent still drills into its sub-list.
-        items.push(item)
-        continue
-      }
-      const matchingChildren = item.children?.filter(child => itemMatches(child, words)) ?? []
-      items.push(...matchingChildren.map(child => ({ ...child, children: undefined })))
-    }
-    if (items.length) filtered.push({ ...section, items })
-  }
-  return filtered
+  const capabilities = sections[1]!.items
+  const primary = capabilities.filter(item => item.key === 'skills')
+  primary.push({
+    key: 'plugins',
+    label: t('chat.referencePlugins'),
+    icon: { kind: 'lucide', icon: Plug },
+    count: input.plugins.length,
+    children: pluginChildren,
+  })
+  return [
+    { ...sections[1]!, items: primary },
+    sections[0]!,
+    {
+      ...sections[2]!,
+      items: [computerUseItem, {
+        key: 'more',
+        label: t('chat.capabilities.moreTools'),
+        icon: { kind: 'lucide', icon: Ellipsis },
+        children: [...capabilities.filter(item => item.key !== 'skills' && item.key !== 'computer-use'), ...sections[2]!.items],
+      }],
+    },
+  ]
 }

@@ -63,65 +63,17 @@ export const SLASH_COMMAND_ALIASES = [
   { name: 'settings', target: 'config' },
 ] as const
 
-/**
- * Desktop-owned commands that duplicate a permanent GUI surface and so stay
- * out of the slash menu's *default* (empty-query) listing: status/cost/context
- * live on the toolbar's ContextUsageIndicator, config/doctor/memory/plugin are
- * Settings tabs, and help is superseded by the composer's capability menu.
- * They are only hidden from the empty-query view — typing the name still
- * matches and executes them exactly as before, and the commands remain
- * registered for `getSlashCommandNameConflict`. Aliases of hidden commands
- * are hidden too so `plugins`/`settings` don't leak their targets back in.
- */
-export const DEFAULT_HIDDEN_SLASH_COMMAND_NAMES: ReadonlySet<string> = new Set([
-  'status',
-  'cost',
-  'context',
-  'config',
-  'doctor',
-  'memory',
-  'plugin',
-  'help',
-  ...SLASH_COMMAND_ALIASES.map(alias => alias.name),
-])
+/** A short, predictable entry point; typing searches the complete registry. */
+export const FREQUENT_SLASH_COMMAND_NAMES = [
+  'compact', 'context', 'status', 'init', 'review', 'model',
+] as const
 
-/**
- * Commands the desktop owns, in the order the slash menu should lead with them.
- * The order is the one the panel and settings tables declare, so the first
- * screen stays the same no matter how the CLI happened to register its list.
- */
 const DESKTOP_SLASH_COMMAND_NAMES: readonly string[] = [
   ...PANEL_SLASH_COMMANDS.map(command => command.name),
   ...SETTINGS_SLASH_COMMANDS.map(command => command.name),
   ...SLASH_COMMAND_ALIASES.map(command => command.name),
   'model',
 ]
-
-/**
- * A session's command list is stitched together from the CLI's own registration
- * (its bundled skills first) and the desktop fallback, which leaves entries such
- * as `update-config`, `debug` and `batch` above the fold while the commands a
- * user reaches for sit below it. Desktop-owned commands are unconditional — the
- * client runs them itself — so they lead, and everything else keeps the order
- * its source gave it.
- */
-const PREFERRED_SLASH_COMMAND_RANKS = new Map(
-  DESKTOP_SLASH_COMMAND_NAMES.map((name, index) => [name.toLowerCase(), index] as const),
-)
-
-function prioritizeSlashCommands(commands: SlashCommandOption[]): SlashCommandOption[] {
-  const rankOf = (command: SlashCommandOption): number | undefined =>
-    PREFERRED_SLASH_COMMAND_RANKS.get(command.name.trim().toLowerCase())
-  const preferred = commands
-    .map((command, index) => ({ command, index, rank: rankOf(command) }))
-    .filter((entry): entry is { command: SlashCommandOption, index: number, rank: number } => entry.rank !== undefined)
-    .sort((a, b) => a.rank - b.rank || a.index - b.index)
-  if (!preferred.length || preferred.length === commands.length) return commands
-  return [
-    ...preferred.map(entry => entry.command),
-    ...commands.filter(command => rankOf(command) === undefined),
-  ]
-}
 
 /** Commands the desktop reserves for itself; new workflows must not claim them. */
 const DESKTOP_RESERVED_SLASH_COMMAND_NAMES = new Set(DESKTOP_SLASH_COMMAND_NAMES.map(name => name.toLowerCase()))
@@ -376,26 +328,23 @@ export function filterSlashCommands(
   commands: ReadonlyArray<SlashCommandOption>,
   filter: string,
 ): SlashCommandOption[] {
-  const normalized = filter.toLowerCase()
-  // No query yet: this is the order the menu opens on, so lead with the
-  // commands the desktop owns instead of whatever the CLI registered first.
-  // Commands with a permanent GUI home (status/cost/context/…) stay hidden
-  // until the user types — see DEFAULT_HIDDEN_SLASH_COMMAND_NAMES.
+  const normalized = filter.trim().toLowerCase()
   if (!normalized.trim()) {
-    return prioritizeSlashCommands(
-      [...commands].filter(
-        command => !DEFAULT_HIDDEN_SLASH_COMMAND_NAMES.has(command.name.trim().toLowerCase()),
-      ),
-    )
+    return FREQUENT_SLASH_COMMAND_NAMES.flatMap(name => commands.filter(command =>
+      command.name.trim().toLowerCase() === name && (!command.kind || command.kind === 'command'),
+    ))
   }
 
-  return commands
-    .map((command, index) => ({
-      command,
-      index,
-      rank: getSlashCommandMatchRank(command, normalized),
-    }))
-    .filter((item) => Number.isFinite(item.rank))
+  const matches = commands.map((command, index) => ({
+    command,
+    index,
+    rank: getSlashCommandMatchRank(command, normalized),
+  })).filter(item => Number.isFinite(item.rank))
+  // Broad descriptions are useful as a fallback, but must not crowd out a
+  // command the user is naming — especially after grouping by command kind.
+  const hasNameMatch = matches.some(item => item.rank < 4)
+  return matches
+    .filter(item => !hasNameMatch || item.rank < 4)
     .sort((a, b) => a.rank - b.rank || a.index - b.index)
     .map((item) => item.command)
 }

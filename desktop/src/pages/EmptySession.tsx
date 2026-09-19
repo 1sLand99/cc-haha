@@ -1,3 +1,4 @@
+import { isComposerReferenceVisible, isComposerSlashCommandVisible } from '@/lib/composerCapabilityVisibility'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useDismissable } from '@/hooks/useDismissable'
 import { BrandSeal } from '@/components/composite/BrandSeal'
@@ -165,17 +166,17 @@ export function EmptySession() {
   const [draftPermissionMode, setDraftPermissionMode] = useState<PermissionMode>(defaultPermissionMode)
   const lastPluginReloadSummary = usePluginStore((state) => state.lastReloadSummary)
   const referenceCurrent = referenceState?.cwd === workDir ? referenceState : null
-  const composerReferences = referenceCurrent?.items ?? EMPTY_COMPOSER_REFERENCES
+  const composerReferences = useMemo(() => (referenceCurrent?.items ?? EMPTY_COMPOSER_REFERENCES).filter(isComposerReferenceVisible), [referenceCurrent?.items])
   useEffect(() => {
     let active = true
-    setReferenceState(previous => ({ cwd: workDir, items: previous?.cwd === workDir ? previous.items : [], loading: true, error: false }))
+    setReferenceState({ cwd: workDir, items: [], loading: true, error: false })
     void composerReferencesApi.list(workDir || undefined).then(data => {
       if (active) setReferenceState({ cwd: workDir, items: [...data.plugins, ...data.skills], loading: false, error: false })
     }).catch(() => {
       if (active) setReferenceState({ cwd: workDir, items: [], loading: false, error: true })
     })
     return () => { active = false }
-  }, [workDir, lastPluginReloadSummary, slashMenuOpen, fileSearchOpen])
+  }, [workDir, lastPluginReloadSummary, slashMenuOpen, fileSearchOpen, plusMenuOpen])
   useEffect(() => {
     setReferenceDetail(null)
     setReferenceOptionId(undefined)
@@ -287,7 +288,7 @@ export function EmptySession() {
       names.add(name.toLowerCase())
       commands.push({ name, description: reference.description, kind: reference.kind })
     }
-    return commands
+    return commands.filter(isComposerSlashCommandVisible)
   }, [agentSlashCommands, slashCommands, slashCommandsCwd, workDir, composerReferences, t])
 
   const handleWorkDirChange = (newWorkDir: string) => {
@@ -822,6 +823,7 @@ export function EmptySession() {
                   ref={slashMenuRef}
                   id={slashMenuId}
                   groups={filteredCommandGroups}
+                  isSearching={Boolean(slashFilter.trim())}
                   references={composerReferences}
                   selectedIndex={slashSelectedIndex}
                   itemRefs={slashItemRefs}
@@ -883,6 +885,19 @@ export function EmptySession() {
 
                     {plusMenuOpen && (
                       <ComposerCapabilityMenu
+                        cwd={workDir}
+                        referencesLoading={referenceCurrent?.loading ?? true}
+                        referencesError={referenceCurrent?.error}
+                        onSelectFile={mention => {
+                          const cursorPos = composerRef.current?.getSelectionOffsets().start ?? input.length
+                          const inserted = insertMentionIntoText(input, mentions, cursorPos, cursorPos, mention)
+                          setInput(inserted.text)
+                          setMentions(inserted.mentions)
+                          requestAnimationFrame(() => {
+                            composerRef.current?.focus()
+                            composerRef.current?.setSelectionOffsets(inserted.cursorPos)
+                          })
+                        }}
                         id={capabilityMenuId}
                         sections={capabilityMenu.sections}
                         onAction={capabilityMenu.onAction}

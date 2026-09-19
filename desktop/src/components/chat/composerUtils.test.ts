@@ -159,7 +159,7 @@ describe('composerUtils', () => {
     expect(replaceSlashCommand('/goal sta', 9, 'goal status')).toBeNull()
   })
 
-  it('ranks slash command name matches before broad description matches', () => {
+  it('keeps name matches free of broad description-only matches', () => {
     expect(
       filterSlashCommands([
         { name: 'lark-calendar', description: 'Includes shortcuts and suggestion helpers' },
@@ -170,57 +170,36 @@ describe('composerUtils', () => {
     ).toEqual([
       'superpowers:brainstorming',
       'superpowers:systematic-debugging',
-      'lark-calendar',
-      'agent-team-orchestrator',
     ])
   })
 
-  it('opens on the commands the desktop owns instead of the CLI registration order', () => {
-    // The CLI lists its bundled skills first, so an unprioritised menu opens on
-    // `update-config` / `debug` / `batch`. Desktop-owned commands lead instead,
-    // and everything else keeps the order its source gave it. `help` has a
-    // permanent GUI home, so it stays out of the empty-query listing.
-    const commands = [
+  it('opens on a bounded set of frequent commands regardless of CLI registration order', () => {
+    const commands = mergeSlashCommands([
       { name: 'update-config', description: 'Configure' },
       { name: 'debug', description: 'Debug' },
-      { name: 'compact', description: 'Compact conversation context' },
-      { name: 'help', description: 'Show available commands' },
-      { name: 'model', description: 'Switch AI model' },
-    ]
-    expect(filterSlashCommands(commands, '').map((command) => command.name)).toEqual([
-      'model',
-      'update-config',
-      'debug',
-      'compact',
+      { name: 'heapdump', description: 'Heap dump' },
+      { name: 'video', description: 'Make videos', kind: 'skill' },
+      { name: 'draw', description: 'Draw diagrams', kind: 'plugin' },
     ])
-  })
-
-  it('hides commands with a permanent GUI home from the empty-query listing only', () => {
-    const all = mergeSlashCommands([])
-    const emptyQueryNames = filterSlashCommands(all, '').map((command) => command.name)
-
-    for (const hidden of ['status', 'cost', 'context', 'config', 'doctor', 'memory', 'plugin', 'help', 'plugins', 'settings']) {
-      expect(emptyQueryNames).not.toContain(hidden)
+    expect(filterSlashCommands(commands, '').map(command => command.name)).toEqual([
+      'compact', 'context', 'status', 'init', 'review', 'model',
+    ])
+    expect(filterSlashCommands(commands, '  ')).toEqual(filterSlashCommands(commands, ''))
+    for (const name of ['update-config', 'debug', 'heapdump', 'video', 'draw', 'config', 'help']) {
+      expect(filterSlashCommands(commands, name).map(command => command.name)).toContain(name)
     }
-    // Everything the desktop still surfaces in the menu is untouched.
-    for (const visible of ['mcp', 'skills', 'save-workflow', 'model', 'compact']) {
-      expect(emptyQueryNames).toContain(visible)
-    }
-
-    // Typing the name still matches — and still resolves to the same UI action.
-    expect(filterSlashCommands(all, 'status').map((command) => command.name)).toContain('status')
-    expect(filterSlashCommands(all, 'conf').map((command) => command.name)).toContain('config')
   })
 
-  it('hides CLI-reported commands by name too, regardless of source', () => {
-    const cliReported = [{ name: 'status', description: 'CLI status', kind: 'command' as const }]
-    const emptyQueryNames = filterSlashCommands(mergeSlashCommands(cliReported), '').map(
-      (command) => command.name,
-    )
-    expect(emptyQueryNames).not.toContain('status')
+  it('does not surface a skill merely because it shares a frequent command name', () => {
+    expect(filterSlashCommands([{ name: 'review', description: 'Custom review', kind: 'skill' }], '')).toEqual([])
   })
 
-  it('leaves match ranking alone once a query is typed', () => {
+  it('keeps CLI-reported frequent commands available in the default list', () => {
+    const commands = mergeSlashCommands([{ name: 'status', description: 'CLI status', kind: 'command' }])
+    expect(filterSlashCommands(commands, '').map(command => command.name)).toContain('status')
+  })
+
+  it('keeps the named command instead of description-only matches', () => {
     const commands = [
       { name: 'help', description: 'Show available commands' },
       { name: 'compact', description: 'Compact conversation context' },
@@ -228,7 +207,26 @@ describe('composerUtils', () => {
     ]
     expect(filterSlashCommands(commands, 'comp').map((command) => command.name)).toEqual([
       'compact',
-      'update-config',
+    ])
+  })
+
+  it('falls back to descriptions and arguments when no command name matches', () => {
+    const commands = [
+      { name: 'compact', description: 'Reduce conversation size' },
+      { name: 'run', description: 'Run a task', argumentHint: '<conversation>' },
+    ]
+    expect(filterSlashCommands(commands, 'conversation').map(command => command.name)).toEqual(['compact', 'run'])
+  })
+
+  it('ranks exact names, prefixes and name segments before substrings', () => {
+    const commands = [
+      { name: 'decompact', description: '' },
+      { name: 'workspace:compact', description: '' },
+      { name: 'compactor', description: '' },
+      { name: 'compact', description: '' },
+    ]
+    expect(filterSlashCommands(commands, 'compact').map(command => command.name)).toEqual([
+      'compact', 'compactor', 'workspace:compact', 'decompact',
     ])
   })
 
