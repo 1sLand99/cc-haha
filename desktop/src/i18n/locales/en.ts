@@ -1,4 +1,17 @@
 export const en = {
+  "chat.history.loadCheckpoints": "Load undo checkpoints",
+  "chat.history.windowNotice": "Only a bounded history window is shown. Long content is shortened; full history remains on disk.",
+  "chat.history.older": "Older messages",
+  "chat.history.latest": "Latest messages",
+  "chat.history.recovering": "Restoring session state…",
+  "chat.history.recoveryIncomplete": "Some session state could not be restored.",
+  "trace.windowNotice": "Transcript and trace use bounded pages.",
+  "trace.windowLimited": "Some records exceed the viewing limit; the original file is unchanged.",
+  "trace.windowFirst": "First page / Live",
+  "trace.windowPrevious": "Previous page",
+  "trace.windowNext": "Next page",
+  "trace.windowScanNext": "Scan next segment",
+
   "extensions.myPlugins": "My plugins",
   "extensions.mySkills": "My skills",
   "extensions.browse": "Back to browse",

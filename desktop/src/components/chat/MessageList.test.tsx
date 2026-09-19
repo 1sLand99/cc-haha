@@ -53,6 +53,8 @@ function makeSessionState(overrides: Partial<PerSessionState> = {}): PerSessionS
     messages: [],
     chatState: 'idle',
     connectionState: 'connected',
+    historyStatus: 'ready',
+    historyHydrated: true,
     streamingText: '',
     streamingToolInput: '',
     activeToolUseId: null,
@@ -336,6 +338,71 @@ describe('MessageList nested tool calls', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('does not load checkpoints from stale cached rows before history hydration completes', async () => {
+    const messages: UIMessage[] = [
+      { id: 'cached-user', type: 'user_text', content: 'Cached prompt', timestamp: 1 },
+      { id: 'cached-reply', type: 'assistant_text', content: 'Cached reply', timestamp: 2 },
+    ]
+    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
+      messages, historyStatus: 'idle', historyHydrated: false, historyWindowed: false,
+    }) } })
+    render(<MessageList />)
+    expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
+    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
+      messages, historyStatus: 'loading', historyHydrated: false, historyWindowed: false,
+    }) } }))
+    expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
+    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
+      messages, historyStatus: 'ready', historyHydrated: false, historyWindowed: false,
+    }) } }))
+    expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
+    const partialPage = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 1024, omittedOversizedEntries: 0 }
+    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
+      messages, historyWindowed: false, historyPage: partialPage,
+    }) } }))
+    expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
+    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
+      messages, historyWindowed: true, historyPage: partialPage,
+    }) } }))
+    expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Load undo checkpoints' }))
+    await waitFor(() => expect(sessionsApi.getTurnCheckpoints).toHaveBeenCalledTimes(1))
+  })
+
+  it('defers checkpoint transcript work until explicitly requested for a bounded history window', async () => {
+    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ historyWindowed: true, messages: [
+      { id: 'user-1', transcriptMessageId: 'user-1', type: 'user_text', content: 'User prompt', timestamp: 1 },
+      { id: 'reply', transcriptMessageId: 'reply', type: 'assistant_text', content: 'Assistant reply', timestamp: 2 },
+    ] }) } })
+    vi.mocked(sessionsApi.getTurnCheckpoints).mockResolvedValue({ checkpoints: [{
+      target: { targetUserMessageId: 'a-different-old-user', userMessageIndex: 0, userMessageCount: 200 },
+      code: { available: true, filesChanged: ['wrong.ts'], insertions: 1, deletions: 0 },
+    }] })
+    render(<MessageList />)
+    expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Load undo checkpoints' }))
+    await waitFor(() => expect(sessionsApi.getTurnCheckpoints).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Load undo checkpoints' }).hasAttribute('disabled')).toBe(false))
+    expect(screen.queryByRole('region', { name: 'Turn changed files' })).toBeNull()
+  })
+
+  it('pages through bounded history without replacing live state and returns to the latest window', async () => {
+    const page = { nextCursor: 'older-cursor', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 1024, omittedOversizedEntries: 0 }
+    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ historyWindowed: true, historyPage: page, messages: [{ id: 'live', type: 'assistant_text', content: 'current live message', timestamp: 1 }] }) } })
+    const getPage = vi.spyOn(sessionsApi, 'getHistoryPage')
+      .mockResolvedValueOnce({ messages: [{ id: 'old', type: 'assistant', content: 'older page message', timestamp: '2020-01-01T00:00:00Z' }], page: { ...page, nextCursor: null, hasMore: false } })
+      .mockResolvedValueOnce({ messages: [{ id: 'latest', type: 'assistant', content: 'latest page message', timestamp: '2026-01-01T00:00:00Z' }], page: { ...page, historyComplete: true } })
+    render(<MessageList />)
+    expect(screen.getByTestId('history-window-notice')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Older messages' }))
+    expect(await screen.findByText('older page message')).toBeTruthy()
+    expect(useChatStore.getState().sessions[ACTIVE_TAB]?.messages[0]?.id).toBe('live')
+    expect(getPage).toHaveBeenCalledWith(ACTIVE_TAB, { cursor: 'older-cursor' }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    fireEvent.click(screen.getByRole('button', { name: 'Latest messages' }))
+    expect(await screen.findByText('latest page message')).toBeTruthy()
+    expect(useChatStore.getState().sessions[ACTIVE_TAB]?.historyBrowseMessages).toBeUndefined()
   })
 
   it('windows long transcripts instead of mounting every historical message at once', () => {

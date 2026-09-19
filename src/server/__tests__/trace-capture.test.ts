@@ -1338,6 +1338,34 @@ describe('session trace API', () => {
     expect(body.events).toEqual([])
   })
 
+  test('streams original trace bytes, rejects oversized detail, and validates overview offsets', async () => {
+    const sessionId = 'route-resource-bounds'
+    const traceDir = path.join(tmpDir, 'cc-haha', 'traces')
+    await fs.mkdir(traceDir, { recursive: true })
+    const raw = Buffer.from(JSON.stringify({ type: 'call', record: {
+      id: 'huge-call', sessionId, source: 'proxy', startedAt: '2026-01-01T00:00:00Z',
+      request: { method: 'POST', url: 'https://example.test', headers: {}, body: {
+        contentType: 'text', bytes: 3 * 1024 * 1024, sha256: '', truncated: false, preview: '字'.repeat(1024 * 1024),
+      } },
+    } }) + '\n')
+    const filePath = path.join(traceDir, `${sessionId}.jsonl`)
+    await fs.writeFile(filePath, raw)
+    const rawRequest = new Request(`http://localhost:3456/api/sessions/${sessionId}/trace/raw`)
+    const download = await handleApiRequest(rawRequest, new URL(rawRequest.url))
+    expect(download.status).toBe(200)
+    expect(download.headers.get('content-disposition')).toContain('attachment')
+    expect(Buffer.from(await download.arrayBuffer())).toEqual(raw)
+    const detailRequest = new Request(`http://localhost:3456/api/sessions/${sessionId}/trace/calls/huge-call`)
+    const detail = await handleApiRequest(detailRequest, new URL(detailRequest.url))
+    expect(detail.status).toBe(413)
+    expect(await detail.json()).toMatchObject({ error: 'TRACE_RECORD_TOO_LARGE' })
+    for (const offset of ['-1', '1.5', 'Infinity', '9007199254740992']) {
+      const request = new Request(`http://localhost:3456/api/sessions/${sessionId}/trace?offset=${offset}`)
+      expect((await handleApiRequest(request, new URL(request.url))).status).toBe(400)
+    }
+    expect(await fs.readFile(filePath)).toEqual(raw)
+  })
+
   test('serves the session trace overview from the index without rereading the JSONL', async () => {
     const recorded = await traceCaptureService.recordCall({
       sessionId: 'session-trim-api',
@@ -1996,6 +2024,57 @@ describe('trace read cache', () => {
     }
   })
 
+  test('rebuilds cold trace summaries with bounded reads instead of hydrating the whole file', async () => {
+    const sessionId = 'session-streamed-projection'
+    const traceDir = path.join(tmpDir, 'cc-haha', 'traces')
+    const filePath = path.join(traceDir, `${sessionId}.jsonl`)
+    await fs.mkdir(traceDir, { recursive: true })
+    // Each UTF-8 record crosses chunk boundaries; the final version of call-a
+    // must win without changing its first insertion order.
+    const first = buildTraceCallLine('call-a', sessionId, '中文'.repeat(100_000))
+    const second = buildTraceCallLine('call-b', sessionId, 'x'.repeat(300_000))
+    const final = buildTraceCallLine('call-a', sessionId, 'updated')
+    await fs.writeFile(filePath, first + second + final + '{"incomplete":')
+    clearTraceCaptureStateForTests()
+    const originalOpen = mutableFs.open.bind(mutableFs)
+    let fullFileReads = 0
+    const readLengths: number[] = []
+    const openSpy = spyOn(mutableFs, 'open').mockImplementation(async (...args) => {
+      const handle = await originalOpen(...args)
+      if (String(args[0]) !== filePath) return handle
+      return new Proxy(handle, {
+        get(target, property) {
+          if (property === 'readFile') {
+            return async (...readArgs: Parameters<typeof target.readFile>) => {
+              fullFileReads += 1
+              return target.readFile(...readArgs)
+            }
+          }
+          if (property === 'read') {
+            return async (buffer: Uint8Array, offset: number, length: number, position: number) => {
+              readLengths.push(length)
+              return target.read(buffer, offset, length, position)
+            }
+          }
+          const value = Reflect.get(target, property, target)
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
+    })
+    try {
+      const overview = await traceCaptureService.getSessionTraceOverview(sessionId)
+      expect(overview.summary.apiCalls).toBe(2)
+      expect(overview.calls.map(call => call.id)).toEqual(['call-a', 'call-b'])
+      expect(fullFileReads).toBe(0)
+      expect(readLengths.length).toBeGreaterThan(3)
+      expect(Math.max(...readLengths)).toBeLessThanOrEqual(256 * 1024)
+      const call = await traceCaptureService.getSessionTraceCall(sessionId, 'call-a')
+      expect(call?.request.body.preview).toContain('updated')
+    } finally {
+      openSpy.mockRestore()
+    }
+  })
+
   test('projects an external append from the stored boundary without rereading the prefix', async () => {
     const traceDir = path.join(tmpDir, 'cc-haha', 'traces')
     const filePath = path.join(traceDir, 'session-projection-external-append.jsonl')
@@ -2113,6 +2192,43 @@ describe('trace read cache', () => {
 
       expect(rewroteAfterRangeRead).toBe(true)
       expect(list.traces[0].summary.models).toEqual([{ model: 'model-new', calls: 1 }])
+    } finally {
+      openSpy.mockRestore()
+    }
+  })
+
+  test.skipIf(process.platform === 'win32')('rebuilds when an append target is replaced after change detection with identical sampled windows', async () => {
+    const sessionId = 'session-append-replaced-inode'
+    const dir = path.join(tmpDir, 'cc-haha', 'traces')
+    const filePath = path.join(dir, `${sessionId}.jsonl`)
+    await fs.mkdir(dir, { recursive: true })
+    const middle = JSON.parse(buildTraceCallLine('middle', sessionId))
+    middle.record.model = 'model-old'
+    const original = buildTraceCallLine('first', sessionId, 'x'.repeat(100_000))
+      + JSON.stringify(middle) + '\n'
+      + buildTraceCallLine('last', sessionId, 'x'.repeat(100_000))
+    await fs.writeFile(filePath, original)
+    await traceCaptureService.getSessionTraceOverview(sessionId)
+    const append = buildTraceCallLine('appended', sessionId)
+    await fs.appendFile(filePath, append)
+    const replacementPath = `${filePath}.replacement`
+    await fs.writeFile(replacementPath, original.replace('model-old', 'model-new') + append)
+    const originalOpen = mutableFs.open.bind(mutableFs)
+    let opens = 0
+    let replaced = false
+    const openSpy = spyOn(mutableFs, 'open').mockImplementation(async (...args) => {
+      if (String(args[0]) === filePath && ++opens === 1) {
+        await fs.rename(replacementPath, filePath)
+        replaced = true
+      }
+      return originalOpen(...args)
+    })
+    try {
+      const overview = await traceCaptureService.getSessionTraceOverview(sessionId)
+      expect(replaced).toBe(true)
+      expect(overview.summary.models).toContainEqual({ model: 'model-new', calls: 1 })
+      expect(overview.summary.models).not.toContainEqual({ model: 'model-old', calls: 1 })
+      expect(overview.calls).toHaveLength(4)
     } finally {
       openSpy.mockRestore()
     }

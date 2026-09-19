@@ -1735,12 +1735,9 @@ async function handleSetRuntimeConfig(
       return
     }
 
-    if (conversationService.hasSession(sessionId)) {
-      await persistSessionRuntimeConfig(sessionId, nextOverride)
-      await restartSessionWithRuntimeConfig(ws, sessionId)
-      return
-    }
-
+    // A spawned process is already registered before its SDK startup settles.
+    // Wait for that startup before restarting, otherwise stopping it rejects
+    // the first turn that is still awaiting the same startup promise.
     const pendingStartup = sessionStartupPromises.get(sessionId)
     if (pendingStartup) {
       const startupRuntimeVersion = sessionStartupRuntimeVersions.get(sessionId) ?? 0
@@ -1763,6 +1760,12 @@ async function handleSetRuntimeConfig(
       ) {
         return
       }
+      await restartSessionWithRuntimeConfig(ws, sessionId)
+      return
+    }
+
+    if (conversationService.hasSession(sessionId)) {
+      await persistSessionRuntimeConfig(sessionId, nextOverride)
       await restartSessionWithRuntimeConfig(ws, sessionId)
       return
     }

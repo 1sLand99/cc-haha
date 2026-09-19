@@ -35,6 +35,8 @@ export type SubagentRunResponse = {
   /** Terminal events with the same fragment-scoped ids as activityMessages. */
   activityTaskNotifications?: AgentTaskNotification[]
   truncated: boolean
+  historyComplete?: boolean
+  activityComplete?: boolean
   updatedAt?: string
   source: SubagentRunSource
   /**

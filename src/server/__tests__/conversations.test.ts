@@ -1511,6 +1511,14 @@ describe('ConversationService', () => {
 
       expect(contextEstimate?.model).toBe('MiniMax-M3')
       expect(contextEstimate?.rawMaxTokens).toBe(1_000_000)
+
+      // No transcript append: provider edits alone must invalidate inspection data.
+      await providerService.updateProvider(provider.id, {
+        modelContextWindows: { 'MiniMax-M3': 64_000 },
+      })
+      const changed = await svc.getInspectionTranscriptSnapshot(sessionId)
+      expect(changed?.contextEstimate?.rawMaxTokens).toBe(64_000)
+      expect(changed?.usage?.models[0]?.contextWindow).toBe(64_000)
     } finally {
       if (previousConfigDir === undefined) {
         delete process.env.CLAUDE_CONFIG_DIR
@@ -2181,7 +2189,7 @@ describe('WebSocket Chat Integration', () => {
     return messages
   }
 
-  async function runTurnUntilComplete(sessionId: string, content: string): Promise<any[]> {
+  async function runTurnUntilComplete(sessionId: string, content: string, onMessage?: (message: any) => void): Promise<any[]> {
     const messages: any[] = []
     const ws = new WebSocket(`${wsUrl}/ws/${sessionId}`)
 
@@ -2194,6 +2202,7 @@ describe('WebSocket Chat Integration', () => {
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data as string)
         messages.push(msg)
+        onMessage?.(msg)
         if (msg.type === 'connected') {
           ws.send(JSON.stringify({ type: 'user_message', content }))
         }
@@ -2970,9 +2979,19 @@ describe('WebSocket Chat Integration', () => {
   }, 15_000)
 
   it('should not add a CLI exit error after a reported SDK API error', async () => {
+    const sessionId = `chat-api-error-exit-${crypto.randomUUID()}`
     const messages = await runTurnUntilComplete(
-      `chat-api-error-exit-${crypto.randomUUID()}`,
+      sessionId,
       'trigger api error then exit',
+      (message) => {
+        if (message.type === 'error' && message.code === 'invalid_request') {
+          // Prove the error was reported before asking the fixture to exit.
+          // Transport flushing alone does not settle the async SDK handler.
+          void conversationService.requestControl(sessionId, {
+            subtype: 'mock_exit_after_api_error_ack',
+          }).catch(() => undefined)
+        }
+      },
     )
 
     const errors = messages.filter((m) => m.type === 'error')
@@ -3926,6 +3945,20 @@ describe('WebSocket Chat Integration', () => {
 
     const originalStartSession = conversationService.startSession.bind(conversationService)
     const originalSendMessage = conversationService.sendMessage.bind(conversationService)
+    const originalStopSession = conversationService.stopSession.bind(conversationService)
+    const originalAppendMetadata = sessionService.appendSessionMetadata.bind(sessionService)
+    let firstStartPending = true
+    let stoppedDuringFirstStart = false
+    let markRuntimePersisted!: () => void
+    const runtimePersisted = new Promise<void>((resolve) => { markRuntimePersisted = resolve })
+    conversationService.stopSession = ((sid: string) => {
+      if (sid === sessionId && firstStartPending) stoppedDuringFirstStart = true
+      return originalStopSession(sid)
+    }) as typeof conversationService.stopSession
+    sessionService.appendSessionMetadata = (async (sid, metadata) => {
+      await originalAppendMetadata(sid, metadata)
+      if (sid === sessionId && metadata.runtimeModelId === 'first-turn-sonnet') markRuntimePersisted()
+    }) as typeof sessionService.appendSessionMetadata
     const startCalls: Array<{
       sessionId: string
       options: { permissionMode?: string; model?: string; effort?: string; providerId?: string | null } | undefined
@@ -3948,8 +3981,13 @@ describe('WebSocket Chat Integration', () => {
     ) {
       startCalls.push({ sessionId: sid, options })
       if (startCalls.length === 1) {
+        // Expose a registered process while the public startup promise is
+        // deliberately unresolved. hasSession alone must not admit a restart.
+        await originalStartSession(sid, workDir, sdkUrl, options)
         markFirstStart()
         await firstStartGate
+        firstStartPending = false
+        return
       }
       return originalStartSession(sid, workDir, sdkUrl, options)
     }) as typeof conversationService.startSession
@@ -3977,13 +4015,17 @@ describe('WebSocket Chat Integration', () => {
 
           if (msg.type === 'connected') {
             ws.send(JSON.stringify({ type: 'prewarm_session' }))
-            void firstStartEntered.then(() => {
+            void firstStartEntered.then(async () => {
               ws.send(JSON.stringify({ type: 'user_message', content: 'first turn while runtime changes' }))
               ws.send(JSON.stringify({
                 type: 'set_runtime_config',
                 providerId: provider.id,
                 modelId: 'first-turn-sonnet',
               }))
+              await runtimePersisted
+              // Drain the transition continuation after its controlled metadata
+              // write, without depending on a wall-clock delay or SDK timing.
+              await new Promise<void>((resolve) => setImmediate(resolve))
               releaseFirstStart()
             })
             return
@@ -4007,6 +4049,7 @@ describe('WebSocket Chat Integration', () => {
         }
       })
 
+      expect(stoppedDuringFirstStart).toBe(false)
       expect(startCalls).toHaveLength(2)
       expect(startCalls[0]).toMatchObject({ sessionId })
       expect(startCalls[0]?.options?.providerId).toBeNull()
@@ -4026,6 +4069,9 @@ describe('WebSocket Chat Integration', () => {
       ws.close()
       conversationService.startSession = originalStartSession
       conversationService.sendMessage = originalSendMessage
+      conversationService.stopSession = originalStopSession
+      sessionService.appendSessionMetadata = originalAppendMetadata
+      releaseFirstStart()
       conversationService.stopSession(sessionId)
     }
   }, 20_000)
@@ -4493,6 +4539,15 @@ describe('WebSocket Chat Integration', () => {
       const { sessionId } = await createRes.json() as { sessionId: string }
 
       const originalStartSession = conversationService.startSession.bind(conversationService)
+      let terminalSdkResultReceived = false
+      let restartedBeforeTerminalResult = false
+      const originalHandleSdkPayload = conversationService.handleSdkPayload.bind(conversationService)
+      const sdkPayloadSpy = spyOn(conversationService, 'handleSdkPayload').mockImplementation((sid, payload, options) => {
+        if (sid === sessionId && payload.split('\n').some((line) => {
+          try { return JSON.parse(line).type === 'result' } catch { return false }
+        })) terminalSdkResultReceived = true
+        originalHandleSdkPayload(sid, payload, options)
+      })
       const startCalls: Array<{
         sessionId: string
         options: { permissionMode?: string; model?: string; effort?: string; providerId?: string | null } | undefined
@@ -4504,6 +4559,7 @@ describe('WebSocket Chat Integration', () => {
         sdkUrl: string,
         options?: { permissionMode?: string; model?: string; effort?: string; thinking?: 'enabled' | 'adaptive' | 'disabled'; providerId?: string | null },
       ) {
+        if (startCalls.length > 0 && !terminalSdkResultReceived) restartedBeforeTerminalResult = true
         startCalls.push({ sessionId: sid, options })
         return originalStartSession(sid, workDir, sdkUrl, options)
       }) as typeof conversationService.startSession
@@ -4568,7 +4624,8 @@ describe('WebSocket Chat Integration', () => {
 
             if (msg.type === 'message_complete' && switchTriggered && !turnComplete) {
               turnComplete = true
-              expect(startCalls).toHaveLength(1)
+              // The server may already have restarted by the time this queued
+              // client event arrives; ordering is checked at SDK receipt above.
               return
             }
 
@@ -4585,6 +4642,7 @@ describe('WebSocket Chat Integration', () => {
           }
         })
 
+        expect(restartedBeforeTerminalResult).toBe(false)
         expect(startCalls).toHaveLength(2)
         expect(startCalls[0]).toMatchObject({
           sessionId,
@@ -4602,6 +4660,7 @@ describe('WebSocket Chat Integration', () => {
         })
       } finally {
         ws.close()
+        sdkPayloadSpy.mockRestore()
         conversationService.startSession = originalStartSession
         conversationService.stopSession(sessionId)
       }
@@ -4647,6 +4706,15 @@ describe('WebSocket Chat Integration', () => {
       const { sessionId } = await createRes.json() as { sessionId: string }
 
       const originalStartSession = conversationService.startSession.bind(conversationService)
+      let terminalSdkResultReceived = false
+      let restartedBeforeTerminalResult = false
+      const originalHandleSdkPayload = conversationService.handleSdkPayload.bind(conversationService)
+      const sdkPayloadSpy = spyOn(conversationService, 'handleSdkPayload').mockImplementation((sid, payload, options) => {
+        if (sid === sessionId && payload.split('\n').some((line) => {
+          try { return JSON.parse(line).type === 'result' } catch { return false }
+        })) terminalSdkResultReceived = true
+        originalHandleSdkPayload(sid, payload, options)
+      })
       const startCalls: Array<{
         sessionId: string
         options: { permissionMode?: string; model?: string; effort?: string; providerId?: string | null } | undefined
@@ -4658,6 +4726,7 @@ describe('WebSocket Chat Integration', () => {
         sdkUrl: string,
         options?: { permissionMode?: string; model?: string; effort?: string; thinking?: 'enabled' | 'adaptive' | 'disabled'; providerId?: string | null },
       ) {
+        if (startCalls.length > 0 && !terminalSdkResultReceived) restartedBeforeTerminalResult = true
         startCalls.push({ sessionId: sid, options })
         if (startCalls.length > 1) {
           throw new Error('deferred restart failed')
@@ -4706,7 +4775,8 @@ describe('WebSocket Chat Integration', () => {
 
             if (msg.type === 'message_complete' && switchTriggered && !turnComplete) {
               turnComplete = true
-              expect(startCalls).toHaveLength(1)
+              // The server may already have restarted by the time this queued
+              // client event arrives; ordering is checked at SDK receipt above.
               return
             }
 
@@ -4739,6 +4809,7 @@ describe('WebSocket Chat Integration', () => {
         expect(switchTriggered).toBe(true)
         expect(turnComplete).toBe(true)
         expect(restartError).toBe(true)
+        expect(restartedBeforeTerminalResult).toBe(false)
         expect(startCalls).toHaveLength(2)
         expect(startCalls[1]).toMatchObject({
           sessionId,
@@ -4749,6 +4820,7 @@ describe('WebSocket Chat Integration', () => {
         })
       } finally {
         ws.close()
+        sdkPayloadSpy.mockRestore()
         conversationService.startSession = originalStartSession
         conversationService.stopSession(sessionId)
       }

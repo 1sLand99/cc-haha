@@ -30,6 +30,23 @@ type MessagesResponse = {
   messages: MessageEntry[]
   taskNotifications?: AgentTaskNotification[]
 }
+export type SessionHistoryPage = MessagesResponse & {
+  page?: {
+    nextCursor: string | null
+    hasMore: boolean
+    historyComplete: boolean
+    sourceVersion: string
+    scannedBytes: number
+    omittedOversizedEntries: number
+  }
+}
+export type SessionHistoryRecovery = MessagesResponse & {
+  sourceVersion: string
+  status: 'ready' | 'incomplete'
+  completeness?: { goal: boolean; todos: boolean; activity: boolean; usage: boolean }
+  tokenUsage: { input_tokens: number; output_tokens: number; cache_read_tokens?: number; cache_creation_tokens?: number } | null
+  omittedRecords: number
+}
 type CreateSessionResponse = { sessionId: string; workDir?: string }
 export type BatchDeleteSessionsResponse = {
   ok: boolean
@@ -410,8 +427,18 @@ export const sessionsApi = {
     return api.get<ProjectSessionHistoryResponse>(`/api/sessions/project-history?${query.toString()}`, options)
   },
 
-  getMessages(sessionId: string) {
-    return api.get<MessagesResponse>(`/api/sessions/${sessionId}/messages`)
+  getMessages(sessionId: string, options?: ApiRequestOptions) {
+    return api.get<SessionHistoryPage>(`/api/sessions/${sessionId}/messages`, options)
+  },
+
+  getHistoryPage(sessionId: string, page?: { cursor?: string }, options?: ApiRequestOptions) {
+    const query = new URLSearchParams()
+    if (page?.cursor) query.set('cursor', page.cursor)
+    return api.get<SessionHistoryPage>(`/api/sessions/${sessionId}/messages${query.size ? `?${query}` : ''}`, options)
+  },
+
+  getHistoryRecovery(sessionId: string, options?: ApiRequestOptions) {
+    return api.get<SessionHistoryRecovery>(`/api/sessions/${sessionId}/history-recovery`, options)
   },
 
   getSummary(sessionId: string, options?: ApiRequestOptions) {
@@ -422,8 +449,13 @@ export const sessionsApi = {
     return api.get<SessionChatStatusResponse>(`/api/sessions/${sessionId}/chat/status`, { signal })
   },
 
-  getTrace(sessionId: string) {
-    return api.get<TraceSession>(`/api/sessions/${sessionId}/trace`)
+  getTrace(sessionId: string, options?: ApiRequestOptions, page?: { offset?: number; revisionToken?: string; scanCursor?: string }) {
+    const query = new URLSearchParams()
+    if (page?.offset) query.set('offset', String(page.offset))
+    if (page?.revisionToken) query.set('revisionToken', page.revisionToken)
+    if (page?.scanCursor) query.set('scanCursor', page.scanCursor)
+    const suffix = query.size ? `?${query}` : ''
+    return api.get<TraceSession>(`/api/sessions/${sessionId}/trace${suffix}`, options)
   },
 
   getTraceCall(sessionId: string, callId: string) {

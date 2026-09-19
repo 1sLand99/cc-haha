@@ -11,7 +11,7 @@ import {
   resolveSubagentRunFromMessages,
   truncateSubagentMessages,
 } from './subagentRunService.js'
-import type { MessageEntry } from './sessionService.js'
+import { sessionService, type MessageEntry } from './sessionService.js'
 
 let tmpDir: string | null = null
 
@@ -309,6 +309,36 @@ describe('getSubagentRunByTool', () => {
       tmpDir = null
     }
     delete process.env.CLAUDE_CONFIG_DIR
+  })
+
+  it('bounds parent lookup and large child display without claiming complete activity or partial token totals', async () => {
+    await setupTmpConfigDir()
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const projectDir = '-tmp-subagent-large'
+    const body = Array.from({ length: 24 }, (_, index) => ({ type: 'assistant', uuid: `body-${index}`, timestamp: '2026-01-01T00:00:05.000Z', message: { role: 'assistant', content: 'x'.repeat(256 * 1024) } }))
+    await writeSessionFile(projectDir, sessionId, [makeAgentToolUseEntry('tool-1'), ...body, makeAgentToolResultEntry('tool-1', 'abc123')])
+    await writeSubagentTranscriptFile(projectDir, sessionId, 'abc123', body)
+    const original = (sessionService as any).readJsonlFile
+    ;(sessionService as any).readJsonlFile = () => { throw new Error('unbounded transcript read') }
+    try {
+      const result = await getSubagentRunByTool(sessionId, 'tool-1')
+      expect(result).toMatchObject({ agentId: 'abc123', truncated: true, historyComplete: false, activityComplete: false })
+      expect(result!.messages.length).toBeGreaterThan(0)
+      expect(result!.messages.length).toBeLessThan(24)
+      expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(2 * 1024 * 1024)
+      expect(result!.messages.at(-1)!.id).toBe('body-23')
+    } finally {
+      ;(sessionService as any).readJsonlFile = original
+    }
+  })
+
+  it('rejects oversized launch sidecars before parsing them', async () => {
+    await setupTmpConfigDir()
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const projectDir = '-tmp-subagent-sidecar'
+    await writeSessionFile(projectDir, sessionId, [makeAgentToolUseEntry('tool-1')])
+    await writeSubagentLaunchMetadata(projectDir, sessionId, 'abc123', { agentType: 'general', toolUseId: 'tool-1', description: 'x'.repeat(128 * 1024) })
+    await expect(getSubagentRunByTool(sessionId, 'tool-1')).rejects.toMatchObject({ statusCode: 413, code: 'SUBAGENT_METADATA_LIMIT' })
   })
 
   it('returns parent metadata and visible persisted subagent transcript messages', async () => {

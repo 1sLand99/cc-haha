@@ -1,7 +1,19 @@
-import type {
- TranslationKey } from './en'
+import type { TranslationKey } from './en'
 
 export const jp: Record<TranslationKey, string> = {
+  "chat.history.loadCheckpoints": "取り消しチェックポイントを読み込む",
+  "chat.history.windowNotice": "履歴の一部を表示しています。長い内容は短縮され、完全な履歴はディスクに保存されています。",
+  "chat.history.older": "以前のメッセージ",
+  "chat.history.latest": "最新のメッセージ",
+  "chat.history.recovering": "セッション状態を復元中…",
+  "chat.history.recoveryIncomplete": "一部のセッション状態を復元できませんでした。",
+  "trace.windowNotice": "会話とトレースは制限付きページで読み込まれます。",
+  "trace.windowLimited": "表示上限を超えた記録があります。元のファイルは変更されません。",
+  "trace.windowFirst": "先頭 / ライブ",
+  "trace.windowPrevious": "前のページ",
+  "trace.windowNext": "次のページ",
+  "trace.windowScanNext": "次の区間を読み込む",
+
   "extensions.myPlugins": "マイプラグイン",
   "extensions.mySkills": "マイスキル",
   "extensions.browse": "一覧に戻る",

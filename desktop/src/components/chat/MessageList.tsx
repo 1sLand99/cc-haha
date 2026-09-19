@@ -2255,6 +2255,7 @@ export function MessageList({
   const branchSession = useSessionStore((s) => s.branchSession)
   const stopGeneration = useChatStore((s) => s.stopGeneration)
   const reloadHistory = useChatStore((s) => s.reloadHistory)
+  const loadOlderHistory = useChatStore((s) => s.loadOlderHistory)
   const queueComposerPrefill = useChatStore((s) => s.queueComposerPrefill)
   const memberSessionTeam = useTeamStore((s) => (
     resolvedSessionId ? s.getTeamByMemberSessionId(resolvedSessionId) : null
@@ -2294,12 +2295,17 @@ export function MessageList({
     ))
   }, [teamSnapshot])
   const addToast = useUIStore((s) => s.addToast)
-  const messages = sessionState?.messages ?? EMPTY_MESSAGES
+  const messages = sessionState?.historyBrowseMessages ?? sessionState?.messages ?? EMPTY_MESSAGES
+  const historyWindowKey = `${resolvedSessionId}:${messages[0]?.id ?? ''}:${messages.at(-1)?.id ?? ''}`
+  const checkpointHistoryReady = sessionState?.historyStatus === 'ready' && sessionState?.historyHydrated === true
+  const checkpointRequiresRequest = Boolean(sessionState?.historyWindowed || sessionState?.historyPage?.historyComplete === false)
+  const checkpointWindowKey = checkpointRequiresRequest ? historyWindowKey : ''
+  const [requestedWindowCheckpoints, setRequestedWindowCheckpoints] = useState<{ key: string; revision: number } | null>(null)
   const chatState = sessionState?.chatState ?? 'idle'
   const isPreparingTurn = Boolean(sessionState?.isPreparingTurn)
   const historyMutationEpoch = sessionState?.historyMutationEpoch ?? 0
-  const streamingText = sessionState?.streamingText ?? ''
-  const streamingToolInput = sessionState?.streamingToolInput ?? ''
+  const streamingText = sessionState?.historyViewingOlder ? '' : sessionState?.streamingText ?? ''
+  const streamingToolInput = sessionState?.historyViewingOlder ? '' : sessionState?.streamingToolInput ?? ''
   const activeThinkingId = sessionState?.activeThinkingId ?? null
   const hasApiRetry = Boolean(sessionState?.apiRetry)
   const hasStreamingFallback = Boolean(sessionState?.streamingFallback)
@@ -3015,7 +3021,8 @@ export function MessageList({
   }, [renderItemKeys])
 
   useEffect(() => {
-    if (!resolvedSessionId || completedTurnTargets.length === 0 || isDirectAgentSession) {
+    if (!resolvedSessionId || !checkpointHistoryReady || completedTurnTargets.length === 0 || isDirectAgentSession ||
+      (checkpointRequiresRequest && requestedWindowCheckpoints?.key !== historyWindowKey)) {
       setTurnChangeCards([])
       setTurnChangeLoadError(null)
       setIsLoadingTurnChangeCards(false)
@@ -3056,7 +3063,7 @@ export function MessageList({
           normalizeTurnCheckpoints(checkpointResponse).flatMap((checkpoint) => {
             const target =
               targetByMessageId.get(checkpoint.target.targetUserMessageId) ??
-              targetByUserMessageIndex.get(checkpoint.target.userMessageIndex)
+              (sessionState?.historyWindowed ? undefined : targetByUserMessageIndex.get(checkpoint.target.userMessageIndex))
             if (!target) {
               return []
             }
@@ -3084,7 +3091,7 @@ export function MessageList({
       cancelled = true
       controller.abort()
     }
-  }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, historyMutationEpoch, isDirectAgentSession, latestCompletedTurnId, resolvedSessionId])
+  }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, historyMutationEpoch, isDirectAgentSession, latestCompletedTurnId, resolvedSessionId, sessionState?.historyWindowed, checkpointHistoryReady, checkpointRequiresRequest, checkpointWindowKey, requestedWindowCheckpoints])
 
   const handleUndoCurrentTurn = useCallback(async (mode: SessionRewindMode = 'both') => {
     if (!resolvedSessionId || !confirmTurnCard || rewindingTurnId || hasRunningBackgroundTasks) return
@@ -3107,7 +3114,7 @@ export function MessageList({
       const result = await sessionsApi.rewind(resolvedSessionId, {
         targetUserMessageId: checkpointTarget.targetUserMessageId,
         userMessageIndex: checkpointTarget.userMessageIndex,
-        expectedContent: target.expectedContent,
+        ...(sessionState?.historyWindowed ? {} : { expectedContent: target.expectedContent }),
         mode,
       })
 
@@ -3616,6 +3623,27 @@ export function MessageList({
           // the agent-teams workbench appeared.
           className="mx-auto max-w-[900px]"
         >
+          {sessionState?.historyWindowed || sessionState?.historyPage?.hasMore ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] p-3 text-xs text-[var(--color-text-secondary)]" data-testid="history-window-notice">
+              <span>{t('chat.history.windowNotice')}</span>
+              {sessionState.historyPage?.nextCursor ? (
+                <Button variant="secondary" size="xs" disabled={sessionState.historyPageLoading} onClick={() => resolvedSessionId && void loadOlderHistory(resolvedSessionId)}>
+                  {t('chat.history.older')}
+                </Button>
+              ) : null}
+              <Button variant="secondary" size="xs" disabled={sessionState.historyPageLoading} onClick={() => resolvedSessionId && void loadOlderHistory(resolvedSessionId, true)}>
+                {t('chat.history.latest')}
+              </Button>
+              {completedTurnTargets.length > 0 ? (
+                <Button variant="secondary" size="xs" disabled={isLoadingTurnChangeCards || chatState !== 'idle'} onClick={() => setRequestedWindowCheckpoints((current) => ({ key: historyWindowKey, revision: (current?.revision ?? 0) + 1 }))}>
+                  {t('chat.history.loadCheckpoints')}
+                </Button>
+              ) : null}
+              {sessionState.historyRecoveryStatus === 'loading' ? <span role="status">{t('chat.history.recovering')}</span> : null}
+              {sessionState.historyRecoveryStatus === 'incomplete' || sessionState.historyRecoveryStatus === 'error' ? <span role="status">{t('chat.history.recoveryIncomplete')}</span> : null}
+              {sessionState.historyError ? <span role="alert">{sessionState.historyError}</span> : null}
+            </div>
+          ) : null}
           {virtualTranscriptWindow.enabled ? (
             <VirtualSpacer height={virtualTranscriptWindow.beforeHeight} position="top" />
           ) : null}

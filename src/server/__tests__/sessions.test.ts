@@ -1736,6 +1736,96 @@ describe('SessionService', () => {
       .toHaveLength(0)
   })
 
+  it('shares bounded inspection across metadata/context/usage readers and invalidates after append', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const projectDir = '-tmp-inspection-budget'
+    await writeSessionFile(projectDir, sessionId, [makeSessionMetaEntry('/tmp/inspection'), makeUserEntry('x'.repeat(256 * 1024), crypto.randomUUID())])
+    const fullRead = spyOn(service as any, 'readJsonlFile').mockImplementation(() => { throw new Error('unbounded history read') })
+    const stream = spyOn(service as any, 'streamJsonlFile')
+    try {
+      await Promise.all([service.getTranscriptMetadata(sessionId), service.getTranscriptContextEstimate(sessionId), service.getTranscriptUsage(sessionId)])
+      expect(fullRead).not.toHaveBeenCalled()
+      expect(stream).toHaveBeenCalledTimes(1)
+      await fs.appendFile(path.join(tmpDir, 'projects', projectDir, `${sessionId}.jsonl`), JSON.stringify({ ...makeUserEntry('next', crypto.randomUUID()), cwd: '/tmp/new-inspection' }) + '\n')
+      expect((await service.getTranscriptMetadata(sessionId))?.cwd).toBe('/tmp/new-inspection')
+      expect(stream).toHaveBeenCalledTimes(2)
+    } finally { fullRead.mockRestore(); stream.mockRestore() }
+  })
+
+  it('reports oversized inspection records rather than returning partial authoritative state', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    await writeSessionFile('-tmp-inspection-limit', sessionId, [makeUserEntry('x'.repeat(2 * 1024 * 1024), crypto.randomUUID())])
+    await expect(service.getTranscriptMetadata(sessionId)).rejects.toMatchObject({ statusCode: 413, code: 'HISTORY_INSPECTION_LIMIT' })
+  })
+
+  it('coalesces overlapping history reads without retaining stale history', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const projectDir = '-tmp-project'
+    await writeSessionFile(projectDir, sessionId, [makeUserEntry('hello', crypto.randomUUID())])
+    const readSpy = spyOn(service as any, 'readJsonlFileWithDiagnostics')
+    try {
+      const histories = await Promise.all([
+        service.getSessionHistory(sessionId),
+        service.getSessionHistory(sessionId),
+      ])
+      expect(readSpy).toHaveBeenCalledTimes(1)
+      expect(histories[0]).toEqual(histories[1])
+      expect(histories[0]!.messages).toHaveLength(1)
+      await fs.appendFile(path.join(tmpDir, 'projects', projectDir, `${sessionId}.jsonl`),
+        `${JSON.stringify(makeUserEntry('new message', crypto.randomUUID()))}\n`)
+      expect((await service.getSessionHistory(sessionId)).messages).toHaveLength(2)
+      expect(readSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      readSpy.mockRestore()
+    }
+  })
+
+  it('streams transcript diagnostics while preserving malformed and missing evidence', async () => {
+    const filePath = path.join(tmpDir, 'diagnostics.jsonl')
+    await fs.writeFile(filePath, '{"type":"user"}\nmalformed\n\n{"type":"assistant"}')
+    const readSpy = spyOn(fs, 'readFile')
+    try {
+      const result = await (service as any).readJsonlFileWithDiagnostics(filePath)
+      expect(result).toEqual({
+        entries: [{ type: 'user' }, { type: 'assistant' }],
+        exists: true,
+        parseComplete: false,
+      })
+      expect(await (service as any).readJsonlFileWithDiagnostics(`${filePath}.missing`)).toEqual({
+        entries: [], exists: false, parseComplete: false,
+      })
+      expect(readSpy).not.toHaveBeenCalled()
+    } finally {
+      readSpy.mockRestore()
+    }
+  })
+
+  it('computes stable message signatures without reading transcript payloads', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const projectDir = '-tmp-project'
+    await writeSessionFile(projectDir, sessionId, [makeUserEntry('hello', crypto.randomUUID())])
+    const child = await writeSubagentTranscriptFile(projectDir, sessionId, 'abc123', [])
+    const streamSpy = spyOn(service as any, 'streamJsonlFile')
+    const readSpy = spyOn(fs, 'readFile')
+    try {
+      const before = await service.getSessionMessagesSignature(sessionId)
+      expect(await service.getSessionMessagesSignature(sessionId)).toBe(before)
+      await fs.appendFile(child, 'child append\n')
+      const appended = await service.getSessionMessagesSignature(sessionId)
+      expect(appended).not.toBe(before)
+      await fs.rm(child)
+      const removed = await service.getSessionMessagesSignature(sessionId)
+      expect(removed).not.toBe(appended)
+      await fs.appendFile(path.join(tmpDir, 'projects', projectDir, `${sessionId}.jsonl`), 'root append\n')
+      expect(await service.getSessionMessagesSignature(sessionId)).not.toBe(removed)
+      expect(streamSpy).not.toHaveBeenCalled()
+      expect(readSpy).not.toHaveBeenCalled()
+    } finally {
+      streamSpy.mockRestore()
+      readSpy.mockRestore()
+    }
+  })
+
   it('should include linked subagent transcript changes in the message signature', async () => {
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     const projectDir = '-tmp-project'

@@ -105,6 +105,8 @@ vi.mock('../api/websocket', () => ({
 vi.mock('../api/sessions', () => ({
   sessionsApi: {
     getMessages: vi.fn(async () => ({ messages: [] })),
+    getHistoryPage: vi.fn(async () => ({ messages: [] })),
+    getHistoryRecovery: vi.fn(async () => ({ status: 'incomplete', messages: [] })),
     getSlashCommands: vi.fn(async () => ({ commands: [] })),
   },
 }))
@@ -1905,7 +1907,7 @@ describe('chatStore history mapping', () => {
 
     const historyLoad = useChatStore.getState().loadHistory(TEST_SESSION_ID)
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
 
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
@@ -2831,7 +2833,7 @@ describe('chatStore history mapping', () => {
 
     const historyLoad = useChatStore.getState().loadHistory(TEST_SESSION_ID)
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'system_notification',
@@ -8967,7 +8969,7 @@ describe('chatStore history mapping', () => {
     useChatStore.getState().connectToSession(TEST_SESSION_ID)
     await Promise.resolve()
 
-    expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+    expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(sendMock).not.toHaveBeenCalledWith(TEST_SESSION_ID, { type: 'prewarm_session' })
   })
 
@@ -11772,7 +11774,7 @@ describe('chatStore history mapping', () => {
       )
     })
     const session = useChatStore.getState().sessions[TEST_SESSION_ID]
-    expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+    expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(session?.streamingText).toBe('')
     expect(session?.messages).toContainEqual(expect.objectContaining({
       type: 'assistant_text',
@@ -11826,7 +11828,7 @@ describe('chatStore history mapping', () => {
           ?.backgroundAgentTasks?.['agent-task-1']?.status,
       ).toBe('stopped')
     })
-    expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+    expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'idle')
   })
 
@@ -11862,7 +11864,7 @@ describe('chatStore history mapping', () => {
     })
 
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
       expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'running')
     })
     expect(
@@ -11903,7 +11905,7 @@ describe('chatStore history mapping', () => {
     })
 
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
       expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'idle')
     })
     expect(
@@ -11944,7 +11946,7 @@ describe('chatStore history mapping', () => {
     })
 
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
       expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'idle')
     })
     expect(
@@ -11993,7 +11995,7 @@ describe('chatStore history mapping', () => {
     })
 
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
       expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'running')
     })
     expect(
@@ -12179,7 +12181,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
     useChatStore.getState().sendMessage(TEST_SESSION_ID, 'new turn')
 
@@ -12594,7 +12596,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
     useChatStore.getState().sendMessage(TEST_SESSION_ID, 'new turn')
 
@@ -12640,7 +12642,7 @@ describe('chatStore history mapping', () => {
       turnState: 'running',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
 
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]).toMatchObject({
@@ -15127,6 +15129,188 @@ describe('chatStore activity state survival across reload paths', () => {
     const session = useChatStore.getState().sessions[TEST_SESSION_ID]
     expect(session?.backgroundAgentTasks?.['agent-task-1']).toMatchObject({ status: 'running' })
     expect(session?.agentTaskNotifications).toEqual(notifications)
+  })
+
+  it('shows a bounded page immediately and restores state independently without treating the tail as authoritative', async () => {
+    const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 1024, omittedOversizedEntries: 0 }
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({ messages: [{ id: 'tail', type: 'assistant', content: 'recent', timestamp: '2026-01-01T00:00:00Z' }], page })
+    let resolveRecovery!: (value: Awaited<ReturnType<typeof sessionsApi.getHistoryRecovery>>) => void
+    vi.mocked(sessionsApi.getHistoryRecovery).mockReturnValueOnce(new Promise((resolve) => { resolveRecovery = resolve }))
+    const usage = { input_tokens: 321, output_tokens: 123 }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ tokenUsage: usage }) } })
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toEqual(expect.arrayContaining([expect.objectContaining({ content: 'recent' })]))
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.tokenUsage).toBe(usage)
+    expect(setTasksFromTodosMock).not.toHaveBeenCalled()
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyRecoveryStatus).toBe('loading')
+    resolveRecovery({ status: 'ready', sourceVersion: 'v1', omittedRecords: 0, messages: [], tokenUsage: { input_tokens: 999, output_tokens: 888 } })
+    await vi.waitFor(() => expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyRecoveryStatus).toBe('ready'))
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.tokenUsage).toEqual({ input_tokens: 999, output_tokens: 888 })
+  })
+
+  it('cancels stale background recovery before an authoritative history reload', async () => {
+    const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 10, omittedOversizedEntries: 0 }
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({ messages: [], page })
+    let resolveRecovery!: (value: Awaited<ReturnType<typeof sessionsApi.getHistoryRecovery>>) => void
+    let signal: AbortSignal | undefined
+    vi.mocked(sessionsApi.getHistoryRecovery).mockImplementationOnce((_id, options) => {
+      signal = options?.signal
+      return new Promise((resolve) => { resolveRecovery = resolve })
+    })
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession() } })
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    await useChatStore.getState().reloadHistory(TEST_SESSION_ID)
+    expect(signal?.aborted).toBe(true)
+    resolveRecovery({ status: 'ready', sourceVersion: 'v1', messages: [], tokenUsage: { input_tokens: 999, output_tokens: 999 }, omittedRecords: 0 })
+    await Promise.resolve()
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.tokenUsage).toEqual({ input_tokens: 0, output_tokens: 0 })
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyRecoveryStatus).toBe('ready')
+  })
+
+  it('restores complete recovery fields from a newer append without clearing incomplete fields', async () => {
+    const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: '1:2:10:1', scannedBytes: 10, omittedOversizedEntries: 0 }
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({ messages: [], page })
+    vi.mocked(sessionsApi.getHistoryRecovery).mockResolvedValueOnce({
+      status: 'incomplete', sourceVersion: '1:2:20:2', omittedRecords: 1, messages: [],
+      completeness: { usage: true, goal: false, todos: false, activity: false },
+      tokenUsage: { input_tokens: 999, output_tokens: 888 },
+    })
+    const goal = { action: 'created' as const, objective: 'Preserve live goal', updatedAt: 1 }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ activeGoal: goal }) } })
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    await vi.waitFor(() => expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyRecoveryStatus).toBe('incomplete'))
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.tokenUsage).toEqual({ input_tokens: 999, output_tokens: 888 })
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.activeGoal).toBe(goal)
+    expect(setTasksFromTodosMock).not.toHaveBeenCalled()
+  })
+
+  it('reads older pages into a separate display window without rewriting live task state', async () => {
+    const live = [{ id: 'live', type: 'assistant_text' as const, content: 'Live', timestamp: 1 }]
+    const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 1024, omittedOversizedEntries: 0 }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: live, chatState: 'thinking', historyPage: page }) } })
+    vi.mocked(sessionsApi.getHistoryPage).mockResolvedValueOnce({ messages: [{ id: 'old', type: 'user', content: 'old page', timestamp: '2020-01-01T00:00:00Z' }], page: { ...page, nextCursor: null, hasMore: false } })
+    await useChatStore.getState().loadOlderHistory(TEST_SESSION_ID)
+    const current = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(current?.messages).toBe(live)
+    expect(current?.chatState).toBe('thinking')
+    expect(current?.historyBrowseMessages).toEqual(expect.arrayContaining([expect.objectContaining({ content: 'old page' })]))
+    expect(setTasksFromTodosMock).not.toHaveBeenCalled()
+  })
+
+  it.each(['loadHistory', 'reloadHistory'] as const)('cancels an older page before %s replaces the current history', async (action) => {
+    const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 10, omittedOversizedEntries: 0 }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ historyPage: page }) } })
+    let resolvePage!: (value: Awaited<ReturnType<typeof sessionsApi.getHistoryPage>>) => void
+    let signal: AbortSignal | undefined
+    vi.mocked(sessionsApi.getHistoryPage).mockImplementationOnce((_id, _page, options) => {
+      signal = options?.signal
+      return new Promise((resolve) => { resolvePage = resolve })
+    })
+    const pending = useChatStore.getState().loadOlderHistory(TEST_SESSION_ID)
+    await useChatStore.getState()[action](TEST_SESSION_ID)
+    expect(signal?.aborted).toBe(true)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyPageLoading).toBe(false)
+    resolvePage({ messages: [{ id: 'stale', type: 'assistant', content: 'stale older page', timestamp: '2026-01-01T00:00:00Z' }], page })
+    await pending
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyBrowseMessages).toBeUndefined()
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyPage).toBeUndefined()
+  })
+
+  it('bounds external session projections and activity text without changing task control state or permission input', () => {
+    const raw = 'x'.repeat(2_000_000)
+    const task = { taskId: 'task', toolUseId: 'tool', status: 'running' as const, startedAt: 1, updatedAt: 2, prompt: raw, result: raw, summary: raw }
+    const permission = { requestId: 'permission', toolName: 'Bash', input: { command: raw } }
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [String(index), makeSession({
+      messages: Array.from({ length: 600 }, (_, row) => ({ id: String(row), type: 'assistant_text', content: 'x'.repeat(30_000), timestamp: row })),
+      backgroundAgentTasks: { task },
+      agentTaskNotifications: { tool: { taskId: 'task', toolUseId: 'tool', status: 'completed', result: raw, summary: raw } },
+      pendingPermission: permission,
+    })])) }))
+    let retained = 0
+    for (const session of Object.values(useChatStore.getState().sessions)) {
+      expect(session.messages.length).toBeLessThanOrEqual(500)
+      expect(session.backgroundAgentTasks?.task).toMatchObject({ taskId: 'task', toolUseId: 'tool', status: 'running', startedAt: 1, updatedAt: 2 })
+      expect(session.pendingPermission).toBe(permission)
+      retained += JSON.stringify(session.messages).length * 2
+      retained += JSON.stringify(session.backgroundAgentTasks).length * 2
+      retained += JSON.stringify(session.agentTaskNotifications).length * 2
+    }
+    expect(retained).toBeLessThan(16 * 1024 * 1024)
+    expect(task.result).toHaveLength(2_000_000)
+    expect(permission.input.command).toHaveLength(2_000_000)
+  })
+
+  it('shares a terminal activity count budget across twenty sessions without dropping active lifecycles', () => {
+    const sessions = Object.fromEntries(Array.from({ length: 20 }, (_, sessionIndex) => {
+      const tasks = Object.fromEntries(Array.from({ length: 700 }, (_, index) => [String(index), { taskId: String(index), toolUseId: String(index), status: 'completed' as const, startedAt: index, updatedAt: index }]))
+      const notifications = Object.fromEntries(Array.from({ length: 700 }, (_, index) => [String(index), { taskId: String(index), toolUseId: String(index), status: 'completed' as const, timestamp: new Date(index).toISOString() }]))
+      return [String(sessionIndex), makeSession({ backgroundAgentTasks: { ...tasks, active: { taskId: 'active', status: 'running', startedAt: 0, updatedAt: 0 } }, agentTaskNotifications: notifications })]
+    }))
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions }))
+    let terminalCount = 0
+    for (const session of Object.values(useChatStore.getState().sessions)) {
+      expect(session.backgroundAgentTasks?.active?.status).toBe('running')
+      expect(session.backgroundAgentTasks?.['699']?.status).toBe('completed')
+      expect(session.agentTaskNotifications['699']?.status).toBe('completed')
+      terminalCount += Object.values(session.backgroundAgentTasks ?? {}).filter((task) => task.status !== 'running').length
+      terminalCount += Object.keys(session.agentTaskNotifications).length
+    }
+    expect(terminalCount).toBe(4000)
+    const before = useChatStore.getState().sessions['0']!
+    useChatStore.getState().handleServerMessage('0', { type: 'content_delta', text: 'live text' })
+    expect(useChatStore.getState().sessions['0']?.backgroundAgentTasks).toBe(before.backgroundAgentTasks)
+    expect(useChatStore.getState().sessions['0']?.agentTaskNotifications).toBe(before.agentTaskNotifications)
+  })
+
+  it('shares a bounded display budget across many running sessions', () => {
+    const sessions = Object.fromEntries(Array.from({ length: 20 }, (_, sessionIndex) => [
+      `budget-${sessionIndex}`,
+      makeSession({ chatState: 'thinking', messages: Array.from({ length: 60 }, (_, index) => ({ id: `${sessionIndex}-${index}`, type: 'assistant_text', content: 'x'.repeat(30_000), timestamp: index })) }),
+    ]))
+    useChatStore.setState({ sessions })
+    useChatStore.getState().handleServerMessage('budget-0', { type: 'status', state: 'thinking', verb: 'Working' })
+    const retained = Object.values(useChatStore.getState().sessions)
+    expect(retained.every((session) => session.chatState === 'thinking')).toBe(true)
+    const retainedCharacters = retained.reduce((total, session) => total + session.messages.reduce((sum, message) => sum + ('content' in message && typeof message.content === 'string' ? message.content.length : 0), 0), 0)
+    expect(retainedCharacters * 2).toBeLessThanOrEqual(16 * 1024 * 1024)
+  })
+
+  it('bounds live message retention while preserving operational state', () => {
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: Array.from({ length: 2000 }, (_, index) => ({ id: String(index), type: 'assistant_text', content: 'old', timestamp: index })), chatState: 'thinking' }) } })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, { type: 'status', state: 'thinking', verb: 'Working' })
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.messages.length).toBeLessThanOrEqual(500)
+    expect(session?.historyWindowed).toBe(true)
+    expect(session?.chatState).toBe('thinking')
+  })
+
+  it('aborts a pending history download on disconnect', async () => {
+    let requestSignal: AbortSignal | undefined
+    vi.mocked(sessionsApi.getMessages).mockImplementationOnce((_id, options) => new Promise((_resolve, reject) => {
+      requestSignal = options?.signal
+      requestSignal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    }))
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession() } })
+    const pending = useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    expect(requestSignal?.aborted).toBe(false)
+    useChatStore.getState().disconnectSession(TEST_SESSION_ID)
+    expect(requestSignal?.aborted).toBe(true)
+    await pending
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]).toBeUndefined()
+  })
+
+  it('aborts a superseded authoritative history reload', async () => {
+    let firstSignal: AbortSignal | undefined
+    vi.mocked(sessionsApi.getMessages).mockImplementationOnce((_id, options) => new Promise((_resolve, reject) => {
+      firstSignal = options?.signal
+      firstSignal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    }))
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession() } })
+    const first = useChatStore.getState().reloadHistory(TEST_SESSION_ID)
+    const second = useChatStore.getState().reloadHistory(TEST_SESSION_ID)
+    expect(firstSignal?.aborted).toBe(true)
+    await Promise.all([first, second])
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
   })
 
   it('applies a cold history response against the latest optimistic user turn', async () => {
