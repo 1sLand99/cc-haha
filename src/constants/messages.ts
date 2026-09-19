@@ -48,3 +48,11 @@ export const ASK_USER_QUESTION_CLARIFY_WITH_QUESTIONS_PREFIX = `${ASK_USER_QUEST
 export const ASK_USER_QUESTION_EXPIRED_ANSWER_PREFIX = `The user is answering the questions you asked earlier.
     That prompt had already stopped waiting for an answer, so these answers are arriving as this message.
     Treat them as their answers to those questions and continue.`
+
+// Approving a plan with a cross-provider execution model forces a CLI restart
+// (provider env is fixed at process spawn): approve → interrupt → restart →
+// the session sits idle with the plan approved. This synthetic follow-up starts
+// the execution turn on the new runtime. It is a real user message in the
+// transcript — same precedent as the /model switch breadcrumbs.
+export const PLAN_EXECUTION_CONTINUE_MESSAGE =
+  'The plan is approved. Continue with the implementation.'

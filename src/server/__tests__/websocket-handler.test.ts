@@ -9,6 +9,7 @@ import {
   __markPrewarmedForTests,
   __resetWebSocketHandlerStateForTests,
   __resolveRuntimeRestartWorkDirForTests,
+  __settleActiveTurnForTests,
   closeSessionConnection,
   getActiveSessionIds,
   handleWebSocket,
@@ -4054,6 +4055,199 @@ describe('WebSocket handler session isolation', () => {
         allowed: false,
       })
     }
+  })
+
+  it('approves ExitPlanMode with an in-process model switch for the same provider', async () => {
+    const sessionId = `plan-same-provider-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+
+    spyOn(conversationService, 'hasSession').mockReturnValue(true)
+    spyOn(conversationService, 'getPendingPermissionToolName').mockReturnValue('ExitPlanMode')
+    spyOn(conversationService, 'getSessionWorkDir').mockReturnValue('/tmp')
+    spyOn(conversationService, 'setModel').mockResolvedValue(true)
+    spyOn(conversationService, 'respondToPermission').mockReturnValue(true)
+    spyOn(sessionService, 'getSessionLaunchInfo').mockResolvedValue({
+      filePath: '/tmp/plan-session.jsonl',
+      projectDir: '/tmp',
+      workDir: '/tmp',
+      transcriptMessageCount: 0,
+      customTitle: null,
+      runtimeProviderId: 'deepseek',
+      runtimeModelId: 'deepseek-v4-pro',
+    })
+    spyOn(sessionService, 'appendSessionMetadata').mockResolvedValue(undefined)
+    const startSession = spyOn(conversationService, 'startSession').mockResolvedValue()
+    const stopSession = spyOn(conversationService, 'stopSession').mockImplementation(() => {})
+
+    handleWebSocket.open(ws)
+    handleWebSocket.message(ws, JSON.stringify({
+      type: 'permission_response',
+      requestId: 'perm-plan-1',
+      allowed: true,
+      runtimeOverride: {
+        providerId: 'deepseek',
+        modelId: 'deepseek-v4-flash',
+      },
+    }))
+    await flushMicrotasks(30)
+
+    expect(conversationService.setModel).toHaveBeenCalledWith(sessionId, 'deepseek-v4-flash')
+    expect(conversationService.respondToPermission).toHaveBeenCalledWith(
+      sessionId,
+      'perm-plan-1',
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    )
+    expect(sessionService.appendSessionMetadata).toHaveBeenCalledWith(sessionId, {
+      workDir: '/tmp',
+      runtimeProviderId: 'deepseek',
+      runtimeModelId: 'deepseek-v4-flash',
+    })
+    expect(startSession).not.toHaveBeenCalled()
+    expect(stopSession).not.toHaveBeenCalled()
+  })
+
+  it('approves ExitPlanMode with a cross-provider switch via restart and auto-continue', async () => {
+    const sessionId = `plan-cross-provider-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+
+    let sessionRunning = true
+    spyOn(conversationService, 'hasSession').mockImplementation(() => sessionRunning)
+    spyOn(conversationService, 'getPendingPermissionToolName').mockReturnValue('ExitPlanMode')
+    spyOn(conversationService, 'getSessionWorkDir').mockReturnValue('/tmp')
+    spyOn(conversationService, 'respondToPermission').mockReturnValue(true)
+    spyOn(conversationService, 'sendInterrupt').mockReturnValue(true)
+    spyOn(conversationService, 'stopSession').mockImplementation(() => {
+      sessionRunning = false
+    })
+    spyOn(conversationService, 'sendMessage').mockResolvedValue(true)
+    spyOn(conversationService, 'startSession').mockImplementation(async () => {
+      sessionRunning = true
+    })
+    spyOn(sessionService, 'getSessionLaunchInfo').mockResolvedValue({
+      filePath: '/tmp/plan-session.jsonl',
+      projectDir: '/tmp',
+      workDir: '/tmp',
+      transcriptMessageCount: 0,
+      customTitle: null,
+      runtimeProviderId: 'deepseek',
+      runtimeModelId: 'deepseek-v4-pro',
+    })
+    spyOn(sessionService, 'appendSessionMetadata').mockResolvedValue(undefined)
+    spyOn(sessionService, 'getCustomTitle').mockResolvedValue(null)
+    spyOn(sessionService, 'shouldPersistSession').mockReturnValue(false)
+    const consoleError = spyOn(console, 'error').mockImplementation(() => {})
+
+    const outputCallbacks = new Set<(msg: any) => void>()
+    spyOn(conversationService, 'onOutput').mockImplementation((_sid, callback) => {
+      outputCallbacks.add(callback)
+    })
+    spyOn(conversationService, 'removeOutputCallback').mockImplementation((_sid, callback) => {
+      outputCallbacks.delete(callback)
+    })
+
+    handleWebSocket.open(ws)
+    // The approval bar sits on an active turn: the CLI is blocked waiting for
+    // this permission, so stop_generation must interrupt it before restart.
+    __markActiveTurnForTests(sessionId)
+    handleWebSocket.message(ws, JSON.stringify({
+      type: 'permission_response',
+      requestId: 'perm-plan-2',
+      allowed: true,
+      runtimeOverride: {
+        providerId: null,
+        modelId: 'claude-sonnet-5',
+      },
+    }))
+    await flushMicrotasks(30)
+
+    expect(consoleError).not.toHaveBeenCalled()
+
+    const errorMessage = ws.sent
+      .map((payload) => JSON.parse(payload))
+      .find((msg) => msg.type === 'error')
+    expect(errorMessage).toBeUndefined()
+
+    expect(conversationService.respondToPermission).toHaveBeenCalledWith(
+      sessionId,
+      'perm-plan-2',
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    )
+    expect(conversationService.sendInterrupt).toHaveBeenCalledWith(sessionId)
+
+    // The CLI writes the interrupted result, then the restart runs.
+    for (const callback of outputCallbacks) {
+      callback({ type: 'result', subtype: 'success', is_error: false })
+    }
+    await flushMicrotasks(30)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await flushMicrotasks(30)
+
+    expect(conversationService.stopSession).toHaveBeenCalledWith(sessionId)
+    expect(conversationService.startSession).toHaveBeenCalledWith(
+      sessionId,
+      '/tmp',
+      expect.stringContaining(`/sdk/${sessionId}`),
+      expect.objectContaining({
+        providerId: null,
+        model: 'claude-sonnet-5',
+      }),
+    )
+    expect(conversationService.sendMessage).toHaveBeenCalledWith(
+      sessionId,
+      'The plan is approved. Continue with the implementation.',
+      undefined,
+      expect.objectContaining({ canSend: expect.any(Function) }),
+    )
+  })
+
+  it('keeps the permission pending when the in-process model switch fails', async () => {
+    const sessionId = `plan-set-model-fail-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+
+    spyOn(conversationService, 'hasSession').mockReturnValue(true)
+    spyOn(conversationService, 'getPendingPermissionToolName').mockReturnValue('ExitPlanMode')
+    spyOn(conversationService, 'getSessionWorkDir').mockReturnValue('/tmp')
+    spyOn(conversationService, 'setModel').mockRejectedValue(new Error('model unavailable'))
+    spyOn(conversationService, 'respondToPermission').mockReturnValue(true)
+    spyOn(sessionService, 'getSessionLaunchInfo').mockResolvedValue({
+      filePath: '/tmp/plan-session.jsonl',
+      projectDir: '/tmp',
+      workDir: '/tmp',
+      transcriptMessageCount: 0,
+      customTitle: null,
+      runtimeProviderId: 'deepseek',
+      runtimeModelId: 'deepseek-v4-pro',
+    })
+    spyOn(sessionService, 'appendSessionMetadata').mockResolvedValue(undefined)
+
+    handleWebSocket.open(ws)
+    handleWebSocket.message(ws, JSON.stringify({
+      type: 'permission_response',
+      requestId: 'perm-plan-3',
+      allowed: true,
+      runtimeOverride: {
+        providerId: 'deepseek',
+        modelId: 'deepseek-v4-flash',
+      },
+    }))
+    await flushMicrotasks(30)
+
+    expect(conversationService.setModel).toHaveBeenCalledWith(sessionId, 'deepseek-v4-flash')
+    expect(conversationService.respondToPermission).not.toHaveBeenCalled()
+    expect(sessionService.appendSessionMetadata).not.toHaveBeenCalled()
+    expect(ws.sent.map((payload) => JSON.parse(payload))).toContainEqual({
+      type: 'error',
+      message: 'Failed to apply the execution model. The plan is still waiting for approval.',
+      code: 'RUNTIME_CONFIG_INVALID',
+    })
   })
 
   it('only forwards boundary resolutions while Stop gates late unscoped output', () => {

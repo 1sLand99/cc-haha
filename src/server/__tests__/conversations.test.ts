@@ -772,6 +772,87 @@ describe('ConversationService', () => {
     expect(svc.getSessionPermissionMode(sessionId)).toBe('default')
   })
 
+  it('resolves setModel only after the CLI acks the set_model control request', async () => {
+    const svc = new ConversationService()
+    const sent: unknown[] = []
+    const sessionId = 'session-set-model'
+    ;(svc as any).sessions.set(sessionId, {
+      proc: null,
+      outputCallbacks: [],
+      workDir: process.cwd(),
+      permissionMode: 'default',
+      sdkToken: 'token',
+      sdkSocket: {
+        send(data: string) {
+          sent.push(JSON.parse(data))
+        },
+      },
+      pendingOutbound: [],
+      stderrLines: [],
+      sdkMessages: [],
+      pendingPermissionRequests: new Map(),
+    })
+
+    const change = svc.setModel(sessionId, 'deepseek-v4-flash')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({
+      type: 'control_request',
+      request: {
+        subtype: 'set_model',
+        model: 'deepseek-v4-flash',
+      },
+    })
+
+    const requestId = (sent[0] as { request_id: string }).request_id
+    svc.handleSdkPayload(sessionId, `${JSON.stringify({
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: requestId,
+        response: {},
+      },
+    })}\n`)
+
+    await expect(change).resolves.toBe(true)
+  })
+
+  it('rejects setModel when the CLI reports a set_model error', async () => {
+    const svc = new ConversationService()
+    const sent: Array<{ request_id: string }> = []
+    const sessionId = 'session-set-model-rejected'
+    ;(svc as any).sessions.set(sessionId, {
+      proc: null,
+      outputCallbacks: [],
+      workDir: process.cwd(),
+      permissionMode: 'default',
+      sdkToken: 'token',
+      sdkSocket: {
+        send(data: string) {
+          sent.push(JSON.parse(data))
+        },
+      },
+      pendingOutbound: [],
+      stderrLines: [],
+      sdkMessages: [],
+      pendingPermissionRequests: new Map(),
+    })
+
+    const change = svc.setModel(sessionId, 'unknown-model')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    svc.handleSdkPayload(sessionId, `${JSON.stringify({
+      type: 'control_response',
+      response: {
+        subtype: 'error',
+        request_id: sent[0]!.request_id,
+        error: 'model unavailable',
+      },
+    })}\n`)
+
+    await expect(change).rejects.toThrow('model unavailable')
+  })
+
   it('should not inject a desktop-specific ask override in default permission mode', () => {
     const svc = new ConversationService()
     expect((svc as any).getPermissionArgs('default', false)).toEqual([
