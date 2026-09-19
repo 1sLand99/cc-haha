@@ -411,8 +411,14 @@ describe('plan mode permission UI', () => {
     expect(useSessionRuntimeStore.getState().selections['session-1']).toEqual({
       providerId: null,
       modelId: 'claude-sonnet-5',
-      effortLevel: 'max',
     })
+    useChatStore.getState().handleServerMessage('session-1', {
+      type: 'runtime_config_applied', providerId: null, modelId: 'claude-sonnet-5',
+    })
+    useSessionRuntimeStore.getState().syncFromSessions([{
+      id: 'session-1', runtimeProviderId: 'deepseek', runtimeModelId: 'deepseek-v4-flash',
+    } as never])
+    expect(useSessionRuntimeStore.getState().selections['session-1']?.modelId).toBe('deepseek-v4-flash')
   })
 
   it('keeps the approval plain when the user re-selects the current model', async () => {

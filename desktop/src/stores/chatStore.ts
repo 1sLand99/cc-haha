@@ -4855,6 +4855,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
           selected?.modelId === msg.modelId &&
           selected?.effortLevel === msg.effortLevel
         if (matchesCurrentSelection) {
+          useSessionRuntimeStore.getState().settleSelection(sessionId)
           update((session) => ({
             runtimeConfigReadyCount: (session.runtimeConfigReadyCount ?? 0) + 1,
           }))
@@ -5540,6 +5541,10 @@ export const useChatStore = create<ChatStore>((setState, get) => {
       }
 
       case 'error': {
+        if (msg.code === 'RUNTIME_CONFIG_INVALID' || msg.code === 'CLI_RESTART_FAILED') {
+          // Let a fresh server snapshot reconcile a rejected optimistic choice.
+          useSessionRuntimeStore.getState().settleSelection(sessionId)
+        }
         const errorMessage: Extract<UIMessage, { type: 'error' }> = {
           id: nextId(),
           type: 'error',

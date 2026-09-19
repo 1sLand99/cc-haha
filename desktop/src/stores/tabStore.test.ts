@@ -51,6 +51,24 @@ describe('tabStore', () => {
     vi.mocked(sessionsApi.getSummary).mockReset().mockRejectedValue(new ApiError(404, 'Session not found'))
   })
 
+  it.each([false, true])('preserves a confirmed model switch during tab restoration (historical=%s)', async (historical) => {
+    const summary = historicalSummary()
+    localStorage.setItem('cc-haha-open-tabs', JSON.stringify({
+      openTabs: [{ sessionId: summary.id, title: summary.title }], activeTabId: summary.id,
+    }))
+    let resolveList!: (value: Awaited<ReturnType<typeof sessionsApi.list>>) => void
+    vi.mocked(sessionsApi.list).mockImplementationOnce(() => new Promise((resolve) => { resolveList = resolve }))
+    vi.mocked(sessionsApi.getSummary).mockResolvedValue(summary)
+    const restore = useTabStore.getState().restoreTabs()
+    const next = { providerId: 'deepseek', modelId: 'deepseek-v4-flash' }
+    useSessionRuntimeStore.getState().setSelection(summary.id, next)
+    useSessionRuntimeStore.getState().settleSelection(summary.id)
+    resolveList({ sessions: historical ? [] : [summary], total: historical ? 0 : 1 })
+    await restore
+    expect(useSessionRuntimeStore.getState().selections[summary.id]).toEqual(next)
+    expect(useTabStore.getState().activeTabId).toBe(summary.id)
+  })
+
   it('refreshes an existing tab title when opening the same session again', () => {
     useTabStore.getState().openTab('session-1', '```json {"title":')
     useTabStore.getState().openTab('session-1', '使用bash写一个shell，随便写点什么东西')
@@ -473,11 +491,11 @@ describe('tabStore', () => {
   )
 
   it('hydrates restored tabs with authoritative transcript runtime metadata', async () => {
-    useSessionRuntimeStore.getState().setSelection('session-1', {
+    useSessionRuntimeStore.setState({ selections: { 'session-1': {
       providerId: null,
       modelId: 'gpt-5.4',
       effortLevel: 'max',
-    })
+    } } })
     localStorage.setItem('cc-haha-open-tabs', JSON.stringify({
       openTabs: [{ sessionId: 'session-1', title: 'Runtime session', type: 'session' }],
       activeTabId: 'session-1',
