@@ -1752,9 +1752,40 @@ describe('SessionService', () => {
     } finally { fullRead.mockRestore(); stream.mockRestore() }
   })
 
+  it('inspects records above the display limit without losing usage or context', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    await writeSessionFile('-tmp-inspection-large', sessionId, [
+      makeSessionMetaEntry('/tmp/inspection'),
+      {
+        type: 'assistant', uuid: crypto.randomUUID(),
+        message: {
+          role: 'assistant', model: 'claude-sonnet-4-5',
+          content: [{ type: 'text', text: 'x'.repeat(2 * 1024 * 1024) }],
+          usage: { input_tokens: 1234, output_tokens: 56 },
+        },
+      },
+    ])
+    const snapshot = await service.getInspectionTranscriptSnapshot(sessionId)
+    expect(snapshot?.metadata.model).toBe('claude-sonnet-4-5')
+    expect(snapshot?.usage?.totalInputTokens).toBe(1234)
+    expect(snapshot?.usage?.totalOutputTokens).toBe(56)
+    expect(snapshot?.contextEstimate).not.toBeNull()
+  })
+
+  it('ignores malformed lines and retries a completed live tail after append', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const projectDir = '-tmp-inspection-tail'
+    await writeSessionFile(projectDir, sessionId, [makeUserEntry('hello', crypto.randomUUID())])
+    const file = path.join(tmpDir, 'projects', projectDir, `${sessionId}.jsonl`)
+    await fs.appendFile(file, '\ninvalid JSON\n' + '{"type":"assistant","message":{"model":"claude-sonnet-4-5"')
+    expect(await service.getInspectionTranscriptSnapshot(sessionId)).not.toBeNull()
+    await fs.appendFile(file, '}}\n')
+    expect((await service.getTranscriptMetadata(sessionId))?.model).toBe('claude-sonnet-4-5')
+  })
+
   it('reports oversized inspection records rather than returning partial authoritative state', async () => {
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
-    await writeSessionFile('-tmp-inspection-limit', sessionId, [makeUserEntry('x'.repeat(2 * 1024 * 1024), crypto.randomUUID())])
+    await writeSessionFile('-tmp-inspection-limit', sessionId, [makeUserEntry('x'.repeat(9 * 1024 * 1024), crypto.randomUUID())])
     await expect(service.getTranscriptMetadata(sessionId)).rejects.toMatchObject({ statusCode: 413, code: 'HISTORY_INSPECTION_LIMIT' })
   })
 

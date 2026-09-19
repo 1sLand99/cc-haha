@@ -1210,8 +1210,14 @@ export class SessionService {
     onEntry: (entry: RawEntry) => void,
   ): Promise<void> {
     await withHistoryReadBudget(undefined, async () => {
-      const result = await streamBoundedHistory(filePath, entry => onEntry(entry as RawEntry))
-      if (result.omittedRecords > 0) throw new ApiError(413, 'Transcript inspection contains records above the viewing limit', 'HISTORY_INSPECTION_LIMIT')
+      // Inspection reduces original records, just like metadata/replay. A display
+      // preview limit must not reject normal image or large tool-result records.
+      const result = await streamBoundedHistory(filePath, entry => onEntry(entry as RawEntry), undefined, {
+        maxRecordBytes: HISTORY_SEMANTIC_RECORD_BYTES,
+      })
+      // Preserve the JSONL reader's tolerance for malformed lines and live partial
+      // tails, but never report authoritative totals after dropping oversized data.
+      if (result.oversizedRecords > 0) throw new ApiError(413, 'Transcript inspection contains records above the semantic read limit', 'HISTORY_INSPECTION_LIMIT')
     }, 'recovery')
   }
 
