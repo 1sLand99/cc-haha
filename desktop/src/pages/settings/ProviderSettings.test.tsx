@@ -218,6 +218,9 @@ describe('provider request compatibility', () => {
   it('loads, edits and saves compatibility while preserving unknown provider fields', async () => {
     const dialog = await open()
     const budget = dialog.getByRole('textbox', { name: 'Reply output budget' })
+    const imageGeneration = dialog.getByRole('switch', { name: 'Enable image generation' })
+    const settingsJson = dialog.getByRole('textbox', { name: 'Settings JSON' })
+    expect(settingsJson.compareDocumentPosition(imageGeneration) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(budget).toHaveValue('64000')
     fireEvent.change(budget, { target: { value: '48000' } })
     fireEvent.click(dialog.getByRole('button', { name: 'Advanced compatibility' }))
@@ -284,6 +287,34 @@ describe('OpenCode Go provider', () => {
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
+  })
+
+  it('puts key and model selection before optional settings and reveals compact option help on focus', async () => {
+    const open = vi.spyOn(getDesktopHost().shell, 'open').mockResolvedValue()
+    render(<ProviderSettings />)
+    fireEvent.click(await screen.findByRole('button', { name: /Add Model/ }))
+    const dialog = within(screen.getByRole('dialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'OpenCode Go' }))
+    const key = dialog.getByLabelText(/API Key/, { selector: 'input' })
+    const fetch = dialog.getByRole('button', { name: /Fetch models/ })
+    const main = dialog.getByLabelText(/Main Model/, { selector: 'input' })
+    const beta = dialog.getByRole('checkbox', { name: 'Disable experimental beta headers' })
+    const budget = dialog.getByRole('textbox', { name: 'Reply output budget' })
+    // Previously several full-width compatibility cards preceded credentials.
+    for (const [first, second] of [[key, fetch], [main, beta], [main, budget]]) {
+      expect(first!.compareDocumentPosition(second!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    expect(fetch).toBeDisabled()
+    fireEvent.change(key, { target: { value: 'fake-opencode-key' } })
+    expect(fetch).toBeEnabled()
+    fireEvent.click(dialog.getByRole('button', { name: /Get API Key/ }))
+    expect(open).toHaveBeenCalledWith('https://opencode.ai/go?ref=3RK0WVVCGD')
+    expect(screen.queryByText(/CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1/)).not.toBeInTheDocument()
+    fireEvent.focus(dialog.getByRole('button', { name: 'Disable experimental beta headers' }))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1')
+    fireEvent.click(beta)
+    expect(beta).toBeChecked()
+    expect(dialog.getByRole('checkbox', { name: 'Enable Tool Search' })).toBeDisabled()
   })
 
   it('is added with an API key alone, because the preset carries everything else', async () => {

@@ -366,6 +366,11 @@ describe('provider presets API', () => {
   describe('OpenCode Go preset', () => {
     const opencodeGo = PROVIDER_PRESETS.find((preset) => preset.id === 'opencode-go')!
 
+    test('links API key signup to the referral page with concise setup guidance', () => {
+      expect(opencodeGo.apiKeyUrl).toBe('https://opencode.ai/go?ref=3RK0WVVCGD')
+      expect(opencodeGo.promoText).toBe('订阅后填入 API Key，即可获取并选择模型。')
+    })
+
     test('is selectable and declares an OpenAI format so requests reach the proxy', () => {
       expect(opencodeGo).toBeDefined()
       expect(opencodeGo.deprecated).toBeUndefined()

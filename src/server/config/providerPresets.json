@@ -318,7 +318,8 @@
     },
     "needsApiKey": true,
     "websiteUrl": "https://opencode.ai",
-    "promoText": "订阅制套餐，只需填 API Key。网关把协议绑在路径上，同一个供应商下不同模型走不同的端点，已按模型族自动分流（GLM/Kimi/DeepSeek/MiMo 走 Chat，MiniMax/Qwen 走 Messages，Grok/GPT 走 Responses），无需手动选择。四个模型槽位可以混填不同族的模型。额度用尽后仍可用免费模型 union-alpha。",
+    "apiKeyUrl": "https://opencode.ai/go?ref=3RK0WVVCGD",
+    "promoText": "订阅后填入 API Key，即可获取并选择模型。",
     "authStrategy": "api_key",
     "defaultEnv": {},
     "modelApiFormats": [
