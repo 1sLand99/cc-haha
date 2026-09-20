@@ -1884,6 +1884,7 @@ function mergeColdRestoredHistoryIntoLiveMessages(
   // with stable identities. Equal id-less prose may be a genuine newer turn,
   // so a temporary duplicate is safer than dropping user-visible output.
   const merged = [...restoredMessages]
+  const liveIndexes: number[] = []
   const messageIndexesByIdentity = new Map<string, number | null>()
   const recordIdentity = (identity: string, index: number) => {
     if (!messageIndexesByIdentity.has(identity)) {
@@ -1917,12 +1918,14 @@ function mergeColdRestoredHistoryIntoLiveMessages(
 
     if (matchedIndex === undefined) {
       const appendedIndex = merged.push(liveMessage) - 1
+      liveIndexes.push(appendedIndex)
       for (const identity of identities) {
         recordIdentity(identity, appendedIndex)
       }
       continue
     }
 
+    liveIndexes.push(matchedIndex)
     const overlaidMessage = overlayLiveHistoryMessage(
       merged[matchedIndex]!,
       liveMessage,
@@ -1938,7 +1941,45 @@ function mergeColdRestoredHistoryIntoLiveMessages(
     }
   }
 
-  return merged
+  // A bounded REST page is only a suffix of the transcript. Unmatched live
+  // rows can be an older cached prefix, not just new output. Place them by
+  // shared identities while leaving the durable page's order untouched.
+  const restoredCount = restoredMessages.length
+  const earliestTimestamp = restoredMessages.reduce((earliest, message) =>
+    Number.isFinite(message.timestamp) ? Math.min(earliest, message.timestamp) : earliest, Infinity)
+  const olderPrefix = new Set<number>()
+  for (const index of liveIndexes) {
+    const timestamp = merged[index]!.timestamp
+    if (index < restoredCount || !Number.isFinite(earliestTimestamp) ||
+      !Number.isFinite(timestamp) || timestamp >= earliestTimestamp) break
+    olderPrefix.add(index)
+  }
+  const beforeRows = new Map<number, UIMessage[]>()
+  const placed = new Set<number>()
+  let nextAnchor = restoredCount
+  for (let offset = liveIndexes.length - 1; offset >= 0; offset--) {
+    const index = liveIndexes[offset]!
+    if (index < restoredCount) {
+      nextAnchor = Math.min(nextAnchor, index)
+      continue
+    }
+    if (placed.has(index)) continue
+    placed.add(index)
+    const message = merged[index]!
+    // Only a disconnected leading prefix can use timestamps as a fallback.
+    // Shared anchors take precedence over clocks, and a later cache row must
+    // never jump ahead of an earlier one because its clock moved backwards.
+    const before = nextAnchor === restoredCount && olderPrefix.has(index) ? 0 : nextAnchor
+    const bucket = beforeRows.get(before) ?? []
+    bucket.push(message)
+    beforeRows.set(before, bucket)
+  }
+  const ordered: UIMessage[] = []
+  for (let index = 0; index <= restoredCount; index++) {
+    ordered.push(...(beforeRows.get(index)?.reverse() ?? []))
+    if (index < restoredCount) ordered.push(merged[index]!)
+  }
+  return ordered
 }
 
 function needsTranscriptIdHydrationRetry(session: PerSessionState | undefined): boolean {
@@ -2808,13 +2849,17 @@ async function changeHistoryWindow(
       : await requestHistoryPage(sessionId, cursor ?? null, controller.signal)
     if (controller.signal.aborted || !isCurrentHistoryLifecycle(sessionId, lifecycle)) return
     set(state => ({ sessions: updateSessionIn(state.sessions, sessionId, current => {
-      if (direction === 'latest' || (!result.page && !seed)) return {
-        messages: mergeColdRestoredHistoryIntoLiveMessages(result.messages, current.messages),
-        historyBrowseMessages: undefined, historyWindowPages: undefined, historyLivePage: undefined, historyWindowOverlay: undefined,
-        historyInitialPage: result.page ? { cursor: null, page: result.page, messages: result.messages } : undefined,
-        historyPage: result.page, historyViewingOlder: false, historyLiveGap: false,
-        historyWindowed: Boolean(result.page && !result.page.historyComplete),
-        historyWindowRevision: (current.historyWindowRevision ?? 0) + 1,
+      if (direction === 'latest' || (!result.page && !seed)) {
+        const messages = mergeColdRestoredHistoryIntoLiveMessages(result.messages, current.messages)
+        return {
+          messages,
+          streamAttemptStartIndex: rebaseStreamAttemptStartIndex(current.messages, messages, current.streamAttemptStartIndex),
+          historyBrowseMessages: undefined, historyWindowPages: undefined, historyLivePage: undefined, historyWindowOverlay: undefined,
+          historyInitialPage: result.page ? { cursor: null, page: result.page, messages: result.messages } : undefined,
+          historyPage: result.page, historyViewingOlder: false, historyLiveGap: false,
+          historyWindowed: Boolean(result.page && !result.page.historyComplete),
+          historyWindowRevision: (current.historyWindowRevision ?? 0) + 1,
+        }
       }
       const previous = current.historyWindowPages ?? (seed ? [seed] : current.historyPage ? [{
         cursor: null, page: current.historyPage, messages: current.historyBrowseMessages ?? current.messages,

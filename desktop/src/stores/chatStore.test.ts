@@ -15376,6 +15376,109 @@ describe('chatStore activity state survival across reload paths', () => {
     expect(current.historyWindowRevision).toBe(5)
   })
 
+  it.each(['jump', 'scroll', 'cold'] as const)(
+    'keeps cached progress before the completed tail when returning through %s',
+    async (entry) => {
+      const raw: MessageEntry[] = [
+        { id: 'engine', type: 'assistant', content: '引擎测试通过，接下来写前后端', timestamp: '2026-01-01T09:33:22Z' },
+        { id: 'components', type: 'assistant', content: '现在编写 React 组件层', timestamp: '2026-01-01T09:35:38Z' },
+        { id: 'types', type: 'assistant', content: '修复类型错误', timestamp: '2026-01-01T09:38:03Z' },
+        { id: 'readme', type: 'assistant', content: '编写 README', timestamp: '2026-01-01T09:49:52Z' },
+        { id: 'done', type: 'assistant', content: '实现完成，全部验证通过', timestamp: '2026-01-01T09:51:29Z' },
+      ]
+      const live = mapHistoryMessagesToUiMessages(raw)
+      const page = { nextCursor: 'older', previousCursor: null, hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 100, omittedOversizedEntries: 0 }
+      useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({
+        messages: live, historyHydrated: entry !== 'cold', historyPage: page, historyViewingOlder: true, historyBrowseMessages: live,
+      }) } })
+      const response = { messages: raw.slice(3), page }
+      if (entry === 'cold') {
+        vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce(response)
+        await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+      } else {
+        vi.mocked(sessionsApi.getHistoryPage).mockResolvedValueOnce(response)
+        if (entry === 'scroll') await useChatStore.getState().loadNewerHistory(TEST_SESSION_ID)
+        else await useChatStore.getState().loadOlderHistory(TEST_SESSION_ID, true)
+      }
+      const current = useChatStore.getState().sessions[TEST_SESSION_ID]!
+      expect(current.messages.map(message => message.id)).toEqual(live.map(message => message.id))
+      expect(current.historyBrowseMessages).toBeUndefined()
+    },
+  )
+
+  it('uses shared history identities before timestamps when merging a partial tail', async () => {
+    const raw: MessageEntry[] = ['anchor', 'middle', 'done'].map((id, index) => ({
+      id, type: 'assistant', content: id, timestamp: new Date((3 - index) * 1000).toISOString(),
+    }))
+    const canonical = mapHistoryMessagesToUiMessages(raw)
+    const cached: UIMessage[] = [
+      { id: 'early', type: 'assistant_text', content: 'early', timestamp: 9999 },
+      canonical[0]!,
+      { id: 'progress', type: 'assistant_text', content: 'progress', timestamp: 9999 },
+      canonical[2]!,
+      { id: 'new-turn', type: 'assistant_text', content: 'done', timestamp: 0 },
+    ]
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: cached }) } })
+    vi.mocked(sessionsApi.getHistoryPage).mockResolvedValueOnce({ messages: raw })
+    await useChatStore.getState().loadOlderHistory(TEST_SESSION_ID, true)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.messages.map(message => message.id)).toEqual([
+      'early', canonical[0]!.id, canonical[1]!.id, 'progress', canonical[2]!.id, 'new-turn',
+    ])
+  })
+
+  it('places a disconnected older cache before the latest page without sorting canonical rows', async () => {
+    const raw: MessageEntry[] = [
+      { id: 'recent', type: 'assistant', content: 'recent', timestamp: new Date(3000).toISOString() },
+      { id: 'done', type: 'assistant', content: 'done', timestamp: new Date(2000).toISOString() },
+    ]
+    const cached: UIMessage[] = [{ id: 'early', type: 'assistant_text', content: 'early', timestamp: 1000 }]
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: cached }) } })
+    vi.mocked(sessionsApi.getHistoryPage).mockResolvedValueOnce({ messages: raw })
+    await useChatStore.getState().loadOlderHistory(TEST_SESSION_ID, true)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.messages.map(message => message.id)).toEqual(['early', 'recent', 'done'])
+  })
+
+  it.each([true, false])('preserves cached row order across clock skew with a right anchor: %s', async (hasAnchor) => {
+    const raw: MessageEntry[] = [
+      { id: 'start', type: 'assistant', content: 'start', timestamp: new Date(100).toISOString() },
+      { id: 'end', type: 'assistant', content: 'end', timestamp: new Date(300).toISOString() },
+    ]
+    const cached: UIMessage[] = [
+      { id: 'x', type: 'assistant_text', content: 'x', timestamp: 200 },
+      { id: 'y', type: 'assistant_text', content: 'y', timestamp: 50 },
+      ...(hasAnchor ? mapHistoryMessagesToUiMessages(raw.slice(1)) : []),
+    ]
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: cached }) } })
+    vi.mocked(sessionsApi.getHistoryPage).mockResolvedValueOnce({ messages: raw })
+    await useChatStore.getState().loadOlderHistory(TEST_SESSION_ID, true)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.messages.map(message => message.id)).toEqual(
+      hasAnchor ? ['start', 'x', 'y', 'end'] : ['start', 'end', 'x', 'y'],
+    )
+  })
+
+  it.each(['thinking', 'none'] as const)('rebases retry cleanup after the latest page adds history with %s output', async (output) => {
+    const old: UIMessage = { id: 'old', type: 'assistant_text', content: 'old answer', timestamp: 1000 }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: [old] }) } })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, { type: 'status', state: 'thinking', attemptStart: true })
+    let resolvePage!: (value: Awaited<ReturnType<typeof sessionsApi.getHistoryPage>>) => void
+    vi.mocked(sessionsApi.getHistoryPage).mockReturnValueOnce(new Promise(resolve => { resolvePage = resolve }))
+    const loading = useChatStore.getState().loadOlderHistory(TEST_SESSION_ID, true)
+    if (output === 'thinking') useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'thinking', text: 'failed attempt', complete: true,
+    })
+    resolvePage({ messages: [
+      { id: 'old', type: 'assistant', content: 'old answer', timestamp: new Date(1000).toISOString() },
+      { id: 'recovered', type: 'assistant', content: 'recovered answer', timestamp: new Date(2000).toISOString() },
+    ] })
+    await loading
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.streamAttemptStartIndex).toBe(2)
+    if (output === 'none') useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'thinking', text: 'failed attempt', complete: true,
+    })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, { type: 'streaming_fallback', cause: 'stream_retry' })
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.messages.map(message => message.id)).toEqual(['old', 'recovered'])
+  })
+
   it('lets return-to-latest cancel an in-flight older page without a late overwrite', async () => {
     const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 10, omittedOversizedEntries: 0 }
     useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ historyPage: page }) } })
