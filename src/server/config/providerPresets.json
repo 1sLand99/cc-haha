@@ -269,10 +269,10 @@
     "baseUrl": "https://direct.aruhub.com:8443",
     "apiFormat": "anthropic",
     "defaultModels": {
-      "main": "claude-sonnet-5",
-      "haiku": "",
-      "sonnet": "",
-      "opus": ""
+      "main": "claude-opus-5",
+      "haiku": "claude-sonnet-5",
+      "sonnet": "claude-sonnet-5",
+      "opus": "claude-opus-5"
     },
     "needsApiKey": true,
     "websiteUrl": "https://aruhub.com",

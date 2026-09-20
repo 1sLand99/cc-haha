@@ -5,7 +5,7 @@ import * as path from 'path'
 
 import { handleProvidersApi } from '../api/providers.js'
 import { PROVIDER_PRESETS, ProviderPresetSchema } from '../config/providerPresets.js'
-import { providerNeedsProxy } from '../services/providerRuntimeEnv.js'
+import { buildProviderManagedEnv, providerNeedsProxy } from '../services/providerRuntimeEnv.js'
 import { resolveModelApiFormat } from '../../shared/modelApiFormats.js'
 import { resolveUpstreamHeaders } from '../proxy/upstreamHeaders.js'
 
@@ -57,9 +57,22 @@ describe('provider presets API', () => {
       apiKeyUrl: 'https://aruhub.com/sign-up?aff=Z54g',
       isNew: true,
       needsApiKey: true,
-      defaultModels: { main: 'claude-sonnet-5', haiku: '', sonnet: '', opus: '' },
+      defaultModels: { main: 'claude-opus-5', haiku: 'claude-sonnet-5', sonnet: 'claude-sonnet-5', opus: 'claude-opus-5' },
     })
     expect(sponsors[0].promoText).toContain('注册即送 1 美元全模型通用额度')
+    const preset = PROVIDER_PRESETS.find((candidate) => candidate.id === 'aruhub')!
+    expect(buildProviderManagedEnv({
+      id: 'aruhub-test', presetId: preset.id, name: preset.name,
+      baseUrl: preset.baseUrl, apiFormat: preset.apiFormat,
+      authStrategy: preset.authStrategy, apiKey: 'fake-aruhub-key',
+      models: preset.defaultModels,
+    })).toMatchObject({
+      ANTHROPIC_MODEL: 'claude-opus-5',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5',
+      // This gateway has no Haiku; use its supported Sonnet for background work.
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-sonnet-5',
+    })
   })
 
   // ApiSmart /v1/models and live calls verified these exact IDs on 2026-09-09.

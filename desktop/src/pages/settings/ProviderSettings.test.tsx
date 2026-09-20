@@ -54,9 +54,13 @@ describe('ApiSmart sponsor provider', () => {
     expect(sponsor.parentElement).toBe(dialog.getByRole('button', { name: 'Atlas Cloud' }).parentElement)
     expect(within(sponsor).getByText('New')).toBeInTheDocument()
     expect(within(sponsor).getByLabelText('Sponsor')).toBeInTheDocument()
+    for (const name of ['Atlas Cloud', 'ApiSmart']) {
+      expect(within(dialog.getByRole('button', { name })).queryByLabelText('Sponsor')).not.toBeInTheDocument()
+    }
     fireEvent.click(sponsor)
     expect(dialog.getByDisplayValue('https://direct.aruhub.com:8443')).toBeInTheDocument()
-    expect(dialog.getByDisplayValue('claude-sonnet-5')).toBeInTheDocument()
+    expect(dialog.getAllByDisplayValue('claude-opus-5')).toHaveLength(2)
+    expect(dialog.getAllByDisplayValue('claude-sonnet-5')).toHaveLength(2)
     expect(dialog.getByText(/注册即送 1 美元全模型通用额度/)).toBeInTheDocument()
     fireEvent.click(dialog.getByRole('button', { name: /Get API Key/ }))
     expect(open).toHaveBeenCalledWith('https://aruhub.com/sign-up?aff=Z54g')
@@ -72,7 +76,7 @@ describe('ApiSmart sponsor provider', () => {
       apiFormat: 'anthropic',
       authStrategy: 'api_key',
       apiKey: 'fake-aruhub-key',
-      models: expect.objectContaining({ main: 'claude-sonnet-5' }),
+      models: { main: 'claude-opus-5', haiku: 'claude-sonnet-5', sonnet: 'claude-sonnet-5', opus: 'claude-opus-5' },
     })))
   })
 
