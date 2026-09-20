@@ -1265,6 +1265,8 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'settings.providers.requestFailed': 'Request failed',
   'settings.providers.addTitle': 'Add Model',
   'settings.providers.editTitle': 'Edit Model',
+  'settings.providers.new': 'New',
+  'settings.providers.sponsor': 'Sponsor',
   'settings.providers.preset': 'Preset',
   'settings.providers.name': 'Configuration name',
   'settings.providers.namePlaceholder': 'Configuration name',

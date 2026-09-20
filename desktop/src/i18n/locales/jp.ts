@@ -1267,6 +1267,8 @@ export const jp: Record<TranslationKey, string> = {
   'settings.providers.requestFailed': 'リクエストに失敗しました',
   'settings.providers.addTitle': 'モデルを追加',
   'settings.providers.editTitle': 'モデルを編集',
+  'settings.providers.new': '新着',
+  'settings.providers.sponsor': 'スポンサー',
   'settings.providers.preset': 'プリセット',
   'settings.providers.name': '設定名',
   'settings.providers.namePlaceholder': '設定名',

@@ -29,6 +29,7 @@ export type ProviderPreset = {
   apiKeyUrl?: string
   promoText?: string
   featured?: boolean
+  isNew?: boolean
   /** Retired preset: hidden from the "add provider" choices, still resolves saved providers. */
   deprecated?: boolean
   authStrategy?: ProviderAuthStrategy

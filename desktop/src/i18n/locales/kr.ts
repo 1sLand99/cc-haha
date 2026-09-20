@@ -1267,6 +1267,8 @@ export const kr: Record<TranslationKey, string> = {
   'settings.providers.requestFailed': '요청에 실패했습니다',
   'settings.providers.addTitle': '모델 추가',
   'settings.providers.editTitle': '모델 편집',
+  'settings.providers.new': '신규',
+  'settings.providers.sponsor': '스폰서',
   'settings.providers.preset': '사전 설정',
   'settings.providers.name': '설정 이름',
   'settings.providers.namePlaceholder': '설정 이름',

@@ -264,6 +264,26 @@
     }
   },
   {
+    "id": "aruhub",
+    "name": "AruHub",
+    "baseUrl": "https://direct.aruhub.com:8443",
+    "apiFormat": "anthropic",
+    "defaultModels": {
+      "main": "claude-sonnet-5",
+      "haiku": "",
+      "sonnet": "",
+      "opus": ""
+    },
+    "needsApiKey": true,
+    "websiteUrl": "https://aruhub.com",
+    "apiKeyUrl": "https://aruhub.com/sign-up?aff=Z54g",
+    "promoText": "AruHub 为 cc-haha 用户提供专属福利：通过「获取 API Key」链接注册即送 1 美元全模型通用额度，不限模型。支持 GPT、Claude，按量付费，适合持续 AI Coding。",
+    "featured": true,
+    "isNew": true,
+    "authStrategy": "api_key",
+    "defaultEnv": {}
+  },
+  {
     "id": "atlascloud",
     "name": "Atlas Cloud",
     "baseUrl": "https://api.atlascloud.ai",

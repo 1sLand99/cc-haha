@@ -56,6 +56,7 @@ export const ProviderPresetSchema = z.object({
   apiKeyUrl: z.string().optional(),
   promoText: z.string().optional(),
   featured: z.boolean().optional(),
+  isNew: z.boolean().optional(),
   // Retired sponsor/provider: filtered out of the "add provider" choices, but the entry
   // MUST stay in this list — deleting it silently degrades providers already saved
   // against it, because three things are resolved from the preset, never from the

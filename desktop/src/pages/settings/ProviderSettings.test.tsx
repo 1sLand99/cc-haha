@@ -41,6 +41,41 @@ describe('ApiSmart sponsor provider', () => {
     vi.restoreAllMocks()
   })
 
+  it('puts AruHub first in the sponsor row with badges and its signup offer', async () => {
+    const create = vi.spyOn(providersApi, 'create').mockImplementation(async (input) => ({
+      provider: { ...input, id: 'saved-aruhub', apiFormat: input.apiFormat ?? 'anthropic' },
+    }))
+    const open = vi.spyOn(getDesktopHost().shell, 'open').mockResolvedValue()
+    render(<ProviderSettings />)
+    fireEvent.click(await screen.findByRole('button', { name: /Add Model/ }))
+    const dialog = within(screen.getByRole('dialog'))
+    const sponsor = dialog.getByRole('button', { name: 'AruHub' })
+    expect(sponsor.parentElement?.firstElementChild).toBe(sponsor)
+    expect(sponsor.parentElement).toBe(dialog.getByRole('button', { name: 'Atlas Cloud' }).parentElement)
+    expect(within(sponsor).getByText('New')).toBeInTheDocument()
+    expect(within(sponsor).getByLabelText('Sponsor')).toBeInTheDocument()
+    fireEvent.click(sponsor)
+    expect(dialog.getByDisplayValue('https://direct.aruhub.com:8443')).toBeInTheDocument()
+    expect(dialog.getByDisplayValue('claude-sonnet-5')).toBeInTheDocument()
+    expect(dialog.getByText(/注册即送 1 美元全模型通用额度/)).toBeInTheDocument()
+    fireEvent.click(dialog.getByRole('button', { name: /Get API Key/ }))
+    expect(open).toHaveBeenCalledWith('https://aruhub.com/sign-up?aff=Z54g')
+    fireEvent.change(dialog.getAllByPlaceholderText('sk-...')[0]!, { target: { value: 'fake-aruhub-key' } })
+    expect(dialog.getByText(/注册即送 1 美元全模型通用额度/)).toBeInTheDocument()
+    fireEvent.change(dialog.getByDisplayValue('https://direct.aruhub.com:8443'), { target: { value: 'https://other.invalid' } })
+    expect(dialog.queryByText(/注册即送 1 美元全模型通用额度/)).not.toBeInTheDocument()
+    fireEvent.change(dialog.getByDisplayValue('https://other.invalid'), { target: { value: 'https://direct.aruhub.com:8443' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      presetId: 'aruhub',
+      baseUrl: 'https://direct.aruhub.com:8443',
+      apiFormat: 'anthropic',
+      authStrategy: 'api_key',
+      apiKey: 'fake-aruhub-key',
+      models: expect.objectContaining({ main: 'claude-sonnet-5' }),
+    })))
+  })
+
   it('prefills the sponsor connection, opens its landing page, and saves the selected models', async () => {
     const open = vi.spyOn(getDesktopHost().shell, 'open').mockResolvedValue()
     const create = vi.spyOn(providersApi, 'create').mockImplementation(async (input) => ({

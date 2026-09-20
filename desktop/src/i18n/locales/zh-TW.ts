@@ -1266,6 +1266,8 @@ export const zh: Record<TranslationKey, string> = {
   'settings.providers.requestFailed': '請求失敗',
   'settings.providers.addTitle': '新增模型',
   'settings.providers.editTitle': '編輯模型',
+  'settings.providers.new': '新',
+  'settings.providers.sponsor': '贊助商',
   'settings.providers.preset': '預設',
   'settings.providers.name': '設定名稱',
   'settings.providers.namePlaceholder': '設定名稱',

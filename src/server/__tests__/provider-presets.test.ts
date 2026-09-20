@@ -44,6 +44,24 @@ function makeRequest(
 }
 
 describe('provider presets API', () => {
+  test('exposes AruHub first among sponsors with signup copy and the new badge', async () => {
+    const { req, url, segments } = makeRequest('GET', '/api/providers/presets')
+    const response = await handleProvidersApi(req, url, segments)
+    const { presets } = await response.json()
+    const sponsors = presets.filter((preset: { featured?: boolean }) => preset.featured)
+    expect(sponsors[0]).toMatchObject({
+      id: 'aruhub',
+      baseUrl: 'https://direct.aruhub.com:8443',
+      apiFormat: 'anthropic',
+      authStrategy: 'api_key',
+      apiKeyUrl: 'https://aruhub.com/sign-up?aff=Z54g',
+      isNew: true,
+      needsApiKey: true,
+      defaultModels: { main: 'claude-sonnet-5', haiku: '', sonnet: '', opus: '' },
+    })
+    expect(sponsors[0].promoText).toContain('注册即送 1 美元全模型通用额度')
+  })
+
   // ApiSmart /v1/models and live calls verified these exact IDs on 2026-09-09.
   // The unsuffixed names in its docs return 503 provider_not_available.
   test('exposes ApiSmart with its live-verified Chat Completions defaults and sponsor link', async () => {
