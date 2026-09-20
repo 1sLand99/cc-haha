@@ -29,6 +29,7 @@ import { ensurePersistentStorageUpgraded } from './services/persistentStorageMig
 import { handleStaticH5Request } from './staticH5.js'
 import {
   classifyH5Request,
+  resolveTrustedRendererOrigin,
   isH5AccessControlPath,
   isLocalCredentialOnlyPath,
   requiresLocalAccessCredential,
@@ -221,6 +222,7 @@ function originFromUrl(value: string | null): string | null {
 
 export function startServer(port = PORT, host = HOST) {
   enableConfigs()
+  const trustedRendererOrigin = resolveTrustedRendererOrigin(process.env.CC_HAHA_TRUSTED_RENDERER_ORIGIN)
   // Warm the synchronous disconnect-grace cache from managed settings so the
   // first client disconnect honors the configured value (issue #764).
   void refreshDisconnectGraceMs()
@@ -333,6 +335,7 @@ export function startServer(port = PORT, host = HOST) {
         const sdkToken = url.searchParams.get('token')
         const h5RequestContext = {
           clientAddress,
+          trustedRendererOrigin,
           localAccessTokenConfigured:
             hasConfiguredLocalAccessToken() || hasConfiguredPetAccessToken(),
           localAccessAuthorized:
