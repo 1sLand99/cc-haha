@@ -48,6 +48,7 @@ import {
   peek,
   subscribeToCommandQueue,
   getCommandsByMaxPriority,
+  getCommandQueue,
 } from 'src/utils/messageQueueManager.js'
 import { notifyCommandLifecycle } from 'src/utils/commandLifecycle.js'
 import {
@@ -1010,6 +1011,51 @@ export function bindAgentRunMessageSink(structuredIO: StructuredIO): () => void 
   })
 }
 
+export function bindBackgroundTaskNotifications(structuredIO: StructuredIO) {
+  const output = structuredIO.outbound
+  // Task completion must reach clients even while the model is still working.
+  // Keep the notification queued for its normal model follow-up, and remember
+  // the queue object so consuming it later does not repeat the SDK bookend.
+  const publishedTaskNotifications = new WeakSet<QueuedCommand>()
+  const publishTaskNotification = (command: QueuedCommand) => {
+    if (
+      command.mode !== 'task-notification' ||
+      command.agentId !== undefined ||
+      publishedTaskNotifications.has(command)
+    ) return
+    const notification = parseTaskNotificationXml(
+      typeof command.value === 'string' ? command.value : '',
+    )
+    if (!notification.status) return
+    publishedTaskNotifications.add(command)
+    // A fast shell can finish before the query loop flushes its start event.
+    for (const event of drainSdkEvents()) output.enqueue(event)
+    output.enqueue({
+      type: 'system',
+      subtype: 'task_notification',
+      task_id: notification.taskId,
+      tool_use_id: notification.toolUseId,
+      status: notification.status,
+      output_file: notification.outputFile,
+      summary: notification.summary,
+      result: notification.result,
+      workflow_run_id: notification.workflowRunId,
+      usage: notification.usage,
+      session_id: getSessionId(),
+      uuid: randomUUID(),
+    })
+  }
+  const publishQueuedTaskNotifications = () => {
+    for (const command of getCommandQueue()) publishTaskNotification(command)
+  }
+  const unsubscribeTaskNotifications = subscribeToCommandQueue(
+    publishQueuedTaskNotifications,
+  )
+  publishQueuedTaskNotifications()
+
+  return { publish: publishTaskNotification, unsubscribe: unsubscribeTaskNotifications }
+}
+
 function runHeadlessStreaming(
   structuredIO: StructuredIO,
   mcpClients: MCPServerConnection[],
@@ -1061,6 +1107,11 @@ function runHeadlessStreaming(
   // Same queue sendRequest() enqueues to — one FIFO for everything.
   const output = structuredIO.outbound
   const removeAgentRunMessageSink = bindAgentRunMessageSink(structuredIO)
+
+  const {
+    publish: publishTaskNotification,
+    unsubscribe: unsubscribeTaskNotifications,
+  } = bindBackgroundTaskNotifications(structuredIO)
 
   // Ctrl+C in -p mode: abort the in-flight query, then shut down gracefully.
   // gracefulShutdown persists session state and flushes analytics, with a
@@ -2086,29 +2137,7 @@ function runHeadlessStreaming(
               typeof command.value === 'string' ? command.value : ''
             const notification = parseTaskNotificationXml(notificationText)
 
-            // Only emit a task_notification SDK event when a <status> tag is
-            // present — that means this is a terminal notification (completed/
-            // failed/stopped). Stream events from enqueueStreamEvent carry no
-            // <status> (they're progress pings); emitting them here would
-            // default to 'completed' and falsely close the task for SDK
-            // consumers. Terminal bookends are now emitted directly via
-            // emitTaskTerminatedSdk, so skipping statusless events is safe.
-            if (notification.status) {
-              output.enqueue({
-                type: 'system',
-                subtype: 'task_notification',
-                task_id: notification.taskId,
-                tool_use_id: notification.toolUseId,
-                status: notification.status,
-                output_file: notification.outputFile,
-                summary: notification.summary,
-                result: notification.result,
-                workflow_run_id: notification.workflowRunId,
-                usage: notification.usage,
-                session_id: getSessionId(),
-                uuid: randomUUID(),
-              })
-            }
+            publishTaskNotification(command)
             if (
               !shouldForwardTaskNotificationToModel(notification, {
                 structuredOutput: options.outputFormat === 'stream-json',
@@ -2732,6 +2761,7 @@ function runHeadlessStreaming(
         unsubscribeSkillChanges()
         unsubscribeAuthStatus?.()
         statusListeners.delete(rateLimitListener)
+        unsubscribeTaskNotifications()
         removeAgentRunMessageSink()
         output.done()
       }
@@ -4368,6 +4398,7 @@ function runHeadlessStreaming(
       unsubscribeSkillChanges()
       unsubscribeAuthStatus?.()
       statusListeners.delete(rateLimitListener)
+      unsubscribeTaskNotifications()
       removeAgentRunMessageSink()
       output.done()
     }
