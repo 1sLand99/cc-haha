@@ -1,6 +1,27 @@
 import type { TranslationKey } from './en'
 
 export const jp: Record<TranslationKey, string> = {
+  "chat.collaborationCancelled": "キャンセル済み",
+
+  "chat.collaborationAccepted": "配信済み",
+  "chat.collaborationConsumed": "処理に取り込み済み",
+
+  "chat.sessionNoProject": "プロジェクトなし",
+  "chat.referenceSessions": "セッション",
+  "chat.sessionReferencesLoadFailed": "セッションを読み込めませんでした。",
+  "chat.openReferencedSession": "セッション {id} を開く",
+  "chat.sessionCollaboration": "セッション連携（{count}）",
+  "chat.collaborationMessages": "連携メッセージ",
+  "chat.collaborationStopGroup": "グループを停止",
+  "chat.collaborationFailedRequest": "連携状態を更新できませんでした。",
+  "chat.collaborationQueued": "待機中",
+  "chat.collaborationRunning": "実行中",
+  "chat.collaborationIdle": "アイドル",
+  "chat.collaborationBlocked": "対応が必要",
+  "chat.collaborationCompleted": "完了",
+  "chat.collaborationFailed": "失敗",
+  "chat.collaborationStopped": "停止済み",
+
   "chat.history.loading": "メッセージを読み込み中…",
   "chat.history.loadFailed": "メッセージを読み込めませんでした。",
   "chat.history.retry": "再試行",
@@ -465,7 +486,7 @@ export const jp: Record<TranslationKey, string> = {
   'attachments.selectionItem': '選択要素 {number}：{name}',
   'chat.capabilities.managePlugins': 'プラグインを管理',
   'chat.capabilities.moreTools': 'その他のツール',
-  'chat.referenceSearchHint': '名前を入力してスキル・プラグイン・プロジェクトファイルを検索',
+  'chat.referenceSearchHint': "入力してセッション、スキル、プラグイン、プロジェクトファイルを検索",
   'chat.slashFrequent': 'よく使うコマンド',
   'chat.slashSearchHint': '名前を入力してコマンド、スキル、プラグインを検索',
   'chat.slashSearchResults': '検索結果',

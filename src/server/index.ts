@@ -1,3 +1,6 @@
+import { configureSessionCollaborationHost, getSessionCollaborationService } from './services/sessionCollaborationHost.js'
+import { authenticateCollaborationCaller, collaborationToolAction } from './sessionCollaborationAuth.js'
+import { handleSessionCollaborationApi } from './api/sessionCollaboration.js'
 /**
  * Claude Code Desktop App — HTTP + WebSocket Server
  *
@@ -293,6 +296,12 @@ export function startServer(port = PORT, host = HOST) {
 
         await localIndexCoordinator.start().catch(() => undefined)
         await ensurePersistentStorageUpgraded()
+        const collaborationAction = collaborationToolAction(url.pathname)
+        if (collaborationAction) {
+          const caller = authenticateCollaborationCaller(req, (id, token) => conversationService.authorizeSdkConnection(id, token))
+          if (!caller) return Response.json({ error: 'Invalid session credential' }, { status: 401 })
+          return handleSessionCollaborationApi(req, collaborationAction, caller, await getSessionCollaborationService())
+        }
         const origin = req.headers.get('Origin')
         const clientAddress = server.requestIP(req)?.address ?? null
         const localTokenOverride = url.searchParams.get('localToken') ?? url.searchParams.get('token')
@@ -611,8 +620,10 @@ export function startServer(port = PORT, host = HOST) {
 
       websocket: handleWebSocket,
     })
+    const disposeCollaboration = configureSessionCollaborationHost(localConnectHost, server.port)
     const stop = server.stop.bind(server)
     server.stop = (closeActiveConnections?: boolean) => {
+      disposeCollaboration()
       publicAccess.disable()
       publicAccessServers.delete(publicAccess)
       return stop(closeActiveConnections)

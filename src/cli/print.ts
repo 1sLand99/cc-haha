@@ -1,3 +1,4 @@
+import { createSessionMessageInbox, isPendingSessionMessage, sessionMessageUuid } from '../utils/sessionMessageInbox.js'
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle'
 import { readFile, stat } from 'fs/promises'
@@ -470,6 +471,8 @@ export function canBatchWith(
   return (
     next !== undefined &&
     next.mode === 'prompt' &&
+    !isPendingSessionMessage(head.uuid) &&
+    !isPendingSessionMessage(next.uuid) &&
     next.workload === head.workload &&
     next.isMeta === head.isMeta
   )
@@ -1106,6 +1109,9 @@ function runHeadlessStreaming(
   let abortController: AbortController | undefined
   // Same queue sendRequest() enqueues to — one FIFO for everything.
   const output = structuredIO.outbound
+  const sessionMessageInbox = createSessionMessageInbox(enqueue, receipt => {
+    output.enqueue({ type: 'system', subtype: 'session_message_receipt', ...receipt, source_uuid: sessionMessageUuid(receipt.message_id), session_id: getSessionId(), uuid: randomUUID() })
+  }, initialMessages)
   const removeAgentRunMessageSink = bindAgentRunMessageSink(structuredIO)
 
   const {
@@ -2763,6 +2769,7 @@ function runHeadlessStreaming(
         statusListeners.delete(rateLimitListener)
         unsubscribeTaskNotifications()
         removeAgentRunMessageSink()
+        sessionMessageInbox.dispose()
         output.done()
       }
     }
@@ -2916,7 +2923,20 @@ function runHeadlessStreaming(
       }
 
       if (message.type === 'control_request') {
-        if (message.request.subtype === 'interrupt') {
+        if (message.request.subtype === 'enqueue_session_message') {
+          try {
+            const deliveryUuid = sessionMessageUuid(message.request.message_id)
+            const persisted = !isPendingSessionMessage(deliveryUuid) && await doesMessageExistInSession(
+              getSessionId() as UUID,
+              deliveryUuid,
+            )
+            sendControlResponseSuccess(message, sessionMessageInbox.accept(message.request, persisted))
+            if (message.request.start_if_idle) void run()
+          } catch (error) {
+            sendControlResponseError(message, error instanceof Error ? error.message : String(error))
+          }
+        } else if (message.request.subtype === 'interrupt') {
+          sessionMessageInbox.cancelQueued(dequeueAllMatching)
           // Track escapes for attribution (ant-only feature)
           if (feature('COMMIT_ATTRIBUTION')) {
             setAppState(prev => ({
@@ -2936,6 +2956,7 @@ function runHeadlessStreaming(
           suggestionState.pendingSuggestion = null
           sendControlResponseSuccess(message)
         } else if (message.request.subtype === 'end_session') {
+          sessionMessageInbox.cancelQueued(dequeueAllMatching)
           logForDebugging(
             `[print.ts] end_session received, reason=${message.request.reason ?? 'unspecified'}`,
           )

@@ -1,3 +1,4 @@
+import { splitSessionReferenceContext } from './sessionReferenceContext.js'
 import { readHistoryContexts } from './sessionHistoryContext.js'
 import { recoverBoundedSessionHistory, type SessionHistoryRecovery } from './sessionHistoryRecovery.js'
 /**
@@ -213,6 +214,7 @@ export type MessageUsage = {
 }
 
 export type MessageEntry = {
+  sessionReferences?: { sessionId: string }[]
   id: string
   type: 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result'
   content: unknown
@@ -1849,10 +1851,27 @@ export class SessionService {
         }) ?? undefined
       : undefined
 
+    let content = msg.content
+    let sessionReferences: { sessionId: string }[] | undefined
+    if (type === 'user') {
+      if (typeof content === 'string') {
+        const parsed = splitSessionReferenceContext(content)
+        content = parsed.content
+        sessionReferences = parsed.sessionReferences
+      } else if (Array.isArray(content)) {
+        content = content.map((block: Record<string, unknown>) => {
+          if (block.type !== 'text' || typeof block.text !== 'string') return block
+          const parsed = splitSessionReferenceContext(block.text)
+          if (parsed.sessionReferences) sessionReferences = parsed.sessionReferences
+          return { ...block, text: parsed.content }
+        })
+      }
+    }
     return {
       id: entry.uuid || crypto.randomUUID(),
       type,
-      content: msg.content,
+      content,
+      ...(sessionReferences ? { sessionReferences } : {}),
       ...(entry.bodyTruncated === true ? { bodyTruncated: true } : {}),
       ...(entry.toolUseResult !== undefined ? { toolUseResult: entry.toolUseResult } : {}),
       timestamp: entry.timestamp || new Date().toISOString(),

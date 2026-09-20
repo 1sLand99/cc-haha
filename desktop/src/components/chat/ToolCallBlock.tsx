@@ -1,3 +1,4 @@
+import { SessionToolLinks, SESSION_TOOL_NAMES } from '@/components/chat/SessionToolLinks'
 import { memo, useMemo, useState } from 'react'
 import { CircleStop, CircleX, LoaderCircle } from 'lucide-react'
 import { activitySegmentIcon } from './activityGroupModel'
@@ -41,6 +42,7 @@ type Props = {
 }
 
 const TOOL_ICONS: Record<string, string> = {
+  ListSessions: 'forum', ReadSession: 'forum', CreateSession: 'add_comment', SendSessionMessage: 'send', WaitSessions: 'hourglass_top',
   Bash: 'terminal',
   PowerShell: 'terminal',
   Read: 'description',
@@ -340,6 +342,8 @@ export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, resu
           </span>
         )}
       </button>
+
+      {SESSION_TOOL_NAMES.has(toolName) ? <SessionToolLinks input={input} result={result?.content} /> : null}
 
       {expandable && expanded && (
         <div
@@ -1279,6 +1283,9 @@ function RowToolIcon({ toolName, active }: { toolName: string; active: boolean }
 /** Whether the row's summary is a sentence rather than something code-shaped. */
 function isProseToolSummary(toolName: string, obj: Record<string, unknown>): boolean {
   switch (toolName) {
+    case 'CreateSession':
+    case 'SendSessionMessage':
+      return true
     case 'Bash':
     case 'PowerShell':
     case 'Agent':
@@ -1294,6 +1301,11 @@ function isProseToolSummary(toolName: string, obj: Record<string, unknown>): boo
 
 function getToolSummary(toolName: string, obj: Record<string, unknown>, t?: (key: TranslationKey, params?: Record<string, string | number>) => string): string {
   switch (toolName) {
+    case 'ListSessions': return typeof obj.query === 'string' ? obj.query : ''
+    case 'CreateSession': return String(obj.title ?? obj.prompt ?? '')
+    case 'ReadSession': return String(obj.sessionId ?? '')
+    case 'SendSessionMessage': return String(obj.content ?? '')
+    case 'WaitSessions': return Array.isArray(obj.sessionIds) ? obj.sessionIds.join(', ') : ''
     case 'Bash':
     case 'PowerShell':
       // The model sends a short description of what the command is for, in the

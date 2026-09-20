@@ -44,6 +44,7 @@ export type MessageUsage = {
 }
 
 export type MessageEntry = {
+  sessionReferences?: Array<{ sessionId: string }>
   id: string
   type: 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result'
   content: unknown

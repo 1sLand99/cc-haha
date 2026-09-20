@@ -1,3 +1,5 @@
+import { handleSessionCollaborationUiApi } from './api/sessionCollaboration.js'
+import { getSessionCollaborationService } from './services/sessionCollaborationHost.js'
 /**
  * API Router — 将请求路由到对应的 API handler
  */
@@ -95,6 +97,8 @@ async function routeApiRequest(req: Request, url: URL): Promise<Response> {
   const resource = segments[1]
 
   switch (resource) {
+    case 'session-collaboration':
+      return handleSessionCollaborationUiApi(req, url, await getSessionCollaborationService())
     case 'sessions': {
       // Route /api/sessions/:id/chat/* to conversations handler
       const subResource = segments[3]

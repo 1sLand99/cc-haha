@@ -1,6 +1,27 @@
 import type { TranslationKey } from './en'
 
 export const kr: Record<TranslationKey, string> = {
+  "chat.collaborationCancelled": "취소됨",
+
+  "chat.collaborationAccepted": "전달됨",
+  "chat.collaborationConsumed": "처리에 반영됨",
+
+  "chat.sessionNoProject": "프로젝트 없음",
+  "chat.referenceSessions": "세션",
+  "chat.sessionReferencesLoadFailed": "세션을 불러올 수 없습니다.",
+  "chat.openReferencedSession": "세션 {id} 열기",
+  "chat.sessionCollaboration": "세션 협업 ({count})",
+  "chat.collaborationMessages": "협업 메시지",
+  "chat.collaborationStopGroup": "그룹 중지",
+  "chat.collaborationFailedRequest": "협업 상태를 업데이트할 수 없습니다.",
+  "chat.collaborationQueued": "대기 중",
+  "chat.collaborationRunning": "실행 중",
+  "chat.collaborationIdle": "유휴",
+  "chat.collaborationBlocked": "조치 필요",
+  "chat.collaborationCompleted": "완료",
+  "chat.collaborationFailed": "실패",
+  "chat.collaborationStopped": "중지됨",
+
   "chat.history.loading": "메시지 불러오는 중…",
   "chat.history.loadFailed": "메시지를 불러오지 못했습니다.",
   "chat.history.retry": "다시 시도",
@@ -465,7 +486,7 @@ export const kr: Record<TranslationKey, string> = {
   'attachments.selectionItem': '선택한 요소 {number}: {name}',
   'chat.capabilities.managePlugins': '플러그인 관리',
   'chat.capabilities.moreTools': '더 많은 도구',
-  'chat.referenceSearchHint': '이름을 입력하여 스킬, 플러그인 및 프로젝트 파일 검색',
+  'chat.referenceSearchHint': "입력하여 세션, 스킬, 플러그인 및 프로젝트 파일 검색",
   'chat.slashFrequent': '자주 쓰는 명령',
   'chat.slashSearchHint': '이름을 입력하여 명령, 스킬 및 플러그인 검색',
   'chat.slashSearchResults': '검색 결과',

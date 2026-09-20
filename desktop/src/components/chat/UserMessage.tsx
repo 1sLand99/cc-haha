@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui/Button'
+import { openSessionSource, sessionSourceTitle } from '@/lib/sessionNavigation'
 import { memo, useCallback, useMemo } from 'react'
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import { UsersRound } from 'lucide-react'
@@ -11,6 +13,7 @@ import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 
 type Props = {
   content: string
+  sessionReferences?: Array<{ sessionId: string }>
   attachments?: UIAttachment[]
   branchAction?: MessageBranchAction
   rewindAction?: MessageRewindAction
@@ -25,6 +28,7 @@ type Props = {
 
 export const UserMessage = memo(function UserMessage({
   content,
+  sessionReferences,
   attachments,
   branchAction,
   rewindAction,
@@ -149,6 +153,9 @@ export const UserMessage = memo(function UserMessage({
         className="group flex min-w-0 max-w-[82%] flex-col items-end sm:max-w-[78%] lg:max-w-[640px]"
       >
         <div className="flex max-w-full flex-col items-end gap-2">
+          {sessionReferences?.length ? <div className="flex max-w-full flex-wrap gap-1" aria-label={t('chat.referenceSessions')}>
+            {sessionReferences.map(reference => <Button key={reference.sessionId} size="sm" variant="ghost" onClick={() => openSessionSource(reference.sessionId)}>{t('chat.openReferencedSession', { id: sessionSourceTitle(reference.sessionId) })}</Button>)}
+          </div> : null}
           {attachments && attachments.length > 0 && (
             <AttachmentGallery attachments={attachments} variant="message" />
           )}

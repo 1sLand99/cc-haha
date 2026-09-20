@@ -15945,3 +15945,15 @@ describe('chatStore AskUserQuestion drafts', () => {
     expect(useChatStore.getState().askUserQuestionDrafts[TEST_SESSION_ID]).toBeUndefined()
   })
 })
+
+it('restores reference sources from both structured history and older server-enveloped messages', () => {
+  const envelope = 'Use @Review\n\n<session_references>\nRead referenced history first.\n[{"sessionId":"prior"}]\n</session_references>'
+  const mapped = mapHistoryMessagesToUiMessages([
+    { id: 'old', type: 'user', content: envelope, timestamp: '2026-09-20T00:00:00Z' },
+    { id: 'new', type: 'user', content: 'Use @Review', sessionReferences: [{ sessionId: 'prior' }], timestamp: '2026-09-20T00:00:01Z' },
+  ])
+  expect(mapped).toEqual([
+    expect.objectContaining({ type: 'user_text', content: 'Use @Review', sessionReferences: [{ sessionId: 'prior' }] }),
+    expect.objectContaining({ type: 'user_text', content: 'Use @Review', sessionReferences: [{ sessionId: 'prior' }] }),
+  ])
+})

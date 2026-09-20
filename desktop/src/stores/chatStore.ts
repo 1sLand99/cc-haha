@@ -1,3 +1,4 @@
+import { normalizeSessionReferences, splitSessionReferenceContext } from '@/lib/sessionReferences'
 import { boundHistoryWindow, historyWindowBoundary, historyWindowMessages, type HistoryDirection, type HistoryWindowPage } from '../lib/chatHistoryWindow'
 import { create } from 'zustand'
 import { boundActivityText, boundChatHistory, previewHistoryPage, copyChatPreview, CHAT_STREAM_MAX_CHARS, CHAT_TERMINAL_ACTIVITY_MAX_PER_SESSION, CHAT_TERMINAL_ACTIVITY_MAX_TOTAL } from '../lib/chatHistoryBudget'
@@ -78,6 +79,7 @@ export type RepositoryLaunchDraftState = {
 }
 
 export type QueuedUserMessage = {
+  sessionReferences?: Array<{ sessionId: string }>
   id: string
   content: string
   attachments?: AttachmentRef[]
@@ -399,7 +401,7 @@ type ChatStore = {
     sessionId: string,
     content: string,
     attachments?: AttachmentRef[],
-    options?: { displayContent?: string; displayAttachments?: AttachmentRef[]; hideDisplayContent?: boolean },
+    options?: { sessionReferences?: Array<{ sessionId: string }>; displayContent?: string; displayAttachments?: AttachmentRef[]; hideDisplayContent?: boolean },
   ) => void
   respondToPermission: (
     sessionId: string,
@@ -3320,6 +3322,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
       newMessages.push({
         id: nextId(),
         type: 'user_text',
+        ...(options?.sessionReferences?.length ? { sessionReferences: options.sessionReferences } : {}),
         content: userFacingContent,
         ...(userFacingContent !== modelFacingContent ? { modelContent: modelFacingContent } : {}),
         attachments: isDirectAgentSession ? undefined : uiAttachments,
@@ -3441,7 +3444,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
         get().setSessionRuntime(sessionId, defaultSelection)
       }
     }
-    wsManager.send(sessionId, { type: 'user_message', content, attachments })
+    wsManager.send(sessionId, { type: 'user_message', content, attachments, ...(options?.sessionReferences?.length ? { sessionReferences: options.sessionReferences } : {}) })
   },
 
   respondToPermission: (sessionId, requestId, allowed, options) => {
@@ -4505,6 +4508,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
         queuedMessage.content,
         queuedMessage.attachments,
         {
+          sessionReferences: queuedMessage.sessionReferences,
           displayContent: queuedMessage.displayContent,
           displayAttachments: queuedMessage.displayAttachments,
         },
@@ -4534,6 +4538,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
       type: 'user_message',
       content: queuedMessage.content,
       attachments: queuedMessage.attachments,
+      ...(queuedMessage.sessionReferences?.length ? { sessionReferences: queuedMessage.sessionReferences } : {}),
     })
   },
 
@@ -5573,7 +5578,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
             ? appendAssistantTextMessage(session.messages, pendingText, Date.now())
             : session.messages
           return {
-            messages: appendReplayedUserMessage(baseMessages, msg.content, Date.now()),
+            messages: appendReplayedUserMessage(baseMessages, msg.content, Date.now(), msg.sessionReferences),
             ...(pendingText.trim() ? { streamingText: '' } : {}),
             activeThinkingId: null,
             suppressNextTaskNotificationResponse: false,
@@ -7408,12 +7413,17 @@ function pathsReferToSameFile(left: string | undefined, right: string | undefine
 }
 
 type RestoredUserDisplay = {
+  sessionReferences?: Array<{ sessionId: string }>
   content: string
   attachments?: UIAttachment[]
   modelContent?: string
 }
 
 function extractRestoredUserDisplay(text: string): RestoredUserDisplay {
+  const referenceContext = splitSessionReferenceContext(text)
+  if (referenceContext.sessionReferences.length) {
+    return { ...extractRestoredUserDisplay(referenceContext.content), sessionReferences: referenceContext.sessionReferences, modelContent: text }
+  }
   const leading = extractLeadingFileReferences(text)
   const workspace = parseWorkspaceReferenceHistoryPrompt(leading.content)
   if (!workspace) return leading
@@ -7532,6 +7542,7 @@ export function appendReplayedUserMessage(
   messages: UIMessage[],
   content: string,
   timestamp: number,
+  sessionReferences?: Array<{ sessionId: string }>,
 ): UIMessage[] {
   // The replayed text carries server-appended image-metadata lines that the
   // optimistic message never had. Normalize them away (same as the history
@@ -7539,6 +7550,7 @@ export function appendReplayedUserMessage(
   // of appending the raw prompt — paths and all — as a duplicate bubble.
   const sanitized = stripGeneratedImageMetadataLines(content) || content.trim()
   const parsed = extractRestoredUserDisplay(sanitized)
+  const references = normalizeSessionReferences(sessionReferences ?? parsed.sessionReferences)
   const displayContent = parsed.content.trim()
   if (!displayContent && !parsed.attachments?.length) return messages
 
@@ -7563,6 +7575,7 @@ export function appendReplayedUserMessage(
       id: nextId(),
       type: 'user_text',
       content: displayContent,
+      ...(references.length ? { sessionReferences: references } : {}),
       ...(parsed.modelContent ? { modelContent: parsed.modelContent } : {}),
       ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
       timestamp,
@@ -7586,6 +7599,7 @@ function appendOptimisticQueuedUserMessage(
       id: nextId(),
       type: 'user_text',
       content: displayContent,
+      ...(message.sessionReferences?.length ? { sessionReferences: message.sessionReferences } : {}),
       ...(modelContent && modelContent !== displayContent ? { modelContent } : {}),
       ...(attachments ? { attachments } : {}),
       timestamp,
@@ -7848,10 +7862,12 @@ export function mapHistoryMessagesToUiMessages(
         continue
       }
       const parsed = extractRestoredUserDisplay(msg.content)
+      const references = normalizeSessionReferences(msg.sessionReferences ?? parsed.sessionReferences)
       uiMessages.push({
         id: msg.id || nextId(),
         type: 'user_text',
         content: parsed.content,
+        ...(references.length ? { sessionReferences: references } : {}),
         ...(msg.id ? { transcriptMessageId: msg.id } : {}),
         ...(parsed.modelContent ? { modelContent: parsed.modelContent } : {}),
         ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
@@ -7937,6 +7953,7 @@ export function mapHistoryMessagesToUiMessages(
           applyVisualSelectionHistoryDisplay(attachments, visualSelectionDisplay)
         }
         const parsed = extractRestoredUserDisplay(visibleText)
+        const references = normalizeSessionReferences(msg.sessionReferences ?? parsed.sessionReferences)
         const userContent = visualSelectionDisplay
           ? visualSelectionDisplay.batch
             ? t('browser.selection.batchMessage', { count: visualSelectionDisplay.items.length })
@@ -7948,6 +7965,7 @@ export function mapHistoryMessagesToUiMessages(
           id: msg.id || nextId(),
           type: 'user_text',
           content: userContent,
+          ...(references.length ? { sessionReferences: references } : {}),
           ...(msg.id ? { transcriptMessageId: msg.id } : {}),
           ...(modelContent ? { modelContent } : {}),
           ...(teammateSender ? { teammateFrom: teammateSender } : {}),

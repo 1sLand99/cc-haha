@@ -1,6 +1,27 @@
 import type { TranslationKey } from './en'
 
 export const zh: Record<TranslationKey, string> = {
+  "chat.collaborationCancelled": "已取消",
+
+  "chat.collaborationAccepted": "已投递",
+  "chat.collaborationConsumed": "已接收处理",
+
+  "chat.sessionNoProject": "无项目",
+  "chat.referenceSessions": "会话",
+  "chat.sessionReferencesLoadFailed": "无法加载会话。",
+  "chat.openReferencedSession": "打开会话 {id}",
+  "chat.sessionCollaboration": "会话协作（{count}）",
+  "chat.collaborationMessages": "协作消息",
+  "chat.collaborationStopGroup": "停止整组",
+  "chat.collaborationFailedRequest": "无法更新协作状态。",
+  "chat.collaborationQueued": "排队中",
+  "chat.collaborationRunning": "运行中",
+  "chat.collaborationIdle": "空闲",
+  "chat.collaborationBlocked": "需要处理",
+  "chat.collaborationCompleted": "已完成",
+  "chat.collaborationFailed": "失败",
+  "chat.collaborationStopped": "已停止",
+
   "chat.history.loading": "正在加载消息…",
   "chat.history.loadFailed": "消息加载失败。",
   "chat.history.retry": "重试",
@@ -464,7 +485,7 @@ export const zh: Record<TranslationKey, string> = {
   'attachments.selectionItem': '所选元素 {number}：{name}',
   'chat.capabilities.managePlugins': '管理插件',
   'chat.capabilities.moreTools': '更多工具',
-  'chat.referenceSearchHint': '输入名称，查找更多技能、插件和项目文件',
+  'chat.referenceSearchHint': "输入以查找会话、技能、插件和项目文件",
   'chat.slashFrequent': '常用命令',
   'chat.slashSearchHint': '输入名称搜索命令、技能和插件',
   'chat.slashSearchResults': '搜索结果',

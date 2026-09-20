@@ -1,3 +1,4 @@
+import { useTabStore } from '@/stores/tabStore'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -204,4 +205,12 @@ describe('UserMessage bare-URL linkify', () => {
     expect(bubbleOf(container).textContent).toBe('Review the auth diff.')
     expect(container.firstElementChild?.className).toContain('justify-end')
   })
+})
+
+it('opens the exact referenced conversation from a source chip', () => {
+  const open = vi.spyOn(useTabStore.getState(), 'openTab')
+  render(<UserMessage content="Use @Review" sessionReferences={[{ sessionId: 'prior' }]} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Open session prior' }))
+  expect(open).toHaveBeenCalledWith('prior', 'prior')
+  open.mockRestore()
 })

@@ -1,6 +1,27 @@
 import type { TranslationKey } from './en'
 
 export const zh: Record<TranslationKey, string> = {
+  "chat.collaborationCancelled": "已取消",
+
+  "chat.collaborationAccepted": "已投遞",
+  "chat.collaborationConsumed": "已接收處理",
+
+  "chat.sessionNoProject": "無專案",
+  "chat.referenceSessions": "對話",
+  "chat.sessionReferencesLoadFailed": "無法載入對話。",
+  "chat.openReferencedSession": "開啟對話 {id}",
+  "chat.sessionCollaboration": "對話協作（{count}）",
+  "chat.collaborationMessages": "協作訊息",
+  "chat.collaborationStopGroup": "停止整組",
+  "chat.collaborationFailedRequest": "無法更新協作狀態。",
+  "chat.collaborationQueued": "排隊中",
+  "chat.collaborationRunning": "執行中",
+  "chat.collaborationIdle": "閒置",
+  "chat.collaborationBlocked": "需要處理",
+  "chat.collaborationCompleted": "已完成",
+  "chat.collaborationFailed": "失敗",
+  "chat.collaborationStopped": "已停止",
+
   "chat.history.loading": "正在載入訊息…",
   "chat.history.loadFailed": "訊息載入失敗。",
   "chat.history.retry": "重試",
@@ -465,7 +486,7 @@ export const zh: Record<TranslationKey, string> = {
   'attachments.selectionItem': '所選元素 {number}：{name}',
   'chat.capabilities.managePlugins': '管理外掛',
   'chat.capabilities.moreTools': '更多工具',
-  'chat.referenceSearchHint': '輸入名稱，尋找更多技能、外掛和專案檔案',
+  'chat.referenceSearchHint': "輸入以尋找對話、技能、外掛程式及專案檔案",
   'chat.slashFrequent': '常用指令',
   'chat.slashSearchHint': '輸入名稱搜尋指令、技能和外掛',
   'chat.slashSearchResults': '搜尋結果',

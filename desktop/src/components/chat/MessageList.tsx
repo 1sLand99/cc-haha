@@ -3888,6 +3888,7 @@ export const MessageBlock = memo(function MessageBlock({
           <UserMessage
             content={message.content}
             attachments={message.attachments}
+            sessionReferences={message.sessionReferences}
             branchAction={branchAction}
             rewindAction={rewindAction}
             timestamp={message.timestamp}
