@@ -37,6 +37,7 @@ import type { UIMessage } from '../../types/chat'
 import type { MessageEntry } from '../../types/session'
 import type { PerSessionState } from '../../stores/chatStore'
 import { FindInPageModal } from '../search/FindInPageModal'
+import { getConversationFindController } from '../search/conversationFindBridge'
 
 const ACTIVE_TAB = 'active-tab'
 
@@ -631,6 +632,25 @@ describe('MessageList nested tool calls', () => {
     expect(assistant!.querySelector('img[alt="remote"], img[alt="loopback"]')).toBeNull()
   })
 
+  it('measures newly mounted virtual rows before waiting for ResizeObserver delivery', () => {
+    const sessionId = 'initial-virtual-measurement'
+    dropSession(sessionId)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { top: 0, bottom: 180, width: 800, height: this.hasAttribute('data-virtual-message-item') ? 180 : 0 } as DOMRect
+    })
+    useChatStore.setState({ sessions: { [sessionId]: makeSessionState({
+      messages: Array.from({ length: 220 }, (_, index) => ({
+        id: `initial-measure-${index}`, type: 'assistant_text' as const,
+        content: `transcript line ${index}`, timestamp: index,
+      })),
+    }) } })
+    const { container } = render(<MessageList sessionId={sessionId} />)
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-virtual-message-item]'))
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) expect(getHeightsForSession(sessionId).get(row.dataset.virtualMessageItem!)).toBe(180)
+    dropSession(sessionId)
+  })
+
   it('keeps fractional border-box jitter from invalidating a settled virtual row', async () => {
     const sessionId = 'virtual-row-measurement-jitter'
     const observers: Array<{
@@ -1128,6 +1148,59 @@ describe('MessageList nested tool calls', () => {
     expect(screen.getAllByRole('button', { name: /Turn \d of 4/ }).every((marker) => (
       marker.getAttribute('aria-current') === null
     ))).toBe(true)
+  })
+
+  it.each(['navigator', 'find', 'workspace'] as const)('replaces an existing reading anchor during %s navigation', async (entry) => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => { frames.push(callback); return frames.length }))
+    const frame = async (time: number) => {
+      const scheduled = frames.splice(0)
+      await act(async () => { scheduled.forEach((callback) => callback(time)); await Promise.resolve() })
+    }
+    let scroller: HTMLElement | null = null
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const key = this.dataset.chatRenderItemKey
+      const top = key?.startsWith('navigation-anchor-') ? Number(key.split('-').at(-1)) * 200 - (scroller?.scrollTop ?? 0) : 0
+      const height = key ? 200 : 300
+      return { top, bottom: top + height, height, left: 0, right: 900, width: 900 } as DOMRect
+    })
+    const messages: UIMessage[] = Array.from({ length: 10 }, (_, index) => ({
+      id: `navigation-anchor-${index}`, type: 'user_text', content: `Unique prompt ${index}`, timestamp: index,
+    }))
+    const getPage = vi.spyOn(sessionsApi, 'getHistoryPage').mockImplementation(() => new Promise(() => {}))
+    const historyPage = { nextCursor: 'older-navigation', previousCursor: null, hasMore: true, historyComplete: false, sourceVersion: 'nav', scannedBytes: 10, omittedOversizedEntries: 0 }
+    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ messages, historyPage }) } })
+    const { container } = render(<MessageList />)
+    scroller = container.querySelector<HTMLElement>('.chat-scroll-area')!
+    Object.defineProperties(scroller, { clientHeight: { configurable: true, value: 300 }, scrollHeight: { configurable: true, value: 2000 } })
+    await frame(0)
+    act(() => { scroller!.scrollTop = 800; fireEvent.wheel(scroller!, { deltaY: -1 }); fireEvent.scroll(scroller!) })
+    await frame(16)
+    const original = container.querySelector<HTMLElement>('[data-chat-render-item-key="navigation-anchor-4"]')!
+    expect(original.getBoundingClientRect().top).toBe(0)
+    const target = container.querySelector<HTMLElement>('[data-chat-render-item-key="navigation-anchor-0"]')!
+    const opener = target.querySelector<HTMLButtonElement>('[aria-label="Copy prompt"]')!
+    opener.id = 'navigation-anchor-opener'
+    Object.defineProperty(target, 'scrollIntoView', { value: () => { scroller!.scrollTop = 0 } })
+    await act(async () => {
+      if (entry === 'navigator') fireEvent.click(screen.getByRole('button', { name: /Turn 1 of 10: Unique prompt 0/ }))
+      else if (entry === 'find') getConversationFindController()!.search('Unique prompt 0')
+      else {
+        useWorkspaceStore.getState().openTarget(ACTIVE_TAB, { kind: 'file', path: 'a.ts' })
+        useWorkspaceStore.getState().setOrigin(ACTIVE_TAB, { sourceTurnKey: 'navigation-anchor-0', sourceElementId: opener.id })
+        useWorkspaceStore.getState().setLayout(ACTIVE_TAB, 'hidden')
+      }
+      await Promise.resolve()
+    })
+    await frame(32)
+    await frame(48)
+    expect(scroller.scrollTop).toBe(0)
+    expect(target.getBoundingClientRect().top).toBe(0)
+    if (entry === 'workspace') expect(document.activeElement).toBe(opener)
+    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: { ...useChatStore.getState().sessions[ACTIVE_TAB]!, statusVerb: 'updated' } } }))
+    await frame(64)
+    expect(scroller.scrollTop).toBe(0)
+    expect(getPage).not.toHaveBeenCalled()
   })
 
   it('mounts and highlights a far virtualized message selected from the navigator', async () => {
@@ -2498,6 +2571,27 @@ describe('MessageList nested tool calls', () => {
 
     expect(group.getAttribute('data-running')).toBe('false')
     expect(group.querySelector('.thinking-dots')).toBeNull()
+  })
+
+  it('keeps an expanded tool group mounted when older and newer pages extend it', () => {
+    const tool = (index: number): UIMessage => ({
+      id: `group-page-${index}`, type: 'tool_use', toolUseId: `group-page-${index}`,
+      toolName: 'Read', input: { file_path: `/tmp/file-${index}` }, timestamp: index,
+    })
+    const messages = [tool(1), tool(2)]
+    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ messages, historyWindowRevision: 1 }) } })
+    render(<MessageList sessionId={ACTIVE_TAB} />)
+    const group = screen.getByTestId('activity-group')
+    fireEvent.click(group.querySelector('[data-chat-disclosure]')!)
+    expect(group.getAttribute('data-expanded')).toBe('true')
+    const row = group.querySelector('[data-chat-anchor-id="group-page-1"]')
+    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ messages: [tool(0), ...messages], historyWindowRevision: 2 }) } }))
+    expect(screen.getByTestId('activity-group')).toBe(group)
+    expect(group.getAttribute('data-expanded')).toBe('true')
+    expect(group.querySelector('[data-chat-anchor-id="group-page-1"]')).toBe(row)
+    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ messages: [tool(0), ...messages, tool(3)], historyWindowRevision: 3 }) } }))
+    expect(screen.getByTestId('activity-group')).toBe(group)
+    expect(group.getAttribute('data-expanded')).toBe('true')
   })
 
   it('summarizes repeated Edit events for one path as one changed file', () => {
@@ -7915,19 +8009,22 @@ describe('MessageList nested tool calls', () => {
       await Promise.resolve()
     })
 
-    await act(async () => {
-      frames.shift()?.(0)
-      await Promise.resolve()
-    })
+    // A browser runs all callbacks registered for a frame. Paging/layout
+    // callbacks share the frame; callbacks they register belong to the next one.
+    const advanceFrame = async (time: number) => {
+      const scheduled = frames.splice(0)
+      await act(async () => {
+        scheduled.forEach((callback) => callback(time))
+        await Promise.resolve()
+      })
+    }
+    await advanceFrame(0)
     const restoredItem = container.querySelector<HTMLElement>('[data-chat-render-item-key="virtual-origin-0"]')
     expect(restoredItem).not.toBeNull()
     const opener = restoredItem!.querySelector<HTMLButtonElement>('[aria-label="Copy prompt"]')!
     opener.id = 'virtual-origin-opener'
 
-    await act(async () => {
-      frames.shift()?.(16)
-      await Promise.resolve()
-    })
+    await advanceFrame(16)
 
     expect(document.activeElement).toBe(opener)
     expect(useWorkspaceStore.getState().getSession(ACTIVE_TAB).origin).toBeNull()

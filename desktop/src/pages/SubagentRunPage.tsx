@@ -248,7 +248,7 @@ export function SubagentRunPage({
           ...state.sessions,
           [tabId]: {
             ...existing,
-            messages: preserveLiveConversation
+            messages: preserveLiveConversation || (data.historyComplete === false && transcriptMessages.length === 0)
               ? existing.messages
               : [...transcriptMessages, ...localMessages],
             agentTaskNotifications: mergedActivity.agentTaskNotifications,
@@ -328,6 +328,7 @@ export function SubagentRunPage({
           <span>{t('subagentRun.agent')}: {data.agentId ?? t('subagentRun.unknown')}</span>
           {data.description ? <span>{data.description}</span> : null}
           {data.outputFile ? <span>{t('subagentRun.output')}: {data.outputFile}</span> : null}
+          {data.historyComplete === false ? <span role="status">{t('subagentRun.incompleteHistory')}</span> : null}
         </>
       ) : null}
       backLabel={t('subagentRun.backToParent')}

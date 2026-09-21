@@ -3241,6 +3241,7 @@ export const jp: Record<TranslationKey, string> = {
   'session.activity.status.unknown': '不明',
 
   // ─── SubAgent Run ──────────────────────────────────────
+  'subagentRun.incompleteHistory': '一部の履歴を読み込めませんでした。利用可能な内容を表示しています。更新して再試行できます。',
   'subagentRun.refresh': 'SubAgent 実行を更新',
   'subagentRun.backToParent': '親セッションに戻る',
   'subagentRun.loading': 'SubAgent 実行を読み込み中...',

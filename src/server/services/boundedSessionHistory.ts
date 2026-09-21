@@ -79,7 +79,7 @@ function decodeCursor(value: string): Cursor {
 
 /** Produce a display preview without dropping a message's identity. Durable
  * replay and semantic state reducers always receive the original record. */
-function displayPreview(entry: Record<string, unknown>): Record<string, unknown> {
+export function displayPreview(entry: Record<string, unknown>): Record<string, unknown> {
   let truncated = false
   let remaining = 48 * 1024
   let nodes = 2048

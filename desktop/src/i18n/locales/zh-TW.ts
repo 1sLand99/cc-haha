@@ -3240,6 +3240,7 @@ export const zh: Record<TranslationKey, string> = {
   'session.activity.status.unknown': '未知',
 
   // ─── SubAgent Run ──────────────────────────────────────
+  'subagentRun.incompleteHistory': '部分歷史記錄無法讀取，已顯示可用內容；可重新整理重試。',
   'subagentRun.refresh': '重新整理 SubAgent 執行',
   'subagentRun.backToParent': '返回父級會話',
   'subagentRun.loading': '正在載入 SubAgent 執行...',

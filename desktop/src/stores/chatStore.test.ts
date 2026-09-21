@@ -15348,7 +15348,7 @@ describe('chatStore activity state survival across reload paths', () => {
     expect(current.historyWindowOverlay).toBeUndefined()
   })
 
-  it('consumes a prefetched page once, keeps adjacent history, and restores evicted newer pages', async () => {
+  it('consumes a prefetched page once and retains small visited pages for reverse reading', async () => {
     const page = (index: number) => ({ nextCursor: index ? `older-${index}` : null, previousCursor: index < 4 ? `newer-${index}` : null, hasMore: index > 0, historyComplete: false, sourceVersion: 'v1', scannedBytes: 10, omittedOversizedEntries: 0 })
     const response = (index: number) => ({ messages: [{ id: `m${index}`, type: 'assistant' as const, content: `page ${index}`, timestamp: '2020-01-01T00:00:00Z' }], page: page(index) })
     const live = [{ id: 'm4', type: 'assistant_text' as const, content: 'page 4', timestamp: 1 }]
@@ -15364,16 +15364,37 @@ describe('chatStore activity state survival across reload paths', () => {
       await useChatStore.getState().loadOlderHistory(TEST_SESSION_ID)
     }
     let current = useChatStore.getState().sessions[TEST_SESSION_ID]!
-    expect(current.historyWindowPages).toHaveLength(3)
-    expect(current.historyBrowseMessages?.map(message => 'content' in message ? message.content : undefined)).toEqual(['page 0', 'page 1', 'page 2'])
-    expect(current.historyPage).toMatchObject({ nextCursor: null, previousCursor: 'newer-2' })
+    expect(current.historyWindowPages).toHaveLength(5)
+    expect(current.historyBrowseMessages?.map(message => 'content' in message ? message.content : undefined)).toEqual(['page 0', 'page 1', 'page 2', 'page 3', 'page 4'])
+    expect(current.historyPage).toMatchObject({ nextCursor: null, previousCursor: null })
     expect(current.messages).toBe(live)
-    vi.mocked(sessionsApi.getHistoryPage).mockResolvedValueOnce(response(3))
+    // Already visited newer messages remain readable without any page request.
+    expect(sessionsApi.getHistoryPage).toHaveBeenCalledTimes(4)
+    expect(current.historyWindowRevision).toBe(4)
+  })
+
+  it('reuses evicted adjacent pages on direction reversal and invalidates them on reload', async () => {
+    const page = (index: number) => ({ nextCursor: index ? `cache-older-${index}` : null, previousCursor: index < 70 ? `cache-newer-${index}` : null, hasMore: index > 0, historyComplete: false, sourceVersion: 'cache-v1', scannedBytes: 10, omittedOversizedEntries: 0 })
+    const response = (index: number) => ({ messages: [{ id: `cache-m${index}`, type: 'assistant' as const, content: `page ${index}`, timestamp: '2020-01-01T00:00:00Z' }], page: page(index) })
+    const live: UIMessage[] = [{ id: 'cache-m70', type: 'assistant_text', content: 'page 70', timestamp: 1 }]
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: live, historyPage: page(70) }) } })
+    for (let index = 69; index >= 0; index--) {
+      vi.mocked(sessionsApi.getHistoryPage).mockResolvedValueOnce(response(index))
+      await useChatStore.getState().loadOlderHistory(TEST_SESSION_ID)
+    }
+    const before = useChatStore.getState().sessions[TEST_SESSION_ID]!
+    const lastId = Number(before.historyBrowseMessages!.at(-1)!.id.replace('cache-m', ''))
+    expect(lastId).toBeLessThan(70)
+    const calls = vi.mocked(sessionsApi.getHistoryPage).mock.calls.length
     await useChatStore.getState().loadNewerHistory(TEST_SESSION_ID)
-    current = useChatStore.getState().sessions[TEST_SESSION_ID]!
-    expect(sessionsApi.getHistoryPage).toHaveBeenLastCalledWith(TEST_SESSION_ID, { cursor: 'newer-2' }, expect.anything())
-    expect(current.historyBrowseMessages?.map(message => 'content' in message ? message.content : undefined)).toEqual(['page 1', 'page 2', 'page 3'])
-    expect(current.historyWindowRevision).toBe(5)
+    expect(sessionsApi.getHistoryPage).toHaveBeenCalledTimes(calls)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.historyBrowseMessages!.at(-1)!.id).toBe(`cache-m${lastId + 1}`)
+    // Authoritative reload must not reuse snapshots from the previous lifecycle.
+    await useChatStore.getState().reloadHistory(TEST_SESSION_ID)
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: live, historyPage: page(70) }) } })
+    vi.mocked(sessionsApi.getHistoryPage).mockResolvedValueOnce(response(69))
+    await useChatStore.getState().loadOlderHistory(TEST_SESSION_ID)
+    expect(sessionsApi.getHistoryPage).toHaveBeenCalledTimes(calls + 1)
   })
 
   it.each(['jump', 'scroll', 'cold'] as const)(
