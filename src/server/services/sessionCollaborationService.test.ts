@@ -332,17 +332,27 @@ describe('session collaboration', () => {
     expect((await service.status()).messages[0]?.status).toBe('cancelled')
   })
 
+  test('a short wait is raised to the minimum and says so, while a newer revision still returns immediately', async () => {
+    const startedAt = Date.now()
+    const raised = await service.wait(0, undefined, 0)
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(10_000)
+    expect(raised).toMatchObject({ requestedTimeoutMs: 0, timeoutMs: 10_000, messages: [] })
+    expect(raised.guidance).toContain('clamped to 10000ms')
+    await service.send('root', 'peer', 'arrived', 'arrived')
+    const fresh = await service.wait(raised.revision, ['peer'], 0)
+    expect(fresh.messages.map(message => message.id)).toEqual(['arrived'])
+    expect(fresh).toMatchObject({ requestedTimeoutMs: 0, timeoutMs: 10_000 })
+  }, 20_000)
+
   test('wait cursor omits unchanged messages but returns a changed delivery receipt', async () => {
     await service.send('root', 'peer', 'message', 'stable')
     const first = await service.wait(0, ['peer'], 0)
     expect(first.messages.map(message => message.id)).toEqual(['stable'])
-    const unchanged = await service.wait(first.revision, ['peer'], 0)
-    expect(unchanged.messages).toEqual([])
+    expect((await service.status(['peer'])).revision).toBe(first.revision)
     await service.onMessageConsumed('stable', 'peer')
     const consumed = await service.wait(first.revision, ['peer'], 0)
     expect(consumed.messages).toHaveLength(1)
     expect(consumed.messages[0]?.status).toBe('consumed')
-    expect((await service.wait(consumed.revision, ['peer'], 0)).messages).toEqual([])
     expect((await service.status(['peer'])).messages).toHaveLength(1)
   })
 
@@ -353,7 +363,6 @@ describe('session collaboration', () => {
     service = new SessionCollaborationService(deps)
     const migrated = await service.wait(0, undefined, 0)
     expect(migrated.messages[0]?.revision).toBe(5)
-    expect((await service.wait(5, undefined, 0)).messages).toEqual([])
     await service.onStopped('b')
     for (let index = 0; index < 60; index++) await service.send('a', 'b', 'x'.repeat(3000), `message-${index}`)
     const bounded = await service.wait(5, undefined, 0)
@@ -361,7 +370,6 @@ describe('session collaboration', () => {
     expect(bounded.omittedMessages).toBeGreaterThan(0)
     expect(JSON.stringify(bounded).length).toBeLessThan(50_000)
     expect((await service.status()).messages).toHaveLength(61)
-    expect((await service.wait(bounded.revision, undefined, 0)).messages).toEqual([])
   })
 })
 

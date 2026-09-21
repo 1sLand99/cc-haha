@@ -57,7 +57,10 @@ export type SessionCollaborationDependencies = {
   now?: () => Date
 }
 type Store = { version: 1; revision: number; members: Record<string, CollaborationMember>; messages: CollaborationMessage[]; stopEpochs?: Record<string, number>; creations?: Record<string, { input: string; rootSessionId?: string; stopEpoch?: number; result?: { sessionId: string; workDir?: string; messageId: string; title?: string }; failure?: { message: string; code: string; status: number } }> }
-export type CollaborationSnapshot = { revision: number; members: CollaborationMember[]; messages: CollaborationMessage[]; waitReason?: 'capacity_blocked'; guidance?: string; truncated?: boolean; omittedMessages?: number; omittedMembers?: number }
+export const COLLABORATION_WAIT_MIN_MS = 10_000
+export const COLLABORATION_WAIT_DEFAULT_MS = 30_000
+export const COLLABORATION_WAIT_MAX_MS = 300_000
+export type CollaborationSnapshot = { revision: number; members: CollaborationMember[]; messages: CollaborationMessage[]; waitReason?: 'capacity_blocked'; guidance?: string; truncated?: boolean; omittedMessages?: number; omittedMembers?: number; requestedTimeoutMs?: number; timeoutMs?: number }
 
 /** Mirrors the host's customTitle rule so the tool result carries the same name the session list shows. */
 function collaborationSessionTitle(input: CollaborationCreateInput): string {
@@ -360,8 +363,11 @@ export class SessionCollaborationService {
       messages: this.store.messages.filter(message => !ids || ids.has(message.targetSessionId) || ids.has(message.sourceSessionId)) })
   }
 
-  async wait(afterRevision: number, sessionIds?: string[], timeoutMs = 30_000, signal?: AbortSignal, callerSessionId?: string): Promise<CollaborationSnapshot> {
+  async wait(afterRevision: number, sessionIds?: string[], timeoutMs = COLLABORATION_WAIT_DEFAULT_MS, signal?: AbortSignal, callerSessionId?: string): Promise<CollaborationSnapshot> {
     if (signal?.aborted) throw signal.reason
+    const requestedTimeoutMs = timeoutMs
+    const clampedTimeoutMs = Math.min(COLLABORATION_WAIT_MAX_MS, Math.max(COLLABORATION_WAIT_MIN_MS, requestedTimeoutMs))
+    const noteTimeout = (snapshot: CollaborationSnapshot): CollaborationSnapshot => requestedTimeoutMs === clampedTimeoutMs ? snapshot : { ...snapshot, requestedTimeoutMs, timeoutMs: clampedTimeoutMs, guidance: [`Requested timeout of ${requestedTimeoutMs}ms was clamped to ${clampedTimeoutMs}ms.`, snapshot.guidance].filter(Boolean).join('\n\n') }
     const inputVersion = callerSessionId ? this.userInputs.get(callerSessionId) ?? 0 : 0
     const current = await this.status(sessionIds)
     const caller = callerSessionId ? this.store.members[callerSessionId] : undefined
@@ -370,14 +376,14 @@ export class SessionCollaborationService {
       const capacityUsed = workers.filter(member => member.state === 'running' || member.state === 'blocked').length
       const awaitedIds = sessionIds && new Set(sessionIds)
       const queuedTarget = workers.some(member => member.state === 'queued' && (!awaitedIds || awaitedIds.has(member.sessionId)))
-      if (capacityUsed >= 3 && queuedTarget) return { ...this.projectWait(current, afterRevision), waitReason: 'capacity_blocked',
-        guidance: 'The three worker slots are occupied, including this turn. End the current turn to release its slot. Queued sessions will then start and automatically report completion or blockage; calling WaitSessions again does not release capacity.' }
+      if (capacityUsed >= 3 && queuedTarget) return noteTimeout({ ...this.projectWait(current, afterRevision), waitReason: 'capacity_blocked',
+        guidance: 'The three worker slots are occupied, including this turn. End the current turn to release its slot. Queued sessions will then start and automatically report completion or blockage; calling WaitSessions again does not release capacity.' })
     }
-    if (current.revision > afterRevision || timeoutMs <= 0) return this.projectWait(current, afterRevision)
+    if (current.revision > afterRevision) return noteTimeout(this.projectWait(current, afterRevision))
     await new Promise<void>((resolve, reject) => {
       const finish = () => { cleanup(); resolve() }
       const abort = () => { cleanup(); reject(signal?.reason ?? new DOMException('Aborted', 'AbortError')) }
-      const timer = setTimeout(finish, Math.min(60_000, timeoutMs))
+      const timer = setTimeout(finish, clampedTimeoutMs)
       const cleanup = () => { clearTimeout(timer); this.listeners.delete(finish); signal?.removeEventListener('abort', abort) }
       this.listeners.add(finish)
       signal?.addEventListener('abort', abort, { once: true })
@@ -388,7 +394,7 @@ export class SessionCollaborationService {
     if (callerSessionId && (this.userInputs.get(callerSessionId) ?? 0) !== inputVersion) {
       throw new ApiError(409, 'Waiting ended because the user supplied new input', 'WAIT_INTERRUPTED')
     }
-    return this.projectWait(await this.status(sessionIds), afterRevision)
+    return noteTimeout(this.projectWait(await this.status(sessionIds), afterRevision))
   }
 
   private projectWait(snapshot: CollaborationSnapshot, afterRevision: number): CollaborationSnapshot {

@@ -21,7 +21,7 @@ export async function callSessionBridge(action: string, input: unknown, signal?:
     method: 'POST', redirect: 'error',
     headers: { Authorization: `Bearer ${config.token}`, 'X-Session-Id': config.sessionId, 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(65_000)]) : AbortSignal.timeout(65_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(305_000)]) : AbortSignal.timeout(305_000),
   })
   if (!response.ok) {
     // Only expose the host's structured, expected API errors. Never include
