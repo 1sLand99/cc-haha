@@ -66,7 +66,6 @@ vi.mock('../../i18n', () => ({
       'sidebar.noMatching': 'No matching sessions',
       'sidebar.sessionListFailed': 'Session list failed',
       'sidebar.refreshSessions': 'Refresh sessions',
-      'sidebar.indexDegraded': 'Using standard history loading',
       'search.global.trigger': 'Search chats',
       'sidebar.projects': 'Projects',
       'sidebar.projectMenu': 'Project menu',
@@ -2213,7 +2212,7 @@ describe('Sidebar', () => {
     expect(screen.getByRole('button', { name: /Indexed row/ })).toBeInTheDocument()
     expect(screen.queryByTestId('sidebar-index-progress')).not.toBeInTheDocument()
     expect(screen.queryByText(/2\s*\/\s*10/)).not.toBeInTheDocument()
-    expect(screen.getByRole('status')).toBeEmptyDOMElement()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
   it.each(['ready', 'off'] as const)('hides visible index status when state is %s', (state) => {
@@ -2258,7 +2257,8 @@ describe('Sidebar', () => {
     render(<Sidebar />)
 
     expect(screen.getByRole('button', { name: /Fallback row/ })).toBeInTheDocument()
-    expect(screen.getByTestId('sidebar-index-degraded')).toHaveTextContent('Using standard history loading')
+    expect(screen.queryByTestId('sidebar-index-degraded')).not.toBeInTheDocument()
+    expect(screen.queryByText('Using standard history loading')).not.toBeInTheDocument()
     expect(screen.queryByText('Session list failed')).not.toBeInTheDocument()
     expect(addToast).not.toHaveBeenCalled()
   })
@@ -2465,52 +2465,31 @@ describe('Sidebar', () => {
     }
   })
 
-  // The live region exists for the one transition a user can perceive: history
-  // is being served the slow way. Building/ready/off are silent there too, so a
+  // No index state is announced. Even the degraded fallback only swaps the
+  // source the list is read from — the rows themselves do not change — so a
   // screen reader is not told about work that needs no reaction.
-  it.each(['building', 'ready', 'off'] as const)('stays silent in the live region while %s', (state) => {
+  it.each(['building', 'ready', 'off', 'degraded'] as const)('stays silent while the index is %s', (state) => {
     useSessionStore.setState({
       sessions: [makeSession('live-row', 'Live row', '/workspace/alpha', '2026-07-15T00:00:00.000Z')],
       indexStatus: {
         mode: state === 'off' ? 'off' : 'on',
         state,
         discovered: 10,
-        indexed: state === 'building' ? 2 : 10,
-        degradedSources: 0,
+        indexed: state === 'ready' ? 10 : 2,
+        degradedSources: state === 'degraded' ? 1 : 0,
         databaseBytes: 4096,
         walBytes: 0,
         lastUpdatedAt: '2026-07-15T00:00:00.000Z',
-        lastErrorCode: null,
+        lastErrorCode: state === 'degraded' ? 'source_unreadable' : null,
       },
     })
 
     render(<Sidebar />)
 
-    expect(screen.getByRole('status')).toBeEmptyDOMElement()
-  })
-
-  it('announces the degraded fallback in the live region', () => {
-    useSessionStore.setState({
-      sessions: [makeSession('live-row', 'Live row', '/workspace/alpha', '2026-07-15T00:00:00.000Z')],
-      indexStatus: {
-        mode: 'on',
-        state: 'degraded',
-        discovered: 10,
-        indexed: 2,
-        degradedSources: 1,
-        databaseBytes: 4096,
-        walBytes: 0,
-        lastUpdatedAt: '2026-07-15T00:00:00.000Z',
-        lastErrorCode: 'source_unreadable',
-      },
-    })
-
-    render(<Sidebar />)
-
-    const liveRegion = screen.getByRole('status')
-    expect(liveRegion).toHaveTextContent('Using standard history loading')
-    expect(liveRegion).not.toHaveTextContent('2/10')
-    expect(screen.getByTestId('sidebar-index-degraded')).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByRole('button', { name: /Live row/ })).toBeInTheDocument()
+    expect(screen.queryByTestId('sidebar-index-degraded')).not.toBeInTheDocument()
+    expect(screen.queryByText('Using standard history loading')).not.toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
   it('refreshes sessions manually and through low-frequency visible polling', async () => {

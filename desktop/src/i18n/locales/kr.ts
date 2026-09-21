@@ -508,7 +508,6 @@ export const kr: Record<TranslationKey, string> = {
   'sidebar.noMatching': '일치하는 세션이 없습니다',
   'sidebar.sessionListFailed': '세션 목록을 불러오지 못했습니다',
   'sidebar.refreshSessions': '세션 새로 고침',
-  'sidebar.indexDegraded': '표준 기록 불러오기를 사용하고 있습니다',
   'search.global.trigger': '대화 검색',
   'search.global.placeholder': '모든 대화 검색…',
   'search.global.recentTitle': '최근 세션',

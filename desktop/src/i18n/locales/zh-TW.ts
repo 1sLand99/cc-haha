@@ -506,7 +506,6 @@ export const zh: Record<TranslationKey, string> = {
   'sidebar.noMatching': '沒有匹配的會話',
   'sidebar.sessionListFailed': '會話列表載入失敗',
   'sidebar.refreshSessions': '重新整理會話列表',
-  'sidebar.indexDegraded': '正在使用標準歷史記錄載入',
   'search.global.trigger': '搜尋聊天',
   'search.global.placeholder': '搜尋全部聊天內容…',
   'search.global.recentTitle': '近期會話',

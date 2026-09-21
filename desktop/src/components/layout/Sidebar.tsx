@@ -273,12 +273,11 @@ export function Sidebar({
   const isTaskView = projectOrganization === 'time'
   const showInitialLoading = isLoading && sessions.length === 0
   const showRefreshLoading = showInitialLoading
-  // Index building/ready/off are implementation details of how the list is
-  // loaded, not something the user acts on, so they stay silent in both the
-  // visible sidebar and the live region. Only `degraded` is announced: there
-  // the list really is served a different way, which the user can perceive.
-  const showIndexDegraded = indexStatus?.state === 'degraded'
-  const indexAnnouncement = showIndexDegraded ? t('sidebar.indexDegraded') : ''
+  // Every index state is an implementation detail of how the list is loaded,
+  // not something the user acts on. Even `degraded` only changes the source
+  // the list is read from — the rows, their order, and search results stay
+  // identical — so it stays silent in both the visible sidebar and the live
+  // region instead of taking a row to explain itself.
   const filteredSessionIds = useMemo(() => filteredSessions.map((session) => session.id), [filteredSessions])
   const selectedCount = selectedSessionIds.size
   const sessionsById = useMemo(
@@ -1161,18 +1160,6 @@ export function Sidebar({
                     {t('sidebar.batchDeleteSelected', { count: selectedCount })}
                   </Button>
                 </div>
-              </div>
-            )}
-            <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-              {indexAnnouncement}
-            </div>
-            {showIndexDegraded && (
-              <div
-                data-testid="sidebar-index-degraded"
-                aria-hidden="true"
-                className="mx-4 mb-1 flex-none text-[11px] leading-5 text-[var(--color-text-tertiary)]"
-              >
-                {t('sidebar.indexDegraded')}
               </div>
             )}
             <div

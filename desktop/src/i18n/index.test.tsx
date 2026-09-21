@@ -116,14 +116,13 @@ describe('useTranslation', () => {
     }
   })
 
-  // Index building/ready/off went silent: the sidebar no longer tells anyone
-  // that history is being indexed. Keeping the strings around invites a future
-  // change to wire them back into the UI, so they must stay deleted.
+  // No index state is surfaced: building/ready/off were already silent, and the
+  // degraded fallback only swaps which source the list is read from, so it no
+  // longer earns a sidebar row either. Keeping the strings around invites a
+  // future change to wire them back into the UI, so they must stay deleted.
   it('carries no key for the silent index states', () => {
     for (const [name, locale] of Object.entries(locales)) {
-      const resurrected = Object.keys(locale).filter(
-        key => key.startsWith('sidebar.index') && key !== 'sidebar.indexDegraded',
-      )
+      const resurrected = Object.keys(locale).filter(key => key.startsWith('sidebar.index'))
       expect(resurrected, `${name} still defines silent index-status keys`).toEqual([])
     }
   })

@@ -506,7 +506,6 @@ export const jp: Record<TranslationKey, string> = {
   'sidebar.noMatching': '一致するセッションがありません',
   'sidebar.sessionListFailed': 'セッション一覧の読み込みに失敗しました',
   'sidebar.refreshSessions': 'セッションを更新',
-  'sidebar.indexDegraded': '標準の履歴読み込みを使用しています',
   'search.global.trigger': 'チャットを検索',
   'search.global.placeholder': 'すべてのチャットを検索…',
   'search.global.recentTitle': '最近のセッション',

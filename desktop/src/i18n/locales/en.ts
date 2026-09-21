@@ -504,7 +504,6 @@ export const en = {
   'sidebar.noMatching': 'No matching sessions',
   'sidebar.sessionListFailed': 'Session list failed to load',
   'sidebar.refreshSessions': 'Refresh sessions',
-  'sidebar.indexDegraded': 'Using standard history loading',
   'search.global.trigger': 'Search chats',
   'search.global.placeholder': 'Search all chats…',
   'search.global.recentTitle': 'Recent chats',
