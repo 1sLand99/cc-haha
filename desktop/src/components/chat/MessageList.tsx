@@ -1,7 +1,6 @@
 import { useRef, useEffect, useMemo, memo, useState, useCallback, useDeferredValue, useLayoutEffect, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { ArrowDown, BookMarked, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleStop, FileStack, LoaderCircle, MessageCircle, Settings, Target, Undo2, XCircle } from 'lucide-react'
-import { useContinuousChatHistory } from '../../hooks/useContinuousChatHistory'
 import { ApiError } from '../../api/client'
 import { sessionsApi, type SessionRewindMode, type SessionTurnCheckpoint } from '../../api/sessions'
 import { listPendingPermissions, useChatStore } from '../../stores/chatStore'
@@ -14,7 +13,6 @@ import { useUIStore } from '../../stores/uiStore'
 import { useTranslation } from '../../i18n'
 import type { TranslationKey } from '../../i18n/locales/en'
 import { UserMessage } from './UserMessage'
-import type { MessageRewindAction } from './MessageActionBar'
 import { AssistantMessage } from './AssistantMessage'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBlock } from './ToolCallBlock'
@@ -2260,8 +2258,6 @@ export function MessageList({
   const stopGeneration = useChatStore((s) => s.stopGeneration)
   const reloadHistory = useChatStore((s) => s.reloadHistory)
   const loadOlderHistory = useChatStore((s) => s.loadOlderHistory)
-  const loadNewerHistory = useChatStore((s) => s.loadNewerHistory)
-  const prefetchHistory = useChatStore((s) => s.prefetchHistory)
   const queueComposerPrefill = useChatStore((s) => s.queueComposerPrefill)
   const memberSessionTeam = useTeamStore((s) => (
     resolvedSessionId ? s.getTeamByMemberSessionId(resolvedSessionId) : null
@@ -2301,17 +2297,13 @@ export function MessageList({
     ))
   }, [teamSnapshot])
   const addToast = useUIStore((s) => s.addToast)
-  const messages = sessionState?.historyBrowseMessages ?? sessionState?.messages ?? EMPTY_MESSAGES
-  const historyWindowKey = `${resolvedSessionId}:${messages[0]?.id ?? ''}:${messages.at(-1)?.id ?? ''}`
+  const messages = sessionState?.messages ?? EMPTY_MESSAGES
   const checkpointHistoryReady = sessionState?.historyStatus === 'ready' && sessionState?.historyHydrated === true
-  const checkpointRequiresRequest = Boolean(sessionState?.historyWindowed || sessionState?.historyPage?.historyComplete === false)
-  const checkpointWindowKey = checkpointRequiresRequest ? historyWindowKey : ''
-  const [requestedWindowCheckpoints, setRequestedWindowCheckpoints] = useState<{ key: string; revision: number; targetId?: string } | null>(null)
   const chatState = sessionState?.chatState ?? 'idle'
   const isPreparingTurn = Boolean(sessionState?.isPreparingTurn)
   const historyMutationEpoch = sessionState?.historyMutationEpoch ?? 0
-  const streamingText = sessionState?.historyViewingOlder ? '' : sessionState?.streamingText ?? ''
-  const streamingToolInput = sessionState?.historyViewingOlder ? '' : sessionState?.streamingToolInput ?? ''
+  const streamingText = sessionState?.streamingText ?? ''
+  const streamingToolInput = sessionState?.streamingToolInput ?? ''
   const activeThinkingId = sessionState?.activeThinkingId ?? null
   const hasApiRetry = Boolean(sessionState?.apiRetry)
   const hasStreamingFallback = Boolean(sessionState?.streamingFallback)
@@ -2342,8 +2334,6 @@ export function MessageList({
     (chatState === 'thinking' && Boolean(activeThinkingId))
   const messageListRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const historyScrollHandlers = useRef<{ onScroll: () => void; onUserIntent: (direction?: 'older' | 'newer') => void; cancelAnchor: () => void; resumeReading: () => void }>({ onScroll: () => {}, onUserIntent: () => {}, cancelAnchor: () => {}, resumeReading: () => {} })
-  const lastTailWindowRevision = useRef(sessionState?.historyWindowRevision ?? 0)
   const scrollContentRef = useRef<HTMLDivElement>(null)
   const virtualItemHeightsRef = useRef<Map<string, number>>(
     resolvedSessionId ? getHeightsForSession(resolvedSessionId) : new Map<string, number>(),
@@ -2489,7 +2479,7 @@ export function MessageList({
   }, [resolvedSessionId])
 
   const requestLiveFollow = useCallback(() => {
-    if (sessionState?.historyViewingOlder || !shouldAutoScrollRef.current || liveFollowFrameRef.current !== null) return
+    if (!shouldAutoScrollRef.current || liveFollowFrameRef.current !== null) return
 
     liveFollowFrameRef.current = requestAnimationFrame(() => {
       liveFollowFrameRef.current = null
@@ -2521,7 +2511,7 @@ export function MessageList({
       }
       setIsAwayFromLatest(false)
     })
-  }, [resolvedSessionId, sessionState?.historyViewingOlder])
+  }, [resolvedSessionId])
 
   const flushMeasuredHeightVersion = useCallback(() => {
     setMeasuredItemsVersion((version) => version + 1)
@@ -2567,9 +2557,8 @@ export function MessageList({
     if (performance.now() < userScrollIntentUntilRef.current) {
       setProgrammaticNavigationItemId(null)
     }
-    historyScrollHandlers.current.onScroll()
     syncVirtualViewportFromContainer(container)
-    const isAtBottom = !sessionState?.historyViewingOlder && isNearScrollBottom(container)
+    const isAtBottom = isNearScrollBottom(container)
     const isPermissionLayoutShift =
       hasPendingPermissionCard &&
       shouldAutoScrollRef.current &&
@@ -2583,7 +2572,7 @@ export function MessageList({
     if (resolvedSessionId) {
       rememberSessionScroll(resolvedSessionId, container, isAtBottom)
     }
-  }, [hasPendingPermissionCard, resolvedSessionId, sessionState?.historyViewingOlder, syncVirtualViewportFromContainer])
+  }, [hasPendingPermissionCard, resolvedSessionId, syncVirtualViewportFromContainer])
 
   /**
    * Expanding a collapsed block is the reader rearranging their own view, not
@@ -2613,21 +2602,19 @@ export function MessageList({
       disclosureLayoutUntilRef.current = 0
       const container = scrollContainerRef.current
       if (!container) return
-      const atBottom = !sessionState?.historyViewingOlder && isNearScrollBottom(container)
+      const atBottom = isNearScrollBottom(container)
       shouldAutoScrollRef.current = atBottom
       setIsAwayFromLatest(!atBottom)
       syncVirtualViewportFromContainer(container)
     })
-  }, [syncVirtualViewportFromContainer, sessionState?.historyViewingOlder])
+  }, [syncVirtualViewportFromContainer])
 
   const markUserScrollIntent = useCallback(() => {
     userScrollIntentUntilRef.current = performance.now() + USER_SCROLL_INTENT_WINDOW_MS
-    historyScrollHandlers.current.onUserIntent()
   }, [])
 
   const handleWheelScrollIntent = useCallback((event: { deltaY: number }) => {
     markUserScrollIntent()
-    if (event.deltaY !== 0) historyScrollHandlers.current.onUserIntent(event.deltaY < 0 ? 'older' : 'newer')
     if (event.deltaY < 0) {
       shouldAutoScrollRef.current = false
       setIsAwayFromLatest(true)
@@ -2648,7 +2635,6 @@ export function MessageList({
     if (!isScrollKey) return
 
     markUserScrollIntent()
-    historyScrollHandlers.current.onUserIntent(isUpwardScrollKey ? 'older' : 'newer')
     if (isUpwardScrollKey) {
       shouldAutoScrollRef.current = false
       setIsAwayFromLatest(true)
@@ -2658,7 +2644,7 @@ export function MessageList({
   useLayoutEffect(() => {
     if (lastSessionIdRef.current !== resolvedSessionId) {
       const snapshot = resolvedSessionId ? sessionScrollSnapshots.get(resolvedSessionId) : undefined
-      shouldAutoScrollRef.current = snapshot?.wasAtBottom ?? !sessionState?.historyViewingOlder
+      shouldAutoScrollRef.current = snapshot?.wasAtBottom ?? true
       lastSessionIdRef.current = resolvedSessionId
       setProgrammaticNavigationItemId(null)
       virtualItemHeightsRef.current = resolvedSessionId
@@ -2691,17 +2677,17 @@ export function MessageList({
         ignoreProgrammaticScrollUntilRef.current = performance.now() + 250
         ignoreProgrammaticScrollTopRef.current = null
         lastAutoScrollAtRef.current = performance.now()
-        shouldAutoScrollRef.current = !sessionState?.historyViewingOlder
+        shouldAutoScrollRef.current = true
         setScrollToBottomWithoutLayoutRead(container)
         setVirtualViewport((current) => ({
           scrollTop: SCROLL_BOTTOM_SENTINEL,
           viewportHeight: container.clientHeight || current.viewportHeight || VIRTUAL_DEFAULT_VIEWPORT_HEIGHT,
         }))
-        setIsAwayFromLatest(Boolean(sessionState?.historyViewingOlder))
+        setIsAwayFromLatest(false)
         if (resolvedSessionId) {
           sessionScrollSnapshots.set(resolvedSessionId, {
             scrollTop: container.scrollTop,
-            wasAtBottom: !sessionState?.historyViewingOlder,
+            wasAtBottom: true,
           })
         }
       } else {
@@ -2710,7 +2696,7 @@ export function MessageList({
         scrollToBottom()
       }
     }
-  }, [resolvedSessionId, scrollToBottom, sessionState?.historyViewingOlder])
+  }, [resolvedSessionId, scrollToBottom])
 
   const tailMessage = messages[messages.length - 1] ?? null
   const tailMessageId = tailMessage?.id ?? null
@@ -2719,17 +2705,14 @@ export function MessageList({
   useEffect(() => {
     if (!resolvedSessionId) return
 
-    const revision = sessionState?.historyWindowRevision ?? 0
-    const windowChanged = lastTailWindowRevision.current !== revision
-    lastTailWindowRevision.current = revision
     const previousTailMessageId = lastTailMessageIdBySessionRef.current.get(resolvedSessionId)
     lastTailMessageIdBySessionRef.current.set(resolvedSessionId, tailMessageId)
-    if (windowChanged || sessionState?.historyViewingOlder || previousTailMessageId === undefined || previousTailMessageId === tailMessageId) return
+    if (previousTailMessageId === undefined || previousTailMessageId === tailMessageId) return
 
     if (tailMessageType === 'user_text') {
       scrollToBottom()
     }
-  }, [resolvedSessionId, scrollToBottom, tailMessageId, tailMessageType, sessionState?.historyWindowRevision, sessionState?.historyViewingOlder])
+  }, [resolvedSessionId, scrollToBottom, tailMessageId, tailMessageType])
 
   useEffect(() => {
     const previousInput = lastLiveFollowInputRef.current
@@ -2760,12 +2743,9 @@ export function MessageList({
   }, [messages.length, requestLiveFollow, resolvedSessionId, streamingText, streamingToolInput])
 
   const handleJumpToLatest = useCallback(() => {
-    historyScrollHandlers.current.cancelAnchor()
     setProgrammaticNavigationItemId(null)
-    if (resolvedSessionId && sessionState?.historyViewingOlder) {
-      void loadOlderHistory(resolvedSessionId, true).then(() => requestAnimationFrame(scrollToBottom))
-    } else scrollToBottom()
-  }, [scrollToBottom, resolvedSessionId, sessionState?.historyViewingOlder, loadOlderHistory])
+    scrollToBottom()
+  }, [scrollToBottom])
 
   useEffect(() => {
     const content = scrollContentRef.current
@@ -2881,11 +2861,11 @@ export function MessageList({
   // The rail is the progress indicator: whichever segment the turn is currently
   // working in carries the running state, so it sits next to the work it
   // describes instead of in a separate strip somewhere else on screen.
-  const showsTurnStatusLine = !sessionState?.historyViewingOlder && (hasApiRetry
+  const showsTurnStatusLine = hasApiRetry
     || hasStreamingFallback
     || isPreparingTurn
     || chatState === 'tool_executing'
-    || (chatState === 'thinking' && !activeThinkingId))
+    || (chatState === 'thinking' && !activeThinkingId)
   const renderItemKeys = useMemo(
     () => renderItems.map(getRenderItemKey),
     [renderItems],
@@ -2952,42 +2932,6 @@ export function MessageList({
     ),
     [measuredItemsVersion, renderItemKeys, renderItemMetrics, renderItems, virtualViewport],
   )
-  const historyAnchorIdentities = useMemo(() => new Map(renderItems.map((item) => [
-    getRenderItemKey(item),
-    item.kind === 'tool_group' ? item.toolCalls.map((tool) => tool.id)
-      : item.kind === 'team_card' ? item.coordinationToolCalls.map((tool) => tool.id)
-        : [item.message.id],
-  ])), [renderItems])
-  const preserveHistoryReading = useCallback(() => {
-    shouldAutoScrollRef.current = false
-    setIsAwayFromLatest(true)
-  }, [])
-  const syncHistoryViewport = useCallback((container: HTMLElement) => {
-    ignoreProgrammaticScrollUntilRef.current = performance.now() + 250
-    ignoreProgrammaticScrollTopRef.current = container.scrollTop
-    syncVirtualViewportFromContainer(container)
-    if (resolvedSessionId) rememberSessionScroll(resolvedSessionId, container, shouldAutoScrollRef.current)
-  }, [resolvedSessionId, syncVirtualViewportFromContainer])
-  const continuousHistory = useContinuousChatHistory({
-    sessionId: resolvedSessionId ?? undefined,
-    revision: sessionState?.historyWindowRevision ?? 0,
-    snapshotKey: sessionState?.historyInitialPage?.page,
-    ready: sessionState?.historyStatus === 'ready' && sessionState?.historyHydrated === true,
-    loading: sessionState?.historyPageLoading === true,
-    error: sessionState?.historyError,
-    olderCursor: sessionState?.historyPage?.nextCursor ?? (sessionState?.historyLiveGap && !sessionState.historyBrowseMessages ? '__live_gap__' : null),
-    newerCursor: sessionState?.historyPage?.previousCursor ?? (sessionState?.historyBrowseMessages ? '__live__' : null),
-    container: scrollContainerRef,
-    keys: renderItemKeys,
-    offsets: virtualTranscriptWindow.offsets,
-    identities: historyAnchorIdentities,
-    isFollowing: () => shouldAutoScrollRef.current,
-    load: (direction) => resolvedSessionId ? (direction === 'older' ? loadOlderHistory(resolvedSessionId) : loadNewerHistory(resolvedSessionId)) : Promise.resolve(),
-    prefetch: (direction) => resolvedSessionId ? prefetchHistory(resolvedSessionId, direction) : Promise.resolve(),
-    syncViewport: syncHistoryViewport,
-    preserveReading: preserveHistoryReading,
-  })
-  historyScrollHandlers.current = continuousHistory
 
   const activeConversationNavigationItemId = useMemo(
     () => isAwayFromLatest
@@ -3078,8 +3022,7 @@ export function MessageList({
   }, [renderItemKeys])
 
   useEffect(() => {
-    if (!resolvedSessionId || !checkpointHistoryReady || completedTurnTargets.length === 0 || isDirectAgentSession ||
-      (checkpointRequiresRequest && requestedWindowCheckpoints?.key !== historyWindowKey)) {
+    if (!resolvedSessionId || !checkpointHistoryReady || completedTurnTargets.length === 0 || isDirectAgentSession) {
       setTurnChangeCards([])
       setTurnChangeLoadError(null)
       setIsLoadingTurnChangeCards(false)
@@ -3131,9 +3074,6 @@ export function MessageList({
             }]
           })
         setTurnChangeCards(nextCards)
-        if (requestedWindowCheckpoints?.targetId && nextCards.some((card) => card.target.messageId === requestedWindowCheckpoints.targetId)) {
-          setTurnUndoConfirmTargetId(requestedWindowCheckpoints.targetId)
-        }
       })
       .catch((error) => {
         if (cancelled) return
@@ -3150,7 +3090,7 @@ export function MessageList({
       cancelled = true
       controller.abort()
     }
-  }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, historyMutationEpoch, isDirectAgentSession, latestCompletedTurnId, resolvedSessionId, sessionState?.historyWindowed, checkpointHistoryReady, checkpointRequiresRequest, checkpointWindowKey, requestedWindowCheckpoints])
+  }, [chatState, completedTurnTargets, hasRunningBackgroundTasks, historyMutationEpoch, isDirectAgentSession, latestCompletedTurnId, resolvedSessionId, checkpointHistoryReady])
 
   const handleUndoCurrentTurn = useCallback(async (mode: SessionRewindMode = 'both') => {
     if (!resolvedSessionId || !confirmTurnCard || rewindingTurnId || hasRunningBackgroundTasks) return
@@ -3173,7 +3113,7 @@ export function MessageList({
       const result = await sessionsApi.rewind(resolvedSessionId, {
         targetUserMessageId: checkpointTarget.targetUserMessageId,
         userMessageIndex: checkpointTarget.userMessageIndex,
-        ...(sessionState?.historyWindowed ? {} : { expectedContent: target.expectedContent }),
+        expectedContent: target.expectedContent,
         mode,
       })
 
@@ -3305,7 +3245,6 @@ export function MessageList({
   const handleNavigateToConversationItem = useCallback((item: ConversationNavigationItem) => {
     const container = scrollContainerRef.current
     if (!container) return
-    historyScrollHandlers.current.cancelAnchor()
 
     const viewportHeight = container.clientHeight || virtualViewport.viewportHeight || VIRTUAL_DEFAULT_VIEWPORT_HEIGHT
     userScrollIntentUntilRef.current = 0
@@ -3360,7 +3299,6 @@ export function MessageList({
         }
       }
 
-      historyScrollHandlers.current.resumeReading()
       scheduleHighlightClear()
     })
   }, [
@@ -3373,7 +3311,6 @@ export function MessageList({
   const navigateToConversationFindMatch = useCallback((match: ConversationFindMatch) => {
     const container = scrollContainerRef.current
     if (!container) return
-    historyScrollHandlers.current.cancelAnchor()
 
     const viewportHeight = container.clientHeight || virtualViewport.viewportHeight || VIRTUAL_DEFAULT_VIEWPORT_HEIGHT
     const targetOffset = virtualTranscriptWindow.offsets[match.renderIndex] ?? virtualTranscriptWindow.totalHeight
@@ -3390,7 +3327,6 @@ export function MessageList({
     ignoreProgrammaticScrollTopRef.current = targetScrollTop
     setScrollTopWithoutLayoutRead(container, targetScrollTop)
     setVirtualViewport({ scrollTop: targetScrollTop, viewportHeight })
-    requestAnimationFrame(() => historyScrollHandlers.current.resumeReading())
   }, [virtualTranscriptWindow.offsets, virtualTranscriptWindow.totalHeight, virtualViewport.viewportHeight])
   const navigateToConversationFindMatchRef = useRef(navigateToConversationFindMatch)
   navigateToConversationFindMatchRef.current = navigateToConversationFindMatch
@@ -3473,7 +3409,6 @@ export function MessageList({
     const container = scrollContainerRef.current
     const content = scrollContentRef.current
     if (!container || !content || !resolvedSessionId) return
-    if (attempt === 0) historyScrollHandlers.current.cancelAnchor()
 
     const renderItem = [...content.querySelectorAll<HTMLElement>('[data-chat-render-item-key]')]
       .find((node) => node.dataset.chatRenderItemKey === origin.sourceTurnKey)
@@ -3490,7 +3425,6 @@ export function MessageList({
         renderItem.scrollIntoView({ block: 'nearest' })
       }
       opener.focus({ preventScroll: true })
-      historyScrollHandlers.current.resumeReading()
       useWorkspaceStore.getState().setOrigin(resolvedSessionId, null)
       workspaceOriginRestoreFrameRef.current = null
       return
@@ -3510,7 +3444,6 @@ export function MessageList({
     }
 
     if (attempt >= 7 || renderIndex < 0) {
-      historyScrollHandlers.current.resumeReading()
       useWorkspaceStore.getState().setOrigin(resolvedSessionId, null)
       workspaceOriginRestoreFrameRef.current = null
       return
@@ -3550,20 +3483,6 @@ export function MessageList({
     })
   }, [isWorkspacePanelOpen, resolvedSessionId, restoreWorkspaceOrigin, workspacePanelOrigin])
 
-  const rewindActionByMessageId = useMemo(() => {
-    const actions = new Map<string, MessageRewindAction>()
-    if (!resolvedSessionId || !checkpointRequiresRequest) return actions
-    const available = new Set(turnChangeCards.map((card) => card.target.messageId))
-    for (const target of completedTurnTargets) {
-      if (available.has(target.messageId)) continue
-      actions.set(target.messageId, {
-        label: t('chat.conversationRewindAction'),
-        loading: isLoadingTurnChangeCards || chatState !== 'idle' || hasRunningBackgroundTasks,
-        onRewind: () => setRequestedWindowCheckpoints((current) => ({ key: historyWindowKey, revision: (current?.revision ?? 0) + 1, targetId: target.messageId })),
-      })
-    }
-    return actions
-  }, [resolvedSessionId, checkpointRequiresRequest, turnChangeCards, completedTurnTargets, t, isLoadingTurnChangeCards, chatState, hasRunningBackgroundTasks, historyWindowKey])
 
   const renderTranscriptItem = (item: RenderItem, index: number) => {
     const cardsForItem = turnCardsByRenderIndex.get(index) ?? []
@@ -3590,7 +3509,8 @@ export function MessageList({
             // is finished, whatever any individual tool's state looks like this
             // instant — which is why this, and not `isStreaming`, decides
             // whether a run stands open.
-            isLive={!sessionState?.historyViewingOlder && chatState !== 'idle' && index === renderItems.length - 1 && !hasTrailingStreamingItem}
+            isLive={chatState !== 'idle' && index === renderItems.length - 1 && !hasTrailingStreamingItem}
+            disclosureKey={getRenderItemKey(item)}
           />
         ) : item.kind === 'team_card' ? (
           resolvedSessionId ? (() => {
@@ -3627,7 +3547,6 @@ export function MessageList({
                 : null
             }
             branchAction={branchActionByMessageId.get(item.message.id)}
-            rewindAction={rewindActionByMessageId.get(item.message.id)}
             turnChangedFiles={changedFilesByRenderIndex.get(index)}
             isTurnOutputOwner={turnOutputOwnerIndexes.has(index)}
             turnCompletion={turnCompletionByMessageId.get(item.message.id)}
@@ -3635,9 +3554,6 @@ export function MessageList({
           />
         )}
 
-        {item.kind === 'message' && requestedWindowCheckpoints?.targetId === item.message.id && turnChangeLoadError ? (
-          <span role="alert" className="text-xs text-[var(--color-error)]">{turnChangeLoadError}</span>
-        ) : null}
 
         {resolvedSessionId && cardsForItem.map((card) => {
           const error = turnActionErrors[card.target.messageId] ?? null
@@ -3694,7 +3610,9 @@ export function MessageList({
       <div
         ref={scrollContainerRef}
         onScroll={updateAutoScrollState}
-        style={isAwayFromLatest || sessionState?.historyViewingOlder ? { overflowAnchor: 'none' } : undefined}
+        // Native scroll anchoring carries position across content growth; the
+        // chat timeline mounts one array, so no page-boundary compensation is
+        // needed and disabling the browser anchor only adds a frame of jump.
         onClickCapture={handleDisclosureToggle}
         onWheel={handleWheelScrollIntent}
         onPointerDown={markUserScrollIntent}
@@ -3710,15 +3628,22 @@ export function MessageList({
           // the agent-teams workbench appeared.
           className="mx-auto max-w-[900px]"
         >
-          {sessionState?.historyPageLoading && sessionState.historyPageDirection !== 'newer' ? (
-            <div className="flex items-center justify-center gap-2 py-2 text-xs text-[var(--color-text-tertiary)]" role="status">
-              <LoaderCircle size={12} className="animate-spin" />{t('chat.history.loading')}
-            </div>
-          ) : null}
-          {sessionState?.historyError ? (
-            <div className="flex items-center justify-center gap-2 py-2 text-xs text-[var(--color-text-secondary)]" role="alert">
-              <span>{t('chat.history.loadFailed')}</span>
-              <Button variant="ghost" size="xs" onClick={() => sessionState?.historyPageDirection === 'latest' ? handleJumpToLatest() : continuousHistory.retry()}>{t('chat.history.retry')}</Button>
+          {sessionState?.historyWindowed && sessionState?.historyPage?.nextCursor ? (
+            // The server's byte budget cut history short; this is the only
+            // remaining pagination seam, and it is user-driven.
+            <div className="flex items-center justify-center gap-2 py-2 text-xs text-[var(--color-text-tertiary)]">
+              {sessionState.historyPageLoading ? (
+                <div className="flex items-center gap-2" role="status">
+                  <LoaderCircle size={12} className="animate-spin" />{t('chat.history.loading')}
+                </div>
+              ) : sessionState.historyError ? (
+                <>
+                  <span role="alert" className="text-[var(--color-text-secondary)]">{t('chat.history.loadFailed')}</span>
+                  <Button variant="ghost" size="xs" onClick={() => resolvedSessionId && void loadOlderHistory(resolvedSessionId)}>{t('chat.history.retry')}</Button>
+                </>
+              ) : (
+                <Button variant="ghost" size="xs" onClick={() => resolvedSessionId && void loadOlderHistory(resolvedSessionId)}>{t('chat.history.loadMore')}</Button>
+              )}
             </div>
           ) : null}
           {virtualTranscriptWindow.enabled ? (
@@ -3757,12 +3682,6 @@ export function MessageList({
             <VirtualSpacer height={virtualTranscriptWindow.afterHeight} position="bottom" />
           ) : null}
 
-          {sessionState?.historyPageLoading && sessionState.historyPageDirection === 'newer' ? (
-            <div className="flex items-center justify-center gap-2 py-2 text-xs text-[var(--color-text-tertiary)]" role="status">
-              <LoaderCircle size={12} className="animate-spin" />{t('chat.history.loading')}
-            </div>
-          ) : null}
-
           {streamingText.trim() && (
             <div
               data-chat-render-item-key={STREAMING_ASSISTANT_NAVIGATION_KEY}
@@ -3773,7 +3692,7 @@ export function MessageList({
             </div>
           )}
 
-          {!sessionState?.historyViewingOlder && chatState === 'compacting' && !hasCompactingDivider && (
+          {chatState === 'compacting' && !hasCompactingDivider && (
             <CompactStatusDivider state="compacting" />
           )}
 
@@ -3792,7 +3711,7 @@ export function MessageList({
             </div>
           )}
 
-          {!requestedWindowCheckpoints?.targetId && !isLoadingTurnChangeCards && visibleTurnChangeCards.length === 0 && turnChangeLoadError && (
+          {!isLoadingTurnChangeCards && visibleTurnChangeCards.length === 0 && turnChangeLoadError && (
             <div className="mx-auto mb-5 w-full max-w-[900px] rounded-[var(--radius-lg)] border border-[var(--color-error)] bg-[var(--color-error-container)] px-4 py-3 text-xs text-[var(--color-on-error-container)]">
               {turnChangeLoadError}
             </div>
@@ -3854,7 +3773,6 @@ export const MessageBlock = memo(function MessageBlock({
   agentTaskNotifications,
   toolResult,
   branchAction,
-  rewindAction,
   turnChangedFiles,
   isTurnOutputOwner,
   turnCompletion,
@@ -3871,7 +3789,6 @@ export const MessageBlock = memo(function MessageBlock({
     loading?: boolean
     onBranch: () => void
   }
-  rewindAction?: MessageRewindAction
   turnChangedFiles?: string[]
   isTurnOutputOwner?: boolean
   turnCompletion?: TurnCompletion
@@ -3905,7 +3822,6 @@ export const MessageBlock = memo(function MessageBlock({
             attachments={message.attachments}
             sessionReferences={message.sessionReferences}
             branchAction={branchAction}
-            rewindAction={rewindAction}
             timestamp={message.timestamp}
             sessionId={sessionId ?? undefined}
             teammateFrom={message.teammateFrom}
@@ -3936,7 +3852,7 @@ export const MessageBlock = memo(function MessageBlock({
     case 'thinking':
       // No wrapper padding: the row's own `-mx-2 … px-2` already lands its text
       // on the column's left edge, the same as one inside a run.
-      return <ThinkingBlock content={message.content} isActive={message.id === activeThinkingId} />
+      return <ThinkingBlock content={message.content} isActive={message.id === activeThinkingId} disclosureKey={message.id} />
     case 'tool_use':
       if (message.toolName === 'AskUserQuestion' && !message.isPending) {
         return (
@@ -3962,6 +3878,7 @@ export const MessageBlock = memo(function MessageBlock({
           isPending={message.isPending}
           status={message.status}
           partialInput={message.partialInput}
+          disclosureKey={message.toolUseId}
           agentTaskNotification={
             message.toolName === 'Agent'
               ? agentTaskNotifications[message.toolUseId]
@@ -3975,6 +3892,7 @@ export const MessageBlock = memo(function MessageBlock({
           content={message.content}
           isError={message.isError}
           standalone
+          disclosureKey={message.id}
         />
       )
     case 'permission_request':

@@ -1,7 +1,5 @@
 import type { UIMessage } from '../types/chat'
 
-export const CHAT_HISTORY_MAX_ROWS = 500
-export const CHAT_HISTORY_MAX_BYTES = 2 * 1024 * 1024
 const messageBytes = new WeakMap<UIMessage, number>()
 
 export function copyChatPreview(value: string, maxChars: number, tail = false): string {
@@ -11,7 +9,7 @@ export function copyChatPreview(value: string, maxChars: number, tail = false): 
 }
 
 /** Estimate retention without serializing or modifying an operational payload. */
-function retainedMessageBytes(message: UIMessage): number {
+export function retainedMessageBytes(message: UIMessage): number {
   const cached = messageBytes.get(message)
   if (cached !== undefined) return cached
   let bytes = 256
@@ -35,23 +33,10 @@ function retainedMessageBytes(message: UIMessage): number {
 }
 
 /**
- * Evict complete older rows, never fields within a row. These same objects feed
- * replay matching, image/diff rendering, copy and rewind; a text preview is not
- * a valid replacement. Keep at least the newest row even if it needs the entire
- * window. Durable history uses bounded records and cursors to recover old rows.
+ * Transcript rows are never evicted from a mounted timeline. The server bounds
+ * history by bytes; a text preview is not a valid replacement for a row that
+ * feeds replay matching, image/diff rendering, copy and rewind.
  */
-export function boundChatHistory(messages: UIMessage[], budget = CHAT_HISTORY_MAX_BYTES) {
-  let bytes = 0
-  let start = messages.length
-  while (start > 0 && messages.length - start < CHAT_HISTORY_MAX_ROWS) {
-    const size = retainedMessageBytes(messages[start - 1]!)
-    if (start < messages.length && bytes + size > budget) break
-    bytes += size
-    start--
-  }
-  return { messages: start === 0 ? messages : messages.slice(start), bytes, dropped: start, clipped: start > 0 }
-}
-
 export const CHAT_TERMINAL_ACTIVITY_MAX_PER_SESSION = 500
 export const CHAT_TERMINAL_ACTIVITY_MAX_TOTAL = 4000
 const activityCache = new WeakMap<object, { budget: number; terminalLimit: number; result: object }>()

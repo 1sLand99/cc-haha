@@ -429,8 +429,11 @@ export const sessionsApi = {
     return api.get<ProjectSessionHistoryResponse>(`/api/sessions/project-history?${query.toString()}`, options)
   },
 
-  getMessages(sessionId: string, options?: ApiRequestOptions) {
-    return api.get<SessionHistoryPage>(`/api/sessions/${sessionId}/messages`, options)
+  // The timeline loads the whole transcript in one call. `mode=full` keeps the
+  // server's own byte budget but returns a single newest-first slice plus a
+  // `historyComplete` flag, so the UI never stitches page boundaries together.
+  getFullHistory(sessionId: string, options?: ApiRequestOptions) {
+    return api.get<SessionHistoryPage>(`/api/sessions/${sessionId}/messages?mode=full`, options)
   },
 
   getHistoryPage(sessionId: string, page?: { cursor?: string }, options?: ApiRequestOptions) {

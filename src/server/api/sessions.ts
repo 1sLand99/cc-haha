@@ -479,8 +479,17 @@ async function getSession(sessionId: string): Promise<Response> {
 }
 
 async function getSessionMessages(req: Request, sessionId: string, url: URL): Promise<Response> {
+  const mode = url.searchParams.get('mode')
+  if (mode !== null && mode !== 'full' && mode !== 'page') throw ApiError.badRequest('Invalid history mode')
+  const cursor = url.searchParams.get('cursor') ?? undefined
+  // A full read always starts from the tail; mixing it with a cursor would
+  // silently turn it back into a paged read with a larger budget.
+  if (mode === 'full' && cursor) throw ApiError.badRequest('mode=full does not take a cursor')
   return Response.json(await sessionService.getSessionHistoryPage(sessionId, {
-    cursor: url.searchParams.get('cursor') ?? undefined,
+    cursor,
+    // `mode=full` returns the whole transcript up to the reader's byte budget in
+    // one response so the desktop timeline never stitches pages together.
+    full: mode === 'full',
     signal: req.signal,
   }))
 }

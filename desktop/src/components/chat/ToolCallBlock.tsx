@@ -1,5 +1,6 @@
 import { SessionToolLinks, SESSION_TOOL_NAMES } from '@/components/chat/SessionToolLinks'
 import { memo, useMemo, useState } from 'react'
+import { getDisclosure, setDisclosure } from '../../lib/disclosureMemory'
 import { CircleStop, CircleX, LoaderCircle } from 'lucide-react'
 import { activitySegmentIcon } from './activityGroupModel'
 import { CodeViewer } from './CodeViewer'
@@ -39,6 +40,8 @@ type Props = {
   partialInput?: string
   defaultExpanded?: boolean
   durationMs?: number
+  /** Stable key that survives virtualized row unmount/remount. */
+  disclosureKey?: string
 }
 
 const TOOL_ICONS: Record<string, string> = {
@@ -131,11 +134,17 @@ type ContentStats = {
   windowed?: boolean
 }
 
-export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, result, compact = false, chrome = 'card', isPending = false, status, partialInput, defaultExpanded = false, durationMs }: Props) {
+export const ToolCallBlock = memo(function ToolCallBlock({ toolName, input, result, compact = false, chrome = 'card', isPending = false, status, partialInput, defaultExpanded = false, durationMs, disclosureKey }: Props) {
   const isRow = chrome === 'row'
   const isExitPlanTool = isExitPlanModeTool(toolName)
   const isEnterPlanTool = isEnterPlanModeTool(toolName)
-  const [expanded, setExpanded] = useState(defaultExpanded || isExitPlanTool)
+  const [localExpanded, setLocalExpanded] = useState(defaultExpanded || isExitPlanTool)
+  const expanded = disclosureKey ? (getDisclosure(disclosureKey) ?? localExpanded) : localExpanded
+  const setExpanded = (next: boolean | ((value: boolean) => boolean)) => {
+    const resolved = typeof next === 'function' ? next(expanded) : next
+    setLocalExpanded(resolved)
+    if (disclosureKey) setDisclosure(disclosureKey, resolved)
+  }
   const t = useTranslation()
   const obj = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
   const icon = TOOL_ICONS[toolName] || 'build'

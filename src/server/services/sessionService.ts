@@ -3933,7 +3933,7 @@ export class SessionService {
     return { entries: visibleEntries, contextScanBytes: context.scannedBytes }
   }
 
-  async getSessionHistoryPage(sessionId: string, options: { cursor?: string; limit?: number; signal?: AbortSignal } = {}): Promise<{
+  async getSessionHistoryPage(sessionId: string, options: { cursor?: string; limit?: number; signal?: AbortSignal; full?: boolean } = {}): Promise<{
     messages: MessageEntry[]
     taskNotifications: SessionTaskNotification[]
     page: HistoryPageInfo
@@ -3950,9 +3950,10 @@ export class SessionService {
     const projection = await this.projectHistoryPageEntries(found.filePath, result, options.signal)
     const entries = result.entries.map(item => item.entry as RawEntry)
     const response = { messages: this.entriesToMessages(projection.entries), taskNotifications: this.taskNotificationsFromEntries(entries), page: { ...result.page, contextScanBytes: projection.contextScanBytes } }
-    // One bounded record may own a page. Conversion can retain both content
-    // and toolUseResult, so allow two copies plus the normal page envelope.
-    if (Buffer.byteLength(JSON.stringify(response)) > 2 * HISTORY_SEMANTIC_RECORD_BYTES + HISTORY_PAGE_BYTES) {
+    // The full-history path is already bounded by the reader's own byte budget,
+    // so only the single-record page path needs the "one oversized record"
+    // envelope check.
+    if (!options.full && Buffer.byteLength(JSON.stringify(response)) > 2 * HISTORY_SEMANTIC_RECORD_BYTES + HISTORY_PAGE_BYTES) {
       throw new ApiError(413, 'History page exceeded its response budget', 'HISTORY_PAGE_TOO_LARGE')
     }
     return response

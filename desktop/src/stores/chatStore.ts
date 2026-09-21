@@ -1,9 +1,8 @@
 import { isInlineImagePath } from '@/lib/attachmentImages'
 import { CHAT_HISTORY_CACHE_BYTES, historyCacheBytes } from '../lib/chatHistoryCache'
 import { normalizeSessionReferences, splitSessionReferenceContext } from '@/lib/sessionReferences'
-import { boundHistoryWindow, historyPageBytes, historyWindowBoundary, historyWindowMessages, type HistoryDirection, type HistoryWindowPage } from '../lib/chatHistoryWindow'
 import { create } from 'zustand'
-import { boundActivityText, boundChatHistory, CHAT_TERMINAL_ACTIVITY_MAX_PER_SESSION, CHAT_TERMINAL_ACTIVITY_MAX_TOTAL } from '../lib/chatHistoryBudget'
+import { boundActivityText, CHAT_TERMINAL_ACTIVITY_MAX_PER_SESSION, CHAT_TERMINAL_ACTIVITY_MAX_TOTAL } from '../lib/chatHistoryBudget'
 import { wsManager } from '../api/websocket'
 import { sessionsApi, type SessionHistoryPage } from '../api/sessions'
 import { ApiResponseParseError } from '../api/client'
@@ -139,17 +138,10 @@ export type PerSessionState = {
   historyHydrated?: boolean
   historyError?: string | null
   historyPage?: SessionHistoryPage['page']
+  /** True while the server's byte budget left older rows unloaded. */
   historyWindowed?: boolean
-  historyLiveGap?: boolean
+  /** An explicit "load earlier" page request is in flight. */
   historyPageLoading?: boolean
-  historyPageDirection?: HistoryDirection | 'latest'
-  historyWindowRevision?: number
-  historyWindowPages?: HistoryWindowPage[]
-  historyLivePage?: SessionHistoryPage['page']
-  historyInitialPage?: HistoryWindowPage
-  historyWindowOverlay?: UIMessage[]
-  historyViewingOlder?: boolean
-  historyBrowseMessages?: UIMessage[]
   historyRecoveryStatus?: 'loading' | 'ready' | 'incomplete' | 'error'
   streamingText: string
   streamingToolInput: string
@@ -379,6 +371,8 @@ export type AskUserQuestionDraft = {
 
 type ChatStore = {
   applyBoundedUpdate: (update: (state: ChatStore) => Partial<ChatStore>) => void
+  /** Test-only: register fixture rows as durable so eviction can exercise them. */
+  markHistoryRowsDurable: (sessionId: string, rows: UIMessage[]) => void
   sessions: Record<string, PerSessionState>
   /** sessionId → toolUseId → draft. In-memory, like `composerDraft`. */
   askUserQuestionDrafts: Record<string, Record<string, AskUserQuestionDraft>>
@@ -431,9 +425,8 @@ type ChatStore = {
     sessionId: string,
     options?: { mode?: 'terminal-reconnect' },
   ) => Promise<void>
-  loadOlderHistory: (sessionId: string, latest?: boolean) => Promise<void>
-  loadNewerHistory: (sessionId: string) => Promise<void>
-  prefetchHistory: (sessionId: string, direction: HistoryDirection) => Promise<void>
+  /** Load the next older page when the server's byte budget cut history short. */
+  loadOlderHistory: (sessionId: string) => Promise<void>
   reloadHistory: (
     sessionId: string,
     guard?: {
@@ -2258,7 +2251,7 @@ async function fetchAndMapSessionHistory(
   existingOwnedToolUseIds = new Set<string>(),
   signal?: AbortSignal,
 ) {
-  const response = await sessionsApi.getMessages(sessionId, { signal })
+  const response = await sessionsApi.getFullHistory(sessionId, { signal })
   const { page } = response
   const historyComplete = !page || page.historyComplete
   const messages = historyComplete ? response.messages : []
@@ -2391,86 +2384,19 @@ type TerminalReconnectHistoryBoundary = {
 const historyLoadsInFlight = new Map<string, HistoryLoadInFlight>()
 const historyRecoveryControllers = new Map<string, AbortController>()
 const historyPageControllers = new Map<string, AbortController>()
-type PreparedHistoryPage = { messages: UIMessage[]; page: SessionHistoryPage['page'] }
-const historyPrefetches = new Map<string, { cursor: string | null; controller: AbortController; promise: Promise<PreparedHistoryPage> }>()
-
-// Separate visited-page retention from the DOM/display window. Reverse cursors
-// address the adjacent page, not necessarily the cursor that originally read it.
-const visitedHistoryPages = new Map<string, { sessionId: string; page: HistoryWindowPage; bytes: number }>()
-let visitedHistoryBytes = 0
-
-function clearVisitedHistory(sessionId: string) {
-  for (const [key, entry] of visitedHistoryPages) {
-    if (entry.sessionId !== sessionId) continue
-    visitedHistoryBytes -= entry.bytes
-    visitedHistoryPages.delete(key)
-  }
+// Rows produced by the most recent durable history load, per session. Idle-tab
+// eviction only drops a transcript whose every row is still one of these
+// objects; anything else may be live state REST has not caught up with yet.
+const durableHistoryRows = new Map<string, WeakSet<UIMessage>>()
+/** Test-only: register fixture rows as durable so eviction can exercise them. */
+function markHistoryRowsDurable(sessionId: string, rows: UIMessage[]) {
+  durableHistoryRows.set(sessionId, new WeakSet(rows))
 }
-
-function rememberHistoryPages(sessionId: string, pages: HistoryWindowPage[]) {
-  const remember = (cursor: string | null | undefined, page: HistoryWindowPage) => {
-    if (!cursor) return
-    const key = JSON.stringify([sessionId, page.page.sourceVersion, cursor])
-    const bytes = historyPageBytes(page) + key.length * 2
-    const existing = visitedHistoryPages.get(key)
-    if (existing) visitedHistoryBytes -= existing.bytes
-    visitedHistoryPages.delete(key)
-    if (bytes > 4 * 1024 * 1024) return
-    visitedHistoryPages.set(key, { sessionId, page, bytes })
-    visitedHistoryBytes += bytes
-    while (visitedHistoryBytes > 4 * 1024 * 1024 || visitedHistoryPages.size > 128) {
-      const oldest = visitedHistoryPages.keys().next().value!
-      visitedHistoryBytes -= visitedHistoryPages.get(oldest)!.bytes
-      visitedHistoryPages.delete(oldest)
-    }
-  }
-  pages.forEach((page, index) => {
-    remember(page.cursor, page)
-    const older = pages[index - 1]
-    const newer = pages[index + 1]
-    if (older?.page.sourceVersion === page.page.sourceVersion) remember(older.page.previousCursor, page)
-    if (newer?.page.sourceVersion === page.page.sourceVersion) remember(newer.page.nextCursor, page)
-  })
-}
-
-function cachedHistoryPage(sessionId: string, cursor: string | null): PreparedHistoryPage | undefined {
-  if (!cursor) return
-  const version = useChatStore.getState().sessions[sessionId]?.historyPage?.sourceVersion
-  const key = JSON.stringify([sessionId, version, cursor])
-  const cached = visitedHistoryPages.get(key)
-  if (!cached) return
-  visitedHistoryPages.delete(key)
-  visitedHistoryPages.set(key, cached)
-  return { messages: cached.page.messages, page: cached.page.page }
-}
-
-function invalidateHistoryPrefetch(sessionId: string) {
-  historyPrefetches.get(sessionId)?.controller.abort()
-  historyPrefetches.delete(sessionId)
-}
-
-async function prepareHistoryPage(sessionId: string, cursor: string | null, signal: AbortSignal): Promise<PreparedHistoryPage> {
-  const response = await sessionsApi.getHistoryPage(sessionId, cursor ? { cursor } : undefined, { signal })
-  const messages = mapHistoryMessagesToUiMessages(response.messages)
-  // The server bounds complete records; retain the whole cursor page.
-  return { messages, page: response.page }
-}
-
-async function requestHistoryPage(sessionId: string, cursor: string | null, signal: AbortSignal): Promise<PreparedHistoryPage> {
-  const cached = cachedHistoryPage(sessionId, cursor)
-  if (cached && !signal.aborted) return cached
-  const prefetched = historyPrefetches.get(sessionId)
-  if (prefetched?.cursor === cursor && !prefetched.controller.signal.aborted) {
-    const abort = () => prefetched.controller.abort()
-    signal.addEventListener('abort', abort, { once: true })
-    try { return await prefetched.promise }
-    finally {
-      signal.removeEventListener('abort', abort)
-      if (historyPrefetches.get(sessionId) === prefetched) historyPrefetches.delete(sessionId)
-    }
-  }
-  invalidateHistoryPrefetch(sessionId)
-  return prepareHistoryPage(sessionId, cursor, signal)
+// Older-than-budget history is loaded on explicit request only. The timeline
+// mounts one array, so every page is prepended to `session.messages` directly.
+async function fetchOlderHistoryPage(sessionId: string, cursor: string, signal: AbortSignal): Promise<{ messages: UIMessage[]; page: SessionHistoryPage['page'] }> {
+  const response = await sessionsApi.getHistoryPage(sessionId, { cursor }, { signal })
+  return { messages: mapHistoryMessagesToUiMessages(response.messages), page: response.page }
 }
 
 const historyReloadControllers = new Map<string, AbortController>()
@@ -2489,8 +2415,6 @@ function currentHistoryLifecycle(sessionId: string): number {
 function advanceHistoryLifecycle(sessionId: string): number {
   const nextGeneration = currentHistoryLifecycle(sessionId) + 1
   historyLifecycleGenerations.set(sessionId, nextGeneration)
-  clearVisitedHistory(sessionId)
-  invalidateHistoryPrefetch(sessionId)
   historyLoadsInFlight.get(sessionId)?.controller.abort()
   historyLoadsInFlight.delete(sessionId)
   historyReloadControllers.get(sessionId)?.abort()
@@ -2840,104 +2764,41 @@ function activeGoalAfterHistoryLoad(
   return session.activeGoal ?? null
 }
 
-const overlayWindowCache = new WeakMap<HistoryWindowPage[], WeakMap<UIMessage[], UIMessage[]>>()
-function messagesWithHistoryOverlay(pages: HistoryWindowPage[], overlay?: UIMessage[]): UIMessage[] {
-  const canonical = historyWindowMessages(pages)
-  if (!overlay?.length) return canonical
-  const cache = overlayWindowCache.get(pages) ?? new WeakMap<UIMessage[], UIMessage[]>()
-  overlayWindowCache.set(pages, cache)
-  const existing = cache.get(overlay)
-  if (existing) return existing
-  const indexes = new Map<string, number>()
-  canonical.forEach((message, index) => strongHistoryMessageIdentities(message).forEach(identity => indexes.set(identity, index)))
-  const buckets = new Map<number, UIMessage[]>()
-  const matched = new Map<number, UIMessage>()
-  let before = canonical.length
-  for (let index = overlay.length - 1; index >= 0; index--) {
-    const message = overlay[index]!
-    const target = strongHistoryMessageIdentities(message).map(identity => indexes.get(identity)).find(value => value !== undefined)
-    if (target !== undefined) { before = target; matched.set(target, message); continue }
-    // A disconnected live prefix has no shared row yet. Keep it visible until
-    // canonical paging reaches it; it never supplies a backend cursor.
-    if (before === canonical.length && message.timestamp < (canonical[0]?.timestamp ?? -Infinity)) before = 0
-    const bucket = buckets.get(before) ?? []
-    bucket.unshift(message)
-    buckets.set(before, bucket)
-  }
-  const result: UIMessage[] = []
-  canonical.forEach((message, index) => { result.push(...(buckets.get(index) ?? []), matched.get(index) ?? message) })
-  result.push(...(buckets.get(canonical.length) ?? []))
-  cache.set(overlay, result)
-  return result
-}
-
-async function changeHistoryWindow(
+async function loadOlderHistoryPage(
   sessionId: string,
-  direction: HistoryDirection | 'latest',
   get: () => ChatStore,
   set: (update: (state: ChatStore) => Partial<ChatStore>) => void,
 ) {
   const session = get().sessions[sessionId]
-  let cursor = direction === 'latest' ? null : direction === 'older' ? session?.historyPage?.nextCursor : session?.historyPage?.previousCursor
-  if (!session || (direction !== 'latest' && ((!cursor && !(direction === 'older' && session.historyLiveGap)) || session.historyPageLoading))) return
-  if (direction === 'latest') {
-    invalidateHistoryPrefetch(sessionId)
-    clearVisitedHistory(sessionId)
-  }
+  const cursor = session?.historyPage?.nextCursor
+  if (!session || !cursor || session.historyPageLoading) return
   const lifecycle = currentHistoryLifecycle(sessionId)
   const controller = new AbortController()
   historyPageControllers.get(sessionId)?.abort()
   historyPageControllers.set(sessionId, controller)
-  set(state => ({ sessions: updateSessionIn(state.sessions, sessionId, () => ({ historyPageLoading: true, historyPageDirection: direction, historyError: null })) }))
+  set(state => ({ sessions: updateSessionIn(state.sessions, sessionId, () => ({ historyPageLoading: true, historyError: null })) }))
   try {
-    let seed = session.historyInitialPage
-    let overlay: UIMessage[] | undefined
-    if (direction === 'older' && !session.historyWindowPages && (seed || session.historyLiveGap)) {
-      const identities = new Set(seed?.messages.flatMap(strongHistoryMessageIdentities) ?? [])
-      const liveChanged = session.historyLiveGap || session.messages.some(message => !strongHistoryMessageIdentities(message).some(identity => identities.has(identity)))
-      if (liveChanged) {
-        invalidateHistoryPrefetch(sessionId)
-        const fresh = await requestHistoryPage(sessionId, null, controller.signal)
-        if (controller.signal.aborted || !isCurrentHistoryLifecycle(sessionId, lifecycle)) return
-        seed = fresh.page ? { cursor: null, page: fresh.page, messages: fresh.messages } : undefined
-        overlay = session.messages
-        cursor = fresh.page?.nextCursor ?? null
-      }
-    }
-    const result = direction === 'older' && seed && !cursor
-      ? { messages: [] as UIMessage[], page: undefined }
-      : await requestHistoryPage(sessionId, cursor ?? null, controller.signal)
+    const result = await fetchOlderHistoryPage(sessionId, cursor, controller.signal)
     if (controller.signal.aborted || !isCurrentHistoryLifecycle(sessionId, lifecycle)) return
     set(state => ({ sessions: updateSessionIn(state.sessions, sessionId, current => {
-      if (direction === 'latest' || (!result.page && !seed)) {
-        const messages = mergeColdRestoredHistoryIntoLiveMessages(result.messages, current.messages)
-        return {
-          messages,
-          streamAttemptStartIndex: rebaseStreamAttemptStartIndex(current.messages, messages, current.streamAttemptStartIndex),
-          historyBrowseMessages: undefined, historyWindowPages: undefined, historyLivePage: undefined, historyWindowOverlay: undefined,
-          historyInitialPage: result.page ? { cursor: null, page: result.page, messages: result.messages } : undefined,
-          historyPage: result.page, historyViewingOlder: false, historyLiveGap: false,
-          historyWindowed: Boolean(result.page && !result.page.historyComplete),
-          historyWindowRevision: (current.historyWindowRevision ?? 0) + 1,
-        }
-      }
-      const previous = current.historyWindowPages ?? (seed ? [seed] : current.historyPage ? [{
-        cursor: null, page: current.historyPage, messages: current.historyBrowseMessages ?? current.messages,
-      }] : [])
-      const incoming = result.page ? { cursor: cursor ?? null, page: result.page, messages: result.messages } : undefined
-      const pages = !incoming ? previous : direction === 'older' ? [incoming, ...previous] : [...previous, incoming]
-      rememberHistoryPages(sessionId, pages)
+      // Prepend into the single mounted array. Rows already present (a live
+      // message that has since been persisted) keep their existing object.
+      const known = new Set(current.messages.flatMap(strongHistoryMessageIdentities))
+      const older = result.messages.filter(message => !strongHistoryMessageIdentities(message).some(identity => known.has(identity)))
+      const messages = older.length ? [...older, ...current.messages] : current.messages
+      const page = result.page && current.historyPage
+        ? { ...current.historyPage, nextCursor: result.page.nextCursor, hasMore: result.page.hasMore,
+            historyComplete: result.page.historyComplete && current.historyPage.previousCursor == null,
+            omittedOversizedEntries: (current.historyPage.omittedOversizedEntries ?? 0) + (result.page.omittedOversizedEntries ?? 0) }
+        : current.historyPage
       return {
-        historyWindowPages: pages,
-        historyLiveGap: false,
-        historyWindowOverlay: overlay ?? current.historyWindowOverlay,
-        historyLivePage: current.historyLivePage ?? current.historyPage,
-        historyBrowseMessages: messagesWithHistoryOverlay(pages, overlay ?? current.historyWindowOverlay),
-        historyPage: historyWindowBoundary(pages), historyViewingOlder: true, historyWindowed: true,
-        historyWindowRevision: (current.historyWindowRevision ?? 0) + 1,
+        messages,
+        historyPage: page,
+        historyWindowed: page ? !page.historyComplete : false,
+        ...(older.length && current.streamAttemptStartIndex !== undefined
+          ? { streamAttemptStartIndex: current.streamAttemptStartIndex + older.length } : {}),
       }
     }) }))
-    if (direction === 'latest' && result.page && !result.page.historyComplete) void recoverSessionHistory(sessionId, result.page.sourceVersion)
   } catch (error) {
     if (controller.signal.aborted || !isCurrentHistoryLifecycle(sessionId, lifecycle)) return
     set(state => ({ sessions: updateSessionIn(state.sessions, sessionId, () => ({ historyError: describeHistoryLoadError(error) })) }))
@@ -2964,53 +2825,19 @@ export const useChatStore = create<ChatStore>((setState, get) => {
       const budget = Math.min(2 * 1024 * 1024, Math.floor(16 * 1024 * 1024 / sessionCount))
       const terminalLimit = Math.min(CHAT_TERMINAL_ACTIVITY_MAX_PER_SESSION, Math.floor(CHAT_TERMINAL_ACTIVITY_MAX_TOTAL / (2 * sessionCount)))
       for (const [id, session] of Object.entries(sessions)) {
-        // Bound the aggregate as well as individual tabs. Operational state is
-        // retained even when an older tab's display history needs reloading.
-        const displayBudget = Math.floor(budget * 3 / 4)
+        // Only activity projections are trimmed here. The transcript is one
+        // array the timeline mounts whole; rows are never evicted from under a
+        // visible tab — that eviction is what produced the scroll jumps.
         const activityBudget = Math.floor(budget / 8)
         const tasks = boundActivityText(session.backgroundAgentTasks, activityBudget, terminalLimit)
         const notifications = boundActivityText(session.agentTaskNotifications, activityBudget, terminalLimit)!
-        const liveBudget = session.historyBrowseMessages ? Math.floor(displayBudget / 4) : session.historyInitialPage ? Math.floor(displayBudget * 3 / 4) : displayBudget
-        const initialIdentities = session.historyInitialPage
-          ? new Set(session.historyInitialPage.messages.flatMap(strongHistoryMessageIdentities)) : undefined
-        const isCompleteInitialPage = initialIdentities && session.messages.every(message => strongHistoryMessageIdentities(message).some(identity => initialIdentities.has(identity)))
-        const bounded = isCompleteInitialPage
-          ? { messages: session.messages, dropped: 0 }
-          : boundChatHistory(session.messages, liveBudget)
-        const pages = session.historyWindowPages
-          ? boundHistoryWindow(session.historyWindowPages, Math.floor(displayBudget / 2), session.historyPageDirection === 'newer' ? 'newer' : 'older')
-          : undefined
-        let overlay = session.historyWindowOverlay
-        if (overlay?.length && pages?.length) {
-          const canonical = historyWindowMessages(pages)
-          const identities = new Set(canonical.map(message => message.id))
-          if (overlay.every(message => identities.has(message.id)) ||
-            (session.historyPageDirection === 'older' && (canonical[canonical.length - 1]?.timestamp ?? Infinity) < overlay[0]!.timestamp)) overlay = undefined
-          // This fixed snapshot can contain not-yet-persisted live rows. Keep
-          // whole rows until canonical paging reaches them; a cursor cannot
-          // recover an evicted overlay-only row.
-        }
-        const initialPage = session.historyInitialPage
-        const browse = pages ? messagesWithHistoryOverlay(pages, overlay)
-          : session.historyBrowseMessages ? boundChatHistory(session.historyBrowseMessages, Math.floor(displayBudget / 2)).messages : undefined
-        // A stream is the unfinished canonical response, not a preview. Keep it
-        // intact until completion; only complete historical rows can be evicted.
-        if (overlay === session.historyWindowOverlay && bounded.messages === session.messages && browse === session.historyBrowseMessages && pages === session.historyWindowPages && tasks === session.backgroundAgentTasks && notifications === session.agentTaskNotifications) continue
+        if (tasks === session.backgroundAgentTasks && notifications === session.agentTaskNotifications) continue
         if (sessions === patch.sessions) sessions = { ...sessions }
-        sessions[id] = {
-          ...session, messages: bounded.messages, historyBrowseMessages: browse, historyWindowPages: pages, historyWindowOverlay: overlay, historyInitialPage: initialPage,
-          ...(pages ? { historyPage: historyWindowBoundary(pages) } : {}),
-          backgroundAgentTasks: tasks, agentTaskNotifications: notifications,
-          historyWindowed: true,
-          historyLiveGap: session.historyLiveGap || bounded.dropped > 0,
-          ...(bounded.dropped && session.streamAttemptStartIndex !== undefined
-            ? { streamAttemptStartIndex: Math.max(0, session.streamAttemptStartIndex - bounded.dropped) } : {}),
-        }
+        sessions[id] = { ...session, backgroundAgentTasks: tasks, agentTaskNotifications: notifications }
       }
-      // Whole-page exceptions are local to a visible/live conversation, not a
-      // license for every dormant tab to retain a large image page forever.
-      // Evict oldest-inserted idle caches; re-entry uses the ordinary cold
-      // history path on the existing connection and preserves runtime state.
+      // Bound the aggregate across tabs. Evict oldest-inserted idle caches;
+      // re-entry uses the ordinary cold history path on the existing
+      // connection and preserves runtime state.
       const tabState = useTabStore.getState()
       const activeTab = tabState.tabs.find(tab => tab.sessionId === tabState.activeTabId)
       const activeIds = new Set([tabState.activeTabId, activeTab?.sourceSessionId, activeTab?.workbenchSessionId, activeTab?.teamLeadSessionId])
@@ -3025,31 +2852,24 @@ export const useChatStore = create<ChatStore>((setState, get) => {
             session.streamingText || session.streamingToolInput || session.activeToolUseId || session.activeThinkingId ||
             session.pendingPermission || session.pendingComputerUsePermission ||
             Object.keys(session.pendingPermissions ?? {}).length || Object.keys(session.pendingComputerUsePermissions ?? {}).length ||
-            session.queuedUserMessages?.length || session.historyWindowOverlay?.length ||
+            session.queuedUserMessages?.length ||
             Object.values(session.backgroundAgentTasks ?? {}).some(task => task.status === 'running')) continue
           const prior = previous.sessions[id]
-          if ((historyLoadsInFlight.has(id) || historyReloadControllers.has(id)) &&
-            session.historyInitialPage === prior?.historyInitialPage && session.messages === prior?.messages) continue
+          if ((historyLoadsInFlight.has(id) || historyReloadControllers.has(id)) && session.messages === prior?.messages) continue
           // historyHydrated can describe an earlier turn. message_complete
-          // marks idle before REST has caught up, so only evict live rows that
-          // are still the exact durable objects retained by a canonical page.
-          const durableRows = new Set([
-            ...(session.historyInitialPage?.messages ?? []),
-            ...(session.historyWindowPages?.flatMap(page => page.messages) ?? []),
-          ])
-          if (session.messages.some(message => !durableRows.has(message))) continue
+          // marks idle before REST has caught up, so only evict rows that are
+          // still the exact durable objects the last history load produced.
+          const durable = durableHistoryRows.get(id)
+          if (!durable || session.messages.some(message => !durable.has(message))) continue
           if (!cacheSizes.get(id)) continue
-          clearVisitedHistory(id)
-          invalidateHistoryPrefetch(id)
           if (sessions === patch.sessions) sessions = { ...sessions }
           sessions[id] = {
             ...session,
-            messages: [], historyInitialPage: undefined, historyWindowPages: undefined,
-            historyBrowseMessages: undefined, historyWindowOverlay: undefined,
-            historyPage: undefined, historyLivePage: undefined,
+            messages: [], historyPage: undefined,
             historyHydrated: false, historyStatus: 'idle', historyError: null,
-            historyViewingOlder: false, historyLiveGap: false, historyWindowed: false,
+            historyWindowed: false,
           }
+          durableHistoryRows.delete(id)
           retainedBytes -= cacheSizes.get(id)!
         }
       }
@@ -3058,6 +2878,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
   }
   return ({
   applyBoundedUpdate: set,
+  markHistoryRowsDurable,
   sessions: {},
   askUserQuestionDrafts: {},
 
@@ -3403,8 +3224,6 @@ export const useChatStore = create<ChatStore>((setState, get) => {
     }
 
     // An explicit send returns to the live conversation; background events do not.
-    clearVisitedHistory(sessionId)
-    invalidateHistoryPrefetch(sessionId)
     historyPageControllers.get(sessionId)?.abort()
     historyPageControllers.delete(sessionId)
     set((s) => {
@@ -3449,12 +3268,6 @@ export const useChatStore = create<ChatStore>((setState, get) => {
           [sessionId]: {
             ...session,
             messages: newMessages,
-            historyBrowseMessages: undefined,
-            historyWindowPages: undefined,
-            historyWindowOverlay: undefined,
-            historyPage: session.historyLivePage ?? session.historyPage,
-            historyLivePage: undefined,
-            historyViewingOlder: false,
             historyPageLoading: false,
             chatState: 'thinking',
             isPreparingTurn: false,
@@ -3694,8 +3507,6 @@ export const useChatStore = create<ChatStore>((setState, get) => {
   },
 
   loadHistory: async (sessionId, options) => {
-    clearVisitedHistory(sessionId)
-    invalidateHistoryPrefetch(sessionId)
     if (historyPageControllers.has(sessionId)) {
       historyPageControllers.get(sessionId)?.abort()
       historyPageControllers.delete(sessionId)
@@ -3812,6 +3623,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
           sessionOwnedActivityToolUseIds(get().sessions[sessionId]),
           controller.signal,
         )
+        durableHistoryRows.set(sessionId, new WeakSet(uiMessages))
         let historyApplied = false
         set((state) => {
           if (!isCurrentHistoryLifecycle(sessionId, lifecycleGeneration)) return state
@@ -3953,13 +3765,6 @@ export const useChatStore = create<ChatStore>((setState, get) => {
               return {
                 historyStatus: 'ready',
                 historyPage: page,
-                historyInitialPage: page ? { cursor: null, page, messages: uiMessages } : undefined,
-                historyLiveGap: false,
-                historyViewingOlder: false,
-                historyBrowseMessages: undefined,
-                historyWindowPages: undefined,
-                historyWindowOverlay: undefined,
-                historyLivePage: undefined,
                 historyWindowed: !historyComplete,
                 historyRecoveryStatus: historyComplete ? 'ready' : 'loading',
                 historyHydrated: true,
@@ -4048,13 +3853,6 @@ export const useChatStore = create<ChatStore>((setState, get) => {
             return {
               historyStatus: 'ready',
               historyPage: page,
-              historyInitialPage: page ? { cursor: null, page, messages: uiMessages } : undefined,
-                historyLiveGap: false,
-              historyViewingOlder: false,
-              historyBrowseMessages: undefined,
-              historyWindowPages: undefined,
-              historyWindowOverlay: undefined,
-              historyLivePage: undefined,
               historyWindowed: !historyComplete,
               historyRecoveryStatus: historyComplete ? 'ready' : 'loading',
               historyHydrated: true,
@@ -4176,35 +3974,11 @@ export const useChatStore = create<ChatStore>((setState, get) => {
     return load
   },
 
-  prefetchHistory: async (sessionId, direction) => {
-    const session = get().sessions[sessionId]
-    const cursor = direction === 'older' ? session?.historyPage?.nextCursor : session?.historyPage?.previousCursor
-    if (!cursor || session?.historyPageLoading || historyPrefetches.get(sessionId)?.cursor === cursor || cachedHistoryPage(sessionId, cursor)) return
-    invalidateHistoryPrefetch(sessionId)
-    while (historyPrefetches.size >= 4) invalidateHistoryPrefetch(historyPrefetches.keys().next().value!)
-    const controller = new AbortController()
-    const pending = { cursor, controller, promise: prepareHistoryPage(sessionId, cursor, controller.signal) }
-    historyPrefetches.set(sessionId, pending)
-    try { await pending.promise }
-    catch {
-      // Speculative failure is retried only when this page is actually requested.
-      if (historyPrefetches.get(sessionId) === pending) historyPrefetches.delete(sessionId)
-    }
-  },
-
-  loadOlderHistory: async (sessionId, latest = false) => {
-    await changeHistoryWindow(sessionId, latest ? 'latest' : 'older', get, set)
-  },
-
-  loadNewerHistory: async (sessionId) => {
-    const current = get().sessions[sessionId]
-    if (!current?.historyBrowseMessages) return
-    await changeHistoryWindow(sessionId, current.historyPage?.previousCursor ? 'newer' : 'latest', get, set)
+  loadOlderHistory: async (sessionId) => {
+    await loadOlderHistoryPage(sessionId, get, set)
   },
 
   reloadHistory: async (sessionId, guard) => {
-    clearVisitedHistory(sessionId)
-    invalidateHistoryPrefetch(sessionId)
     if (historyPageControllers.has(sessionId)) {
       historyPageControllers.get(sessionId)?.abort()
       historyPageControllers.delete(sessionId)
@@ -4256,6 +4030,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
         sessionOwnedActivityToolUseIds(get().sessions[sessionId]),
         controller.signal,
       )
+      durableHistoryRows.set(sessionId, new WeakSet(uiMessages))
 
       if (
         !isCurrentHistoryLifecycle(sessionId, lifecycleGeneration) ||
@@ -4327,13 +4102,6 @@ export const useChatStore = create<ChatStore>((setState, get) => {
           sessions: updateSessionIn(state.sessions, sessionId, () => ({
             historyStatus: 'ready',
             historyPage: page,
-            historyInitialPage: page ? { cursor: null, page, messages: uiMessages } : undefined,
-                historyLiveGap: false,
-            historyViewingOlder: false,
-            historyBrowseMessages: undefined,
-            historyWindowPages: undefined,
-            historyWindowOverlay: undefined,
-            historyLivePage: undefined,
             historyWindowed: !historyComplete,
             historyRecoveryStatus: historyComplete ? 'ready' : 'loading',
             historyHydrated: true,
@@ -5874,13 +5642,6 @@ export const useChatStore = create<ChatStore>((setState, get) => {
             historyMutationEpoch: (session?.historyMutationEpoch ?? 0) + 1,
             historyStatus: 'ready',
             historyPage: undefined,
-            historyInitialPage: undefined,
-            historyLiveGap: false,
-            historyViewingOlder: false,
-            historyBrowseMessages: undefined,
-            historyWindowPages: undefined,
-            historyWindowOverlay: undefined,
-            historyLivePage: undefined,
             historyWindowed: false,
             historyHydrated: true,
             historyError: null,

@@ -3,13 +3,43 @@ import { mkdtemp, rm, writeFile, appendFile, open, rename } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
-import { readBoundedHistoryPage, streamBoundedHistory, withHistoryReadBudget, HISTORY_SCAN_BYTES, HISTORY_RECORD_BYTES, HISTORY_SEMANTIC_RECORD_BYTES, HISTORY_PAGE_BYTES, HISTORY_PAGE_ROWS } from './boundedSessionHistory.js'
+import { readBoundedHistoryPage, streamBoundedHistory, withHistoryReadBudget, HISTORY_SCAN_BYTES, HISTORY_FULL_SCAN_BYTES, HISTORY_RECORD_BYTES, HISTORY_SEMANTIC_RECORD_BYTES, HISTORY_PAGE_BYTES, HISTORY_PAGE_ROWS } from './boundedSessionHistory.js'
 
 let directory: string
 let file: string
 beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), 'history-budget-test-')); file = join(directory, 'session.jsonl') })
 afterEach(async () => { await rm(directory, { recursive: true, force: true }) })
 const row = (id: string, text = id) => JSON.stringify({ type: 'assistant', uuid: id, message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n'
+
+describe('bounded history full read', () => {
+  test('returns every ordinary record in one response without a cursor walk', async () => {
+    await writeFile(file, Array.from({ length: 180 }, (_, index) => row(String(index), 'x'.repeat(8 * 1024))).join(''))
+    const result = await readBoundedHistoryPage(file, { full: true })
+    expect(result.entries.map(item => item.entry.uuid)).toEqual(Array.from({ length: 180 }, (_, index) => String(index)))
+    expect(result.page.historyComplete).toBe(true)
+    expect(result.page.nextCursor).toBeNull()
+    expect(result.page.scannedBytes).toBeLessThanOrEqual(HISTORY_FULL_SCAN_BYTES)
+  })
+
+  test('stops at the byte budget but keeps a forward cursor instead of failing', async () => {
+    await writeFile(file, Array.from({ length: 40 }, (_, index) => row(String(index), 'x'.repeat(1024 * 1024))).join(''))
+    const result = await readBoundedHistoryPage(file, { full: true })
+    expect(result.entries.length).toBeGreaterThan(0)
+    expect(result.entries.length).toBeLessThan(40)
+    expect(result.page.historyComplete).toBe(false)
+    expect(result.page.nextCursor).not.toBeNull()
+    // The newest slice is retained; the walk stopped at the budget, not the head.
+    expect(result.entries.at(-1)!.entry.uuid).toBe('39')
+  })
+
+  test('honors the row limit while leaving a continuation cursor', async () => {
+    await writeFile(file, Array.from({ length: 12 }, (_, index) => row(String(index))).join(''))
+    const result = await readBoundedHistoryPage(file, { full: true, limit: 4 })
+    expect(result.entries.map(item => item.entry.uuid)).toEqual(['8', '9', '10', '11'])
+    expect(result.page.historyComplete).toBe(false)
+    expect(result.page.nextCursor).not.toBeNull()
+  })
+})
 
 describe('bounded history pages', () => {
   test('reads a bounded tail and pages every ordinary large record without loss', async () => {

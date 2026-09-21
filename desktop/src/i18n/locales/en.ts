@@ -23,6 +23,7 @@ export const en = {
   "chat.history.loading": "Loading messages…",
   "chat.history.loadFailed": "Could not load messages.",
   "chat.history.retry": "Try again",
+  "chat.history.loadMore": "Load earlier messages",
 
   "trace.windowNotice": "Transcript and trace use bounded pages.",
   "trace.windowLimited": "Some records exceed the viewing limit; the original file is unchanged.",

@@ -347,107 +347,41 @@ describe('MessageList nested tool calls', () => {
       { id: 'cached-reply', type: 'assistant_text', content: 'Cached reply', timestamp: 2 },
     ]
     useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
-      messages, historyStatus: 'idle', historyHydrated: false, historyWindowed: false,
+      messages, historyStatus: 'idle', historyHydrated: false,
     }) } })
     render(<MessageList />)
     expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
     act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
-      messages, historyStatus: 'loading', historyHydrated: false, historyWindowed: false,
+      messages, historyStatus: 'loading', historyHydrated: false,
     }) } }))
     expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
     act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
-      messages, historyStatus: 'ready', historyHydrated: false, historyWindowed: false,
+      messages, historyStatus: 'ready', historyHydrated: false,
     }) } }))
     expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
     const partialPage = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 1024, omittedOversizedEntries: 0 }
     act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
-      messages, historyWindowed: false, historyPage: partialPage,
+      messages, historyStatus: 'ready', historyHydrated: true, historyPage: partialPage,
     }) } }))
-    expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
-    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
-      messages, historyWindowed: true, historyPage: partialPage,
-    }) } }))
-    expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Roll back conversation' }))
     await waitFor(() => expect(sessionsApi.getTurnCheckpoints).toHaveBeenCalledTimes(1))
   })
 
-  it('defers checkpoint transcript work until explicitly requested for a bounded history window', async () => {
-    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ historyWindowed: true, messages: [
-      { id: 'user-1', transcriptMessageId: 'user-1', type: 'user_text', content: 'User prompt', timestamp: 1 },
-      { id: 'reply', transcriptMessageId: 'reply', type: 'assistant_text', content: 'Assistant reply', timestamp: 2 },
-    ] }) } })
-    vi.mocked(sessionsApi.getTurnCheckpoints).mockResolvedValue({ checkpoints: [{
-      target: { targetUserMessageId: 'a-different-old-user', userMessageIndex: 0, userMessageCount: 200 },
-      code: { available: true, filesChanged: ['wrong.ts'], insertions: 1, deletions: 0 },
-    }] })
-    render(<MessageList />)
-    expect(sessionsApi.getTurnCheckpoints).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Roll back conversation' }))
-    await waitFor(() => expect(sessionsApi.getTurnCheckpoints).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Roll back conversation' }).hasAttribute('disabled')).toBe(false))
-    expect(screen.queryByRole('region', { name: 'Turn changed files' })).toBeNull()
-  })
 
-  it('scrolls into older history without buttons or replacing live state and jumps back to live', async () => {
+
+  it('mounts older history ahead of the live rows only when the user asks for it', async () => {
     const page = { nextCursor: 'older-cursor', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 1024, omittedOversizedEntries: 0 }
     useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ historyWindowed: true, historyPage: page, messages: [{ id: 'live', type: 'assistant_text', content: 'current live message', timestamp: 1 }] }) } })
     const getPage = vi.spyOn(sessionsApi, 'getHistoryPage')
-      .mockResolvedValueOnce({ messages: [{ id: 'old', type: 'assistant', content: 'older page message', timestamp: '2020-01-01T00:00:00Z' }], page: { ...page, nextCursor: null, hasMore: false } })
-      .mockResolvedValueOnce({ messages: [{ id: 'latest', type: 'assistant', content: 'latest page message', timestamp: '2026-01-01T00:00:00Z' }], page: { ...page, historyComplete: true } })
+      .mockResolvedValueOnce({ messages: [{ id: 'old', type: 'assistant', content: 'older page message', timestamp: '2020-01-01T00:00:00Z' }], page: { ...page, nextCursor: null, hasMore: false, historyComplete: true } })
     render(<MessageList />)
-    expect(screen.queryByTestId('history-window-notice')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Older messages' })).toBeNull()
+    expect(screen.queryByText('older page message')).toBeNull()
     expect(getPage).not.toHaveBeenCalled()
-    const scroller = screen.getByTestId('message-list').firstElementChild as HTMLElement
-    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 600 })
-    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1800 })
-    scroller.scrollTop = 100
-    fireEvent.wheel(scroller, { deltaY: -100 })
+    fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }))
     expect(await screen.findByText('older page message')).toBeTruthy()
-    expect(useChatStore.getState().sessions[ACTIVE_TAB]?.messages[0]?.id).toBe('live')
     expect(getPage).toHaveBeenCalledWith(ACTIVE_TAB, { cursor: 'older-cursor' }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
-    fireEvent.click(screen.getByRole('button', { name: 'Latest' }))
-    expect(await screen.findByText('latest page message')).toBeTruthy()
-    expect(useChatStore.getState().sessions[ACTIVE_TAB]?.historyBrowseMessages).toBeUndefined()
+    expect(useChatStore.getState().sessions[ACTIVE_TAB]?.messages.map((message) => message.id)).toEqual(['old', 'live'])
   })
 
-  it('scrolls forward through history and does not mistake the historical window bottom for the live tail', async () => {
-    const loadNewer = vi.spyOn(useChatStore.getState(), 'loadNewerHistory').mockResolvedValue()
-    const page = { nextCursor: 'older', previousCursor: 'newer', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 100, omittedOversizedEntries: 0 }
-    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
-      historyPage: page, historyWindowed: true, historyViewingOlder: true,
-      messages: [{ id: 'live', type: 'assistant_text', content: 'Live content', timestamp: 10 }],
-      historyBrowseMessages: [{ id: 'old', type: 'assistant_text', content: 'Historical content', timestamp: 1 }],
-    }) } })
-    render(<MessageList />)
-    const scroller = screen.getByTestId('message-list').firstElementChild as HTMLElement
-    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 600 })
-    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1800 })
-    scroller.scrollTop = 1200
-    fireEvent.wheel(scroller, { deltaY: 100 })
-    await waitFor(() => expect(loadNewer).toHaveBeenCalledWith(ACTIVE_TAB))
-    expect(screen.getByRole('button', { name: 'Latest' })).toBeTruthy()
-    expect(screen.getByText('Historical content')).toBeTruthy()
-    expect(screen.queryByText('Live content')).toBeNull()
-  })
-
-  it('loads disk history when live retention created a gap after an initially complete page', async () => {
-    const loadOlder = vi.spyOn(useChatStore.getState(), 'loadOlderHistory').mockResolvedValue()
-    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
-      historyLiveGap: true, historyWindowed: true,
-      historyPage: { nextCursor: null, hasMore: false, historyComplete: true, sourceVersion: 'v1', scannedBytes: 100, omittedOversizedEntries: 0 },
-      messages: [{ id: 'recent', type: 'assistant_text', content: 'Recent live message', timestamp: 10 }],
-    }) } })
-    render(<MessageList />)
-    expect(loadOlder).not.toHaveBeenCalled()
-    const scroller = screen.getByTestId('message-list').firstElementChild as HTMLElement
-    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 600 })
-    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1800 })
-    scroller.scrollTop = 100
-    fireEvent.wheel(scroller, { deltaY: -100 })
-    await waitFor(() => expect(loadOlder).toHaveBeenCalledWith(ACTIVE_TAB))
-  })
 
   it('does not render internal recovery state as a history banner', () => {
     useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ historyWindowed: true, historyRecoveryStatus: 'incomplete' }) } })
@@ -2579,17 +2513,17 @@ describe('MessageList nested tool calls', () => {
       toolName: 'Read', input: { file_path: `/tmp/file-${index}` }, timestamp: index,
     })
     const messages = [tool(1), tool(2)]
-    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ messages, historyWindowRevision: 1 }) } })
+    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ messages,  }) } })
     render(<MessageList sessionId={ACTIVE_TAB} />)
     const group = screen.getByTestId('activity-group')
     fireEvent.click(group.querySelector('[data-chat-disclosure]')!)
     expect(group.getAttribute('data-expanded')).toBe('true')
     const row = group.querySelector('[data-chat-anchor-id="group-page-1"]')
-    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ messages: [tool(0), ...messages], historyWindowRevision: 2 }) } }))
+    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ messages: [tool(0), ...messages],  }) } }))
     expect(screen.getByTestId('activity-group')).toBe(group)
     expect(group.getAttribute('data-expanded')).toBe('true')
     expect(group.querySelector('[data-chat-anchor-id="group-page-1"]')).toBe(row)
-    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ messages: [tool(0), ...messages, tool(3)], historyWindowRevision: 3 }) } }))
+    act(() => useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ messages: [tool(0), ...messages, tool(3)],  }) } }))
     expect(screen.getByTestId('activity-group')).toBe(group)
     expect(group.getAttribute('data-expanded')).toBe('true')
   })
@@ -7025,8 +6959,8 @@ describe('MessageList nested tool calls', () => {
     expect(screen.queryByText(`Session not found: ${subagentTabId}`)).toBeNull()
   })
 
-  it.each([false, true])('confirms rewind and restores the complete prompt (windowed: %s)', async (windowed) => {
-    const prompt = windowed ? 'x'.repeat(40000) + 'FINAL REQUIREMENT' : '做一个页面'
+  it('confirms rewind and restores the complete prompt', async () => {
+    const prompt = '做一个页面'
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
       checkpoints: [
         {
@@ -7130,17 +7064,13 @@ describe('MessageList nested tool calls', () => {
     })
 
     const current = useChatStore.getState().sessions[ACTIVE_TAB]!
-    useChatStore.getState().applyBoundedUpdate(() => ({ sessions: { [ACTIVE_TAB]: { ...current, historyWindowed: windowed } } }))
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions: { [ACTIVE_TAB]: { ...current, historyWindowed: false } } }))
     render(<MessageList />)
 
-    if (windowed) {
-      fireEvent.click((await screen.findAllByRole('button', { name: 'Roll back conversation' }))[0]!)
-    } else {
-      await expandChangedFileCards()
-      const historicalCard = (await screen.findByText('first.ts')).closest('section')
-      expect(historicalCard).toBeTruthy()
-      fireEvent.click(within(historicalCard as HTMLElement).getByRole('button', { name: 'Rewind to before this turn' }))
-    }
+    await expandChangedFileCards()
+    const historicalCard = (await screen.findByText('first.ts')).closest('section')
+    expect(historicalCard).toBeTruthy()
+    fireEvent.click(within(historicalCard as HTMLElement).getByRole('button', { name: 'Rewind to before this turn' }))
 
     expect(sessionsApi.rewind).not.toHaveBeenCalled()
     const dialog = await screen.findByRole('dialog', { name: 'Rewind to before this turn?' })
@@ -7156,7 +7086,7 @@ describe('MessageList nested tool calls', () => {
       expect(sessionsApi.rewind).toHaveBeenLastCalledWith(ACTIVE_TAB, {
         targetUserMessageId: 'user-1',
         userMessageIndex: 0,
-        ...(windowed ? {} : { expectedContent: prompt }),
+        expectedContent: prompt,
         mode: 'both',
       })
     })
@@ -7369,7 +7299,7 @@ describe('MessageList nested tool calls', () => {
       unverifiedChangeSources: [],
       mode: 'conversation',
     })
-    vi.spyOn(sessionsApi, 'getMessages').mockResolvedValue({
+    vi.spyOn(sessionsApi, 'getFullHistory').mockResolvedValue({
       messages: [
         {
           id: 'transcript-user-first',

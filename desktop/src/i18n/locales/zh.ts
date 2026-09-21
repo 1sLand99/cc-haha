@@ -25,6 +25,7 @@ export const zh: Record<TranslationKey, string> = {
   "chat.history.loading": "正在加载消息…",
   "chat.history.loadFailed": "消息加载失败。",
   "chat.history.retry": "重试",
+  "chat.history.loadMore": "加载更早的消息",
 
   "trace.windowNotice": "聊天记录与追踪按有限窗口加载。",
   "trace.windowLimited": "部分记录超出查看上限，原始文件保持完整。",

@@ -25,6 +25,7 @@ export const kr: Record<TranslationKey, string> = {
   "chat.history.loading": "메시지 불러오는 중…",
   "chat.history.loadFailed": "메시지를 불러오지 못했습니다.",
   "chat.history.retry": "다시 시도",
+  "chat.history.loadMore": "이전 메시지 불러오기",
 
   "trace.windowNotice": "대화와 추적은 제한된 페이지로 불러옵니다.",
   "trace.windowLimited": "일부 기록이 표시 한도를 초과했습니다. 원본 파일은 유지됩니다.",
