@@ -288,6 +288,14 @@ export function TraceSession({
   const hasTraceContent = trace.calls.length > 0 || (trace.events?.length ?? 0) > 0 || messages.length > 0
   const selectedSpan = selectedId ? viewModel.spansById.get(selectedId) : undefined
   const activeSpan = selectedSpan ?? viewModel.spansById.get(viewModel.rootId) ?? viewModel.spans[0] ?? null
+  // An open record follows its own content, not the session revision. A sibling
+  // span arriving must not clear and refetch the record the reader is looking at.
+  const detailRevisionKey = spanContentKey(activeSpan)
+  // The overview reads the opening call, so it must use that call's content key.
+  // A different key misses the detail cache and refetches the same body.
+  const overviewRevisionKey = spanContentKey(
+    viewModel.spans.find((span) => span.kind === 'llm') ?? null,
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-surface)] text-[var(--color-text-primary)]">
@@ -331,7 +339,8 @@ export function TraceSession({
                   span={activeSpan}
                   viewModel={viewModel}
                   sessionId={sessionId}
-                  revisionKey={revisionKey}
+                  revisionKey={detailRevisionKey}
+                  overviewRevisionKey={overviewRevisionKey}
                   onSelect={setSelectedId}
                 />
               }
@@ -343,6 +352,29 @@ export function TraceSession({
       )}
     </div>
   )
+}
+
+function spanContentKey(span: TraceSpan | null): string | undefined {
+  if (!span) return undefined
+  const call = span.call
+  if (call) {
+    return [
+      call.id,
+      call.status ?? span.status,
+      call.completedAt ?? '',
+      call.durationMs ?? '',
+      call.request.body.sha256,
+      call.response?.body.sha256 ?? '',
+      call.error?.name ?? '',
+      call.error?.message ?? '',
+    ].join(':')
+  }
+  return [
+    span.id,
+    span.status,
+    span.completedAt ?? '',
+    span.durationMs ?? '',
+  ].join(':')
 }
 
 function traceRevisionKey(revision: {
