@@ -1151,7 +1151,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets, browserMode
         }
         applyToolSearchEnv(mergedEnv, apiFormat, toolSearchEnabled)
         applyDisableExperimentalBetasEnv(mergedEnv, disableExperimentalBetas)
-        const merged = {
+        const merged: Record<string, unknown> = {
           ...settings,
           skipWebFetchPreflight: settings.skipWebFetchPreflight ?? true,
           env: mergedEnv,

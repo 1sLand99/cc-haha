@@ -813,7 +813,7 @@ describe('TraceSession', () => {
     })
 
     await waitFor(
-      () => expect(sessionsApi.getTraceCall.mock.calls.length).toBeGreaterThan(callsBeforeUpdate),
+      () => expect(vi.mocked(sessionsApi.getTraceCall).mock.calls.length).toBeGreaterThan(callsBeforeUpdate),
       { timeout: 5_000 },
     )
     expect(await screen.findByText('Updated full record')).toBeInTheDocument()

@@ -66,7 +66,6 @@ export function TraceSession({
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [clockNowMs, setClockNowMs] = useState(() => Date.now())
-  const [revisionKey, setRevisionKey] = useState<string | undefined>()
   const snapshotSignatureRef = useRef<string | null>(null)
   const lastSpanIdRef = useRef<string | null>(null)
 
@@ -124,7 +123,6 @@ export function TraceSession({
             if (cancelled || requestGeneration !== revisionRequestGeneration) return
             currentRevision = revision.revision
             currentRevisionToken = revision.revisionToken
-            setRevisionKey(traceRevisionKey(revision))
           }).catch(() => {
             if (cancelled || requestGeneration !== revisionRequestGeneration) return
             revisionPollingAvailable = false
@@ -134,7 +132,6 @@ export function TraceSession({
           currentRevisionToken = pendingRevisionKey?.startsWith('token:')
             ? pendingRevisionKey.slice('token:'.length)
             : undefined
-          setRevisionKey(pendingRevisionKey)
         }
         const signature = traceSnapshotSignature(trace)
         if (silent && snapshotSignatureRef.current === signature) return
