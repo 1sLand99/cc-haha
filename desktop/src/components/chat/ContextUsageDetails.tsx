@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
-import { formatDurationMs } from '../../lib/trace/formatters'
 import {
   formatCacheHitRate,
   formatCompactTokens,
@@ -20,10 +19,8 @@ type ContextCategory = {
  * rounding a cache hit up to 100%, withholding a speed with no API duration) stay in one place.
  */
 export type ContextUsageSessionStats = {
-  totalTokens: number
   cacheHitRate: number | null
   tokensPerSecond: number | null
-  apiDurationMs: number
   /** Pre-formatted by the server (unknown-model sessions included), displayed verbatim. */
   costDisplay: string
 }
@@ -52,13 +49,10 @@ export type ContextUsageDetailsProps = {
     loading: string
     unavailableDetail: string
     breakdown: string
-    sessionTotalTokens: string
     sessionCacheHit: string
     sessionSpeed: string
     sessionCost: string
-    sessionApiDuration: string
     sessionSpeedUnit: string
-    sessionScopeNote: string
   }
 }
 
@@ -243,23 +237,7 @@ function ReadyBody({
       </div>
 
       {sessionStats && (
-        <>
-          <SessionStatGrid stats={sessionStats} labels={labels} density={density} />
-          <div className="mt-3 text-[11px] text-[var(--color-text-tertiary)]">
-            {labels.sessionTotalTokens}{' '}
-            <span className="font-mono text-[var(--color-text-secondary)]" data-testid="session-total-tokens" title={formatNumber(sessionStats.totalTokens)}>
-              {formatCompactTokens(sessionStats.totalTokens)}
-            </span>
-            {' · '}
-            {labels.sessionApiDuration}{' '}
-            <span className="font-mono text-[var(--color-text-secondary)]">
-              {formatDurationMs(sessionStats.apiDurationMs)}
-            </span>
-          </div>
-          {/* Subagent transcripts are separate files and are never folded in here; saying so beats
-              letting the number quietly disagree with the user's bill. */}
-          <div className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">{labels.sessionScopeNote}</div>
-        </>
+        <SessionStatGrid stats={sessionStats} labels={labels} density={density} />
       )}
 
       {categories.length > 0 && (

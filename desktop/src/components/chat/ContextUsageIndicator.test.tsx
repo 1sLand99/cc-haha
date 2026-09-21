@@ -853,9 +853,8 @@ describe('ContextUsageIndicator session usage', () => {
 
     fireEvent.click(screen.getByTestId('context-usage-indicator'))
 
-    // 1000 uncached input + 2400 output. Cache hits stay in the hit-rate row, not the headline.
-    expect(await screen.findByTestId('session-total-tokens')).toHaveTextContent('3.4K')
-    expect(screen.getByTestId('session-cache-hit')).toHaveTextContent('90.0%')
+    // Cache reads stay in the hit-rate row; they are not a separate headline.
+    expect(await screen.findByTestId('session-cache-hit')).toHaveTextContent('90.0%')
     // 2400 output / 42s API time, including prefill — not the 12s decode span (200 tok/s).
     expect(screen.getByTestId('session-speed')).toHaveTextContent('57')
     expect(screen.getByTestId('session-speed')).toHaveTextContent('tok/s')
@@ -922,7 +921,9 @@ describe('ContextUsageIndicator session usage', () => {
 
     await screen.findByTestId('context-usage-popover')
     // An all-zero row would read as a measurement rather than an absence.
-    expect(screen.queryByTestId('session-total-tokens')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('session-speed')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('session-cache-hit')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('session-cost')).not.toBeInTheDocument()
   })
 
   it('does not stack polls behind a request that has not answered yet', async () => {

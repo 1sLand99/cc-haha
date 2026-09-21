@@ -126,4 +126,19 @@ describe('useTranslation', () => {
       expect(resurrected, `${name} still defines silent index-status keys`).toEqual([])
     }
   })
+
+  // The context popover dropped the "new tokens / API time / subagents excluded"
+  // caption. Those numbers duplicate the speed and cost rows above them, and a
+  // wholesale locale restore would put the caption back without a key-count check
+  // noticing.
+  it('carries no key for the removed context-usage caption', () => {
+    for (const [name, locale] of Object.entries(locales)) {
+      const resurrected = Object.keys(locale).filter(key =>
+        key === 'contextIndicator.sessionTotalTokens'
+        || key === 'contextIndicator.sessionApiDuration'
+        || key === 'contextIndicator.sessionScopeNote',
+      )
+      expect(resurrected, `${name} still defines the removed context-usage caption`).toEqual([])
+    }
+  })
 })
