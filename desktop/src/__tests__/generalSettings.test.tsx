@@ -2325,7 +2325,7 @@ describe('Settings > Providers tab', () => {
       const baseUrlInput = within(dialog).getByRole('textbox', { name: /Base URL/i })
       expect(baseUrlInput).toHaveValue('https://open.bigmodel.cn/api/anthropic')
       expect(within(dialog).getByRole('button', { name: /Get API Key/i })).toBeInTheDocument()
-      expect(within(dialog).getByText('Mainland China promotion')).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: 'Mainland China promotion' })).toBeInTheDocument()
 
       fireEvent.click(regionTrigger)
       fireEvent.click(within(dialog).getByRole('option', { name: /Global/ }))

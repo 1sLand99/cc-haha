@@ -1800,7 +1800,20 @@ function ProviderFormModal({ open, onClose, mode, provider, presets, browserMode
                 <span className="material-symbols-outlined text-[9px] opacity-60 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5">arrow_outward</span>
               </button>
             )}
-            {promoText && <span className="text-[11px] leading-5 text-[var(--color-text-tertiary)]">{promoText}</span>}
+            {promoText && (
+              apiKeyUrl ? (
+                <button
+                  type="button"
+                  onClick={() => openExternalUrl(apiKeyUrl)}
+                  className="group inline-flex min-w-0 cursor-pointer items-start gap-1 text-left text-[11px] leading-5 text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-brand)] focus:outline-none focus:shadow-[var(--shadow-focus-ring)]"
+                >
+                  <span>{promoText}</span>
+                  <span aria-hidden="true" className="material-symbols-outlined mt-1 shrink-0 text-[10px] opacity-50 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5">arrow_outward</span>
+                </button>
+              ) : (
+                <span className="text-[11px] leading-5 text-[var(--color-text-tertiary)]">{promoText}</span>
+              )
+            )}
           </div>
         )}
 
