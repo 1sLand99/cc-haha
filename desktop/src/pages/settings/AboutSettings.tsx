@@ -51,6 +51,7 @@ export function AboutSettings() {
   const [updateProxyDraft, setUpdateProxyDraft] = useState(updateProxy)
   const [updateProxySaveError, setUpdateProxySaveError] = useState<string | null>(null)
   const [isSavingUpdateProxy, setIsSavingUpdateProxy] = useState(false)
+  const [communityOpen, setCommunityOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -413,6 +414,37 @@ export function AboutSettings() {
             <div className="text-xs text-[var(--color-text-tertiary)]">{t('settings.about.feedbackDesc')}</div>
           </div>
         </button>
+      </div>
+
+      {/* The QR is the same image README.md embeds under "User Group". */}
+      <div className="mt-3 w-full">
+        <button
+          type="button"
+          onClick={() => setCommunityOpen((open) => !open)}
+          aria-expanded={communityOpen}
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-[var(--radius-xl)] border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
+        >
+          <span className="material-symbols-outlined text-[20px] text-[var(--color-text-tertiary)]">qr_code_2</span>
+          <div className="flex-1 text-left">
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.about.community')}</div>
+            <div className="text-xs text-[var(--color-text-tertiary)]">{t('settings.about.communityDesc')}</div>
+          </div>
+          <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)]">
+            {communityOpen ? 'expand_less' : 'expand_more'}
+          </span>
+        </button>
+        {communityOpen && (
+          <div className="mt-2 flex flex-col items-center gap-2 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-4">
+            <img
+              src={publicAssetPath('icons/wechat-group-qr.png')}
+              alt={t('settings.about.communityQrAlt')}
+              width={196}
+              height={196}
+              className="rounded-[var(--radius-md)]"
+            />
+            <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.about.communityHint')}</p>
+          </div>
+        )}
       </div>
     </div>
   )
