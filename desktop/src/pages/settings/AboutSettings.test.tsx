@@ -12,7 +12,7 @@ afterEach(() => {
   cleanup()
 })
 
-it('keeps the group QR collapsed until the entry below feedback is opened', async () => {
+it('opens the group QR in a dialog instead of pushing it below the fold', async () => {
   render(<AboutSettings />)
   // The version arrives from an async host call; let it settle so the assertion
   // is not racing a state update.
@@ -20,15 +20,16 @@ it('keeps the group QR collapsed until the entry below feedback is opened', asyn
 
   const entry = screen.getByRole('button', { name: /加入 cc-haha 交流群/ })
   expect(entry.compareDocumentPosition(screen.getByRole('button', { name: /反馈问题/ })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
-  expect(entry).toHaveAttribute('aria-expanded', 'false')
-  expect(screen.queryByRole('img', { name: 'cc-haha 企业微信用户群二维码' })).not.toBeInTheDocument()
+  expect(entry).toHaveAttribute('aria-haspopup', 'dialog')
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
   fireEvent.click(entry)
 
+  const dialog = screen.getByRole('dialog', { name: '加入 cc-haha 交流群' })
   const qr = screen.getByRole('img', { name: 'cc-haha 企业微信用户群二维码' })
+  expect(dialog).toContainElement(qr)
   expect(qr).toHaveAttribute('src', expect.stringContaining('icons/wechat-group-qr.png'))
-  expect(entry).toHaveAttribute('aria-expanded', 'true')
 
-  fireEvent.click(entry)
-  expect(screen.queryByRole('img', { name: 'cc-haha 企业微信用户群二维码' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 })

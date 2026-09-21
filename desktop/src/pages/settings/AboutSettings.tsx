@@ -11,6 +11,7 @@ import { formatBytes } from '../../lib/formatBytes'
 import { getDesktopHost } from '../../lib/desktopHost'
 import { publicAssetPath } from '../../lib/publicAsset'
 import { BrandSeal } from '../../components/composite/BrandSeal'
+import { Modal } from '@/components/ui/Modal'
 import { isValidHttpProxyUrl } from '../settings/shared'
 
 /**
@@ -416,12 +417,13 @@ export function AboutSettings() {
         </button>
       </div>
 
-      {/* The QR is the same image README.md embeds under "User Group". */}
+      {/* The QR is the same image README.md embeds under "User Group". A dialog
+          keeps it on screen; expanding inline pushed it below the fold. */}
       <div className="mt-3 w-full">
         <button
           type="button"
-          onClick={() => setCommunityOpen((open) => !open)}
-          aria-expanded={communityOpen}
+          onClick={() => setCommunityOpen(true)}
+          aria-haspopup="dialog"
           className="w-full flex items-center gap-3 px-4 py-3 rounded-[var(--radius-xl)] border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] transition-colors cursor-pointer"
         >
           <span className="material-symbols-outlined text-[20px] text-[var(--color-text-tertiary)]">qr_code_2</span>
@@ -429,23 +431,26 @@ export function AboutSettings() {
             <div className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.about.community')}</div>
             <div className="text-xs text-[var(--color-text-tertiary)]">{t('settings.about.communityDesc')}</div>
           </div>
-          <span className="material-symbols-outlined text-[18px] text-[var(--color-text-tertiary)]">
-            {communityOpen ? 'expand_less' : 'expand_more'}
-          </span>
         </button>
-        {communityOpen && (
-          <div className="mt-2 flex flex-col items-center gap-2 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-4">
-            <img
-              src={publicAssetPath('icons/wechat-group-qr.png')}
-              alt={t('settings.about.communityQrAlt')}
-              width={196}
-              height={196}
-              className="rounded-[var(--radius-md)]"
-            />
-            <p className="text-xs text-[var(--color-text-tertiary)]">{t('settings.about.communityHint')}</p>
-          </div>
-        )}
       </div>
+
+      <Modal
+        open={communityOpen}
+        onClose={() => setCommunityOpen(false)}
+        title={t('settings.about.community')}
+        width={360}
+      >
+        <div className="flex flex-col items-center gap-3 pb-2">
+          <img
+            src={publicAssetPath('icons/wechat-group-qr.png')}
+            alt={t('settings.about.communityQrAlt')}
+            width={240}
+            height={240}
+            className="rounded-[var(--radius-md)]"
+          />
+          <p className="text-center text-xs text-[var(--color-text-tertiary)]">{t('settings.about.communityHint')}</p>
+        </div>
+      </Modal>
     </div>
   )
 }
