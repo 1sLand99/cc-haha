@@ -1344,6 +1344,7 @@ export const kr: Record<TranslationKey, string> = {
   'settings.providers.multiProtocolBadge': '멀티 프로토콜',
   'settings.providers.apiFormatPerModelHint': '이 프리셋은 모델별로 프로토콜을 선택하므로 이 항목은 고정됩니다',
   'settings.providers.proxyHint': '요청은 로컬 프록시를 통해 변환됩니다',
+  'settings.providers.apiFormatOverrideHint': '프로토콜을 변경했습니다. 프리셋 기본 URL이 해당 프로토콜을 지원하지 않을 수 있으니 호환되는 엔드포인트를 지정하세요',
   'settings.providers.authStrategy': '인증 변수',
   'settings.providers.authStrategyApiKey': 'API 키 (ANTHROPIC_API_KEY)',
   'settings.providers.authStrategyApiKeyDesc': 'x-api-key를 사용한 Anthropic API 직접 액세스.',

@@ -1340,6 +1340,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'settings.providers.multiProtocolBadge': 'Multi-protocol',
   'settings.providers.apiFormatPerModelHint': 'This preset picks the protocol per model, so the choice is fixed by it',
   'settings.providers.proxyHint': 'Requests will be translated via the local proxy',
+  'settings.providers.apiFormatOverrideHint': 'Protocol changed from the preset default — point the base URL at an endpoint that serves it',
   'settings.providers.authStrategy': 'Auth Variable',
   'settings.providers.authStrategyApiKey': 'API Key (ANTHROPIC_API_KEY)',
   'settings.providers.authStrategyApiKeyDesc': 'Direct Anthropic API access using x-api-key.',

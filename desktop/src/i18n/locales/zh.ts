@@ -1340,6 +1340,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.providers.multiProtocolBadge': '多协议',
   'settings.providers.apiFormatPerModelHint': '该预设按模型自动选择协议，此项由预设决定',
   'settings.providers.proxyHint': '请求将通过本地代理转换协议格式',
+  'settings.providers.apiFormatOverrideHint': '已切换协议：请确认接口地址是该协议的兼容端点，预设默认地址可能不适用',
   'settings.providers.authStrategy': '认证变量',
   'settings.providers.authStrategyApiKey': 'API Key (ANTHROPIC_API_KEY)',
   'settings.providers.authStrategyApiKeyDesc': '直连 Anthropic 官方 API，发送 x-api-key。',

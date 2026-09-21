@@ -1342,6 +1342,7 @@ export const jp: Record<TranslationKey, string> = {
   'settings.providers.multiProtocolBadge': 'マルチプロトコル',
   'settings.providers.apiFormatPerModelHint': 'このプリセットはモデルごとにプロトコルを選ぶため、この項目は固定です',
   'settings.providers.proxyHint': 'リクエストはローカルプロキシ経由で変換されます',
+  'settings.providers.apiFormatOverrideHint': 'プロトコルを変更しました。プリセットの既定 URL が対応しているとは限らないため、このプロトコルに対応したエンドポイントを指定してください',
   'settings.providers.authStrategy': '認証変数',
   'settings.providers.authStrategyApiKey': 'API キー (ANTHROPIC_API_KEY)',
   'settings.providers.authStrategyApiKeyDesc': 'x-api-key を使用した Anthropic API への直接アクセス。',
