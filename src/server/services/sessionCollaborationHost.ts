@@ -42,13 +42,19 @@ export async function getSessionCollaborationService(): Promise<SessionCollabora
       sessions: {
         async list({ query, limit, offset, signal }) {
           const needle = query?.trim() ?? ''
-          const metadata = await sessionService.searchSessionMetadata(needle, { limit, offset, signal })
+          // Metadata ranking and the body lookup are both synchronous SQLite.
+          // Whichever is still pending once this elapses is skipped so the
+          // picker cannot hold the process while other requests wait.
+          const deadlineMs = Date.now() + 300
+          const metadata = await sessionService.searchSessionMetadata(needle, { limit, offset, signal, deadlineMs })
           signal?.throwIfAborted()
           // A full metadata page already answers the picker. Do not wait for
           // full-text matches (or canonical transcript validation) to display it.
           if (!needle) return metadata
-          if (metadata.sessions.length === limit) return { ...metadata, truncated: true, totalIsLowerBound: true }
-          const content = await searchService.searchSessionSuggestions(needle, { limit: 100, signal })
+          if (metadata.truncated || metadata.sessions.length === limit || Date.now() > deadlineMs) {
+            return { ...metadata, truncated: true, totalIsLowerBound: true }
+          }
+          const content = await searchService.searchSessionSuggestions(needle, { limit: 100, signal, deadlineMs })
           signal?.throwIfAborted()
           const details = new Map(sessionService.getSessionSuggestionMetadata(content.sessions.map(item => item.sessionId)).map(item => [item.id, item]))
           const normalized = needle.toLowerCase()

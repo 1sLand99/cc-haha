@@ -112,7 +112,7 @@ test('a full metadata page skips transcript search and returns immediately from 
     const service = await getSessionCollaborationService()
     const result = await service.candidates('修复')
     expect(result.sessions.map(item => item.sessionId)).toEqual(sessions.map(item => item.id))
-    expect(metadata).toHaveBeenCalledWith('修复', { limit: 30, offset: 0, signal: undefined })
+    expect(metadata).toHaveBeenCalledWith('修复', expect.objectContaining({ limit: 30, offset: 0, signal: undefined }))
     expect(await service.list({ query: '修复' })).toMatchObject({ total: 20_000, totalIsLowerBound: true, truncated: true })
     expect(list).not.toHaveBeenCalled()
     expect(fullText).not.toHaveBeenCalled()

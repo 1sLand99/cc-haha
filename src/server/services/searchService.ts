@@ -307,9 +307,15 @@ export class SearchService {
   // ---------------------------------------------------------------------------
 
   /** Menu suggestions deliberately trust the disposable index, never opening canonical transcripts. */
-  async searchSessionSuggestions(query: string, options: { limit?: number; signal?: AbortSignal } = {}) {
+  async searchSessionSuggestions(query: string, options: { limit?: number; signal?: AbortSignal; deadlineMs?: number } = {}) {
     throwIfAborted(options.signal)
     if (!query.trim()) return { sessions: [], truncated: false, indexUnavailable: false }
+    // The FTS lookup is one synchronous statement, so the deadline is checked
+    // before it starts. A picker that already spent its budget on metadata
+    // returns that page instead of stalling every other request.
+    if (options.deadlineMs !== undefined && Date.now() > options.deadlineMs) {
+      return { sessions: [], truncated: true, indexUnavailable: false }
+    }
     const projected = this.suggestIndexedSessions(query, options)
     throwIfAborted(options.signal)
     return {

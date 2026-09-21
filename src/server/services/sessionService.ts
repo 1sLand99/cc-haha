@@ -10,7 +10,7 @@ import { recoverBoundedSessionHistory, type SessionHistoryRecovery } from './ses
  */
 
 import { HISTORY_SEMANTIC_RECORD_BYTES, HISTORY_PAGE_BYTES, displayPreview, readBoundedHistoryPage, streamBoundedHistory, withHistoryReadBudget, type HistoryPageInfo } from './boundedSessionHistory.js'
-import { constants, createReadStream, type Stats } from 'node:fs'
+import { constants, createReadStream, createWriteStream, type Stats } from 'node:fs'
 import { createHash } from 'node:crypto'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
@@ -3375,7 +3375,7 @@ export class SessionService {
   }
 
   /** Metadata-only reference lookup: no per-result transcript or workspace hydration. */
-  async searchSessionMetadata(query: string, options: { limit?: number; offset?: number; signal?: AbortSignal } = {}): Promise<{ sessions: Array<{ id: string; title: string; workDir: string | null; projectPath: string; modifiedAt: string }>; total: number }> {
+  async searchSessionMetadata(query: string, options: { limit?: number; offset?: number; signal?: AbortSignal; deadlineMs?: number } = {}): Promise<{ sessions: Array<{ id: string; title: string; workDir: string | null; projectPath: string; modifiedAt: string }>; total: number; truncated?: boolean }> {
     options.signal?.throwIfAborted()
     this.syncSharedMutationEpoch()
     const limit = Math.min(100, Math.max(1, options.limit ?? 30))
@@ -3394,8 +3394,12 @@ export class SessionService {
     const scope = this.getConfigDir()
     this.prepareSessionListCaches(scope)
     const rows: Array<{ id: string; title: string; workDir: string | null; projectPath: string; modifiedAt: string }> = []
+    let truncated = false
     for (const file of await this.discoverSessionFiles(undefined, scope)) {
       options.signal?.throwIfAborted()
+      // The picker shares this process with every other request. Stop walking
+      // transcripts once its budget is spent and return the rows already read.
+      if (options.deadlineMs !== undefined && Date.now() > options.deadlineMs) { truncated = true; break }
       try {
         const summary = await this.getCachedSessionListSummary(file.filePath, file.projectDir, await fs.stat(file.filePath), scope)
         rows.push({ id: file.sessionId, title: summary.title, workDir: summary.workDir, projectPath: file.projectDir, modifiedAt: summary.modifiedAt })
@@ -3409,7 +3413,7 @@ export class SessionService {
     }
     const matches = rows.filter(row => [row.title, row.id, row.workDir ?? '', row.projectPath].some(value => value.toLowerCase().includes(needle)))
     matches.sort((a, b) => rank(b) - rank(a) || Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt) || a.id.localeCompare(b.id) || a.projectPath.localeCompare(b.projectPath))
-    return { sessions: matches.slice(offset, offset + limit), total: matches.length }
+    return { sessions: matches.slice(offset, offset + limit), total: matches.length, ...(truncated ? { truncated } : {}) }
   }
 
   /** List all sessions, optionally filtered by physical project path. */
@@ -4608,15 +4612,33 @@ export class SessionService {
         throw ApiError.notFound(`Session not found: ${sessionId}`)
       }
 
-      const entries = await this.readJsonlFile(found.filePath)
-      const workDir = this.resolveWorkDirFromEntries(entries, found.projectDir) || fallbackWorkDir || process.cwd()
-      const repository = this.resolveRepositoryFromEntries(entries)
+      // Only the newest metadata survives a clear. Walk the transcript one
+      // record at a time so a large session is not parsed into one array.
+      const preserved = { workDir: undefined as string | undefined, cwd: undefined as string | undefined,
+        repository: undefined as PreparedSessionWorkspace['repository'] | undefined,
+        permissionMode: undefined as string | undefined }
+      await streamBoundedHistory(found.filePath, entry => {
+        const record = entry as RawEntry
+        if (record.type === 'session-meta') {
+          if (typeof (record as Record<string, unknown>).workDir === 'string') preserved.workDir = (record as Record<string, unknown>).workDir as string
+          if (typeof record.permissionMode === 'string' && VALID_SESSION_PERMISSION_MODES.has(record.permissionMode)) preserved.permissionMode = record.permissionMode
+        }
+        if (typeof record.cwd === 'string' && record.cwd.trim()) preserved.cwd = record.cwd
+        const repository = (record as Record<string, unknown>).repository
+        if (repository && typeof repository === 'object') preserved.repository = repository as PreparedSessionWorkspace['repository']
+      }, undefined, { maxRecordBytes: HISTORY_SEMANTIC_RECORD_BYTES }).catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      })
+      const workDir = (preserved.workDir && normalizeDriveRootPathForPlatform(preserved.workDir))
+        || (preserved.cwd && normalizeDriveRootPathForPlatform(preserved.cwd))
+        || this.desanitizePath(found.projectDir) || fallbackWorkDir || process.cwd()
+      const repository = preserved.repository
       const permissionMode = (
         preservedPermissionMode &&
         VALID_SESSION_PERMISSION_MODES.has(preservedPermissionMode)
       )
         ? preservedPermissionMode
-        : this.resolvePermissionModeFromEntries(entries)
+        : preserved.permissionMode
       const now = new Date().toISOString()
 
       const initialEntry = {
@@ -4829,33 +4851,51 @@ export class SessionService {
     }
 
     const removedIds = new Set(removedMessageIds)
-    const filteredEntries = entries.filter(
-      (entry) => {
-        if (typeof entry.uuid !== 'string') return true
-        if (removedIds.has(entry.uuid)) return false
-        if (
-          entry.message?.role &&
-          (entry.type === 'user' || entry.type === 'assistant' || entry.type === 'system')
-        ) {
-          return remainingMessageIds.has(entry.uuid)
-        }
-        return true
-      },
-    )
-
-    const content =
-      filteredEntries.length > 0
-        ? filteredEntries.map((entry) => JSON.stringify(entry)).join('\n') + '\n'
-        : ''
+    const kept = (entry: RawEntry): boolean => {
+      if (typeof entry.uuid !== 'string') return true
+      if (removedIds.has(entry.uuid)) return false
+      if (
+        entry.message?.role &&
+        (entry.type === 'user' || entry.type === 'assistant' || entry.type === 'system')
+      ) {
+        return remainingMessageIds.has(entry.uuid)
+      }
+      return true
+    }
+    // Copy the original lines that survive. Re-serializing every retained entry
+    // would hold the whole transcript as one string on the request thread.
     const transcriptStats = await fs.stat(found.filePath)
     const tempFilePath = `${found.filePath}.rewind-${crypto.randomUUID()}.tmp`
+    const output = createWriteStream(tempFilePath, { mode: transcriptStats.mode })
+    let failed = false
+    const fail = (error: Error) => { if (!failed) { failed = true; output.destroy(error) } }
     try {
-      await fs.writeFile(tempFilePath, content, {
-        encoding: 'utf-8',
-        mode: transcriptStats.mode,
+      await new Promise<void>((resolve, reject) => {
+        output.on('error', reject)
+        output.on('finish', resolve)
+        void (async () => {
+          const input = createReadStream(found.filePath, { encoding: 'utf8' })
+          try {
+            for await (const line of createInterface({ input, crlfDelay: Infinity })) {
+              if (line.trim()) {
+                try {
+                  if (!kept(JSON.parse(line) as RawEntry)) continue
+                } catch { /* Keep a line the transcript reader would also keep. */ }
+              }
+              if (!output.write(`${line}\n`)) await new Promise<void>(resume => output.once('drain', resume))
+            }
+            output.end()
+          } catch (error) {
+            fail(error instanceof Error ? error : new Error(String(error)))
+          } finally {
+            input.destroy()
+          }
+        })()
       })
+      if (!this.shouldPersistSession()) return { removedCount: 0, removedMessageIds: [] }
       await fs.rename(tempFilePath, found.filePath)
     } finally {
+      output.destroy()
       await fs.rm(tempFilePath, { force: true })
     }
     this.invalidateSessionListCache()
