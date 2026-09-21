@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boundActivityText, boundChatHistory, previewHistoryPage, CHAT_HISTORY_MAX_ROWS } from './chatHistoryBudget'
+import { boundActivityText, boundChatHistory, CHAT_HISTORY_MAX_ROWS } from './chatHistoryBudget'
 import type { UIMessage } from '../types/chat'
 
 function text(id: number, content = 'message'): UIMessage {
@@ -7,14 +7,24 @@ function text(id: number, content = 'message'): UIMessage {
 }
 
 describe('chat history retention', () => {
-  it('uses spare page space for ordinary replies while bounding an oversized tool body', () => {
-    const normal = Array.from({ length: 100 }, (_, index) => text(index, 'A complete readable response. '.repeat(20)))
-    const huge = text(100, 'x'.repeat(2_000_000))
-    const result = previewHistoryPage([...normal, huge], 256 * 1024)
-    expect(result).toHaveLength(101)
-    for (let index = 0; index < normal.length; index++) expect(result[index]).toBe(normal[index])
-    expect(result.at(-1)).toMatchObject({ id: '100' })
-    expect(JSON.stringify(result).length * 2).toBeLessThan(256 * 1024)
+  it('keeps complete page payloads because a cursor cannot recover a clipped body', () => {
+    const messages = [text(0, 'x'.repeat(300_000))]
+    expect(boundChatHistory(messages, 256 * 1024).messages).toBe(messages)
+  })
+
+  it('preserves image sources, later attachments and structured tool fields', () => {
+    const messages: UIMessage[] = [{
+      id: 'user', type: 'user_text', timestamp: 1, content: 'prompt'.repeat(8000),
+      modelContent: 'full model prompt'.repeat(4000),
+      attachments: [
+        { type: 'image', name: 'image.png', data: 'data:image/png;base64,' + 'A'.repeat(40_000), path: '/tmp/image.png' },
+        { type: 'file', name: 'notes.md', path: '/tmp/notes.md' },
+      ],
+    }, {
+      id: 'edit', type: 'tool_use', toolName: 'Edit', toolUseId: 'edit-1', timestamp: 2,
+      input: { file_path: '/tmp/file.ts', old_string: 'old line\n'.repeat(5000), new_string: 'fixed' },
+    }]
+    expect(boundChatHistory(messages).messages).toBe(messages)
   })
 
   it('bounds many small rows and keeps the recent window', () => {
@@ -24,13 +34,13 @@ describe('chat history retention', () => {
     expect(result.dropped).toBe(1500)
   })
 
-  it('caps a huge structured tool payload without losing row identity or mutating input', () => {
+  it('retains one oversized newest message intact and evicts whole older rows', () => {
     const message: UIMessage = { id: 'tool', type: 'tool_use', toolName: 'Bash', toolUseId: 'id', timestamp: 123, input: { command: 'x'.repeat(2_000_000) } }
-    const result = boundChatHistory([message])
-    expect(result.clipped).toBe(true)
-    expect(result.messages[0]).toMatchObject({ id: 'tool', toolUseId: 'id', timestamp: 123 })
-    expect(JSON.stringify(result.messages).length).toBeLessThan(34_000)
-    expect((message.input as { command: string }).command).toHaveLength(2_000_000)
+    const result = boundChatHistory([text(0), message])
+    expect(result.messages).toEqual([message])
+    expect(result.messages[0]).toBe(message)
+    expect(result.dropped).toBe(1)
+    expect(result.bytes).toBeGreaterThan(4_000_000)
     expect(boundChatHistory(result.messages).messages).toBe(result.messages)
   })
 

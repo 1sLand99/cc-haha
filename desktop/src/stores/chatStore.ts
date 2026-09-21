@@ -1,7 +1,9 @@
+import { isInlineImagePath } from '@/lib/attachmentImages'
+import { CHAT_HISTORY_CACHE_BYTES, historyCacheBytes } from '../lib/chatHistoryCache'
 import { normalizeSessionReferences, splitSessionReferenceContext } from '@/lib/sessionReferences'
 import { boundHistoryWindow, historyPageBytes, historyWindowBoundary, historyWindowMessages, type HistoryDirection, type HistoryWindowPage } from '../lib/chatHistoryWindow'
 import { create } from 'zustand'
-import { boundActivityText, boundChatHistory, previewHistoryPage, copyChatPreview, CHAT_STREAM_MAX_CHARS, CHAT_TERMINAL_ACTIVITY_MAX_PER_SESSION, CHAT_TERMINAL_ACTIVITY_MAX_TOTAL } from '../lib/chatHistoryBudget'
+import { boundActivityText, boundChatHistory, CHAT_TERMINAL_ACTIVITY_MAX_PER_SESSION, CHAT_TERMINAL_ACTIVITY_MAX_TOTAL } from '../lib/chatHistoryBudget'
 import { wsManager } from '../api/websocket'
 import { sessionsApi, type SessionHistoryPage } from '../api/sessions'
 import { ApiResponseParseError } from '../api/client'
@@ -2450,8 +2452,8 @@ function invalidateHistoryPrefetch(sessionId: string) {
 async function prepareHistoryPage(sessionId: string, cursor: string | null, signal: AbortSignal): Promise<PreparedHistoryPage> {
   const response = await sessionsApi.getHistoryPage(sessionId, cursor ? { cursor } : undefined, { signal })
   const messages = mapHistoryMessagesToUiMessages(response.messages)
-  // Keep speculative work small; retain all row identities within a cursor page.
-  return { messages: previewHistoryPage(messages, 256 * 1024), page: response.page }
+  // The server bounds complete records; retain the whole cursor page.
+  return { messages, page: response.page }
 }
 
 async function requestHistoryPage(sessionId: string, cursor: string | null, signal: AbortSignal): Promise<PreparedHistoryPage> {
@@ -2973,7 +2975,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
           ? new Set(session.historyInitialPage.messages.flatMap(strongHistoryMessageIdentities)) : undefined
         const isCompleteInitialPage = initialIdentities && session.messages.every(message => strongHistoryMessageIdentities(message).some(identity => initialIdentities.has(identity)))
         const bounded = isCompleteInitialPage
-          ? { messages: previewHistoryPage(session.messages, liveBudget), dropped: 0 }
+          ? { messages: session.messages, dropped: 0 }
           : boundChatHistory(session.messages, liveBudget)
         const pages = session.historyWindowPages
           ? boundHistoryWindow(session.historyWindowPages, Math.floor(displayBudget / 2), session.historyPageDirection === 'newer' ? 'newer' : 'older')
@@ -2984,26 +2986,71 @@ export const useChatStore = create<ChatStore>((setState, get) => {
           const identities = new Set(canonical.map(message => message.id))
           if (overlay.every(message => identities.has(message.id)) ||
             (session.historyPageDirection === 'older' && (canonical[canonical.length - 1]?.timestamp ?? Infinity) < overlay[0]!.timestamp)) overlay = undefined
-          else overlay = previewHistoryPage(overlay, Math.floor(displayBudget / 8))
+          // This fixed snapshot can contain not-yet-persisted live rows. Keep
+          // whole rows until canonical paging reaches them; a cursor cannot
+          // recover an evicted overlay-only row.
         }
         const initialPage = session.historyInitialPage
-          ? { ...session.historyInitialPage, messages: previewHistoryPage(session.historyInitialPage.messages, Math.floor(displayBudget / (session.historyBrowseMessages ? 8 : 4))) }
-          : undefined
         const browse = pages ? messagesWithHistoryOverlay(pages, overlay)
           : session.historyBrowseMessages ? boundChatHistory(session.historyBrowseMessages, Math.floor(displayBudget / 2)).messages : undefined
-        const text = copyChatPreview(session.streamingText, CHAT_STREAM_MAX_CHARS, true)
-        const input = copyChatPreview(session.streamingToolInput, CHAT_STREAM_MAX_CHARS)
-        if (initialPage?.messages === session.historyInitialPage?.messages && overlay === session.historyWindowOverlay && bounded.messages === session.messages && browse === session.historyBrowseMessages && pages === session.historyWindowPages && text === session.streamingText && input === session.streamingToolInput && tasks === session.backgroundAgentTasks && notifications === session.agentTaskNotifications) continue
+        // A stream is the unfinished canonical response, not a preview. Keep it
+        // intact until completion; only complete historical rows can be evicted.
+        if (overlay === session.historyWindowOverlay && bounded.messages === session.messages && browse === session.historyBrowseMessages && pages === session.historyWindowPages && tasks === session.backgroundAgentTasks && notifications === session.agentTaskNotifications) continue
         if (sessions === patch.sessions) sessions = { ...sessions }
         sessions[id] = {
           ...session, messages: bounded.messages, historyBrowseMessages: browse, historyWindowPages: pages, historyWindowOverlay: overlay, historyInitialPage: initialPage,
           ...(pages ? { historyPage: historyWindowBoundary(pages) } : {}),
-          streamingText: text, streamingToolInput: input,
           backgroundAgentTasks: tasks, agentTaskNotifications: notifications,
           historyWindowed: true,
           historyLiveGap: session.historyLiveGap || bounded.dropped > 0,
           ...(bounded.dropped && session.streamAttemptStartIndex !== undefined
             ? { streamAttemptStartIndex: Math.max(0, session.streamAttemptStartIndex - bounded.dropped) } : {}),
+        }
+      }
+      // Whole-page exceptions are local to a visible/live conversation, not a
+      // license for every dormant tab to retain a large image page forever.
+      // Evict oldest-inserted idle caches; re-entry uses the ordinary cold
+      // history path on the existing connection and preserves runtime state.
+      const tabState = useTabStore.getState()
+      const activeTab = tabState.tabs.find(tab => tab.sessionId === tabState.activeTabId)
+      const activeIds = new Set([tabState.activeTabId, activeTab?.sourceSessionId, activeTab?.workbenchSessionId, activeTab?.teamLeadSessionId])
+      const cacheSizes = new Map(Object.entries(sessions).map(([id, session]) => [id, historyCacheBytes(session)]))
+      let retainedBytes = [...cacheSizes.values()].reduce((total, bytes) => total + bytes, 0)
+      if (retainedBytes > CHAT_HISTORY_CACHE_BYTES) {
+        for (const [id, session] of Object.entries(sessions)) {
+          if (retainedBytes <= CHAT_HISTORY_CACHE_BYTES) break
+          if (activeIds.has(id) || session.chatState !== 'idle' || session.historyHydrated !== true || session.historyStatus !== 'ready' ||
+            session.historyBootstrapDisabled || session.historyPageLoading || session.historyRecoveryStatus === 'loading' ||
+            session.awaitingReconnectSync || session.preHydrationSocketGapPending || session.isPreparingTurn ||
+            session.streamingText || session.streamingToolInput || session.activeToolUseId || session.activeThinkingId ||
+            session.pendingPermission || session.pendingComputerUsePermission ||
+            Object.keys(session.pendingPermissions ?? {}).length || Object.keys(session.pendingComputerUsePermissions ?? {}).length ||
+            session.queuedUserMessages?.length || session.historyWindowOverlay?.length ||
+            Object.values(session.backgroundAgentTasks ?? {}).some(task => task.status === 'running')) continue
+          const prior = previous.sessions[id]
+          if ((historyLoadsInFlight.has(id) || historyReloadControllers.has(id)) &&
+            session.historyInitialPage === prior?.historyInitialPage && session.messages === prior?.messages) continue
+          // historyHydrated can describe an earlier turn. message_complete
+          // marks idle before REST has caught up, so only evict live rows that
+          // are still the exact durable objects retained by a canonical page.
+          const durableRows = new Set([
+            ...(session.historyInitialPage?.messages ?? []),
+            ...(session.historyWindowPages?.flatMap(page => page.messages) ?? []),
+          ])
+          if (session.messages.some(message => !durableRows.has(message))) continue
+          if (!cacheSizes.get(id)) continue
+          clearVisitedHistory(id)
+          invalidateHistoryPrefetch(id)
+          if (sessions === patch.sessions) sessions = { ...sessions }
+          sessions[id] = {
+            ...session,
+            messages: [], historyInitialPage: undefined, historyWindowPages: undefined,
+            historyBrowseMessages: undefined, historyWindowOverlay: undefined,
+            historyPage: undefined, historyLivePage: undefined,
+            historyHydrated: false, historyStatus: 'idle', historyError: null,
+            historyViewingOlder: false, historyLiveGap: false, historyWindowed: false,
+          }
+          retainedBytes -= cacheSizes.get(id)!
         }
       }
       return sessions === patch.sessions ? patch : { ...patch, sessions }
@@ -3906,7 +3953,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
               return {
                 historyStatus: 'ready',
                 historyPage: page,
-                historyInitialPage: page ? { cursor: null, page, messages: previewHistoryPage(uiMessages, 256 * 1024) } : undefined,
+                historyInitialPage: page ? { cursor: null, page, messages: uiMessages } : undefined,
                 historyLiveGap: false,
                 historyViewingOlder: false,
                 historyBrowseMessages: undefined,
@@ -4001,7 +4048,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
             return {
               historyStatus: 'ready',
               historyPage: page,
-              historyInitialPage: page ? { cursor: null, page, messages: previewHistoryPage(uiMessages, 256 * 1024) } : undefined,
+              historyInitialPage: page ? { cursor: null, page, messages: uiMessages } : undefined,
                 historyLiveGap: false,
               historyViewingOlder: false,
               historyBrowseMessages: undefined,
@@ -4280,7 +4327,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
           sessions: updateSessionIn(state.sessions, sessionId, () => ({
             historyStatus: 'ready',
             historyPage: page,
-            historyInitialPage: page ? { cursor: null, page, messages: previewHistoryPage(uiMessages, 256 * 1024) } : undefined,
+            historyInitialPage: page ? { cursor: null, page, messages: uiMessages } : undefined,
                 historyLiveGap: false,
             historyViewingOlder: false,
             historyBrowseMessages: undefined,
@@ -7352,7 +7399,7 @@ function extractLeadingFileReferences(text: string): {
     if (!match?.[1]) break
 
     attachments.push({
-      type: 'file',
+      type: isInlineImagePath(match[1]) ? 'image' : 'file',
       name: getReferenceName(match[1]),
       path: match[1],
     })

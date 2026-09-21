@@ -71,3 +71,23 @@ test('empty query is recent metadata order even when an old title is empty', () 
   ])
   expect(index.searchSessionMetadata!('', { limit: 2 })!.sessions.map(row => row.id)).toEqual(['recent', 'middle'])
 })
+
+test('Unicode title and path matches keep exact ranking, totals and deep pagination', () => {
+  seed([
+    ...Array.from({ length: 320 }, (_, i) => ({ id: `fuzzy-${i}`, title: `Discuss ÉCOLE ${i}`, modified: i + 10 })),
+    { id: 'exact', title: 'ÉCOLE', modified: 1 },
+    { id: 'path', title: 'unrelated', workDir: '/ÉCOLE' },
+  ])
+  const first = index.searchSessionMetadata!('école', { limit: 2 })!
+  expect(first.total).toBe(322)
+  expect(first.sessions.map(row => row.id)).toEqual(['exact', 'fuzzy-319'])
+  expect(index.searchSessionMetadata!('ÉCOLE', { offset: 319, limit: 3 })!.sessions.map(row => row.id)).toEqual(['fuzzy-1', 'fuzzy-0', 'path'])
+  expect(index.searchSessionMetadata!('école', { offset: 322 })!.sessions).toEqual([])
+})
+
+test('ASCII queries also match Unicode capitals that lowercase into ASCII sequences', () => {
+  seed([{ id: 'a', title: 'KELVIN' }, { id: 'b', title: 'İSTANBUL' }])
+  expect(index.searchSessionMetadata!('kelvin')!.sessions.map(row => row.id)).toEqual(['a'])
+  expect(index.searchSessionMetadata!('KELVIN')!.sessions.map(row => row.id)).toEqual(['a'])
+  expect(index.searchSessionMetadata!('i\u0307stanbul')!.sessions.map(row => row.id)).toEqual(['b'])
+})

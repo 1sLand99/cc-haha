@@ -43,16 +43,18 @@ describe('continuous history window', () => {
     expect(retained[0]).toBe(pages[0])
   })
 
-  it('preserves every row identity when large bodies exhaust the display budget', () => {
-    const pages = [page(0), page(1), page(2)]
+  it('retains complete neighbouring pages and evicts older pages instead of clipping bodies', () => {
+    const pages = [page(0), page(1), page(2), page(3)]
     for (const [index, entry] of pages.entries()) entry.messages = Array.from({ length: 200 }, (_, row) => ({
       id: `${index}-${row}`, type: 'assistant_text', timestamp: row, content: 'x'.repeat(32_000),
     }))
     const bounded = boundHistoryWindow(pages, 256 * 1024, 'older')
     const messages = historyWindowMessages(bounded)
     expect(messages).toHaveLength(600)
-    expect(messages.map(message => message.id)).toEqual(pages.flatMap(entry => entry.messages.map(message => message.id)))
-    expect(JSON.stringify(messages).length * 2).toBeLessThan(256 * 1024)
+    expect(messages.map(message => message.id)).toEqual(pages.slice(0, 3).flatMap(entry => entry.messages.map(message => message.id)))
+    expect(bounded).toHaveLength(3)
+    expect(bounded[0]).toBe(pages[0])
+    expect(historyWindowBoundary(bounded).previousCursor).toBe(pages[2]!.page.previousCursor)
     expect(pages[0]!.messages[0]).toMatchObject({ content: 'x'.repeat(32_000) })
     expect(historyWindowMessages(bounded)).toBe(messages)
   })

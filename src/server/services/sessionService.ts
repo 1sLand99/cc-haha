@@ -8,7 +8,7 @@ import { recoverBoundedSessionHistory, type SessionHistoryRecovery } from './ses
  * 确保 Desktop App 与 CLI 的数据完全互通。
  */
 
-import { HISTORY_SEMANTIC_RECORD_BYTES, displayPreview, readBoundedHistoryPage, streamBoundedHistory, withHistoryReadBudget, type HistoryPageInfo } from './boundedSessionHistory.js'
+import { HISTORY_SEMANTIC_RECORD_BYTES, HISTORY_PAGE_BYTES, displayPreview, readBoundedHistoryPage, streamBoundedHistory, withHistoryReadBudget, type HistoryPageInfo } from './boundedSessionHistory.js'
 import { constants, createReadStream, type Stats } from 'node:fs'
 import { createHash } from 'node:crypto'
 import * as fs from 'node:fs/promises'
@@ -3908,12 +3908,13 @@ export class SessionService {
     return recovery
   }
 
-  private async projectHistoryPageEntries(filePath: string, result: Awaited<ReturnType<typeof readBoundedHistoryPage>>, signal?: AbortSignal): Promise<{ entries: RawEntry[]; contextScanBytes: number }> {
+  private async projectHistoryPageEntries(filePath: string, result: Awaited<ReturnType<typeof readBoundedHistoryPage>>, signal?: AbortSignal, includeUnownedSidechains = false): Promise<{ entries: RawEntry[]; contextScanBytes: number }> {
     const context = await readHistoryContexts({
       filePath,
       sourceVersion: result.page.sourceVersion,
       offsets: result.entries.map(item => item.byteStart),
       signal,
+      includeUnownedSidechains,
       classify: raw => {
         const entry = raw as RawEntry
         const user = entry.message?.role === 'user' && !entry.isMeta
@@ -3949,7 +3950,9 @@ export class SessionService {
     const projection = await this.projectHistoryPageEntries(found.filePath, result, options.signal)
     const entries = result.entries.map(item => item.entry as RawEntry)
     const response = { messages: this.entriesToMessages(projection.entries), taskNotifications: this.taskNotificationsFromEntries(entries), page: { ...result.page, contextScanBytes: projection.contextScanBytes } }
-    if (Buffer.byteLength(JSON.stringify(response)) > 2 * 1024 * 1024) {
+    // One bounded record may own a page. Conversion can retain both content
+    // and toolUseResult, so allow two copies plus the normal page envelope.
+    if (Buffer.byteLength(JSON.stringify(response)) > 2 * HISTORY_SEMANTIC_RECORD_BYTES + HISTORY_PAGE_BYTES) {
       throw new ApiError(413, 'History page exceeded its response budget', 'HISTORY_PAGE_TOO_LARGE')
     }
     return response
@@ -4112,12 +4115,12 @@ export class SessionService {
               if (retainedBytes > 2 * 1024 * 1024) throw new ApiError(413, 'Agent transcript changed beyond its viewing budget', 'SUBAGENT_RECORD_LIMIT')
               if (entries.length >= 10_000) throw new ApiError(413, 'Agent transcript exceeds its record budget', 'SUBAGENT_RECORD_LIMIT')
               entries.push(entry as RawEntry)
-            })
+            }, undefined, { maxRecordBytes: HISTORY_SEMANTIC_RECORD_BYTES })
             return { messages: this.entriesToMessages(entries), taskNotifications: this.taskNotificationsFromEntries(entries), historyComplete: scan.omittedRecords === 0 }
           })
         }
         const result = await readBoundedHistoryPage(filePath)
-        const projection = await this.projectHistoryPageEntries(filePath, result)
+        const projection = await this.projectHistoryPageEntries(filePath, result, undefined, true)
         const entries = result.entries.map(item => item.entry as RawEntry)
         return {
           messages: this.entriesToMessages(projection.entries),
