@@ -8,7 +8,7 @@ import { recoverBoundedSessionHistory, type SessionHistoryRecovery } from './ses
  * 确保 Desktop App 与 CLI 的数据完全互通。
  */
 
-import { HISTORY_SEMANTIC_RECORD_BYTES, readBoundedHistoryPage, streamBoundedHistory, withHistoryReadBudget, type HistoryPageInfo } from './boundedSessionHistory.js'
+import { HISTORY_SEMANTIC_RECORD_BYTES, displayPreview, readBoundedHistoryPage, streamBoundedHistory, withHistoryReadBudget, type HistoryPageInfo } from './boundedSessionHistory.js'
 import { constants, createReadStream, type Stats } from 'node:fs'
 import { createHash } from 'node:crypto'
 import * as fs from 'node:fs/promises'
@@ -4055,6 +4055,7 @@ export class SessionService {
       const entries: RawEntry[] = []
       const taskNotifications: SessionTaskNotification[] = []
       let bytes = 0
+      let incomplete = false
       let suppressTaskNotificationResponse = false
       const scan = await streamBoundedHistory(filePath, raw => {
         const entry = raw as RawEntry
@@ -4066,19 +4067,22 @@ export class SessionService {
         const content = Array.isArray(message?.content) ? message.content.filter((block: any) =>
           block?.type === 'tool_use' ? ids.has(block.id) : block?.type === 'tool_result' && ids.has(block.tool_use_id)) : []
         const notices = this.taskNotificationsFromEntries([entry]).filter(notice => ids.has(notice.toolUseId))
-        if (content.length && !suppressTaskNotificationResponse) {
-          const selected = { ...entry, message: { ...message, content } } as RawEntry
-          bytes += Buffer.byteLength(JSON.stringify(selected))
-          entries.push(selected)
+        const selected = content.length && !suppressTaskNotificationResponse
+          ? displayPreview({ ...entry, message: { ...message, content } }) : undefined
+        if (selected?.bodyTruncated) incomplete = true
+        const selectedBytes = (selected ? Buffer.byteLength(JSON.stringify(selected)) : 0) +
+          (notices.length ? Buffer.byteLength(JSON.stringify(notices)) : 0)
+        if (bytes + selectedBytes > 2 * 1024 * 1024 || entries.length + taskNotifications.length + (selected ? 1 : 0) + notices.length > 2048) {
+          incomplete = true
+          return
         }
-        if (notices.length) bytes += Buffer.byteLength(JSON.stringify(notices))
+        bytes += selectedBytes
+        if (selected) entries.push(selected as RawEntry)
         taskNotifications.push(...notices)
-        if (bytes > 2 * 1024 * 1024 || entries.length + taskNotifications.length > 2048) {
-          throw new ApiError(413, 'Agent lookup exceeds its viewing budget', 'SUBAGENT_LOOKUP_LIMIT')
-        }
-      })
-      if (scan.omittedRecords) throw new ApiError(413, 'Agent lookup contains records above the viewing limit', 'SUBAGENT_LOOKUP_INCOMPLETE')
-      const transcript = { messages: this.entriesToMessages(entries), taskNotifications, historyComplete: true }
+      }, undefined, { maxRecordBytes: HISTORY_SEMANTIC_RECORD_BYTES })
+      // A skipped record may be unrelated to this Agent. Preserve the evidence
+      // we did read without claiming that absence proves a missing run.
+      const transcript = { messages: this.entriesToMessages(entries), taskNotifications, historyComplete: !incomplete && scan.omittedRecords === 0 }
       this.subagentLookupCache.delete(key)
       this.subagentLookupCache.set(key, { version, transcript })
       while (this.subagentLookupCache.size > 4) this.subagentLookupCache.delete(this.subagentLookupCache.keys().next().value!)

@@ -1,5 +1,5 @@
 import { useRef, useEffect, useMemo, memo, useState, useCallback, useDeferredValue, useLayoutEffect, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import { ArrowDown, BookMarked, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleStop, FileStack, LoaderCircle, MessageCircle, Settings, Target, Undo2, XCircle } from 'lucide-react'
 import { useContinuousChatHistory } from '../../hooks/useContinuousChatHistory'
 import { ApiError } from '../../api/client'
@@ -2189,7 +2189,7 @@ const MeasuredRenderItem = memo(function MeasuredRenderItem({
   children,
 }: {
   itemKey: string
-  onHeightChange: (itemKey: string, height: number) => void
+  onHeightChange: (itemKey: string, height: number, initial?: boolean) => void
   highlighted: boolean
   railPosition: TurnRailPosition
   children: ReactNode
@@ -2200,6 +2200,8 @@ const MeasuredRenderItem = memo(function MeasuredRenderItem({
     const node = itemRef.current
     if (!node) return undefined
 
+    const initialHeight = node.getBoundingClientRect().height
+    if (initialHeight > 0) onHeightChange(itemKey, initialHeight, true)
     if (typeof ResizeObserver === 'undefined') return undefined
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0]
@@ -2340,7 +2342,7 @@ export function MessageList({
     (chatState === 'thinking' && Boolean(activeThinkingId))
   const messageListRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const historyScrollHandlers = useRef<{ onScroll: () => void; onUserIntent: (direction?: 'older' | 'newer') => void; cancelAnchor: () => void }>({ onScroll: () => {}, onUserIntent: () => {}, cancelAnchor: () => {} })
+  const historyScrollHandlers = useRef<{ onScroll: () => void; onUserIntent: (direction?: 'older' | 'newer') => void; cancelAnchor: () => void; resumeReading: () => void }>({ onScroll: () => {}, onUserIntent: () => {}, cancelAnchor: () => {}, resumeReading: () => {} })
   const lastTailWindowRevision = useRef(sessionState?.historyWindowRevision ?? 0)
   const scrollContentRef = useRef<HTMLDivElement>(null)
   const virtualItemHeightsRef = useRef<Map<string, number>>(
@@ -2349,8 +2351,6 @@ export function MessageList({
   const virtualItemMetricCacheRef = useRef<Map<string, VirtualRenderItemMetric>>(
     resolvedSessionId ? getMetricsForSession(resolvedSessionId) : new Map<string, VirtualRenderItemMetric>(),
   )
-  const pendingMeasuredHeightsRef = useRef(false)
-  const measureFlushFrameRef = useRef<number | null>(null)
   const liveFollowFrameRef = useRef<number | null>(null)
   const navigationHighlightTimerRef = useRef<number | null>(null)
   const workspaceOriginRestoreFrameRef = useRef<number | null>(null)
@@ -2407,9 +2407,6 @@ export function MessageList({
     message.type === 'compact_summary' && message.phase === 'compacting')
 
   useEffect(() => () => {
-    if (measureFlushFrameRef.current !== null) {
-      cancelAnimationFrame(measureFlushFrameRef.current)
-    }
     if (liveFollowFrameRef.current !== null) {
       cancelAnimationFrame(liveFollowFrameRef.current)
     }
@@ -2527,12 +2524,10 @@ export function MessageList({
   }, [resolvedSessionId, sessionState?.historyViewingOlder])
 
   const flushMeasuredHeightVersion = useCallback(() => {
-    if (!pendingMeasuredHeightsRef.current) return
-    pendingMeasuredHeightsRef.current = false
     setMeasuredItemsVersion((version) => version + 1)
   }, [])
 
-  const handleVirtualItemHeightChange = useCallback((itemKey: string, height: number) => {
+  const handleVirtualItemHeightChange = useCallback((itemKey: string, height: number, initial = false) => {
     const measuredHeight = clampNumber(height, VIRTUAL_MIN_ITEM_HEIGHT, VIRTUAL_MAX_ITEM_HEIGHT)
     const previousHeight = virtualItemHeightsRef.current.get(itemKey)
     if (
@@ -2545,19 +2540,10 @@ export function MessageList({
       requestLiveFollow()
     }
 
-    if (typeof requestAnimationFrame === 'undefined') {
-      pendingMeasuredHeightsRef.current = true
-      flushMeasuredHeightVersion()
-    } else if (!pendingMeasuredHeightsRef.current) {
-      pendingMeasuredHeightsRef.current = true
-      if (measureFlushFrameRef.current !== null) {
-        cancelAnimationFrame(measureFlushFrameRef.current)
-      }
-      measureFlushFrameRef.current = requestAnimationFrame(() => {
-        measureFlushFrameRef.current = null
-        flushMeasuredHeightVersion()
-      })
-    }
+    // Mount measurements commit before paint; observer measurements must update
+    // offsets and restore the reading anchor in the same frame as the new height.
+    if (initial) flushMeasuredHeightVersion()
+    else flushSync(flushMeasuredHeightVersion)
   }, [flushMeasuredHeightVersion, hasPendingPermissionCard, requestLiveFollow])
 
   const updateAutoScrollState = useCallback(() => {
@@ -2681,12 +2667,7 @@ export function MessageList({
       virtualItemMetricCacheRef.current = resolvedSessionId
         ? getMetricsForSession(resolvedSessionId)
         : new Map<string, VirtualRenderItemMetric>()
-      pendingMeasuredHeightsRef.current = false
       lastContentResizeFollowHeightRef.current = null
-      if (measureFlushFrameRef.current !== null) {
-        cancelAnimationFrame(measureFlushFrameRef.current)
-        measureFlushFrameRef.current = null
-      }
       if (liveFollowFrameRef.current !== null) {
         cancelAnimationFrame(liveFollowFrameRef.current)
         liveFollowFrameRef.current = null
@@ -2909,6 +2890,29 @@ export function MessageList({
     () => renderItems.map(getRenderItemKey),
     [renderItems],
   )
+  const committedGroupKeys = useRef<{ sessionId: string | null | undefined; byTool: Map<string, string> }>({ sessionId: resolvedSessionId, byTool: new Map() })
+  const groupMountKeys = useMemo(() => {
+    const previous = committedGroupKeys.current.sessionId === resolvedSessionId
+      ? committedGroupKeys.current.byTool : new Map<string, string>()
+    const keys = new Map<string, string>()
+    const byTool = new Map<string, string>()
+    const used = new Set<string>()
+    for (const item of renderItems) {
+      if (item.kind !== 'tool_group') continue
+      // Prepending a page can rename a group. Preserve its mounted disclosure
+      // and inner rows through surviving tool identities in either direction.
+      const retained = item.toolCalls.map((tool) => previous.get(tool.id)).find((key) => key && !used.has(key))
+      const key = retained ?? `activity:${item.id}`
+      const uniqueKey = used.has(key) ? `${key}:${keys.size}` : key
+      used.add(uniqueKey)
+      keys.set(item.id, uniqueKey)
+      for (const tool of item.toolCalls) byTool.set(tool.id, uniqueKey)
+    }
+    return { keys, byTool }
+  }, [renderItems, resolvedSessionId])
+  useLayoutEffect(() => {
+    committedGroupKeys.current = { sessionId: resolvedSessionId, byTool: groupMountKeys.byTool }
+  }, [groupMountKeys, resolvedSessionId])
   const renderItemMetrics = useMemo(
     () => renderItems.map((item, index) => {
       const key = renderItemKeys[index]!
@@ -2962,11 +2966,12 @@ export function MessageList({
     ignoreProgrammaticScrollUntilRef.current = performance.now() + 250
     ignoreProgrammaticScrollTopRef.current = container.scrollTop
     syncVirtualViewportFromContainer(container)
-    if (resolvedSessionId) rememberSessionScroll(resolvedSessionId, container, false)
+    if (resolvedSessionId) rememberSessionScroll(resolvedSessionId, container, shouldAutoScrollRef.current)
   }, [resolvedSessionId, syncVirtualViewportFromContainer])
   const continuousHistory = useContinuousChatHistory({
     sessionId: resolvedSessionId ?? undefined,
     revision: sessionState?.historyWindowRevision ?? 0,
+    snapshotKey: sessionState?.historyInitialPage?.page,
     ready: sessionState?.historyStatus === 'ready' && sessionState?.historyHydrated === true,
     loading: sessionState?.historyPageLoading === true,
     error: sessionState?.historyError,
@@ -2976,6 +2981,7 @@ export function MessageList({
     keys: renderItemKeys,
     offsets: virtualTranscriptWindow.offsets,
     identities: historyAnchorIdentities,
+    isFollowing: () => shouldAutoScrollRef.current,
     load: (direction) => resolvedSessionId ? (direction === 'older' ? loadOlderHistory(resolvedSessionId) : loadNewerHistory(resolvedSessionId)) : Promise.resolve(),
     prefetch: (direction) => resolvedSessionId ? prefetchHistory(resolvedSessionId, direction) : Promise.resolve(),
     syncViewport: syncHistoryViewport,
@@ -3299,6 +3305,7 @@ export function MessageList({
   const handleNavigateToConversationItem = useCallback((item: ConversationNavigationItem) => {
     const container = scrollContainerRef.current
     if (!container) return
+    historyScrollHandlers.current.cancelAnchor()
 
     const viewportHeight = container.clientHeight || virtualViewport.viewportHeight || VIRTUAL_DEFAULT_VIEWPORT_HEIGHT
     userScrollIntentUntilRef.current = 0
@@ -3353,6 +3360,7 @@ export function MessageList({
         }
       }
 
+      historyScrollHandlers.current.resumeReading()
       scheduleHighlightClear()
     })
   }, [
@@ -3365,6 +3373,7 @@ export function MessageList({
   const navigateToConversationFindMatch = useCallback((match: ConversationFindMatch) => {
     const container = scrollContainerRef.current
     if (!container) return
+    historyScrollHandlers.current.cancelAnchor()
 
     const viewportHeight = container.clientHeight || virtualViewport.viewportHeight || VIRTUAL_DEFAULT_VIEWPORT_HEIGHT
     const targetOffset = virtualTranscriptWindow.offsets[match.renderIndex] ?? virtualTranscriptWindow.totalHeight
@@ -3381,6 +3390,7 @@ export function MessageList({
     ignoreProgrammaticScrollTopRef.current = targetScrollTop
     setScrollTopWithoutLayoutRead(container, targetScrollTop)
     setVirtualViewport({ scrollTop: targetScrollTop, viewportHeight })
+    requestAnimationFrame(() => historyScrollHandlers.current.resumeReading())
   }, [virtualTranscriptWindow.offsets, virtualTranscriptWindow.totalHeight, virtualViewport.viewportHeight])
   const navigateToConversationFindMatchRef = useRef(navigateToConversationFindMatch)
   navigateToConversationFindMatchRef.current = navigateToConversationFindMatch
@@ -3463,6 +3473,7 @@ export function MessageList({
     const container = scrollContainerRef.current
     const content = scrollContentRef.current
     if (!container || !content || !resolvedSessionId) return
+    if (attempt === 0) historyScrollHandlers.current.cancelAnchor()
 
     const renderItem = [...content.querySelectorAll<HTMLElement>('[data-chat-render-item-key]')]
       .find((node) => node.dataset.chatRenderItemKey === origin.sourceTurnKey)
@@ -3479,6 +3490,7 @@ export function MessageList({
         renderItem.scrollIntoView({ block: 'nearest' })
       }
       opener.focus({ preventScroll: true })
+      historyScrollHandlers.current.resumeReading()
       useWorkspaceStore.getState().setOrigin(resolvedSessionId, null)
       workspaceOriginRestoreFrameRef.current = null
       return
@@ -3498,6 +3510,7 @@ export function MessageList({
     }
 
     if (attempt >= 7 || renderIndex < 0) {
+      historyScrollHandlers.current.resumeReading()
       useWorkspaceStore.getState().setOrigin(resolvedSessionId, null)
       workspaceOriginRestoreFrameRef.current = null
       return
@@ -3681,6 +3694,7 @@ export function MessageList({
       <div
         ref={scrollContainerRef}
         onScroll={updateAutoScrollState}
+        style={isAwayFromLatest || sessionState?.historyViewingOlder ? { overflowAnchor: 'none' } : undefined}
         onClickCapture={handleDisclosureToggle}
         onWheel={handleWheelScrollIntent}
         onPointerDown={markUserScrollIntent}
@@ -3713,12 +3727,13 @@ export function MessageList({
 
           {virtualTranscriptWindow.items.map(({ item, index }) => {
             const itemKey = getRenderItemKey(item)
+            const mountKey = groupMountKeys.keys.get(itemKey) ?? itemKey
             const content = renderTranscriptItem(item, index)
             const railPosition = turnRailPositions[index] ?? 'none'
 
             return virtualTranscriptWindow.enabled ? (
               <MeasuredRenderItem
-                key={itemKey}
+                key={mountKey}
                 itemKey={itemKey}
                 onHeightChange={handleVirtualItemHeightChange}
                 highlighted={highlightedNavigationItemKey === itemKey}
@@ -3728,7 +3743,7 @@ export function MessageList({
               </MeasuredRenderItem>
             ) : (
               <div
-                key={itemKey}
+                key={mountKey}
                 data-chat-render-item-key={itemKey}
                 data-turn-rail={railPosition}
                 className={`${CHAT_RENDER_ITEM_CLASS} chat-render-item--cv ${turnRailClass(railPosition)} ${highlightedNavigationItemKey === itemKey ? 'chat-render-item--navigation-target' : ''}`}

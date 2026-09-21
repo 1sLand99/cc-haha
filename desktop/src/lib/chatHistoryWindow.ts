@@ -9,20 +9,44 @@ export type HistoryWindowPage = {
   messages: UIMessage[]
 }
 
-const MAX_WINDOW_PAGES = 3
+// Raw transcript pages may collapse into a single tool summary. Bound by bytes,
+// not three requests, while still capping metadata for empty/hidden pages.
+const MAX_WINDOW_PAGES = 64
+const pageSizes = new WeakMap<HistoryWindowPage, number>()
+export function historyPageBytes(page: HistoryWindowPage): number {
+  let size = pageSizes.get(page)
+  if (size === undefined) {
+    size = 256 + JSON.stringify(page).length * 2
+    pageSizes.set(page, size)
+  }
+  return size
+}
 const cache = new WeakMap<HistoryWindowPage[], { budget: number; direction: HistoryDirection; pages: HistoryWindowPage[] }>()
 
 export function boundHistoryWindow(pages: HistoryWindowPage[], budget: number, direction: HistoryDirection): HistoryWindowPage[] {
   const cached = cache.get(pages)
   if (cached?.budget === budget && cached.direction === direction) return cached.pages
-  const selected = pages.length <= MAX_WINDOW_PAGES ? pages
-    : direction === 'older' ? pages.slice(0, MAX_WINDOW_PAGES) : pages.slice(-MAX_WINDOW_PAGES)
-  const perPage = Math.floor(budget / Math.max(1, selected.length))
-  const result = selected.map(page => {
+  // A stable per-page allowance avoids shortening the previous page's text
+  // every time a new page joins, which otherwise changes the reading geometry.
+  const perPage = Math.floor(budget / 3)
+  const candidates = direction === 'older' ? pages.slice(0, MAX_WINDOW_PAGES) : pages.slice(-MAX_WINDOW_PAGES)
+  const normalized = candidates.map(page => {
     const messages = previewHistoryPage(page.messages, perPage)
     return messages === page.messages ? page : { ...page, messages }
   })
-  const bounded = selected === pages && result.every((page, index) => page === pages[index]) ? pages : result
+  let start = direction === 'older' ? 0 : normalized.length
+  let end = start
+  let bytes = 0
+  while (direction === 'older' ? end < normalized.length : start > 0) {
+    const next = normalized[direction === 'older' ? end : start - 1]!
+    const size = historyPageBytes(next)
+    if (end - start >= 3 && bytes + size > budget) break
+    bytes += size
+    if (direction === 'older') end++
+    else start--
+  }
+  const result = normalized.slice(start, end)
+  const bounded = result.length === pages.length && result.every((page, index) => page === pages[index]) ? pages : result
   const memo = { budget, direction, pages: bounded }
   cache.set(pages, memo)
   cache.set(bounded, memo)

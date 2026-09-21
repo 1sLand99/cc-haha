@@ -3239,6 +3239,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'session.activity.status.unknown': 'Unknown',
 
   // ─── SubAgent Run ──────────────────────────────────────
+  'subagentRun.incompleteHistory': 'Some history could not be read. Available content is shown; refresh to retry.',
   'subagentRun.refresh': 'Refresh SubAgent run',
   'subagentRun.backToParent': 'Back to parent session',
   'subagentRun.loading': 'Loading SubAgent run...',

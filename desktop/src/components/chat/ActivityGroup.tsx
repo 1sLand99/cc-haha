@@ -176,7 +176,7 @@ function ActivityToolRow({
   const childToolCalls = childToolCallsByParent.get(toolCall.toolUseId) ?? []
 
   return (
-    <div>
+    <div data-chat-anchor-id={toolCall.id}>
       <ToolCallBlock
         chrome="row"
         toolName={toolCall.toolName}

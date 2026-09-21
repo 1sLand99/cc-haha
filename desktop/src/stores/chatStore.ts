@@ -1,5 +1,5 @@
 import { normalizeSessionReferences, splitSessionReferenceContext } from '@/lib/sessionReferences'
-import { boundHistoryWindow, historyWindowBoundary, historyWindowMessages, type HistoryDirection, type HistoryWindowPage } from '../lib/chatHistoryWindow'
+import { boundHistoryWindow, historyPageBytes, historyWindowBoundary, historyWindowMessages, type HistoryDirection, type HistoryWindowPage } from '../lib/chatHistoryWindow'
 import { create } from 'zustand'
 import { boundActivityText, boundChatHistory, previewHistoryPage, copyChatPreview, CHAT_STREAM_MAX_CHARS, CHAT_TERMINAL_ACTIVITY_MAX_PER_SESSION, CHAT_TERMINAL_ACTIVITY_MAX_TOTAL } from '../lib/chatHistoryBudget'
 import { wsManager } from '../api/websocket'
@@ -2392,6 +2392,56 @@ const historyPageControllers = new Map<string, AbortController>()
 type PreparedHistoryPage = { messages: UIMessage[]; page: SessionHistoryPage['page'] }
 const historyPrefetches = new Map<string, { cursor: string | null; controller: AbortController; promise: Promise<PreparedHistoryPage> }>()
 
+// Separate visited-page retention from the DOM/display window. Reverse cursors
+// address the adjacent page, not necessarily the cursor that originally read it.
+const visitedHistoryPages = new Map<string, { sessionId: string; page: HistoryWindowPage; bytes: number }>()
+let visitedHistoryBytes = 0
+
+function clearVisitedHistory(sessionId: string) {
+  for (const [key, entry] of visitedHistoryPages) {
+    if (entry.sessionId !== sessionId) continue
+    visitedHistoryBytes -= entry.bytes
+    visitedHistoryPages.delete(key)
+  }
+}
+
+function rememberHistoryPages(sessionId: string, pages: HistoryWindowPage[]) {
+  const remember = (cursor: string | null | undefined, page: HistoryWindowPage) => {
+    if (!cursor) return
+    const key = JSON.stringify([sessionId, page.page.sourceVersion, cursor])
+    const bytes = historyPageBytes(page) + key.length * 2
+    const existing = visitedHistoryPages.get(key)
+    if (existing) visitedHistoryBytes -= existing.bytes
+    visitedHistoryPages.delete(key)
+    if (bytes > 4 * 1024 * 1024) return
+    visitedHistoryPages.set(key, { sessionId, page, bytes })
+    visitedHistoryBytes += bytes
+    while (visitedHistoryBytes > 4 * 1024 * 1024 || visitedHistoryPages.size > 128) {
+      const oldest = visitedHistoryPages.keys().next().value!
+      visitedHistoryBytes -= visitedHistoryPages.get(oldest)!.bytes
+      visitedHistoryPages.delete(oldest)
+    }
+  }
+  pages.forEach((page, index) => {
+    remember(page.cursor, page)
+    const older = pages[index - 1]
+    const newer = pages[index + 1]
+    if (older?.page.sourceVersion === page.page.sourceVersion) remember(older.page.previousCursor, page)
+    if (newer?.page.sourceVersion === page.page.sourceVersion) remember(newer.page.nextCursor, page)
+  })
+}
+
+function cachedHistoryPage(sessionId: string, cursor: string | null): PreparedHistoryPage | undefined {
+  if (!cursor) return
+  const version = useChatStore.getState().sessions[sessionId]?.historyPage?.sourceVersion
+  const key = JSON.stringify([sessionId, version, cursor])
+  const cached = visitedHistoryPages.get(key)
+  if (!cached) return
+  visitedHistoryPages.delete(key)
+  visitedHistoryPages.set(key, cached)
+  return { messages: cached.page.messages, page: cached.page.page }
+}
+
 function invalidateHistoryPrefetch(sessionId: string) {
   historyPrefetches.get(sessionId)?.controller.abort()
   historyPrefetches.delete(sessionId)
@@ -2405,6 +2455,8 @@ async function prepareHistoryPage(sessionId: string, cursor: string | null, sign
 }
 
 async function requestHistoryPage(sessionId: string, cursor: string | null, signal: AbortSignal): Promise<PreparedHistoryPage> {
+  const cached = cachedHistoryPage(sessionId, cursor)
+  if (cached && !signal.aborted) return cached
   const prefetched = historyPrefetches.get(sessionId)
   if (prefetched?.cursor === cursor && !prefetched.controller.signal.aborted) {
     const abort = () => prefetched.controller.abort()
@@ -2435,6 +2487,7 @@ function currentHistoryLifecycle(sessionId: string): number {
 function advanceHistoryLifecycle(sessionId: string): number {
   const nextGeneration = currentHistoryLifecycle(sessionId) + 1
   historyLifecycleGenerations.set(sessionId, nextGeneration)
+  clearVisitedHistory(sessionId)
   invalidateHistoryPrefetch(sessionId)
   historyLoadsInFlight.get(sessionId)?.controller.abort()
   historyLoadsInFlight.delete(sessionId)
@@ -2825,7 +2878,10 @@ async function changeHistoryWindow(
   const session = get().sessions[sessionId]
   let cursor = direction === 'latest' ? null : direction === 'older' ? session?.historyPage?.nextCursor : session?.historyPage?.previousCursor
   if (!session || (direction !== 'latest' && ((!cursor && !(direction === 'older' && session.historyLiveGap)) || session.historyPageLoading))) return
-  if (direction === 'latest') invalidateHistoryPrefetch(sessionId)
+  if (direction === 'latest') {
+    invalidateHistoryPrefetch(sessionId)
+    clearVisitedHistory(sessionId)
+  }
   const lifecycle = currentHistoryLifecycle(sessionId)
   const controller = new AbortController()
   historyPageControllers.get(sessionId)?.abort()
@@ -2868,6 +2924,7 @@ async function changeHistoryWindow(
       }] : [])
       const incoming = result.page ? { cursor: cursor ?? null, page: result.page, messages: result.messages } : undefined
       const pages = !incoming ? previous : direction === 'older' ? [incoming, ...previous] : [...previous, incoming]
+      rememberHistoryPages(sessionId, pages)
       return {
         historyWindowPages: pages,
         historyLiveGap: false,
@@ -3299,6 +3356,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
     }
 
     // An explicit send returns to the live conversation; background events do not.
+    clearVisitedHistory(sessionId)
     invalidateHistoryPrefetch(sessionId)
     historyPageControllers.get(sessionId)?.abort()
     historyPageControllers.delete(sessionId)
@@ -3589,6 +3647,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
   },
 
   loadHistory: async (sessionId, options) => {
+    clearVisitedHistory(sessionId)
     invalidateHistoryPrefetch(sessionId)
     if (historyPageControllers.has(sessionId)) {
       historyPageControllers.get(sessionId)?.abort()
@@ -4073,7 +4132,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
   prefetchHistory: async (sessionId, direction) => {
     const session = get().sessions[sessionId]
     const cursor = direction === 'older' ? session?.historyPage?.nextCursor : session?.historyPage?.previousCursor
-    if (!cursor || session?.historyPageLoading || historyPrefetches.get(sessionId)?.cursor === cursor) return
+    if (!cursor || session?.historyPageLoading || historyPrefetches.get(sessionId)?.cursor === cursor || cachedHistoryPage(sessionId, cursor)) return
     invalidateHistoryPrefetch(sessionId)
     while (historyPrefetches.size >= 4) invalidateHistoryPrefetch(historyPrefetches.keys().next().value!)
     const controller = new AbortController()
@@ -4097,6 +4156,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
   },
 
   reloadHistory: async (sessionId, guard) => {
+    clearVisitedHistory(sessionId)
     invalidateHistoryPrefetch(sessionId)
     if (historyPageControllers.has(sessionId)) {
       historyPageControllers.get(sessionId)?.abort()

@@ -10,15 +10,37 @@ function page(index: number, content = 'short message'): HistoryWindowPage {
 }
 
 describe('continuous history window', () => {
-  it('keeps adjacent pages and a return cursor when the opposite edge is evicted', () => {
-    const pages = [0, 1, 2, 3].map(index => page(index))
-    const older = boundHistoryWindow(pages, 1024 * 1024, 'older')
-    expect(historyWindowMessages(older).map(message => message.id)).toEqual(['0', '1', '2'])
-    expect(historyWindowBoundary(older)).toMatchObject({ nextCursor: 'older-0', previousCursor: 'newer-2' })
-    const newer = boundHistoryWindow(pages, 1024 * 1024, 'newer')
-    expect(historyWindowMessages(newer).map(message => message.id)).toEqual(['1', '2', '3'])
-    expect(historyWindowBoundary(newer)).toMatchObject({ nextCursor: 'older-1', previousCursor: 'newer-3' })
-    expect(boundHistoryWindow(newer, 1024 * 1024, 'newer')).toBe(newer)
+  it('retains small visited pages instead of evicting them after three requests', () => {
+    const pages = Array.from({ length: 12 }, (_, index) => page(index))
+    expect(boundHistoryWindow(pages, 1024 * 1024, 'older')).toBe(pages)
+    expect(boundHistoryWindow(pages, 1024 * 1024, 'newer')).toBe(pages)
+  })
+
+  it('evicts only the opposite boundary when the byte budget is exhausted', () => {
+    const pages = Array.from({ length: 20 }, (_, index) => page(index, 'x'.repeat(30_000)))
+    const older = boundHistoryWindow(pages, 256 * 1024, 'older')
+    const newer = boundHistoryWindow(pages, 256 * 1024, 'newer')
+    expect(older.length).toBeGreaterThanOrEqual(3)
+    expect(older.length).toBeLessThan(pages.length)
+    expect(older[0]).toBe(pages[0])
+    expect(newer.at(-1)).toBe(pages.at(-1))
+    expect(historyWindowBoundary(older).previousCursor).toBe(older.at(-1)!.page.previousCursor)
+    expect(historyWindowBoundary(newer).nextCursor).toBe(newer[0]!.page.nextCursor)
+    expect(boundHistoryWindow(newer, 256 * 1024, 'newer')).toBe(newer)
+  })
+
+  it('does not shorten displayed text when another page is joined', () => {
+    const first = page(0, 'readable reply '.repeat(5000))
+    const before = boundHistoryWindow([first], 128 * 1024, 'older')
+    const after = boundHistoryWindow([page(-2), page(-1), ...before], 128 * 1024, 'older')
+    expect(after.find(entry => entry.cursor === first.cursor)).toBe(before[0])
+  })
+
+  it('bounds empty-page metadata even when records project to no visible rows', () => {
+    const pages = Array.from({ length: 100 }, (_, index) => ({ ...page(index), messages: [] }))
+    const retained = boundHistoryWindow(pages, 1024 * 1024, 'older')
+    expect(retained.length).toBeLessThan(100)
+    expect(retained[0]).toBe(pages[0])
   })
 
   it('preserves every row identity when large bodies exhaust the display budget', () => {

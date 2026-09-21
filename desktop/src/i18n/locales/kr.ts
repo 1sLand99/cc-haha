@@ -3241,6 +3241,7 @@ export const kr: Record<TranslationKey, string> = {
   'session.activity.status.unknown': '알 수 없음',
 
   // ─── SubAgent Run ──────────────────────────────────────
+  'subagentRun.incompleteHistory': '일부 기록을 읽을 수 없어 확인 가능한 내용을 표시합니다. 새로고침하여 다시 시도하세요.',
   'subagentRun.refresh': 'SubAgent 실행 새로고침',
   'subagentRun.backToParent': '상위 세션으로 돌아가기',
   'subagentRun.loading': 'SubAgent 실행을 불러오는 중...',
