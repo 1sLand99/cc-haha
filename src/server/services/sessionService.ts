@@ -1799,6 +1799,16 @@ export class SessionService {
     ).length
   }
 
+  /** A real conversation, including a collaboration delivery persisted as isMeta. */
+  private hasConversationTranscript(entries: RawEntry[]): boolean {
+    return entries.some((entry) => {
+      if (!entry.message?.role) return false
+      if (entry.type !== 'user' && entry.type !== 'assistant' && entry.type !== 'system') return false
+      if (!entry.isMeta) return true
+      return entry.type === 'user' && parseSessionCollaborationEnvelope(entry.message.content) !== null
+    })
+  }
+
   // --------------------------------------------------------------------------
   // Entry → MessageEntry conversion
   // --------------------------------------------------------------------------
@@ -2617,7 +2627,7 @@ export class SessionService {
           const projectsRoot = indexedMatches.length > 0
             ? await fs.realpath(this.getProjectsDir())
             : null
-          const hydratedMatches: Array<SessionFileMatch & { mtimeMs: number }> = []
+          const hydratedMatches: Array<SessionFileMatch & { mtimeMs: number; hasTranscript: boolean }> = []
           let hydrationFailed = false
           for (const match of indexedMatches) {
             try {
@@ -2627,7 +2637,12 @@ export class SessionService {
                 sessionId,
                 projectsRoot!,
               )
-              hydratedMatches.push({ ...match, mtimeMs: stat.mtimeMs })
+              const entries = await this.readJsonlFile(match.filePath)
+              hydratedMatches.push({
+                ...match,
+                mtimeMs: stat.mtimeMs,
+                hasTranscript: this.hasConversationTranscript(entries),
+              })
             } catch (error) {
               if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
                 hydrationFailed = true
@@ -2641,7 +2656,7 @@ export class SessionService {
             indexedMutationEpoch === getSharedSessionMutationState(this.localIndexGateway).epoch
           ) {
             return hydratedMatches
-              .sort((a, b) => b.mtimeMs - a.mtimeMs || a.filePath.localeCompare(b.filePath))
+              .sort((a, b) => Number(b.hasTranscript) - Number(a.hasTranscript) || b.mtimeMs - a.mtimeMs || a.filePath.localeCompare(b.filePath))
               .map(({ filePath, projectDir }) => ({ filePath, projectDir }))
           }
           if (hydrationFailed) this.markIndexReadFailure()
@@ -2668,19 +2683,25 @@ export class SessionService {
       return []
     }
 
-    const matches: Array<{ filePath: string; projectDir: string; mtimeMs: number }> = []
+    const matches: Array<{ filePath: string; projectDir: string; mtimeMs: number; hasTranscript: boolean }> = []
     for (const dir of projectDirs) {
       const filePath = path.join(projectsDir, dir, `${sessionId}.jsonl`)
       try {
         const stat = await fs.stat(filePath)
-        matches.push({ filePath, projectDir: dir, mtimeMs: stat.mtimeMs })
+        const entries = await this.readJsonlFile(filePath)
+        matches.push({
+          filePath,
+          projectDir: dir,
+          mtimeMs: stat.mtimeMs,
+          hasTranscript: this.hasConversationTranscript(entries),
+        })
       } catch {
         continue
       }
     }
 
     return matches
-      .sort((a, b) => b.mtimeMs - a.mtimeMs || a.filePath.localeCompare(b.filePath))
+      .sort((a, b) => Number(b.hasTranscript) - Number(a.hasTranscript) || b.mtimeMs - a.mtimeMs || a.filePath.localeCompare(b.filePath))
       .map(({ filePath, projectDir }) => ({ filePath, projectDir }))
   }
 
@@ -4745,7 +4766,19 @@ export class SessionService {
 
     const normalizedWorkDir = normalizeDriveRootPathForPlatform(metadata.workDir)
     const targetProjectDir = this.sanitizePath(normalizedWorkDir)
-    const targetFilePath = path.join(this.getProjectsDir(), targetProjectDir, `${sessionId}.jsonl`)
+    const requestedFilePath = path.join(this.getProjectsDir(), targetProjectDir, `${sessionId}.jsonl`)
+    // A session has one transcript. Startup can still name the directory it was
+    // launched from after the CLI has moved into its worktree and written the
+    // conversation there; metadata belongs on that file, not on a second copy.
+    let targetFilePath = requestedFilePath
+    for (const match of matches) {
+      if (match.filePath === requestedFilePath) continue
+      const entries = await this.readJsonlFile(match.filePath)
+      if (this.hasConversationTranscript(entries)) {
+        targetFilePath = match.filePath
+        break
+      }
+    }
 
     if (!metadata.customTitle && !this.memoryLaunchInfo.has(this.memorySessionKey(sessionId))) {
       if (this.metadataMatchesLaunchInfo(previousInfo, {
@@ -4811,7 +4844,7 @@ export class SessionService {
       const entries = await this.readJsonlFile(filePath)
       if (entries.length === 0) continue
 
-      if (this.countTranscriptMessages(entries) > 0) continue
+      if (this.hasConversationTranscript(entries)) continue
 
       await fs.rm(filePath, { force: true })
       removed += 1
