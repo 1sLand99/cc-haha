@@ -1156,6 +1156,12 @@ function ProviderFormModal({ open, onClose, mode, provider, presets, browserMode
           skipWebFetchPreflight: settings.skipWebFetchPreflight ?? true,
           env: mergedEnv,
         }
+        // `model` / `modelContext` are the session's selected default, written by
+        // the model picker. They are not part of the provider being added, so
+        // showing them here makes a new provider look like it inherits Grok 4.7
+        // (or whatever was last selected) and saving would write that back.
+        delete merged.model
+        delete merged.modelContext
         setSettingsJson(JSON.stringify(writeCompatibilityJson(merged, apiFormat === 'anthropic' ? undefined : parseCompatibilityForm(compatibility)), null, 2))
       }).catch(() => {
         if (!cancelled && !settingsJsonUserEditedRef.current) {
@@ -1569,6 +1575,11 @@ function ProviderFormModal({ open, onClose, mode, provider, presets, browserMode
           const { providersApi } = await import('../../api/providers')
           const settings = writeCompatibilityJson(parsed, storedCompatibility)
           delete settings.requestCompatibility
+          // The editor never owns the session default model. updateSettings merges
+          // by replacing the whole object, so omitting these keys keeps the
+          // model picker's selection instead of clearing it.
+          delete settings.model
+          delete settings.modelContext
           await providersApi.updateSettings(settings)
         } catch {
           // JSON validation already prevents this
