@@ -7025,7 +7025,8 @@ describe('MessageList nested tool calls', () => {
     expect(screen.queryByText(`Session not found: ${subagentTabId}`)).toBeNull()
   })
 
-  it('confirms before rewinding to an earlier turn from a historical change card', async () => {
+  it.each([false, true])('confirms rewind and restores the complete prompt (windowed: %s)', async (windowed) => {
+    const prompt = windowed ? 'x'.repeat(40000) + 'FINAL REQUIREMENT' : '做一个页面'
     vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockResolvedValue({
       checkpoints: [
         {
@@ -7102,7 +7103,7 @@ describe('MessageList nested tool calls', () => {
             {
               id: 'user-1',
               type: 'user_text',
-              content: '做一个页面',
+              content: prompt,
               timestamp: 1,
             },
             {
@@ -7128,16 +7129,18 @@ describe('MessageList nested tool calls', () => {
       },
     })
 
+    const current = useChatStore.getState().sessions[ACTIVE_TAB]!
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions: { [ACTIVE_TAB]: { ...current, historyWindowed: windowed } } }))
     render(<MessageList />)
 
-    await expandChangedFileCards()
-    const historicalCard = (await screen.findByText('first.ts')).closest('section')
-    expect(historicalCard).toBeTruthy()
-    fireEvent.click(
-      within(historicalCard as HTMLElement).getByRole('button', {
-        name: 'Rewind to before this turn',
-      }),
-    )
+    if (windowed) {
+      fireEvent.click((await screen.findAllByRole('button', { name: 'Roll back conversation' }))[0]!)
+    } else {
+      await expandChangedFileCards()
+      const historicalCard = (await screen.findByText('first.ts')).closest('section')
+      expect(historicalCard).toBeTruthy()
+      fireEvent.click(within(historicalCard as HTMLElement).getByRole('button', { name: 'Rewind to before this turn' }))
+    }
 
     expect(sessionsApi.rewind).not.toHaveBeenCalled()
     const dialog = await screen.findByRole('dialog', { name: 'Rewind to before this turn?' })
@@ -7153,13 +7156,13 @@ describe('MessageList nested tool calls', () => {
       expect(sessionsApi.rewind).toHaveBeenLastCalledWith(ACTIVE_TAB, {
         targetUserMessageId: 'user-1',
         userMessageIndex: 0,
-        expectedContent: '做一个页面',
+        ...(windowed ? {} : { expectedContent: prompt }),
         mode: 'both',
       })
     })
     expect(reloadHistory).toHaveBeenCalledWith(ACTIVE_TAB)
     expect(queueComposerPrefill).toHaveBeenCalledWith(ACTIVE_TAB, {
-      text: '做一个页面',
+      text: prompt,
       attachments: undefined,
     })
   })

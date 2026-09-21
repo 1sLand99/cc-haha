@@ -352,8 +352,47 @@ describe('getSubagentRunByTool', () => {
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     const projectDir = '-tmp-subagent-child-partial'
     await writeSessionFile(projectDir, sessionId, [makeAgentToolUseEntry('tool-1')])
-    await writeSubagentTranscriptFile(projectDir, sessionId, 'child123', [{ type: 'assistant', message: { role: 'assistant', content: 'x'.repeat(1100 * 1024) } }])
+    await writeSubagentTranscriptFile(projectDir, sessionId, 'child123', [{ type: 'assistant', message: { role: 'assistant', content: 'x'.repeat(9 * 1024 * 1024) } }])
     expect(await getSubagentRunByAgentId(sessionId, 'child123')).toMatchObject({ agentId: 'child123', status: 'unknown', historyComplete: false, messages: [] })
+  })
+
+  it('retains a complete child message above one MiB in the small transcript reader', async () => {
+    await setupTmpConfigDir()
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const projectDir = '-tmp-subagent-small-large-message'
+    const agentId = 'child-large-message'
+    const content = 'START' + 'x'.repeat(1100 * 1024) + 'END'
+    await writeSessionFile(projectDir, sessionId, [makeAgentToolUseEntry('tool-1')])
+    await writeSubagentTranscriptFile(projectDir, sessionId, agentId, [{
+      type: 'assistant', uuid: 'child-reply', isSidechain: true,
+      message: { role: 'assistant', content },
+    }])
+    const result = await getSubagentRunByAgentId(sessionId, agentId)
+    expect(result).toMatchObject({ agentId, historyComplete: true })
+    expect(result?.messages).toHaveLength(1)
+    expect(result?.messages[0]?.content).toBe(content)
+  })
+
+  it('keeps the visible tail of a large sidechain transcript inside its own agent run', async () => {
+    await setupTmpConfigDir()
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const projectDir = '-tmp-subagent-large-sidechain'
+    const agentId = 'sidechain123'
+    await writeSessionFile(projectDir, sessionId, [makeAgentToolUseEntry('tool-1')])
+    const entries = Array.from({ length: 220 }, (_, index) => ({
+      type: index === 0 ? 'user' : 'assistant',
+      uuid: `sidechain-${index}`,
+      parentUuid: index ? `sidechain-${index - 1}` : null,
+      isSidechain: true,
+      message: { role: index === 0 ? 'user' : 'assistant', content: index === 219 ? 'Latest visible child reply' : 'x'.repeat(8192) },
+      timestamp: '2026-01-01T00:00:00.000Z',
+    }))
+    await writeSubagentTranscriptFile(projectDir, sessionId, agentId, entries)
+    const result = await getSubagentRunByAgentId(sessionId, agentId)
+    expect(result?.messages.length).toBeGreaterThan(0)
+    expect(result?.messages.at(-1)?.content).toBe('Latest visible child reply')
+    expect(result).toMatchObject({ historyComplete: false, activityComplete: false, truncated: true })
+    expect(result!.messages.length).toBeLessThan(entries.length)
   })
 
   it('previews a large addressed call and result while retaining their identity', async () => {

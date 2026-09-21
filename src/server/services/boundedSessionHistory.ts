@@ -222,26 +222,19 @@ export async function readBoundedHistoryPage(filePath: string, options: { cursor
         let entry: Record<string, unknown>
         try { entry = JSON.parse(raw.toString('utf8')) } catch { omitted++; continue }
         if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
-        entry = displayPreview(entry)
-        let previewBytes = Buffer.byteLength(JSON.stringify(entry))
-        if (previewBytes > HISTORY_PAGE_BYTES) {
-          // Even an unusually broad structured body keeps its transcript row.
-          // The scalar envelope is enough to display an honest preview marker.
-          const message = entry.message as Record<string, unknown> | undefined
-          entry = { type: entry.type, uuid: entry.uuid, timestamp: entry.timestamp, parentUuid: entry.parentUuid,
-            parent_tool_use_id: entry.parent_tool_use_id, isSidechain: entry.isSidechain, bodyTruncated: true,
-            ...(message ? { message: { role: message.role, content: '[Message body exceeds preview budget]' } } : { content: '[Message body exceeds preview budget]' }) }
-          previewBytes = Buffer.byteLength(JSON.stringify(entry))
-          if (previewBytes > HISTORY_PAGE_BYTES) { omitted++; continue }
-        }
+        // Page whole records instead of shortening display fields. Image data,
+        // tool inputs and trailing reference envelopes must remain parseable.
+        // A record above the ordinary page budget owns its page; the reader's
+        // semantic record and scan limits still bound memory and I/O.
+        const entryBytes = Buffer.byteLength(JSON.stringify(entry))
         const content = (entry.message as { content?: unknown } | undefined)?.content
         // Each assistant block/tool result may become a separate UI row. Stop
         // before the complete record instead of clipping rows behind a cursor.
         const rowCost = Array.isArray(content) ? Math.max(1, content.length) : 1
-        if ((outputBytes + previewBytes > HISTORY_PAGE_BYTES || renderedRows + rowCost > HISTORY_PAGE_ROWS) && entries.length) { position = boundary; break }
+        if ((outputBytes + entryBytes > HISTORY_PAGE_BYTES || renderedRows + rowCost > HISTORY_PAGE_ROWS) && entries.length) { position = boundary; break }
         renderedRows += rowCost
         entries.push({ entry, byteStart: newer ? boundary : start, byteEnd: end })
-        outputBytes += previewBytes
+        outputBytes += entryBytes
         await new Promise<void>(resolve => setImmediate(resolve))
       }
       const after = await handle.stat({ bigint: true })

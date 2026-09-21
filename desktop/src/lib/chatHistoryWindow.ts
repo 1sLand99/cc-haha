@@ -1,6 +1,5 @@
 import type { SessionHistoryPage } from '../api/sessions'
 import type { UIMessage } from '../types/chat'
-import { previewHistoryPage } from './chatHistoryBudget'
 
 export type HistoryDirection = 'older' | 'newer'
 export type HistoryWindowPage = {
@@ -26,20 +25,17 @@ const cache = new WeakMap<HistoryWindowPage[], { budget: number; direction: Hist
 export function boundHistoryWindow(pages: HistoryWindowPage[], budget: number, direction: HistoryDirection): HistoryWindowPage[] {
   const cached = cache.get(pages)
   if (cached?.budget === budget && cached.direction === direction) return cached.pages
-  // A stable per-page allowance avoids shortening the previous page's text
-  // every time a new page joins, which otherwise changes the reading geometry.
-  const perPage = Math.floor(budget / 3)
-  const candidates = direction === 'older' ? pages.slice(0, MAX_WINDOW_PAGES) : pages.slice(-MAX_WINDOW_PAGES)
-  const normalized = candidates.map(page => {
-    const messages = previewHistoryPage(page.messages, perPage)
-    return messages === page.messages ? page : { ...page, messages }
-  })
+  // Cursors address whole pages. Drop the opposite boundary, never shorten a
+  // body within a retained page. A single oversized record may own its page.
+  const normalized = direction === 'older' ? pages.slice(0, MAX_WINDOW_PAGES) : pages.slice(-MAX_WINDOW_PAGES)
   let start = direction === 'older' ? 0 : normalized.length
   let end = start
   let bytes = 0
   while (direction === 'older' ? end < normalized.length : start > 0) {
     const next = normalized[direction === 'older' ? end : start - 1]!
     const size = historyPageBytes(next)
+    // Retain the current page and its two neighbours so a page insertion
+    // cannot evict the reader's anchor. Each server page has a record limit.
     if (end - start >= 3 && bytes + size > budget) break
     bytes += size
     if (direction === 'older') end++

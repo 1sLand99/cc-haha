@@ -79,3 +79,31 @@ test('collaboration cursors traverse real bounded history pages without dropping
   expect(longestCursor).toBeGreaterThan(500)
   expect(longestCursor).toBeLessThan(32_000)
 })
+
+
+test('preserves trailing reference envelopes after long user prompts in both history formats', async () => {
+  const prompt = 'Long referenced request. '.repeat(1800)
+  const text = await resolveSessionReferenceContext(prompt, [{ sessionId: referenced }], async () => true)
+  await writeFile(file, [entry('long-string', text), entry('long-block', [{ type: 'text', text }])].map(value => JSON.stringify(value)).join('\n') + '\n')
+  const restored = await historyService().getSessionHistoryPage(id)
+  expect(restored.messages.find(message => message.id === 'long-string')).toMatchObject({ content: prompt, sessionReferences: [{ sessionId: referenced }] })
+  expect(restored.messages.find(message => message.id === 'long-block')).toMatchObject({ content: [{ type: 'text', text: prompt }], sessionReferences: [{ sessionId: referenced }] })
+  expect(restored.page.contentTruncated).toBeUndefined()
+})
+
+
+test('serves a complete tool result above two MiB as a standalone history page', async () => {
+  const result = 'complete tool output\n'.repeat(160_000)
+  expect(Buffer.byteLength(result)).toBeGreaterThan(2 * 1024 * 1024)
+  const content = [{ type: 'tool_result', tool_use_id: 'large-tool', is_error: false, content: result }]
+  await writeFile(file, [entry('before', 'earlier request'), entry('large-result', content), entry('after', 'later request')].map(value => JSON.stringify(value)).join('\n') + '\n')
+  const service = historyService()
+  const latest = await service.getSessionHistoryPage(id)
+  expect(latest.messages.map(message => message.id)).toEqual(['after'])
+  const large = await service.getSessionHistoryPage(id, { cursor: latest.page.nextCursor! })
+  expect(large.messages).toHaveLength(1)
+  expect(large.messages[0]).toMatchObject({ id: 'large-result', content })
+  expect(large.page.contentTruncated).toBeUndefined()
+  const older = await service.getSessionHistoryPage(id, { cursor: large.page.nextCursor! })
+  expect(older.messages.map(message => message.id)).toEqual(['before'])
+})

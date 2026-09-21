@@ -1,4 +1,4 @@
-import type { LocalIndexDatabase } from './database.js'
+import type { LocalIndexDatabase, LocalIndexReadOperation } from './database.js'
 import { createActivityIndex, type ActivityIndex } from './activityIndex.js'
 import type {
   ClaudeCodeStats,
@@ -183,6 +183,52 @@ function boundedInteger(value: number | undefined, fallback: number): number {
   return Math.max(0, Math.trunc(value!))
 }
 
+function searchUnicodeSessionMetadata(operation: LocalIndexReadOperation, needle: string, limit: number, offset: number): SessionIndexPage {
+  const rank = (row: SessionRow): number => {
+    const names = [row.title.toLowerCase(), row.session_id.toLowerCase()]
+    if (![...names, row.work_dir?.toLowerCase() ?? '', row.project_path.toLowerCase()].some(value => value.includes(needle))) return -1
+    return names.includes(needle) ? 3 : names.some(value => value.startsWith(needle)) ? 2 : names.some(value => value.includes(needle)) ? 1 : 0
+  }
+  const scan = (visit: (row: SessionRow) => void) => {
+    let last: SessionRow | undefined
+    while (true) {
+      const rows = operation.all<SessionRow>(`
+        SELECT * FROM sessions
+        ${last ? 'WHERE modified_at_ms < ? OR (modified_at_ms = ? AND session_id > ?) OR (modified_at_ms = ? AND session_id = ? AND transcript_path > ?)' : ''}
+        ORDER BY modified_at_ms DESC, session_id ASC, transcript_path ASC LIMIT 256
+      `, ...(last ? [last.modified_at_ms, last.modified_at_ms, last.session_id, last.modified_at_ms, last.session_id, last.transcript_path] : []))
+      for (const row of rows) visit(row)
+      if (rows.length < 256) break
+      last = rows[rows.length - 1]
+    }
+  }
+  // Count rank buckets before selecting the requested page. Two bounded scans
+  // avoid retaining offset + limit rows for arbitrarily deep pagination.
+  const counts = [0, 0, 0, 0]
+  scan(row => { const value = rank(row); if (value >= 0) counts[value]!++ })
+  const total = counts.reduce((sum, value) => sum + value, 0)
+  if (offset >= total) return { sessions: [], total }
+  const skips = [0, 0, 0, 0]
+  const takes = [0, 0, 0, 0]
+  let remainingSkip = offset
+  let remainingTake = limit
+  for (let value = 3; value >= 0; value--) {
+    skips[value] = Math.min(remainingSkip, counts[value]!)
+    remainingSkip -= skips[value]!
+    takes[value] = Math.min(remainingTake, counts[value]! - skips[value]!)
+    remainingTake -= takes[value]!
+  }
+  const buckets: SessionRow[][] = [[], [], [], []]
+  scan(row => {
+    const value = rank(row)
+    if (value < 0 || takes[value] === 0) return
+    if (skips[value]! > 0) { skips[value]!--; return }
+    buckets[value]!.push(row)
+    takes[value]!--
+  })
+  return { sessions: buckets.reverse().flat().map(sessionFromRow), total }
+}
+
 function sessionFromRow(row: SessionRow): IndexedSessionRow {
   const repository = parseStoredJson<PersistedRepositorySession>(row.repository_json)
   const worktreeSession = row.worktree_session_json === 'null'
@@ -321,7 +367,18 @@ export function createSessionIndex(database: LocalIndexDatabase): SessionIndex {
       const limit = Math.min(100, Math.max(1, boundedInteger(options?.limit, 30)))
       const offset = boundedInteger(options?.offset, 0)
       return database.read(operation => {
-        const where = `instr(lower(title), ?) > 0 OR instr(lower(session_id), ?) > 0 OR instr(lower(coalesce(work_dir, '')), ?) > 0 OR instr(lower(project_path), ?) > 0`
+        // Bun SQLite's built-in lower() only folds ASCII. Keep common English
+        // and uncased scripts on SQL, and scan metadata in bounded batches when
+        // matching non-ASCII letters needs the same Unicode folding as JS.
+        if (Array.from(needle).some(char => char.codePointAt(0)! > 127 && char.toLowerCase() !== char.toUpperCase())) {
+          return searchUnicodeSessionMetadata(operation, needle, limit, offset)
+        }
+        // These Unicode capitals lowercase into ASCII (or an ASCII prefix),
+        // so even an ASCII query must consider them on the fast path.
+        const lower = (column: string) => `replace(replace(lower(${column}), 'K', 'k'), 'İ', 'i̇')`
+        const title = lower('title')
+        const sessionId = lower('session_id')
+        const where = `instr(${title}, ?) > 0 OR instr(${sessionId}, ?) > 0 OR instr(${lower("coalesce(work_dir, '')")}, ?) > 0 OR instr(${lower('project_path')}, ?) > 0`
         const total = operation.get<{ total: number }>(`SELECT COUNT(*) AS total FROM sessions WHERE ${where}`, needle, needle, needle, needle)?.total ?? 0
         const rows = operation.all<SessionRow>(`
           SELECT transcript_path, session_id, project_path, title, created_at,
@@ -331,9 +388,9 @@ export function createSessionIndex(database: LocalIndexDatabase): SessionIndex {
           FROM sessions WHERE ${where}
           ORDER BY CASE
             WHEN ? = '' THEN 0
-            WHEN lower(title) = ? OR lower(session_id) = ? THEN 3
-            WHEN instr(lower(title), ?) = 1 OR instr(lower(session_id), ?) = 1 THEN 2
-            WHEN instr(lower(title), ?) > 0 OR instr(lower(session_id), ?) > 0 THEN 1
+            WHEN ${title} = ? OR ${sessionId} = ? THEN 3
+            WHEN instr(${title}, ?) = 1 OR instr(${sessionId}, ?) = 1 THEN 2
+            WHEN instr(${title}, ?) > 0 OR instr(${sessionId}, ?) > 0 THEN 1
             ELSE 0 END DESC,
             modified_at_ms DESC, session_id ASC, transcript_path ASC
           LIMIT ? OFFSET ?

@@ -175,6 +175,7 @@ import { useSettingsStore } from './settingsStore'
 import { runsForOwner, runsForSession, useWorkflowStore } from './workflowStore'
 import {
   mapHistoryMessagesToUiMessages,
+  appendReplayedUserMessage,
   registerAgentRunSession,
   reconstructAgentNotifications,
   reconstructRunActivityFromTranscript,
@@ -3946,6 +3947,29 @@ describe('chatStore history mapping', () => {
         }],
       },
     ])
+  })
+
+  it.each(['string', 'blocks', 'replay'])('restores path-only image references as previews through %s', (mode) => {
+    const path = '/private/tmp/uploads/screenshot.PNG'
+    const content = `@"${path}" @"/tmp/notes.md" 看这张图`
+    const mapped = mode === 'replay'
+      ? appendReplayedUserMessage([], content, 1)
+      : mapHistoryMessagesToUiMessages([{
+          id: 'path-image',
+          type: 'user',
+          timestamp: '2026-09-21T00:00:00.000Z',
+          content: mode === 'string' ? content : [{ type: 'text', text: content }],
+        }])
+
+    expect(mapped).toMatchObject([{
+      type: 'user_text',
+      content: '看这张图',
+      modelContent: content,
+      attachments: [
+        { type: 'image', name: 'screenshot.PNG', path },
+        { type: 'file', name: 'notes.md', path: '/tmp/notes.md' },
+      ],
+    }])
   })
 
   it('restores persisted workspace diff comments without exposing the model prompt', () => {
@@ -15558,6 +15582,70 @@ describe('chatStore activity state survival across reload paths', () => {
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyPage).toBeUndefined()
   })
 
+  it('keeps complete user payloads through send and repeated replay', () => {
+    const content = 'start ' + 'x'.repeat(40_000) + ' final requirement'
+    const data = 'data:image/png;base64,' + 'A'.repeat(60_000)
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession() } })
+    useChatStore.getState().sendMessage(TEST_SESSION_ID, content, [
+      { type: 'image', name: 'image.png', data, mimeType: 'image/png' },
+      { type: 'file', name: 'notes.md', path: '/tmp/notes.md' },
+    ])
+    for (let index = 0; index < 3; index++) {
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'user_message_replay', content: `@"/tmp/notes.md" ${content}`,
+      })
+    }
+    const users = useChatStore.getState().sessions[TEST_SESSION_ID]!.messages.filter(message => message.type === 'user_text')
+    expect(users).toHaveLength(1)
+    expect(users[0]).toMatchObject({
+      content,
+      attachments: [
+        { type: 'image', name: 'image.png', data, mimeType: 'image/png' },
+        { type: 'file', name: 'notes.md', path: '/tmp/notes.md' },
+      ],
+    })
+  })
+
+  it('preserves both sides of a completed large Edit tool', () => {
+    const input = { file_path: '/tmp/file.ts', old_string: 'old line\n'.repeat(5000), new_string: 'fixed' }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession() } })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, { type: 'tool_use_complete', toolName: 'Edit', toolUseId: 'large-edit', input })
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'tool_use', toolUseId: 'large-edit', input }),
+    ]))
+  })
+
+  it('keeps the complete long streaming reply through completion and canonical history reconciliation', async () => {
+    vi.useFakeTimers()
+    try {
+      const content = 'HEAD_SENTINEL' + 'm'.repeat(70_000) + 'TAIL_SENTINEL'
+      const canonical: MessageEntry[] = [
+        { id: 'user-long', type: 'user', content: 'write', timestamp: new Date(1).toISOString() },
+        { id: 'assistant-long', type: 'assistant', content, timestamp: new Date(2).toISOString() },
+      ]
+      vi.mocked(sessionsApi.getMessages).mockResolvedValue({ messages: canonical, page: {
+        nextCursor: null, hasMore: false, historyComplete: true, sourceVersion: 'long-fixture', scannedBytes: 71_000, omittedOversizedEntries: 0,
+      } })
+      useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({
+        historyHydrated: true, historyStatus: 'ready',
+        messages: [{ id: 'user-long', type: 'user_text', content: 'write', transcriptMessageId: 'user-long', timestamp: 1 }],
+      }) } })
+      const store = useChatStore.getState()
+      store.handleServerMessage(TEST_SESSION_ID, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(TEST_SESSION_ID, { type: 'content_delta', text: content })
+      await vi.advanceTimersByTimeAsync(51)
+      expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.streamingText).toBe(content)
+      store.handleServerMessage(TEST_SESSION_ID, { type: 'message_complete', usage: { input_tokens: 1, output_tokens: 1 } })
+      await vi.advanceTimersByTimeAsync(801)
+      const replies = useChatStore.getState().sessions[TEST_SESSION_ID]!.messages.filter(message => message.type === 'assistant_text')
+      expect(replies).toHaveLength(1)
+      expect(replies[0]).toMatchObject({ content, transcriptMessageId: 'assistant-long' })
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
+
   it('bounds external session projections and activity text without changing task control state or permission input', () => {
     const raw = 'x'.repeat(2_000_000)
     const task = { taskId: 'task', toolUseId: 'tool', status: 'running' as const, startedAt: 1, updatedAt: 2, prompt: raw, result: raw, summary: raw }
@@ -15977,4 +16065,115 @@ it('restores reference sources from both structured history and older server-env
     expect.objectContaining({ type: 'user_text', content: 'Use @Review', sessionReferences: [{ sessionId: 'prior' }] }),
     expect.objectContaining({ type: 'user_text', content: 'Use @Review', sessionReferences: [{ sessionId: 'prior' }] }),
   ])
+})
+
+describe('chatStore inactive complete-page retention', () => {
+  let activeSessionId = 'image-cache-0'
+  let restoreTabState = () => {}
+  let imageData: string
+  const page = { nextCursor: null, hasMore: false, historyComplete: true, sourceVersion: 'cache-fixture', scannedBytes: 1_000_000, omittedOversizedEntries: 0 }
+  const imageSessions = () => Object.fromEntries(Array.from({ length: 20 }, (_, index) => {
+    const id = `image-cache-${index}`
+    const messages: UIMessage[] = [{ id: `${id}-user`, type: 'user_text', content: 'Inspect', timestamp: 1,
+      attachments: Array.from({ length: 3 }, (_, imageIndex) => ({ type: 'image' as const, name: `${imageIndex}.png`, data: imageData, mimeType: 'image/png' })),
+    }]
+    return [id, makeSession({ chatState: 'idle', historyStatus: 'ready', historyHydrated: true, messages,
+      historyPage: page, historyInitialPage: { cursor: null, page, messages },
+    })]
+  }))
+
+  beforeEach(async () => {
+    const { readFileSync } = await import('node:fs')
+    imageData = `data:image/png;base64,${readFileSync('src/assets/pets/action-sheet-guide.zh.png').toString('base64')}`
+    const { useTabStore } = await import('./tabStore')
+    const tabState = useTabStore.getState()
+    activeSessionId = 'image-cache-0'
+    const spy = vi.spyOn(useTabStore, 'getState').mockImplementation(() => ({ ...tabState, activeTabId: activeSessionId }))
+    restoreTabState = () => spy.mockRestore()
+    getMemberBySessionIdMock.mockReturnValue(null)
+    vi.mocked(sessionsApi.getMessages).mockReset()
+    vi.mocked(sessionsApi.getSlashCommands).mockResolvedValue({ commands: [] })
+    useChatStore.setState({ ...initialState, sessions: {} })
+  })
+
+  afterEach(() => {
+    restoreTabState()
+    useChatStore.setState({ ...initialState, sessions: {} })
+  })
+
+  it('keeps overlay-only live rows intact until durable paging catches them', () => {
+    const overlay: UIMessage[] = Array.from({ length: 4 }, (_, index) => ({ id: `live-${index}`, type: 'assistant_text', content: 'x'.repeat(200_000), timestamp: index }))
+    const canonical: UIMessage[] = [{ id: 'canonical', type: 'assistant_text', content: 'Persisted', timestamp: 10 }]
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions: { [activeSessionId]: makeSession({
+      chatState: 'idle', historyHydrated: true, historyStatus: 'ready',
+      messages: overlay, historyWindowOverlay: overlay, historyBrowseMessages: [...overlay, ...canonical],
+      historyWindowPages: [{ cursor: null, page, messages: canonical }],
+    }) } }))
+    const session = useChatStore.getState().sessions[activeSessionId]!
+    expect(session.historyWindowOverlay).toBe(overlay)
+    expect(session.historyBrowseMessages?.map(message => message.id)).toEqual(['live-0', 'live-1', 'live-2', 'live-3', 'canonical'])
+  })
+
+  it('evicts idle page caches across 20 image sessions and cold-loads one again without disconnecting', async () => {
+    const sessions = imageSessions()
+    sessions['image-cache-1']!.chatState = 'thinking'
+    sessions['image-cache-2']!.pendingPermission = { requestId: 'permission', toolName: 'Bash', input: { command: 'test' } }
+    sessions['image-cache-3']!.backgroundAgentTasks = { running: { taskId: 'running', status: 'running', startedAt: 1, updatedAt: 1 } }
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions }))
+    const retained = useChatStore.getState().sessions
+    const retainedCharacters = Object.values(retained).reduce((sum, session) => sum + [...new Set([
+      ...session.messages, ...(session.historyInitialPage?.messages ?? []), ...(session.historyBrowseMessages ?? []),
+    ])].reduce((count, message) => count + (message.type === 'user_text' ? message.attachments?.reduce((bytes, attachment) => bytes + (attachment.data?.length ?? 0), 0) ?? 0 : 0), 0), 0)
+    expect(retainedCharacters * 2).toBeLessThanOrEqual(16 * 1024 * 1024)
+    for (const index of [0, 1, 2, 3]) expect(retained[`image-cache-${index}`]!.messages).toHaveLength(1)
+    expect(retained['image-cache-2']!.pendingPermission).toBe(sessions['image-cache-2']!.pendingPermission)
+    expect(retained['image-cache-3']!.backgroundAgentTasks).toBe(sessions['image-cache-3']!.backgroundAgentTasks)
+    const evictedId = Object.keys(retained).find(id => retained[id]!.messages.length === 0)!
+    expect(retained[evictedId]).toMatchObject({ historyHydrated: false, historyStatus: 'idle', connectionState: 'connected' })
+    expect(retained[evictedId]!.historyInitialPage).toBeUndefined()
+
+    activeSessionId = evictedId
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({ messages: [{ id: `${evictedId}-user`, type: 'user', timestamp: new Date(1).toISOString(), content: [
+      { type: 'text', text: 'Inspect' },
+      ...Array.from({ length: 3 }, () => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageData.split(',')[1] } })),
+    ] }], page })
+    const { wsManager } = await import('../api/websocket')
+    const disconnectCalls = vi.mocked(wsManager.disconnect).mock.calls.length
+    useChatStore.getState().connectToSession(evictedId)
+    await vi.waitFor(() => expect(useChatStore.getState().sessions[evictedId]!.historyHydrated).toBe(true))
+    expect(vi.mocked(wsManager.disconnect).mock.calls).toHaveLength(disconnectCalls)
+    expect(useChatStore.getState().sessions[evictedId]!.messages).toEqual([
+      expect.objectContaining({ type: 'user_text', attachments: expect.arrayContaining([expect.objectContaining({ data: imageData })]) }),
+    ])
+    useChatStore.getState().applyBoundedUpdate(state => ({ sessions: { ...state.sessions } }))
+    expect(useChatStore.getState().sessions[evictedId]!.historyHydrated).toBe(true)
+  })
+
+  it('does not evict a just-completed background reply before its transcript catches up', async () => {
+    vi.useFakeTimers()
+    try {
+      const sessions = imageSessions()
+      for (const session of Object.values(sessions)) session.chatState = 'thinking'
+      const id = 'image-cache-19'
+      sessions[id]!.streamingText = 'Completed but not yet persisted'
+      useChatStore.setState({ sessions })
+      vi.mocked(sessionsApi.getMessages).mockImplementationOnce(async () => {
+        // Completion marks idle before starting the HTTP refresh. The prior
+        // historyHydrated flag does not prove this new live row is durable.
+        expect(useChatStore.getState().sessions[id]!.messages).toEqual(expect.arrayContaining([
+          expect.objectContaining({ type: 'assistant_text', content: 'Completed but not yet persisted' }),
+        ]))
+        return { messages: [{ id: `${id}-user`, type: 'user', content: 'Inspect', timestamp: new Date(1).toISOString() }], page }
+      })
+      useChatStore.getState().handleServerMessage(id, { type: 'message_complete', usage: { input_tokens: 1, output_tokens: 1 } })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(useChatStore.getState().sessions[id]!.messages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'assistant_text', content: 'Completed but not yet persisted' }),
+      ]))
+      expect(useChatStore.getState().sessions[id]!.connectionState).toBe('connected')
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
 })
