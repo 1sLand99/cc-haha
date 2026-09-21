@@ -1,4 +1,4 @@
-import { api } from '@/api/client'
+import { api, type ApiRequestOptions } from '@/api/client'
 
 export type SessionCandidate = {
   sessionId: string
@@ -15,7 +15,7 @@ export type SessionCollaborationStatus = {
 }
 const base = '/api/session-collaboration'
 export const sessionCollaborationApi = {
-  list(query = '') { return api.get<{ sessions: SessionCandidate[] }>(`${base}?query=${encodeURIComponent(query)}`) },
+  list(query = '', options?: ApiRequestOptions) { return api.get<{ sessions: SessionCandidate[] }>(`${base}?query=${encodeURIComponent(query)}`, options) },
   status(sessionId: string) { return api.get<SessionCollaborationStatus>(`${base}/${encodeURIComponent(sessionId)}/status`) },
   stop(sessionId: string) { return api.post(`${base}/${encodeURIComponent(sessionId)}/stop`, {}) },
 }

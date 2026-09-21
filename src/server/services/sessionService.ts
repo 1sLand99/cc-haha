@@ -3351,6 +3351,54 @@ export class SessionService {
     return rows
   }
 
+  getSessionSuggestionMetadata(sessionIds: string[]): Array<{ id: string; title: string; workDir: string | null; projectPath: string; modifiedAt: string }> {
+    this.syncSharedMutationEpoch()
+    if (this.getUsableIndexMode() !== 'on') return []
+    try {
+      const rows = this.localIndexGateway.getSessionSuggestionMetadata?.(sessionIds.slice(0, 100)) ?? []
+      if (!this.indexStatusRemainsUsable()) return []
+      return rows.map(({ id, title, workDir, projectPath, modifiedAt }) => ({ id, title, workDir, projectPath, modifiedAt }))
+    } catch { this.markIndexReadFailure(); return [] }
+  }
+
+  /** Metadata-only reference lookup: no per-result transcript or workspace hydration. */
+  async searchSessionMetadata(query: string, options: { limit?: number; offset?: number; signal?: AbortSignal } = {}): Promise<{ sessions: Array<{ id: string; title: string; workDir: string | null; projectPath: string; modifiedAt: string }>; total: number }> {
+    options.signal?.throwIfAborted()
+    this.syncSharedMutationEpoch()
+    const limit = Math.min(100, Math.max(1, options.limit ?? 30))
+    const offset = Math.max(0, options.offset ?? 0)
+    const epoch = getSharedSessionMutationState(this.localIndexGateway).epoch
+    if (this.getUsableIndexMode() === 'on') {
+      try {
+        const result = this.localIndexGateway.searchSessionMetadata?.(query, { limit, offset })
+        if (result && epoch === getSharedSessionMutationState(this.localIndexGateway).epoch && this.indexStatusRemainsUsable()) {
+          return { sessions: result.sessions.map(({ id, title, workDir, projectPath, modifiedAt }) => ({ id, title, workDir, projectPath, modifiedAt })), total: result.total }
+        }
+      } catch { this.markIndexReadFailure() }
+    }
+    // Scan the metadata projection once, rank before limiting, and reuse its
+    // summary cache. Do not hydrate every workspace or repeatedly page lists.
+    const scope = this.getConfigDir()
+    this.prepareSessionListCaches(scope)
+    const rows: Array<{ id: string; title: string; workDir: string | null; projectPath: string; modifiedAt: string }> = []
+    for (const file of await this.discoverSessionFiles(undefined, scope)) {
+      options.signal?.throwIfAborted()
+      try {
+        const summary = await this.getCachedSessionListSummary(file.filePath, file.projectDir, await fs.stat(file.filePath), scope)
+        rows.push({ id: file.sessionId, title: summary.title, workDir: summary.workDir, projectPath: file.projectDir, modifiedAt: summary.modifiedAt })
+      } catch { /* Match sidebar behavior for unreadable transcripts. */ }
+    }
+    const needle = query.trim().toLowerCase()
+    const rank = (row: typeof rows[number]) => {
+      if (!needle) return 0
+      const names = [row.title.toLowerCase(), row.id.toLowerCase()]
+      return names.includes(needle) ? 3 : names.some(value => value.startsWith(needle)) ? 2 : names.some(value => value.includes(needle)) ? 1 : 0
+    }
+    const matches = rows.filter(row => [row.title, row.id, row.workDir ?? '', row.projectPath].some(value => value.toLowerCase().includes(needle)))
+    matches.sort((a, b) => rank(b) - rank(a) || Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt) || a.id.localeCompare(b.id) || a.projectPath.localeCompare(b.projectPath))
+    return { sessions: matches.slice(offset, offset + limit), total: matches.length }
+  }
+
   /** List all sessions, optionally filtered by physical project path. */
   async listSessions(options?: {
     project?: string

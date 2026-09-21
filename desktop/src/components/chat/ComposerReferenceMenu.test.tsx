@@ -80,7 +80,7 @@ it('browses directory queries without filtering out their children', async () =>
   const onSelect = vi.fn()
   render(<ComposerReferenceMenu id="path" cwd="/work" filter="src/" references={references} onSelect={onSelect} />)
   await screen.findByRole('option', { name: 'app.ts' })
-  expect(filesystemApi.browse).toHaveBeenCalledWith('/work/src', { includeFiles: true })
+  expect(filesystemApi.browse).toHaveBeenCalledWith('/work/src', { includeFiles: true, signal: expect.any(AbortSignal) })
   expect(screen.queryByRole('option', { name: 'Design' })).not.toBeInTheDocument()
 })
 
@@ -90,6 +90,7 @@ it('discards late query and workspace results and never selects stale files', as
   const onSelect = vi.fn()
   const ref = createRef<ComposerReferenceMenuHandle>()
   const view = render(<ComposerReferenceMenu ref={ref} id="search" cwd="/old" filter="old" references={[]} onSelect={onSelect} />)
+  await waitFor(() => expect(filesystemApi.search).toHaveBeenCalled())
   view.rerender(<ComposerReferenceMenu ref={ref} id="search" cwd="/work" filter="app" references={[]} onSelect={onSelect} />)
   act(() => { ref.current!.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' })) })
   expect(onSelect).not.toHaveBeenCalled()
@@ -118,6 +119,7 @@ it('preserves explicitly highlighted results when asynchronous files change thei
   const onSelect = vi.fn()
   render(<ComposerReferenceMenu ref={ref} id="pending" cwd="/work" filter="hyper" references={references} onSelect={onSelect} />)
   fireEvent.mouseEnter(screen.getByRole('option', { name: 'HyperFrames' }))
+  await waitFor(() => expect(filesystemApi.search).toHaveBeenCalled())
   await act(async () => { resolveFiles({ currentPath: '/work', parentPath: '/', entries: [{ ...file, name: 'hyper', path: '/work/hyper' }] }) })
   expect(screen.getAllByRole('option')[0]).toHaveAccessibleName('hyper')
   expect(screen.getByRole('option', { name: 'HyperFrames' })).toHaveAttribute('aria-selected', 'true')
@@ -138,7 +140,7 @@ it.each(['src/', 'src\\'])('keeps every child accessible while browsing %s', asy
   render(<ComposerReferenceMenu id="directory" cwd="/work" filter={filter} references={[]} onSelect={vi.fn()} />)
   await screen.findByRole('option', { name: 'file-14.ts' })
   expect(screen.getAllByRole('option')).toHaveLength(15)
-  expect(filesystemApi.browse).toHaveBeenCalledWith('/work/src', { includeFiles: true })
+  expect(filesystemApi.browse).toHaveBeenCalledWith('/work/src', { includeFiles: true, signal: expect.any(AbortSignal) })
   expect(filesystemApi.search).not.toHaveBeenCalled()
 })
 
@@ -155,7 +157,7 @@ it('searches previous sessions and selects a structured reference without treati
   const onSelect = vi.fn()
   render(<ComposerReferenceMenu id="sessions" cwd="/work" filter="Auth" references={[]} onSelect={onSelect} />)
   fireEvent.click(await screen.findByRole('option', { name: 'Auth review' }))
-  expect(sessionCollaborationApi.list).toHaveBeenCalledWith('Auth')
+  expect(sessionCollaborationApi.list).toHaveBeenCalledWith('Auth', expect.objectContaining({ signal: expect.any(AbortSignal) }))
   expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: 'session', id: 'past-session', label: 'Auth review', path: '' }))
 })
 
@@ -206,7 +208,7 @@ it('discards stale session results and keeps colliding ID prefixes distinguishab
   const ref = createRef<ComposerReferenceMenuHandle>()
   const onSelect = vi.fn()
   const view = render(<ComposerReferenceMenu ref={ref} id="switch-query" cwd="/work" filter="old" references={[]} onSelect={onSelect} />)
-  await waitFor(() => expect(sessionCollaborationApi.list).toHaveBeenCalledWith('old'))
+  await waitFor(() => expect(sessionCollaborationApi.list).toHaveBeenCalledWith('old', expect.objectContaining({ signal: expect.any(AbortSignal) })))
   const sessions = ['same1234-A', 'same1234-B'].map(sessionId => ({ sessionId, title: 'Review', cwd: '/work/api', status: 'idle', updatedAt: '' }))
   vi.mocked(sessionCollaborationApi.list).mockResolvedValue({ sessions })
   view.rerender(<ComposerReferenceMenu ref={ref} id="switch-query" cwd="/work" filter="Review" references={[]} onSelect={onSelect} />)
@@ -217,4 +219,44 @@ it('discards stale session results and keeps colliding ID prefixes distinguishab
   act(() => { ref.current!.handleKeyDown(new KeyboardEvent('keydown', { key: 'ArrowDown' })); })
   act(() => { ref.current!.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' })); })
   expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'same1234-B' }))
+})
+
+it('debounces keyword requests and aborts superseded and unmounted requests', async () => {
+  vi.useFakeTimers()
+  vi.mocked(filesystemApi.search).mockImplementation(() => new Promise(() => {}))
+  vi.mocked(sessionCollaborationApi.list).mockImplementation(() => new Promise(() => {}))
+  try {
+    const view = render(<ComposerReferenceMenu id="cancel" cwd="/work" filter="修" references={[]} onSelect={vi.fn()} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+    view.rerender(<ComposerReferenceMenu id="cancel" cwd="/work" filter="修复" references={[]} onSelect={vi.fn()} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(149) })
+    expect(filesystemApi.search).not.toHaveBeenCalled()
+    expect(sessionCollaborationApi.list).not.toHaveBeenCalled()
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(filesystemApi.search).toHaveBeenCalledTimes(1)
+    expect(sessionCollaborationApi.list).toHaveBeenCalledTimes(1)
+    const fileSignal = vi.mocked(filesystemApi.search).mock.calls[0]![2]!.signal!
+    const sessionSignal = vi.mocked(sessionCollaborationApi.list).mock.calls[0]![1]!.signal!
+    expect(fileSignal.aborted).toBe(false)
+    expect(sessionSignal.aborted).toBe(false)
+    view.rerender(<ComposerReferenceMenu id="cancel" cwd="/work" filter="修复中" references={[]} onSelect={vi.fn()} />)
+    expect(fileSignal.aborted).toBe(true)
+    expect(sessionSignal.aborted).toBe(true)
+    await act(async () => { await vi.advanceTimersByTimeAsync(150) })
+    const nextFileSignal = vi.mocked(filesystemApi.search).mock.calls[1]![2]!.signal!
+    const nextSessionSignal = vi.mocked(sessionCollaborationApi.list).mock.calls[1]![1]!.signal!
+    view.unmount()
+    expect(nextFileSignal.aborted).toBe(true)
+    expect(nextSessionSignal.aborted).toBe(true)
+  } finally { vi.useRealTimers() }
+})
+
+it('browses directories immediately and cancels their request on workspace change', () => {
+  vi.mocked(filesystemApi.browse).mockImplementation(() => new Promise(() => {}))
+  const view = render(<ComposerReferenceMenu id="browse-cancel" cwd="/work" filter="src/" references={[]} onSelect={vi.fn()} />)
+  expect(filesystemApi.browse).toHaveBeenCalledTimes(1)
+  const signal = vi.mocked(filesystemApi.browse).mock.calls[0]![1]!.signal!
+  view.rerender(<ComposerReferenceMenu id="browse-cancel" cwd="/other" filter="src/" references={[]} onSelect={vi.fn()} />)
+  expect(signal.aborted).toBe(true)
+  expect(filesystemApi.browse).toHaveBeenCalledTimes(2)
 })

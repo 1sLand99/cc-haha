@@ -44,14 +44,15 @@ export const ComposerReferenceMenu = forwardRef<ComposerReferenceMenuHandle, Pro
   useEffect(() => {
     if (browseReferences) return
     let active = true
+    const controller = new AbortController()
     const timer = setTimeout(() => {
-      void sessionCollaborationApi.list(filter).then(data => {
+      void sessionCollaborationApi.list(filter, { signal: controller.signal }).then(data => {
         if (active) setSessionResult({ query: filter, sessions: data.sessions })
       }, () => {
         if (active) setSessionResult({ query: filter, sessions: [], error: true })
       })
     }, 150)
-    return () => { active = false; clearTimeout(timer) }
+    return () => { active = false; clearTimeout(timer); controller.abort() }
   }, [filter, browseReferences])
   const sessionCandidates = !browseReferences && sessionResult?.query === filter ? sessionResult.sessions : []
   const sessionLoading = !browseReferences && sessionResult?.query !== filter
@@ -73,18 +74,23 @@ export const ComposerReferenceMenu = forwardRef<ComposerReferenceMenuHandle, Pro
   useEffect(() => {
     if (browseReferences || !filter.trim() && override === undefined) return
     let active = true
+    const controller = new AbortController()
     const base = (cwd || rootRef.current.path).replace(/[\\/]+$/, '')
     const path = override ?? (browsingDirectory && base ? `${base}/${directoryQuery.replace(/\/+$/, '')}` : base)
     const search = override || browsingDirectory ? '' : directoryQuery
-    const request = search ? filesystemApi.search(search, path) : filesystemApi.browse(path, { includeFiles: true })
-    void request.then(data => {
-      if (!active) return
-      if (!rootRef.current.path) rootRef.current = { cwd, path: data.currentPath }
-      setResult({ key: queryKey, entries: data.entries, current: data.currentPath, root: rootRef.current.path })
-    }, error => {
-      if (active) setResult({ key: queryKey, entries: [], current: path, root: base, error: error instanceof ApiError && error.status === 403 ? 'denied' : 'failed' })
-    })
-    return () => { active = false }
+    const run = () => {
+      const request = search ? filesystemApi.search(search, path, { signal: controller.signal }) : filesystemApi.browse(path, { includeFiles: true, signal: controller.signal })
+      void request.then(data => {
+        if (!active) return
+        if (!rootRef.current.path) rootRef.current = { cwd, path: data.currentPath }
+        setResult({ key: queryKey, entries: data.entries, current: data.currentPath, root: rootRef.current.path })
+      }, error => {
+        if (active) setResult({ key: queryKey, entries: [], current: path, root: base, error: error instanceof ApiError && error.status === 403 ? 'denied' : 'failed' })
+      })
+    }
+    const timer = search ? setTimeout(run, 150) : undefined
+    if (!search) run()
+    return () => { active = false; clearTimeout(timer); controller.abort() }
   }, [cwd, filter, override, queryKey, browseReferences, directoryQuery, browsingDirectory])
 
   const groups = useMemo(() => {

@@ -25,7 +25,7 @@ export async function handleSessionCollaborationApi(req: Request, action: string
       body = value
     } catch { throw ApiError.badRequest('A JSON object is required') }
     switch (action) {
-      case 'list': return Response.json(await service.list({ query: stringField(body, 'query'), limit: numberField(body, 'limit'), offset: numberField(body, 'offset') }))
+      case 'list': return Response.json(await service.list({ query: stringField(body, 'query'), limit: numberField(body, 'limit'), offset: numberField(body, 'offset'), signal: req.signal }))
       case 'read': return Response.json(await service.read(stringField(body, 'sessionId', true)!, {
         cursor: stringField(body, 'cursor'), limit: numberField(body, 'limit'), signal: req.signal,
         includeOutputs: body.includeOutputs === true, maxOutputCharsPerItem: numberField(body, 'maxOutputCharsPerItem'),
@@ -53,7 +53,7 @@ export async function handleSessionCollaborationApi(req: Request, action: string
 export async function handleSessionCollaborationUiApi(req: Request, url: URL, service: SessionCollaborationService): Promise<Response> {
   try {
     const parts = url.pathname.split('/').filter(Boolean).slice(2)
-    if (!parts.length && req.method === 'GET') return Response.json(await service.candidates(url.searchParams.get('query') || undefined))
+    if (!parts.length && req.method === 'GET') return Response.json(await service.candidates(url.searchParams.get('query') || undefined, req.signal))
     const sessionId = parts[0]
     if (!sessionId) throw ApiError.notFound('Session id required')
     if (parts.length === 2 && parts[1] === 'status' && req.method === 'GET') return Response.json(await service.groupStatus(sessionId))

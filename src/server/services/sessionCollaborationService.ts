@@ -36,7 +36,7 @@ export type CollaborationCreateResult = { sessionId: string; workDir?: string; m
 export type SessionCollaborationDependencies = {
   statePath: string
   sessions: {
-    list(options: { query?: string; limit: number; offset: number }): Promise<unknown>
+    list(options: { query?: string; limit: number; offset: number; signal?: AbortSignal }): Promise<unknown>
     read(sessionId: string, options: { cursor?: string; limit: number; signal?: AbortSignal }): Promise<unknown>
     exists(sessionId: string): Promise<boolean>
     /** Must use the caller's effective runtime and an isolated Git worktree. */
@@ -176,17 +176,24 @@ export class SessionCollaborationService {
     return message
   }
 
-  async list(options: { query?: string; limit?: number; offset?: number } = {}): Promise<unknown> {
-    return this.deps.sessions.list({ ...options, limit: Math.min(100, Math.max(1, options.limit ?? 30)), offset: Math.max(0, options.offset ?? 0) })
+  async list(options: { query?: string; limit?: number; offset?: number; signal?: AbortSignal } = {}): Promise<unknown> {
+    options.signal?.throwIfAborted()
+    const result = await this.deps.sessions.list({ ...options, limit: Math.min(100, Math.max(1, options.limit ?? 30)), offset: Math.max(0, options.offset ?? 0) })
+    options.signal?.throwIfAborted()
+    return result
   }
 
-  async candidates(query?: string): Promise<{ sessions: Array<{ sessionId: string; title: string; cwd: string; status: string; updatedAt: string }> }> {
-    const result = await this.list({ query }) as { sessions?: Array<Record<string, unknown>> }
-    const snapshot = await this.status()
+  async candidates(query?: string, signal?: AbortSignal): Promise<{ sessions: Array<{ sessionId: string; title: string; cwd: string; status: string; updatedAt: string }> }> {
+    const result = await this.list({ query, signal }) as { sessions?: Array<Record<string, unknown>> }
+    await this.ready
+    await this.tail
+    signal?.throwIfAborted()
+    // Suggestions need only a status lookup for the returned page, not a clone
+    // of every collaboration message and member in the application.
     return { sessions: (result.sessions ?? []).map(session => ({
       sessionId: String(session.sessionId ?? session.id), title: String(session.title ?? ''),
       cwd: String(session.cwd ?? session.workDir ?? session.projectPath ?? ''),
-      status: snapshot.members.find(member => member.sessionId === (session.sessionId ?? session.id))?.state ?? 'idle',
+      status: this.store.members[String(session.sessionId ?? session.id)]?.state ?? 'idle',
       updatedAt: String(session.updatedAt ?? session.modifiedAt ?? ''),
     })) }
   }

@@ -1437,6 +1437,18 @@ export function createLocalIndexCoordinator(
       }
     },
 
+    getSessionSuggestionMetadata(sessionIds) {
+      if (!indexReadAllowed() || !index?.getSessionSuggestionMetadata) return null
+      try { return index.getSessionSuggestionMetadata(sessionIds) }
+      catch (error) { markDegraded(error, 'LOCAL_INDEX_READ_FAILED'); return null }
+    },
+
+    searchSessionMetadata(query, options): SessionIndexPage | null {
+      if (!indexReadAllowed() || !index?.searchSessionMetadata) return null
+      try { return index.searchSessionMetadata(query, options) }
+      catch (error) { markDegraded(error, 'LOCAL_INDEX_READ_FAILED'); return null }
+    },
+
     findSearchCandidates(
       filters: SessionSearchCandidateFilters,
     ): IndexedSessionSearchCandidate[] | null {

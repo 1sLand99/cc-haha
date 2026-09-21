@@ -29,6 +29,28 @@ beforeEach(async () => {
 afterEach(async () => { await rm(directory, { recursive: true, force: true }) })
 
 describe('session collaboration', () => {
+  test('suggestions project current member status without materializing message history', async () => {
+    await service.onSessionState('root', 'blocked')
+    service.status = async () => { throw new Error('Suggestions must not clone the full collaboration history') }
+    expect((await service.candidates('Main')).sessions).toEqual([
+      { sessionId: 'root', title: 'Main', cwd: '/fixture', status: 'blocked', updatedAt: 'now' },
+    ])
+  })
+
+  test('suggestions propagate cancellation and reject cancelled results', async () => {
+    const controller = new AbortController()
+    let calls = 0
+    deps.sessions.list = async options => {
+      calls++
+      expect(options.signal).toBe(controller.signal)
+      controller.abort(new Error('Query replaced'))
+      return { sessions: [] }
+    }
+    await expect(service.candidates('old query', controller.signal)).rejects.toThrow('Query replaced')
+    await expect(service.candidates('old query', controller.signal)).rejects.toThrow('Query replaced')
+    expect(calls).toBe(1)
+  })
+
   test('shares three worker slots across nested delegation and releases them on completion', async () => {
     const a = await service.create('root', { prompt: 'a' })
     expect(a).toMatchObject({ state: 'running', delivery: 'accepted' })

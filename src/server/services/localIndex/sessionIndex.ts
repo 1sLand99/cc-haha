@@ -57,6 +57,8 @@ export type SessionEntryLocatorPage = {
 }
 
 export interface SessionIndexReader {
+  getSessionSuggestionMetadata?(sessionIds: string[]): IndexedSessionRow[] | null
+  searchSessionMetadata?(query: string, options?: { limit?: number; offset?: number }): SessionIndexPage | null
   listSessions(options?: {
     project?: string
     limit?: number
@@ -296,6 +298,46 @@ export function createSessionIndex(database: LocalIndexDatabase): SessionIndex {
               LIMIT ? OFFSET ?
             `, project, limit, offset)
 
+        return { sessions: rows.map(sessionFromRow), total }
+      })
+    },
+
+    getSessionSuggestionMetadata(sessionIds): IndexedSessionRow[] {
+      const ids = [...new Set(sessionIds)].slice(0, 100)
+      if (!ids.length) return []
+      return database.read(operation => operation.all<SessionRow>(`
+        SELECT transcript_path, session_id, project_path, title, created_at,
+          modified_at, message_count, work_dir, permission_mode,
+          runtime_provider_id, runtime_provider_present, runtime_model_id,
+          effort_level, repository_json, worktree_session_json
+        FROM sessions WHERE session_id IN (${ids.map(() => '?').join(',')})
+        ORDER BY modified_at_ms DESC, session_id ASC, transcript_path ASC
+        LIMIT 100
+      `, ...ids).map(sessionFromRow))
+    },
+
+    searchSessionMetadata(query, options): SessionIndexPage {
+      const needle = query.trim().toLowerCase()
+      const limit = Math.min(100, Math.max(1, boundedInteger(options?.limit, 30)))
+      const offset = boundedInteger(options?.offset, 0)
+      return database.read(operation => {
+        const where = `instr(lower(title), ?) > 0 OR instr(lower(session_id), ?) > 0 OR instr(lower(coalesce(work_dir, '')), ?) > 0 OR instr(lower(project_path), ?) > 0`
+        const total = operation.get<{ total: number }>(`SELECT COUNT(*) AS total FROM sessions WHERE ${where}`, needle, needle, needle, needle)?.total ?? 0
+        const rows = operation.all<SessionRow>(`
+          SELECT transcript_path, session_id, project_path, title, created_at,
+            modified_at, message_count, work_dir, permission_mode,
+            runtime_provider_id, runtime_provider_present, runtime_model_id,
+            effort_level, repository_json, worktree_session_json
+          FROM sessions WHERE ${where}
+          ORDER BY CASE
+            WHEN ? = '' THEN 0
+            WHEN lower(title) = ? OR lower(session_id) = ? THEN 3
+            WHEN instr(lower(title), ?) = 1 OR instr(lower(session_id), ?) = 1 THEN 2
+            WHEN instr(lower(title), ?) > 0 OR instr(lower(session_id), ?) > 0 THEN 1
+            ELSE 0 END DESC,
+            modified_at_ms DESC, session_id ASC, transcript_path ASC
+          LIMIT ? OFFSET ?
+        `, needle, needle, needle, needle, needle, needle, needle, needle, needle, needle, needle, limit, offset)
         return { sessions: rows.map(sessionFromRow), total }
       })
     },

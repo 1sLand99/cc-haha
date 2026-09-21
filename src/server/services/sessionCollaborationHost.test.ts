@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SessionCollaborationService, type CollaborationMessage } from './sessionCollaborationService.js'
-import { handleSessionCollaborationEvent, configureSessionCollaborationHost, getSessionCollaborationService, findSessionMetadataMatches } from './sessionCollaborationHost.js'
+import { handleSessionCollaborationEvent, configureSessionCollaborationHost, getSessionCollaborationService } from './sessionCollaborationHost.js'
 import { sessionService } from './sessionService.js'
 import { admitSessionUserTurn, emitSessionTurnEvent } from './sessionTurnEvents.js'
 import { SearchService } from './searchService.js'
@@ -69,24 +69,6 @@ test('host rejects unavailable source workspace explicitly instead of silently c
   }
 })
 
-test('metadata search finds old titles and ids beyond the first hundred sessions without conflating equal titles', async () => {
-  const sessions = Array.from({ length: 235 }, (_, index) => ({
-    id: `session-${index}`, title: index === 230 ? 'Unique archived design' : index === 1 || index === 201 ? 'Same title' : 'Ordinary',
-    workDir: index === 234 ? '/fixture/old-project' : '/fixture/project',
-  }))
-  const requests: number[] = []
-  const list = async ({ limit, offset }: { limit: number; offset: number }) => {
-    requests.push(offset)
-    return { sessions: sessions.slice(offset, offset + limit), total: sessions.length }
-  }
-  expect((await findSessionMetadataMatches('unique archived', list)).map(item => item.id)).toEqual(['session-230'])
-  expect(requests).toEqual([0, 100, 200])
-  expect((await findSessionMetadataMatches('session-229', list)).map(item => item.id)).toEqual(['session-229'])
-  expect((await findSessionMetadataMatches('same title', list)).map(item => item.id)).toEqual(['session-1', 'session-201'])
-  expect((await findSessionMetadataMatches('/old-project', list)).map(item => item.id)).toEqual(['session-234'])
-})
-
-
 test('manual admission waits for already emitted Stop events before reserving its slot', async () => {
   const previous = process.env.CLAUDE_CONFIG_DIR
   process.env.CLAUDE_CONFIG_DIR = directory
@@ -117,25 +99,52 @@ test('manual admission waits for already emitted Stop events before reserving it
 })
 
 
-test('old exact title and id matches rank before the server candidate limit', async () => {
+test('a full metadata page skips transcript search and returns immediately from the bounded index', async () => {
   const previous = process.env.CLAUDE_CONFIG_DIR
   process.env.CLAUDE_CONFIG_DIR = directory
   const dispose = configureSessionCollaborationHost('127.0.0.1', 1234)
-  const sessions = [
-    ...Array.from({ length: 45 }, (_, i) => ({ id: `recent-${i}`, title: `Recent needle discussion ${i}`, workDir: '/fixture' })),
-    { id: 'old-title', title: 'needle', workDir: '/fixture' },
-    { id: 'needle', title: 'Old conversation', workDir: '/fixture' },
-  ]
-  spyOn(sessionService, 'listSessions').mockImplementation(async ({ offset = 0, limit = 30 } = {}) => ({ sessions: sessions.slice(offset, offset + limit), total: sessions.length }) as any)
-  spyOn(SearchService.prototype, 'searchSessions').mockResolvedValue({ results: [], truncated: false } as any)
+  const sessions = Array.from({ length: 30 }, (_, i) => ({ id: `match-${i}`, title: '修复', workDir: '/fixture', projectPath: 'project', modifiedAt: 'now' }))
+  const metadata = spyOn(sessionService, 'searchSessionMetadata').mockResolvedValue({ sessions, total: 20_000 })
+  const list = spyOn(sessionService, 'listSessions').mockRejectedValue(new Error('Must not hydrate the sidebar'))
+  const fullText = spyOn(SearchService.prototype, 'searchSessions').mockRejectedValue(new Error('Must not read transcripts'))
+  const suggestions = spyOn(SearchService.prototype, 'searchSessionSuggestions').mockRejectedValue(new Error('Already have a full metadata page'))
   try {
     const service = await getSessionCollaborationService()
-    const result = await service.candidates('needle')
-    expect(result.sessions).toHaveLength(30)
-    expect(result.sessions.slice(0, 2).map(session => session.sessionId)).toEqual(['old-title', 'needle'])
+    const result = await service.candidates('修复')
+    expect(result.sessions.map(item => item.sessionId)).toEqual(sessions.map(item => item.id))
+    expect(metadata).toHaveBeenCalledWith('修复', { limit: 30, offset: 0, signal: undefined })
+    expect(await service.list({ query: '修复' })).toMatchObject({ total: 20_000, totalIsLowerBound: true, truncated: true })
+    expect(list).not.toHaveBeenCalled()
+    expect(fullText).not.toHaveBeenCalled()
+    expect(suggestions).not.toHaveBeenCalled()
   } finally {
-    dispose()
-    mock.restore()
+    dispose(); mock.restore()
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = previous
+  }
+})
+
+test('content suggestions fill metadata pages without duplicate metadata hits or canonical history reads', async () => {
+  const previous = process.env.CLAUDE_CONFIG_DIR
+  process.env.CLAUDE_CONFIG_DIR = directory
+  const dispose = configureSessionCollaborationHost('127.0.0.1', 1234)
+  const title = { id: 'title', title: 'Project match', workDir: '/fixture', projectPath: '修复-project', modifiedAt: 'now' }
+  const body = { id: 'body', title: 'Older discussion', workDir: '/fixture', projectPath: 'project', modifiedAt: 'before' }
+  spyOn(sessionService, 'searchSessionMetadata').mockImplementation(async (_query, options) => ({ sessions: options?.offset ? [] : [title], total: 1 }))
+  spyOn(sessionService, 'getSessionSuggestionMetadata').mockReturnValue([title, body])
+  const fullText = spyOn(SearchService.prototype, 'searchSessions').mockRejectedValue(new Error('Must not scan files'))
+  spyOn(SearchService.prototype, 'searchSessionSuggestions').mockResolvedValue({
+    sessions: [title, body, body].map(item => ({ sessionId: item.id, projectPath: item.projectPath, modifiedAt: item.modifiedAt, ownerTranscriptPath: `/fixture/${item.id}.jsonl` })),
+    truncated: false, indexUnavailable: false,
+  })
+  try {
+    const service = await getSessionCollaborationService()
+    expect((await service.candidates('修复')).sessions.map(item => item.sessionId)).toEqual(['title', 'body'])
+    expect((await service.list({ query: '修复', offset: 1, limit: 1 }) as any).sessions.map((item: any) => item.id)).toEqual(['body'])
+    expect((await service.list({ query: '修复', offset: 2, limit: 1 }) as any).sessions).toEqual([])
+    expect(fullText).not.toHaveBeenCalled()
+  } finally {
+    dispose(); mock.restore()
     if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
     else process.env.CLAUDE_CONFIG_DIR = previous
   }

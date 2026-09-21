@@ -156,7 +156,7 @@ describe('ComposerCapabilityMenu', () => {
 
     fireEvent.change(searchInput(), { target: { value: 'no-such-capability' } })
     expect(await screen.findByText('No matching references')).toBeInTheDocument()
-    expect(sessionCollaborationApi.list).toHaveBeenCalledWith('no-such-capability')
+    expect(sessionCollaborationApi.list).toHaveBeenCalledWith('no-such-capability', expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

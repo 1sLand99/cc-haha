@@ -11,28 +11,6 @@ import { ApiError } from '../middleware/errorHandler.js'
 
 const searchService = new SearchService()
 
-/** Scan only the existing metadata projection; transcript content has its own bounded index search. */
-export async function findSessionMetadataMatches(
-  query: string,
-  list: (options: { limit: number; offset: number }) => Promise<{ sessions: Array<{ id: string; title?: string; workDir?: string | null; projectPath?: string }>; total?: number }>,
-): Promise<Array<Record<string, unknown>>> {
-  const needle = query.toLocaleLowerCase()
-  const matches = new Map<string, Record<string, unknown>>()
-  const seen = new Set<string>()
-  for (let offset = 0; ; offset += 100) {
-    const page = await list({ limit: 100, offset })
-    let newSessions = 0
-    for (const session of page.sessions) {
-      if (seen.has(session.id)) continue
-      seen.add(session.id)
-      newSessions++
-      if (`${session.title ?? ''} ${session.id} ${session.workDir ?? session.projectPath ?? ''}`.toLocaleLowerCase().includes(needle)) matches.set(session.id, session)
-    }
-    if (page.sessions.length < 100 || newSessions === 0 || (page.total !== undefined && offset + page.sessions.length >= page.total)) break
-  }
-  return [...matches.values()]
-}
-
 let endpoint = { serverHost: '127.0.0.1', serverPort: 0 }
 let current: { path: string; service: SessionCollaborationService; ready: Promise<void> } | undefined
 let unsubscribe: (() => void) | undefined
@@ -62,27 +40,36 @@ export async function getSessionCollaborationService(): Promise<SessionCollabora
     const service = new SessionCollaborationService({
       statePath: path,
       sessions: {
-        async list({ query, limit, offset }) {
-          if (!query?.trim()) return sessionService.listSessions({ limit, offset })
-          // Search transcript content as well as titles, using the existing
-          // indexed/bounded fallback instead of materializing all histories.
-          const [matches, metadata] = await Promise.all([
-            searchService.searchSessions(query, { limit: Math.min(100, offset + limit), matchesPerSession: 1 }),
-            findSessionMetadataMatches(query, options => sessionService.listSessions(options)),
-          ])
-          const selected = new Map<string, Record<string, unknown>>()
-          for (const session of metadata) selected.set(String(session.id), session)
-          for (const match of matches.results) if (!selected.has(match.sessionId)) selected.set(match.sessionId, { ...match, id: match.sessionId })
-          const needle = query.trim().toLocaleLowerCase()
-          const rank = (session: Record<string, unknown>): number => {
-            const names = [session.id ?? session.sessionId, session.title].filter(value => typeof value === 'string').map(value => String(value).toLocaleLowerCase())
-            if (names.some(value => value === needle)) return 3
-            if (names.some(value => value.startsWith(needle))) return 2
-            if (names.some(value => value.includes(needle))) return 1
-            return 0
+        async list({ query, limit, offset, signal }) {
+          const needle = query?.trim() ?? ''
+          const metadata = await sessionService.searchSessionMetadata(needle, { limit, offset, signal })
+          signal?.throwIfAborted()
+          // A full metadata page already answers the picker. Do not wait for
+          // full-text matches (or canonical transcript validation) to display it.
+          if (!needle) return metadata
+          if (metadata.sessions.length === limit) return { ...metadata, truncated: true, totalIsLowerBound: true }
+          const content = await searchService.searchSessionSuggestions(needle, { limit: 100, signal })
+          signal?.throwIfAborted()
+          const details = new Map(sessionService.getSessionSuggestionMetadata(content.sessions.map(item => item.sessionId)).map(item => [item.id, item]))
+          const normalized = needle.toLowerCase()
+          const seen = new Set<string>()
+          const bodyOnly = content.sessions.flatMap(item => {
+            const detail = details.get(item.sessionId)
+            // The metadata page is authoritative for title/project matches;
+            // filter these from content pages too so pagination cannot repeat them.
+            if (seen.has(item.sessionId)) return []
+            seen.add(item.sessionId)
+            if (detail && [detail.id, detail.title, detail.workDir ?? '', detail.projectPath].some(value => value.toLowerCase().includes(normalized))) return []
+            return [detail ?? { id: item.sessionId, title: item.sessionId, projectPath: item.projectPath, modifiedAt: item.modifiedAt }]
+          })
+          const bodyOffset = Math.max(0, offset - metadata.total)
+          return {
+            sessions: [...metadata.sessions, ...bodyOnly.slice(bodyOffset, bodyOffset + limit - metadata.sessions.length)],
+            total: metadata.total + bodyOnly.length,
+            truncated: content.truncated,
+            totalIsLowerBound: content.truncated || content.indexUnavailable,
+            indexUnavailable: content.indexUnavailable,
           }
-          const ranked = [...selected.values()].sort((a, b) => rank(b) - rank(a))
-          return { sessions: ranked.slice(offset, offset + limit), total: selected.size, truncated: matches.truncated }
         },
         read: (sessionId, options) => sessionService.getSessionHistoryPage(sessionId, options),
         exists: async sessionId => Boolean(await sessionService.getSessionSummary(sessionId)),

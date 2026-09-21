@@ -1961,7 +1961,7 @@ describe('ChatInput file mentions', () => {
     })
     expect(document.querySelector('.composer-mention')).toHaveTextContent('@README.md')
     expect(getComposerText()).toContain('Please review @README.md')
-    expect(mocks.search).toHaveBeenCalledWith('README', '/repo')
+    expect(mocks.search).toHaveBeenCalledWith('README', '/repo', { signal: expect.any(AbortSignal) })
     expect(screen.queryByRole('combobox', { name: 'Search skills, plugins, files…' })).not.toBeInTheDocument()
     expect(mocks.wsSend).not.toHaveBeenCalled()
     fireEvent.keyDown(getComposerElement(), { key: 'Enter' })
