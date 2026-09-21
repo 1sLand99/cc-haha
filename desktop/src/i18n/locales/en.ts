@@ -3245,6 +3245,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'subagentRun.loading': 'Loading SubAgent run...',
   'subagentRun.source': 'Source',
   'subagentRun.agent': 'Agent',
+  'subagentRun.model': 'Model',
   'subagentRun.unknown': 'Unknown',
   'subagentRun.task': 'Task',
   'subagentRun.updated': 'Updated',

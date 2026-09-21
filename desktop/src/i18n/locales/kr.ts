@@ -3247,6 +3247,7 @@ export const kr: Record<TranslationKey, string> = {
   'subagentRun.loading': 'SubAgent 실행을 불러오는 중...',
   'subagentRun.source': '소스',
   'subagentRun.agent': 'Agent',
+  'subagentRun.model': '모델',
   'subagentRun.unknown': '알 수 없음',
   'subagentRun.task': '작업',
   'subagentRun.updated': '업데이트됨',

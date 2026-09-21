@@ -3247,6 +3247,7 @@ export const jp: Record<TranslationKey, string> = {
   'subagentRun.loading': 'SubAgent 実行を読み込み中...',
   'subagentRun.source': 'ソース',
   'subagentRun.agent': 'Agent',
+  'subagentRun.model': 'モデル',
   'subagentRun.unknown': '不明',
   'subagentRun.task': 'タスク',
   'subagentRun.updated': '更新日時',

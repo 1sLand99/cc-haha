@@ -3245,6 +3245,7 @@ export const zh: Record<TranslationKey, string> = {
   'subagentRun.loading': '正在加载 SubAgent 运行...',
   'subagentRun.source': '来源',
   'subagentRun.agent': 'Agent',
+  'subagentRun.model': '模型',
   'subagentRun.unknown': '未知',
   'subagentRun.task': '任务',
   'subagentRun.updated': '更新时间',

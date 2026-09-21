@@ -467,6 +467,46 @@ describe('SubagentRunPage', () => {
     expectSharedSessionSurface('subagent')
   })
 
+  it('shows the model the newest transcript turn answered on, not an earlier one', async () => {
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun({
+      messages: [
+        { id: 'msg-user', type: 'user', content: 'Read files', timestamp: TRANSCRIPT_TIMESTAMP },
+        {
+          id: 'msg-assistant-1',
+          type: 'assistant',
+          content: [{ type: 'text', text: 'First pass' }],
+          model: 'claude-haiku-4-5',
+          timestamp: TRANSCRIPT_TIMESTAMP,
+        },
+        {
+          id: 'msg-assistant-2',
+          type: 'assistant',
+          content: [{ type: 'text', text: 'Second pass' }],
+          model: 'claude-sonnet-5',
+          timestamp: TRANSCRIPT_TIMESTAMP,
+        },
+      ],
+    }))
+
+    render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="Kuhn" />)
+
+    await screen.findByTestId('subagent-conversation')
+    const header = screen.getByTestId('session-header')
+    expect(within(header).getByText('claude-sonnet-5')).toBeInTheDocument()
+    expect(within(header).queryByText('claude-haiku-4-5')).not.toBeInTheDocument()
+  })
+
+  it('omits the model badge while no turn has reported one', async () => {
+    vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun())
+
+    render(<SubagentRunPage sourceSessionId="session-1" toolUseId="tool-1" title="Kuhn" />)
+
+    await screen.findByTestId('subagent-conversation')
+    const header = screen.getByTestId('session-header')
+    expect(within(header).queryByTitle('Model')).not.toBeInTheDocument()
+    expect(within(header).getByText('Completed')).toBeInTheDocument()
+  })
+
   it('uses compact main-session chrome and mobile transcript behavior on narrow screens', async () => {
     viewportMocks.isMobile = true
     vi.mocked(subagentsApi.getRunByTool).mockResolvedValue(subagentRun({
