@@ -1,19 +1,11 @@
 import type { TranslationKey } from './en'
 
 export const zh: Record<TranslationKey, string> = {
-  "chat.collaborationCancelled": "已取消",
-
-  "chat.collaborationAccepted": "已投遞",
-  "chat.collaborationConsumed": "已接收處理",
-
   "chat.sessionNoProject": "無專案",
   "chat.referenceSessions": "對話",
   "chat.sessionReferencesLoadFailed": "無法載入對話。",
   "chat.openReferencedSession": "開啟對話 {id}",
-  "chat.sessionCollaboration": "對話協作（{count}）",
-  "chat.collaborationMessages": "協作訊息",
-  "chat.collaborationStopGroup": "停止整組",
-  "chat.collaborationFailedRequest": "無法更新協作狀態。",
+  "chat.collaborationMessageFrom": "由 {id} 從另一個對話發送",
   "chat.collaborationQueued": "排隊中",
   "chat.collaborationRunning": "執行中",
   "chat.collaborationIdle": "閒置",
@@ -1350,6 +1342,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.providers.multiProtocolBadge': '多協定',
   'settings.providers.apiFormatPerModelHint': '此預設會依模型自動選擇協定，本項由預設決定',
   'settings.providers.proxyHint': '請求將透過本地代理轉換協議格式',
+  'settings.providers.apiFormatOverrideHint': '已切換協定：請確認介面位址是該協定的相容端點，預設位址可能不適用',
   'settings.providers.authStrategy': '認證變數',
   'settings.providers.authStrategyApiKey': 'API Key (ANTHROPIC_API_KEY)',
   'settings.providers.authStrategyApiKeyDesc': '直連 Anthropic 官方 API，傳送 x-api-key。',
@@ -3247,6 +3240,7 @@ export const zh: Record<TranslationKey, string> = {
   'subagentRun.loading': '正在載入 SubAgent 執行...',
   'subagentRun.source': '來源',
   'subagentRun.agent': 'Agent',
+  'subagentRun.model': '模型',
   'subagentRun.unknown': '未知',
   'subagentRun.task': '任務',
   'subagentRun.updated': '更新時間',

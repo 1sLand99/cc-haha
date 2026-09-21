@@ -3821,6 +3821,7 @@ export const MessageBlock = memo(function MessageBlock({
             content={message.content}
             attachments={message.attachments}
             sessionReferences={message.sessionReferences}
+            collaboration={message.collaboration}
             branchAction={branchAction}
             timestamp={message.timestamp}
             sessionId={sessionId ?? undefined}

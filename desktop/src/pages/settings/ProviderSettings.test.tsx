@@ -80,6 +80,47 @@ describe('ApiSmart sponsor provider', () => {
     })))
   })
 
+  it('lets a preset switch protocol while the preset endpoint stays put', async () => {
+    const create = vi.spyOn(providersApi, 'create').mockImplementation(async (input) => ({
+      provider: { ...input, id: 'saved-aruhub', apiFormat: input.apiFormat ?? 'anthropic' },
+    }))
+    render(<ProviderSettings />)
+    fireEvent.click(await screen.findByRole('button', { name: /Add Model/ }))
+    const dialog = within(screen.getByRole('dialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'AruHub' }))
+
+    // AruHub is an Anthropic-endpoint preset that also serves OpenAI, so the
+    // protocol starts on the preset's own value and is the user's to change.
+    const formatTrigger = dialog.getByRole('button', { name: /Anthropic Messages \(native\)/ })
+    expect(dialog.queryByText(/point the base URL at an endpoint that serves it/)).not.toBeInTheDocument()
+
+    fireEvent.click(formatTrigger)
+    fireEvent.click(await screen.findByRole('option', { name: /OpenAI Chat Completions/ }))
+
+    expect(dialog.getByText(/point the base URL at an endpoint that serves it/)).toBeInTheDocument()
+    // The address is the user's to replace, so switching must not rewrite it.
+    expect(dialog.getByDisplayValue('https://direct.aruhub.com:8443')).toBeInTheDocument()
+
+    fireEvent.change(dialog.getAllByPlaceholderText('sk-...')[0]!, { target: { value: 'fake-aruhub-key' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      presetId: 'aruhub',
+      baseUrl: 'https://direct.aruhub.com:8443',
+      apiFormat: 'openai_chat',
+      apiKey: 'fake-aruhub-key',
+    })))
+  })
+
+  it('does not warn about the endpoint while a preset keeps its own protocol', async () => {
+    render(<ProviderSettings />)
+    fireEvent.click(await screen.findByRole('button', { name: /Add Model/ }))
+    const dialog = within(screen.getByRole('dialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'ApiSmart' }))
+
+    expect(dialog.getByRole('button', { name: /OpenAI Chat Completions \(proxy\)/ })).toBeInTheDocument()
+    expect(dialog.queryByText(/point the base URL at an endpoint that serves it/)).not.toBeInTheDocument()
+  })
+
   it('prefills the sponsor connection, opens its landing page, and saves the selected models', async () => {
     const open = vi.spyOn(getDesktopHost().shell, 'open').mockResolvedValue()
     const create = vi.spyOn(providersApi, 'create').mockImplementation(async (input) => ({

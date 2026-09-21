@@ -1,19 +1,11 @@
 import type { TranslationKey } from './en'
 
 export const jp: Record<TranslationKey, string> = {
-  "chat.collaborationCancelled": "キャンセル済み",
-
-  "chat.collaborationAccepted": "配信済み",
-  "chat.collaborationConsumed": "処理に取り込み済み",
-
   "chat.sessionNoProject": "プロジェクトなし",
   "chat.referenceSessions": "セッション",
   "chat.sessionReferencesLoadFailed": "セッションを読み込めませんでした。",
   "chat.openReferencedSession": "セッション {id} を開く",
-  "chat.sessionCollaboration": "セッション連携（{count}）",
-  "chat.collaborationMessages": "連携メッセージ",
-  "chat.collaborationStopGroup": "グループを停止",
-  "chat.collaborationFailedRequest": "連携状態を更新できませんでした。",
+  "chat.collaborationMessageFrom": "{id} が別のセッションから送信",
   "chat.collaborationQueued": "待機中",
   "chat.collaborationRunning": "実行中",
   "chat.collaborationIdle": "アイドル",
@@ -1351,6 +1343,7 @@ export const jp: Record<TranslationKey, string> = {
   'settings.providers.multiProtocolBadge': 'マルチプロトコル',
   'settings.providers.apiFormatPerModelHint': 'このプリセットはモデルごとにプロトコルを選ぶため、この項目は固定です',
   'settings.providers.proxyHint': 'リクエストはローカルプロキシ経由で変換されます',
+  'settings.providers.apiFormatOverrideHint': 'プロトコルを変更しました。プリセットの既定 URL が対応しているとは限らないため、このプロトコルに対応したエンドポイントを指定してください',
   'settings.providers.authStrategy': '認証変数',
   'settings.providers.authStrategyApiKey': 'API キー (ANTHROPIC_API_KEY)',
   'settings.providers.authStrategyApiKeyDesc': 'x-api-key を使用した Anthropic API への直接アクセス。',
@@ -3248,6 +3241,7 @@ export const jp: Record<TranslationKey, string> = {
   'subagentRun.loading': 'SubAgent 実行を読み込み中...',
   'subagentRun.source': 'ソース',
   'subagentRun.agent': 'Agent',
+  'subagentRun.model': 'モデル',
   'subagentRun.unknown': '不明',
   'subagentRun.task': 'タスク',
   'subagentRun.updated': '更新日時',

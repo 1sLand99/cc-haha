@@ -1,4 +1,3 @@
-import { SessionCollaborationPanel } from '@/components/chat/SessionCollaborationPanel'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { GitFork, Target } from 'lucide-react'
@@ -896,8 +895,6 @@ export function ActiveSession() {
               placement="overlay"
             />
           ) : null}
-
-          {activeTabId && !isEmpty && isSessionTabState(activeTabId, activeTabType) ? <SessionCollaborationPanel key={activeTabId} sessionId={activeTabId} /> : null}
 
           <ChatInput
             variant={isEmpty && !showRightPanel ? 'hero' : 'default'}

@@ -14,6 +14,8 @@ import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 type Props = {
   content: string
   sessionReferences?: Array<{ sessionId: string }>
+  /** Set when this message was delivered from another collaborating session. */
+  collaboration?: { sourceSessionId: string; messageId?: string }
   attachments?: UIAttachment[]
   branchAction?: MessageBranchAction
   rewindAction?: MessageRewindAction
@@ -29,6 +31,7 @@ type Props = {
 export const UserMessage = memo(function UserMessage({
   content,
   sessionReferences,
+  collaboration,
   attachments,
   branchAction,
   rewindAction,
@@ -153,6 +156,9 @@ export const UserMessage = memo(function UserMessage({
         className="group flex min-w-0 max-w-[82%] flex-col items-end sm:max-w-[78%] lg:max-w-[640px]"
       >
         <div className="flex max-w-full flex-col items-end gap-2">
+          {collaboration ? <div className="px-0.5 text-[11px] text-[var(--color-text-tertiary)]">
+            <Button size="sm" variant="ghost" onClick={() => openSessionSource(collaboration.sourceSessionId)}>{t('chat.collaborationMessageFrom', { id: sessionSourceTitle(collaboration.sourceSessionId) })}</Button>
+          </div> : null}
           {sessionReferences?.length ? <div className="flex max-w-full flex-wrap gap-1" aria-label={t('chat.referenceSessions')}>
             {sessionReferences.map(reference => <Button key={reference.sessionId} size="sm" variant="ghost" onClick={() => openSessionSource(reference.sessionId)}>{t('chat.openReferencedSession', { id: sessionSourceTitle(reference.sessionId) })}</Button>)}
           </div> : null}

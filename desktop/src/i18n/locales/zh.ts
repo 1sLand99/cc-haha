@@ -1,19 +1,11 @@
 import type { TranslationKey } from './en'
 
 export const zh: Record<TranslationKey, string> = {
-  "chat.collaborationCancelled": "已取消",
-
-  "chat.collaborationAccepted": "已投递",
-  "chat.collaborationConsumed": "已接收处理",
-
   "chat.sessionNoProject": "无项目",
   "chat.referenceSessions": "会话",
   "chat.sessionReferencesLoadFailed": "无法加载会话。",
   "chat.openReferencedSession": "打开会话 {id}",
-  "chat.sessionCollaboration": "会话协作（{count}）",
-  "chat.collaborationMessages": "协作消息",
-  "chat.collaborationStopGroup": "停止整组",
-  "chat.collaborationFailedRequest": "无法更新协作状态。",
+  "chat.collaborationMessageFrom": "由 {id} 从另一个会话发送",
   "chat.collaborationQueued": "排队中",
   "chat.collaborationRunning": "运行中",
   "chat.collaborationIdle": "空闲",
@@ -1349,6 +1341,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.providers.multiProtocolBadge': '多协议',
   'settings.providers.apiFormatPerModelHint': '该预设按模型自动选择协议，此项由预设决定',
   'settings.providers.proxyHint': '请求将通过本地代理转换协议格式',
+  'settings.providers.apiFormatOverrideHint': '已切换协议：请确认接口地址是该协议的兼容端点，预设默认地址可能不适用',
   'settings.providers.authStrategy': '认证变量',
   'settings.providers.authStrategyApiKey': 'API Key (ANTHROPIC_API_KEY)',
   'settings.providers.authStrategyApiKeyDesc': '直连 Anthropic 官方 API，发送 x-api-key。',
@@ -3246,6 +3239,7 @@ export const zh: Record<TranslationKey, string> = {
   'subagentRun.loading': '正在加载 SubAgent 运行...',
   'subagentRun.source': '来源',
   'subagentRun.agent': 'Agent',
+  'subagentRun.model': '模型',
   'subagentRun.unknown': '未知',
   'subagentRun.task': '任务',
   'subagentRun.updated': '更新时间',

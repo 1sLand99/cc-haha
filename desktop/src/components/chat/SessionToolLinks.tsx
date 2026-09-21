@@ -33,11 +33,34 @@ export function sessionToolTargets(input: unknown, result: unknown): string[] {
   return [...ids].slice(0, 20)
 }
 
+/** Titles carried by collaboration tool results (e.g. CreateSession) win over a
+ * stale session store, which may still show the placeholder right after spawn. */
+function sessionToolResultTitles(result: unknown): Map<string, string> {
+  const titles = new Map<string, string>()
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 4 || titles.size >= 20) return
+    if (typeof value === 'string') {
+      try { visit(JSON.parse(value), depth + 1) } catch { /* Ordinary tool output stays text. */ }
+      return
+    }
+    if (Array.isArray(value)) { for (const item of value.slice(0, 20)) visit(item, depth + 1); return }
+    if (!value || typeof value !== 'object') return
+    const record = value as Record<string, unknown>
+    if (typeof record.sessionId === 'string' && typeof record.title === 'string' && record.title.trim()) {
+      titles.set(record.sessionId, record.title)
+    }
+    for (const key of ['text', 'data', 'sessions', 'members']) if (record[key]) visit(record[key], depth + 1)
+  }
+  visit(result, 0)
+  return titles
+}
+
 export function SessionToolLinks({ input, result }: { input: unknown, result: unknown }) {
   const t = useTranslation()
   const targets = sessionToolTargets(input, result)
+  const resultTitles = sessionToolResultTitles(result)
   if (!targets.length) return null
   return <div className="flex flex-wrap gap-1 px-3 py-1" aria-label={t('chat.referenceSessions')}>
-    {targets.map(id => <Button key={id} size="sm" variant="ghost" onClick={() => openSessionSource(id)}>{t('chat.openReferencedSession', { id: sessionSourceTitle(id) })}</Button>)}
+    {targets.map(id => <Button key={id} size="sm" variant="ghost" onClick={() => openSessionSource(id)}>{t('chat.openReferencedSession', { id: resultTitles.get(id) ?? sessionSourceTitle(id) })}</Button>)}
   </div>
 }

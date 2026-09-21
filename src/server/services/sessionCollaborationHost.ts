@@ -73,6 +73,7 @@ export async function getSessionCollaborationService(): Promise<SessionCollabora
         },
         read: (sessionId, options) => sessionService.getSessionHistoryPage(sessionId, options),
         exists: async sessionId => Boolean(await sessionService.getSessionSummary(sessionId)),
+        titles: sessionIds => Object.fromEntries(sessionService.getSessionSuggestionMetadata(sessionIds).map(item => [item.id, item.title])),
         async create(callerSessionId, input) {
           const workDir = input.workDir ?? await sessionService.getSessionWorkDir(callerSessionId)
           if (!workDir) throw new ApiError(409, 'The source session working directory is unavailable', 'SESSION_WORKSPACE_UNAVAILABLE')

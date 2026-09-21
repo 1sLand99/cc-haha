@@ -1,19 +1,13 @@
 import type { TranslationKey } from './en'
 
 export const kr: Record<TranslationKey, string> = {
-  "chat.collaborationCancelled": "취소됨",
 
-  "chat.collaborationAccepted": "전달됨",
-  "chat.collaborationConsumed": "처리에 반영됨",
 
   "chat.sessionNoProject": "프로젝트 없음",
   "chat.referenceSessions": "세션",
   "chat.sessionReferencesLoadFailed": "세션을 불러올 수 없습니다.",
   "chat.openReferencedSession": "세션 {id} 열기",
-  "chat.sessionCollaboration": "세션 협업 ({count})",
-  "chat.collaborationMessages": "협업 메시지",
-  "chat.collaborationStopGroup": "그룹 중지",
-  "chat.collaborationFailedRequest": "협업 상태를 업데이트할 수 없습니다.",
+  "chat.collaborationMessageFrom": "{id}이(가) 다른 세션에서 보냄",
   "chat.collaborationQueued": "대기 중",
   "chat.collaborationRunning": "실행 중",
   "chat.collaborationIdle": "유휴",
@@ -1351,6 +1345,7 @@ export const kr: Record<TranslationKey, string> = {
   'settings.providers.multiProtocolBadge': '멀티 프로토콜',
   'settings.providers.apiFormatPerModelHint': '이 프리셋은 모델별로 프로토콜을 선택하므로 이 항목은 고정됩니다',
   'settings.providers.proxyHint': '요청은 로컬 프록시를 통해 변환됩니다',
+  'settings.providers.apiFormatOverrideHint': '프로토콜을 변경했습니다. 프리셋 기본 URL이 해당 프로토콜을 지원하지 않을 수 있으니 호환되는 엔드포인트를 지정하세요',
   'settings.providers.authStrategy': '인증 변수',
   'settings.providers.authStrategyApiKey': 'API 키 (ANTHROPIC_API_KEY)',
   'settings.providers.authStrategyApiKeyDesc': 'x-api-key를 사용한 Anthropic API 직접 액세스.',
@@ -3248,6 +3243,7 @@ export const kr: Record<TranslationKey, string> = {
   'subagentRun.loading': 'SubAgent 실행을 불러오는 중...',
   'subagentRun.source': '소스',
   'subagentRun.agent': 'Agent',
+  'subagentRun.model': '모델',
   'subagentRun.unknown': '알 수 없음',
   'subagentRun.task': '작업',
   'subagentRun.updated': '업데이트됨',

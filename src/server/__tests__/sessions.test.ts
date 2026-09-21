@@ -16,6 +16,7 @@ import {
 import { conversationService } from '../services/conversationService.js'
 import { clearCommandsCache } from '../../commands.js'
 import { parseJSONL } from '../../utils/json.js'
+import { formatSessionCollaborationPrompt } from '../../utils/sessionCollaborationEnvelope.js'
 import { createSessionBranch } from '../../utils/sessionBranching.js'
 import { sanitizePath } from '../../utils/sessionStoragePortable.js'
 import { clearInstalledPluginsCache } from '../../utils/plugins/installedPluginsManager.js'
@@ -1475,6 +1476,34 @@ describe('SessionService', () => {
     const detail = await service.getSession(sessionId)
     expect(detail!.messages).toHaveLength(1)
     expect(detail!.messages[0]!.content).toBe('Real message')
+  })
+
+  it('shows session collaboration deliveries as clean user messages with source metadata', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    await writeSessionFile('-tmp-project', sessionId, [
+      makeSnapshotEntry(),
+      {
+        ...makeMetaUserEntry(),
+        message: {
+          role: 'user',
+          content: formatSessionCollaborationPrompt({
+            senderSessionId: 'root-session',
+            messageId: 'm-1',
+            text: '只读发现：#1335 当前版本未复现',
+          }),
+        },
+      },
+      makeUserEntry('Real message'),
+    ])
+
+    const detail = await service.getSession(sessionId)
+    expect(detail!.messages).toHaveLength(2)
+    expect(detail!.messages[0]).toMatchObject({
+      type: 'user',
+      content: '只读发现：#1335 当前版本未复现',
+      collaboration: { sourceSessionId: 'root-session', messageId: 'm-1' },
+    })
+    expect(detail!.messages[1]!.content).toBe('Real message')
   })
 
   // --------------------------------------------------------------------------
