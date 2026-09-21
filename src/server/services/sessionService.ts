@@ -3971,7 +3971,7 @@ export class SessionService {
     return { entries: visibleEntries, contextScanBytes: context.scannedBytes }
   }
 
-  async getSessionHistoryPage(sessionId: string, options: { cursor?: string; limit?: number; signal?: AbortSignal; full?: boolean } = {}): Promise<{
+  async getSessionHistoryPage(sessionId: string, options: { cursor?: string; limit?: number; signal?: AbortSignal; full?: boolean; projectContext?: boolean } = {}): Promise<{
     messages: MessageEntry[]
     taskNotifications: SessionTaskNotification[]
     page: HistoryPageInfo
@@ -3985,7 +3985,12 @@ export class SessionService {
       throw ApiError.notFound(`Session not found: ${sessionId}`)
     }
     const result = await readBoundedHistoryPage(found.filePath, options)
-    const projection = await this.projectHistoryPageEntries(found.filePath, result, options.signal)
+    // A referenced-session read only needs the records on this page. Building
+    // the ownership index scans the transcript from the start, which is what
+    // stalls the shared server while a model pages backward.
+    const projection = options.projectContext === false
+      ? { entries: result.entries.map(item => item.entry as RawEntry), contextScanBytes: 0 }
+      : await this.projectHistoryPageEntries(found.filePath, result, options.signal)
     const entries = result.entries.map(item => item.entry as RawEntry)
     const response = { messages: this.entriesToMessages(projection.entries), taskNotifications: this.taskNotificationsFromEntries(entries), page: { ...result.page, contextScanBytes: projection.contextScanBytes } }
     // The full-history path is already bounded by the reader's own byte budget,

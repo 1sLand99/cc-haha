@@ -8,7 +8,6 @@ import { BrandSeal } from '@/components/composite/BrandSeal'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { ErrorState } from '@/components/ui/ErrorState'
 import { IconButton } from '@/components/ui/IconButton'
 import { Spinner } from '@/components/ui/Spinner'
 import { useDismissable } from '@/hooks/useDismissable'
@@ -117,7 +116,6 @@ export function Sidebar({
   const sessions = useSessionStore((s) => s.sessions)
   const projectHistory = useSessionStore((s) => s.projectHistory)
   const isLoading = useSessionStore((s) => s.isLoading)
-  const error = useSessionStore((s) => s.error)
   const indexStatus = useSessionStore((s) => s.indexStatus)
   const indexBuilding = indexStatus?.mode === 'on' && indexStatus.state === 'building'
   const fetchSessions = useSessionStore((s) => s.fetchSessions)
@@ -1168,22 +1166,11 @@ export function Sidebar({
               data-testid="sidebar-session-scroll-area"
               className="sidebar-scroll-area min-h-0 flex-1 overflow-y-auto px-3 pb-20"
             >
-              {error && (
-                <ErrorState
-                  className="mx-1 mt-2 break-words"
-                  size="sm"
-                  tone="strong"
-                  title={t('sidebar.sessionListFailed')}
-                  detail={error}
-                  onRetry={() => fetchSessions()}
-                  retryLabel={t('common.retry')}
-                />
-              )}
               {showInitialLoading ? (
                 <div className="px-3 py-4 text-center text-xs text-[var(--color-text-tertiary)]">
                   {t('common.loading')}
                 </div>
-              ) : !error && filteredSessions.length === 0 && (
+              ) : filteredSessions.length === 0 && (
                 <div className="px-3 py-2">
                   <EmptyState variant="inline" title={t('sidebar.noSessions')} />
                 </div>

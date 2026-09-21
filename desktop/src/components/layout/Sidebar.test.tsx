@@ -2263,28 +2263,29 @@ describe('Sidebar', () => {
     expect(addToast).not.toHaveBeenCalled()
   })
 
-  it('announces a session list failure and offers a retry', () => {
-    useSessionStore.setState({ sessions: [], isLoading: false, error: 'upstream exploded' })
+  it('keeps a failed refresh off the sidebar so polling cannot flash a banner', () => {
+    useSessionStore.setState({
+      sessions: [makeSession('kept-row', 'Kept row', '/workspace/alpha', '2026-07-15T00:00:00.000Z')],
+      isLoading: false,
+      error: 'upstream exploded',
+    })
 
     render(<Sidebar />)
 
-    const alert = screen.getByRole('alert')
-    expect(alert).toHaveTextContent('Session list failed')
-    expect(alert).toHaveTextContent('upstream exploded')
-
-    fetchSessions.mockClear()
-    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
-    expect(fetchSessions).toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /Kept row/ })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText('Session list failed')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
   })
 
-  it('does not claim there are no sessions while the list is failing', () => {
+  it('does not replace an empty list with a failure banner', () => {
     useSessionStore.setState({ sessions: [], isLoading: false, error: 'upstream exploded' })
 
     render(<Sidebar />)
 
-    // Showing "no sessions" next to the failure reads as "the list is empty",
-    // which is a different fact from "we could not load the list".
-    expect(screen.queryByText('No sessions')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText('Session list failed')).not.toBeInTheDocument()
+    expect(screen.getByText('No sessions')).toBeInTheDocument()
   })
 
   it('says there are no sessions once the list loads empty', () => {

@@ -108,7 +108,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   fetchSessions: async (project?: string) => {
     const requestId = ++fetchSessionsRequestId
     const runtimeSelections = useSessionRuntimeStore.getState().selections
-    set({ isLoading: true, error: null, sessionListRequestId: requestId })
+    // A failed refresh must not clear the list or surface a banner. The sidebar
+    // polls this endpoint, so painting the failure and clearing it on the next
+    // attempt makes the whole pane flicker.
+    set({ isLoading: true, sessionListRequestId: requestId })
     try {
       const response = await sessionsApi.list(buildSessionListParams(project))
       if (requestId !== get().sessionListRequestId) return
@@ -154,7 +157,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       syncOpenSessionTabTitles(syncedSessions)
     } catch (err) {
       if (requestId !== get().sessionListRequestId) return
-      set({ error: (err as Error).message, isLoading: false })
+      console.error('[session-list] refresh failed', err)
+      set({ isLoading: false })
     }
   },
 

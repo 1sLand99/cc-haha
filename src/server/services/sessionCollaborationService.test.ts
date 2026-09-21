@@ -187,6 +187,26 @@ describe('session collaboration', () => {
     expect(JSON.parse(fragments.map(message => message.content).join(''))).toEqual(large)
   })
 
+  test('a cursor chain stops after the page budget instead of walking the transcript', async () => {
+    let reads = 0
+    deps.sessions.read = async () => {
+      reads += 1
+      return { messages: [
+        { type: 'user', content: `turn ${reads}` }, { type: 'assistant', content: 'answer' },
+      ], page: { historyComplete: false, sourceVersion: 'v1', nextCursor: `storage-${reads}` } }
+    }
+    let cursor: string | undefined
+    let pages = 0
+    do {
+      const result = await service.read('root', { cursor }) as any
+      pages += 1
+      cursor = result.page.nextCursor ?? undefined
+    } while (cursor)
+    expect(pages).toBeLessThanOrEqual(8)
+    expect(reads).toBeLessThanOrEqual(8)
+    expect(cursor).toBeUndefined()
+  })
+
   test('group Stop fences all descendants before runtime completion callbacks', async () => {
     await service.create('root', { prompt: 'a' })
     await service.create('root', { prompt: 'b' })

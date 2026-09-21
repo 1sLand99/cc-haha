@@ -77,7 +77,7 @@ export async function getSessionCollaborationService(): Promise<SessionCollabora
             indexUnavailable: content.indexUnavailable,
           }
         },
-        read: (sessionId, options) => sessionService.getSessionHistoryPage(sessionId, options),
+        read: (sessionId, options) => sessionService.getSessionHistoryPage(sessionId, { ...options, projectContext: false }),
         exists: async sessionId => Boolean(await sessionService.getSessionSummary(sessionId)),
         titles: sessionIds => Object.fromEntries(sessionService.getSessionSuggestionMetadata(sessionIds).map(item => [item.id, item.title])),
         async create(callerSessionId, input) {

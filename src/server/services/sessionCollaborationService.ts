@@ -57,6 +57,8 @@ export type SessionCollaborationDependencies = {
   now?: () => Date
 }
 type Store = { version: 1; revision: number; members: Record<string, CollaborationMember>; messages: CollaborationMessage[]; stopEpochs?: Record<string, number>; creations?: Record<string, { input: string; rootSessionId?: string; stopEpoch?: number; result?: { sessionId: string; workDir?: string; messageId: string; title?: string }; failure?: { message: string; code: string; status: number } }> }
+/** Pages one ReadSession cursor chain may serve before it stops instead of walking the whole transcript. */
+export const COLLABORATION_READ_MAX_PAGES = 8
 export const COLLABORATION_WAIT_MIN_MS = 10_000
 export const COLLABORATION_WAIT_DEFAULT_MS = 30_000
 export const COLLABORATION_WAIT_MAX_MS = 300_000
@@ -221,13 +223,22 @@ export class SessionCollaborationService {
     let end: number | undefined
     let sourceVersion: unknown
     let fragmentEnd: number | undefined
+    // A reference read starts at the newest page. Each returned cursor carries
+    // how many pages were already served, so one model cannot walk an entire
+    // transcript by following the cursor.
+    let depth = 0
     if (options.cursor) {
       try {
         const cursor = JSON.parse(Buffer.from(options.cursor, 'base64url').toString('utf8'))
         if (cursor.version !== 1 || cursor.sessionId !== sessionId || (cursor.end !== undefined && (!Number.isInteger(cursor.end) || cursor.end < 0))) throw new Error('Invalid cursor')
         if (cursor.fragmentEnd !== undefined && (!Number.isInteger(cursor.fragmentEnd) || cursor.fragmentEnd < 0)) throw new Error('Invalid fragment')
-        baseCursor = cursor.baseCursor; end = cursor.end; sourceVersion = cursor.sourceVersion; fragmentEnd = cursor.fragmentEnd
+        if (cursor.depth !== undefined && (!Number.isInteger(cursor.depth) || cursor.depth < 0)) throw new Error('Invalid depth')
+        baseCursor = cursor.baseCursor; end = cursor.end; sourceVersion = cursor.sourceVersion; fragmentEnd = cursor.fragmentEnd; depth = cursor.depth ?? 0
       } catch { throw ApiError.badRequest('Invalid collaboration history cursor') }
+    }
+    if (depth >= COLLABORATION_READ_MAX_PAGES) {
+      return { messages: [], turnsIncluded: 0, truncated: true, pageLimitReached: true,
+        page: { nextCursor: null, hasMore: false }, historyComplete: false }
     }
     const page = await this.deps.sessions.read(sessionId, { cursor: baseCursor, signal: options.signal, limit: 100 }) as { messages: Array<Record<string, unknown>>; page: Record<string, unknown> }
     if (sourceVersion !== undefined && sourceVersion !== page.page.sourceVersion) throw ApiError.conflict('Session history changed during pagination; restart the read')
@@ -267,9 +278,10 @@ export class SessionCollaborationService {
       remaining -= available
       nextEnd = index
     }
-    const next = nextEnd > 0
-      ? { version: 1, sessionId, baseCursor, end: nextEnd, sourceVersion: page.page.sourceVersion, fragmentEnd: nextFragmentEnd }
-      : page.page.nextCursor ? { version: 1, sessionId, baseCursor: page.page.nextCursor } : null
+    const nextDepth = depth + 1
+    const next = nextDepth >= COLLABORATION_READ_MAX_PAGES ? null : nextEnd > 0
+      ? { version: 1, sessionId, baseCursor, end: nextEnd, sourceVersion: page.page.sourceVersion, fragmentEnd: nextFragmentEnd, depth: nextDepth }
+      : page.page.nextCursor ? { version: 1, sessionId, baseCursor: page.page.nextCursor, depth: nextDepth } : null
     return { messages: projectedMessages, turnsIncluded: turns, truncated,
       page: { ...page.page, nextCursor: next ? Buffer.from(JSON.stringify(next)).toString('base64url') : null, hasMore: next !== null },
       historyComplete: next === null && page.page.historyComplete === true && !truncated }
