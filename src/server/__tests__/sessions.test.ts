@@ -2765,6 +2765,29 @@ describe('SessionService', () => {
     })
   })
 
+  it('keeps a collaboration title after the placeholder transcript is deleted', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const placeholder = await writeSessionFile('-tmp-source', sessionId, [
+      makeSnapshotEntry(),
+      { type: 'session-meta', isMeta: true, workDir: '/tmp/source', timestamp: '2026-01-01T00:00:00.000Z' },
+      { type: 'custom-title', customTitle: 'Review the auth boundary', timestamp: '2026-01-01T00:00:00.000Z' },
+    ])
+    const transcript = await writeSessionFile('-tmp-worktree', sessionId, [
+      makeSnapshotEntry(),
+      { type: 'session-meta', isMeta: true, workDir: '/tmp/worktree', timestamp: '2026-01-01T00:00:01.000Z' },
+      makeUserEntry('Hello from worktree'),
+    ])
+
+    await service.appendSessionMetadata(sessionId, { workDir: '/tmp/worktree' })
+    const removed = await service.deletePlaceholderSessionFiles(sessionId, '/tmp/worktree')
+
+    expect(removed).toBe(1)
+    await expect(fs.access(placeholder)).rejects.toThrow()
+    expect(await fs.readFile(transcript, 'utf8')).toContain('"customTitle":"Review the auth boundary"')
+    expect((await service.listSessions()).sessions.find(session => session.id === sessionId)?.title)
+      .toBe('Review the auth boundary')
+  })
+
   it('should recover workDir from transcript cwd when session-meta is missing', async () => {
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     await writeSessionFile('-tmp-project', sessionId, [

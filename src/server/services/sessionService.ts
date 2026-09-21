@@ -4785,7 +4785,29 @@ export class SessionService {
       }
     }
 
-    if (!metadata.customTitle && !this.memoryLaunchInfo.has(this.memorySessionKey(sessionId))) {
+    // Startup names the directory the session was launched from, so a
+    // collaboration title can land on that placeholder. Once the conversation
+    // lives in another transcript, keep the title with the file that survives
+    // placeholder cleanup instead of letting the only copy be deleted.
+    let customTitle = metadata.customTitle ?? null
+    if (!customTitle) {
+      const target = matches.find((match) => match.filePath === targetFilePath)
+      const targetTitle = target
+        ? (await this.getMetadataProjection(target.filePath, target.projectDir)).customTitle
+        : null
+      if (!targetTitle) {
+        for (const match of matches) {
+          if (match.filePath === targetFilePath) continue
+          const title = (await this.getMetadataProjection(match.filePath, match.projectDir)).customTitle
+          if (title) {
+            customTitle = title
+            break
+          }
+        }
+      }
+    }
+
+    if (!customTitle && !this.memoryLaunchInfo.has(this.memorySessionKey(sessionId))) {
       if (this.metadataMatchesLaunchInfo(previousInfo, {
         ...metadata,
         workDir: normalizedWorkDir,
@@ -4815,10 +4837,10 @@ export class SessionService {
       timestamp: new Date().toISOString(),
     })
 
-    if (metadata.customTitle && this.canPersistTitle(sessionId, metadata.customTitle)) {
+    if (customTitle && this.canPersistTitle(sessionId, customTitle)) {
       await this.appendJsonlEntry(targetFilePath, {
         type: 'custom-title',
-        customTitle: metadata.customTitle,
+        customTitle,
         timestamp: new Date().toISOString(),
       })
     }
