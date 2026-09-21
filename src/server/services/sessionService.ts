@@ -1,4 +1,5 @@
 import { splitSessionReferenceContext } from './sessionReferenceContext.js'
+import { parseSessionCollaborationEnvelope } from '../../utils/sessionCollaborationEnvelope.js'
 import { readHistoryContexts } from './sessionHistoryContext.js'
 import { recoverBoundedSessionHistory, type SessionHistoryRecovery } from './sessionHistoryRecovery.js'
 /**
@@ -215,6 +216,8 @@ export type MessageUsage = {
 
 export type MessageEntry = {
   sessionReferences?: { sessionId: string }[]
+  /** Present when this user-position message was delivered from another session. */
+  collaboration?: { sourceSessionId: string; messageId: string }
   id: string
   type: 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result'
   content: unknown
@@ -1853,8 +1856,14 @@ export class SessionService {
 
     let content = msg.content
     let sessionReferences: { sessionId: string }[] | undefined
+    let collaboration: { sourceSessionId: string; messageId: string } | undefined
     if (type === 'user') {
-      if (typeof content === 'string') {
+      const envelope = parseSessionCollaborationEnvelope(content)
+      if (envelope) {
+        // Render only the payload; the prompt wrapper is model-facing transport.
+        content = envelope.text
+        collaboration = { sourceSessionId: envelope.senderSessionId, messageId: envelope.messageId }
+      } else if (typeof content === 'string') {
         const parsed = splitSessionReferenceContext(content)
         content = parsed.content
         sessionReferences = parsed.sessionReferences
@@ -1872,6 +1881,7 @@ export class SessionService {
       type,
       content,
       ...(sessionReferences ? { sessionReferences } : {}),
+      ...(collaboration ? { collaboration } : {}),
       ...(entry.bodyTruncated === true ? { bodyTruncated: true } : {}),
       ...(entry.toolUseResult !== undefined ? { toolUseResult: entry.toolUseResult } : {}),
       timestamp: entry.timestamp || new Date().toISOString(),
@@ -2051,7 +2061,10 @@ export class SessionService {
   }
 
   private isVisibleTranscriptMessageEntry(entry: RawEntry): boolean {
-    if (!entry.message?.role || entry.isMeta) return false
+    if (!entry.message?.role) return false
+    // Collaboration deliveries are persisted as isMeta prompts; they carry a real
+    // cross-session message the user must see, so they are the one exception.
+    if (entry.isMeta && !parseSessionCollaborationEnvelope(entry.message.content)) return false
     if (
       entry.type !== 'user' &&
       entry.type !== 'assistant' &&
@@ -5055,8 +5068,10 @@ export class SessionService {
       // Only process transcript entries (user / assistant / system with messages)
       if (!entry.message?.role) continue
 
-      // Skip meta entries (CLI internal bookkeeping)
-      if (entry.isMeta) continue
+      // Skip meta entries (CLI internal bookkeeping). Collaboration deliveries
+      // are the exception: the isMeta prompt carries a real cross-session
+      // message that must render as an ordinary user-position bubble.
+      if (entry.isMeta && !parseSessionCollaborationEnvelope(entry.message.content)) continue
 
       const isTaskNotification =
         entry.message.role === 'user' &&

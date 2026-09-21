@@ -2033,6 +2033,24 @@ function refreshCompletedTranscriptHistory(
   })
 }
 
+const collaborationHistoryRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+/** Debounced idle-only transcript refetch for collaboration deliveries. */
+function scheduleCollaborationHistoryRefresh(sessionId: string): void {
+  if (collaborationHistoryRefreshTimers.has(sessionId)) return
+  collaborationHistoryRefreshTimers.set(sessionId, setTimeout(() => {
+    collaborationHistoryRefreshTimers.delete(sessionId)
+    const store = useChatStore.getState()
+    const session = store.sessions[sessionId]
+    if (!session || session.chatState !== 'idle') return
+    if (session.historyBootstrapDisabled === true || session.awaitingReconnectSync === true) return
+    void store.reloadHistory(sessionId, {
+      messages: session.messages,
+      backgroundAgentTasks: session.backgroundAgentTasks,
+    })
+  }, 1200))
+}
+
 function reconcileCompletedTranscriptHistory(
   get: () => ChatStore,
   sessionId: string,
@@ -5685,7 +5703,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
             ? appendAssistantTextMessage(session.messages, pendingText, Date.now())
             : session.messages
           return {
-            messages: appendReplayedUserMessage(baseMessages, msg.content, Date.now(), msg.sessionReferences),
+            messages: appendReplayedUserMessage(baseMessages, msg.content, Date.now(), msg.sessionReferences, msg.collaboration),
             ...(pendingText.trim() ? { streamingText: '' } : {}),
             activeThinkingId: null,
             suppressNextTaskNotificationResponse: false,
@@ -5819,6 +5837,25 @@ export const useChatStore = create<ChatStore>((setState, get) => {
         useTabStore.getState().updateTabTitle(msg.sessionId, msg.title)
         break
       case 'system_notification':
+        if (msg.subtype === 'session_collaboration_updated') {
+          // Collaboration creates/renames sibling sessions and delivers messages
+          // into this transcript; refresh the list so titles resolve. History
+          // refetch is only the idle fallback — a busy session already receives
+          // the delivery through the live replay stream, and refetching mid-turn
+          // on every lifecycle event would churn the streaming view.
+          void useSessionStore.getState().fetchSessions()
+          const target = (msg.data as { sessionId?: unknown } | undefined)?.sessionId
+          const affectedId = typeof target === 'string' ? target : sessionId
+          const affected = get().sessions[affectedId]
+          if (
+            affected &&
+            affected.chatState === 'idle' &&
+            affected.historyBootstrapDisabled !== true &&
+            affected.awaitingReconnectSync !== true
+          ) {
+            scheduleCollaborationHistoryRefresh(affectedId)
+          }
+        }
         if (msg.subtype === 'slash_commands' && Array.isArray(msg.data)) {
           const incomingCommands = normalizeSlashCommandList(msg.data)
           update((session) => ({
@@ -7650,6 +7687,7 @@ export function appendReplayedUserMessage(
   content: string,
   timestamp: number,
   sessionReferences?: Array<{ sessionId: string }>,
+  collaboration?: { sourceSessionId: string; messageId?: string },
 ): UIMessage[] {
   // The replayed text carries server-appended image-metadata lines that the
   // optimistic message never had. Normalize them away (same as the history
@@ -7683,6 +7721,7 @@ export function appendReplayedUserMessage(
       type: 'user_text',
       content: displayContent,
       ...(references.length ? { sessionReferences: references } : {}),
+      ...(collaboration ? { collaboration } : {}),
       ...(parsed.modelContent ? { modelContent: parsed.modelContent } : {}),
       ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
       timestamp,
@@ -7975,6 +8014,7 @@ export function mapHistoryMessagesToUiMessages(
         type: 'user_text',
         content: parsed.content,
         ...(references.length ? { sessionReferences: references } : {}),
+        ...(msg.collaboration ? { collaboration: msg.collaboration } : {}),
         ...(msg.id ? { transcriptMessageId: msg.id } : {}),
         ...(parsed.modelContent ? { modelContent: parsed.modelContent } : {}),
         ...(parsed.attachments ? { attachments: parsed.attachments } : {}),

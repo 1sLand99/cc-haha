@@ -1,19 +1,11 @@
 import type { TranslationKey } from './en'
 
 export const zh: Record<TranslationKey, string> = {
-  "chat.collaborationCancelled": "已取消",
-
-  "chat.collaborationAccepted": "已投遞",
-  "chat.collaborationConsumed": "已接收處理",
-
   "chat.sessionNoProject": "無專案",
   "chat.referenceSessions": "對話",
   "chat.sessionReferencesLoadFailed": "無法載入對話。",
   "chat.openReferencedSession": "開啟對話 {id}",
-  "chat.sessionCollaboration": "對話協作（{count}）",
-  "chat.collaborationMessages": "協作訊息",
-  "chat.collaborationStopGroup": "停止整組",
-  "chat.collaborationFailedRequest": "無法更新協作狀態。",
+  "chat.collaborationMessageFrom": "由 {id} 從另一個對話發送",
   "chat.collaborationQueued": "排隊中",
   "chat.collaborationRunning": "執行中",
   "chat.collaborationIdle": "閒置",

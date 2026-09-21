@@ -1,6 +1,7 @@
 import { mkdir, appendFile, readFile, writeFile, readdir } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
+import { formatSessionCollaborationPrompt } from '../../../utils/sessionCollaborationEnvelope.js'
 
 const args = process.argv.slice(2)
 
@@ -263,7 +264,9 @@ async function appendCollaborationHistory(input: any, reply?: string) {
     try { await readFile(file) } catch { continue }
     const uuid = collaborationUuid(input.message_id)
     const record = reply === undefined
-      ? { type: 'user', uuid, sessionId, isMeta: true, message: { role: 'user', content: input.text }, timestamp: new Date().toISOString() }
+      // Mirror the real CLI: consumed session messages persist as isMeta user
+      // entries whose content is the collaboration envelope, not bare text.
+      ? { type: 'user', uuid, sessionId, isMeta: true, message: { role: 'user', content: formatSessionCollaborationPrompt({ senderSessionId: input.sender_session_id, messageId: input.message_id, text: input.text }) }, timestamp: new Date().toISOString() }
       : { type: 'assistant', uuid: crypto.randomUUID(), parentUuid: uuid, sessionId, message: { role: 'assistant', content: [{ type: 'text', text: reply }] }, timestamp: new Date().toISOString() }
     await appendFile(file, JSON.stringify(record) + '\n')
     return

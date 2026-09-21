@@ -688,6 +688,38 @@ describe('chatStore history mapping', () => {
     expect(mapped[3]).toMatchObject({ parentToolUseId: 'agent-1' })
   })
 
+  it('keeps collaboration source metadata on user messages from history', () => {
+    const messages: MessageEntry[] = [
+      {
+        id: 'collab-1',
+        type: 'user',
+        timestamp: '2026-04-06T00:00:00.000Z',
+        content: '只读发现：#1335 未复现',
+        collaboration: { sourceSessionId: 'root-1', messageId: 'm-1' },
+      },
+    ]
+
+    const mapped = mapHistoryMessagesToUiMessages(messages)
+
+    expect(mapped).toHaveLength(1)
+    expect(mapped[0]).toMatchObject({
+      type: 'user_text',
+      content: '只读发现：#1335 未复现',
+      collaboration: { sourceSessionId: 'root-1', messageId: 'm-1' },
+    })
+  })
+
+  it('keeps collaboration source metadata on live replayed user messages', () => {
+    const mapped = appendReplayedUserMessage([], '发现两条线索', 1000, undefined, { sourceSessionId: 'root-1', messageId: 'm-2' })
+
+    expect(mapped).toHaveLength(1)
+    expect(mapped[0]).toMatchObject({
+      type: 'user_text',
+      content: '发现两条线索',
+      collaboration: { sourceSessionId: 'root-1', messageId: 'm-2' },
+    })
+  })
+
   it('collapses replayed and blank thinking blocks from history mapping', () => {
     const messages: MessageEntry[] = [
       {

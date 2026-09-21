@@ -9,6 +9,12 @@ it('opens session sources returned inside a tool text block', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Open session created' }))
   expect(openTab).toHaveBeenCalledWith('created', 'created')
 })
+it('prefers the title carried by a CreateSession result over a stale session store', () => {
+  // Regression: spawned sessions rendered as "Untitled Session" because the
+  // session store had not refreshed yet when the tool card rendered.
+  render(<SessionToolLinks input={{}} result={{ sessionId: 'child', title: '安全检查', state: 'queued', delivery: 'queued', messageId: 'm' }} />)
+  expect(screen.getByRole('button', { name: 'Open session 安全检查' })).toBeDefined()
+})
 it('handles protocol targets without scraping arbitrary content', () => {
   expect(sessionToolTargets({ targetSessionId: 'target' }, { members: [{ sessionId: 'target' }, { sessionId: 'child' }], content: 'sessionId=not-a-reference' })).toEqual(['target', 'child'])
 })

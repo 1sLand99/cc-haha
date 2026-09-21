@@ -1,19 +1,13 @@
 import type { TranslationKey } from './en'
 
 export const kr: Record<TranslationKey, string> = {
-  "chat.collaborationCancelled": "취소됨",
 
-  "chat.collaborationAccepted": "전달됨",
-  "chat.collaborationConsumed": "처리에 반영됨",
 
   "chat.sessionNoProject": "프로젝트 없음",
   "chat.referenceSessions": "세션",
   "chat.sessionReferencesLoadFailed": "세션을 불러올 수 없습니다.",
   "chat.openReferencedSession": "세션 {id} 열기",
-  "chat.sessionCollaboration": "세션 협업 ({count})",
-  "chat.collaborationMessages": "협업 메시지",
-  "chat.collaborationStopGroup": "그룹 중지",
-  "chat.collaborationFailedRequest": "협업 상태를 업데이트할 수 없습니다.",
+  "chat.collaborationMessageFrom": "{id}이(가) 다른 세션에서 보냄",
   "chat.collaborationQueued": "대기 중",
   "chat.collaborationRunning": "실행 중",
   "chat.collaborationIdle": "유휴",

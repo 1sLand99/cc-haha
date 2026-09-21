@@ -1,19 +1,11 @@
 import type { TranslationKey } from './en'
 
 export const jp: Record<TranslationKey, string> = {
-  "chat.collaborationCancelled": "キャンセル済み",
-
-  "chat.collaborationAccepted": "配信済み",
-  "chat.collaborationConsumed": "処理に取り込み済み",
-
   "chat.sessionNoProject": "プロジェクトなし",
   "chat.referenceSessions": "セッション",
   "chat.sessionReferencesLoadFailed": "セッションを読み込めませんでした。",
   "chat.openReferencedSession": "セッション {id} を開く",
-  "chat.sessionCollaboration": "セッション連携（{count}）",
-  "chat.collaborationMessages": "連携メッセージ",
-  "chat.collaborationStopGroup": "グループを停止",
-  "chat.collaborationFailedRequest": "連携状態を更新できませんでした。",
+  "chat.collaborationMessageFrom": "{id} が別のセッションから送信",
   "chat.collaborationQueued": "待機中",
   "chat.collaborationRunning": "実行中",
   "chat.collaborationIdle": "アイドル",

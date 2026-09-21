@@ -8,6 +8,7 @@
 
 import type { ServerWebSocket } from 'bun'
 import { sessionMessageUuid } from '../../utils/sessionMessageInbox.js'
+import { parseSessionCollaborationEnvelope } from '../../utils/sessionCollaborationEnvelope.js'
 import { admitSessionUserTurn, emitSessionTurnEvent } from '../services/sessionTurnEvents.js'
 import { ApiError } from '../middleware/errorHandler.js'
 import { resolveSessionReferenceContext, splitSessionReferenceContext } from '../services/sessionReferenceContext.js'
@@ -3450,10 +3451,17 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
 
       const replayText = extractReplayUserText(cliMsg)
       if (replayText) {
-        messages.push({
-          type: 'user_message_replay',
-          ...splitSessionReferenceContext(replayText),
-        })
+        const collaborationEnvelope = parseSessionCollaborationEnvelope(replayText)
+        messages.push(collaborationEnvelope
+          ? {
+              type: 'user_message_replay',
+              content: collaborationEnvelope.text,
+              collaboration: { sourceSessionId: collaborationEnvelope.senderSessionId, messageId: collaborationEnvelope.messageId },
+            }
+          : {
+              type: 'user_message_replay',
+              ...splitSessionReferenceContext(replayText),
+            })
       }
 
       return messages

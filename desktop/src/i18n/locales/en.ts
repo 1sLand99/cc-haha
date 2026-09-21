@@ -1,17 +1,9 @@
 export const en = {
-  "chat.collaborationCancelled": "Cancelled",
-
-  "chat.collaborationAccepted": "Delivered",
-  "chat.collaborationConsumed": "Consumed",
-
   "chat.sessionNoProject": "No project",
   "chat.referenceSessions": "Sessions",
   "chat.sessionReferencesLoadFailed": "Could not load sessions.",
   "chat.openReferencedSession": "Open session {id}",
-  "chat.sessionCollaboration": "Session collaboration ({count})",
-  "chat.collaborationMessages": "Collaboration messages",
-  "chat.collaborationStopGroup": "Stop group",
-  "chat.collaborationFailedRequest": "Could not update collaboration.",
+  "chat.collaborationMessageFrom": "Sent by {id} from another session",
   "chat.collaborationQueued": "Queued",
   "chat.collaborationRunning": "Running",
   "chat.collaborationIdle": "Idle",

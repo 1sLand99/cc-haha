@@ -23,6 +23,8 @@ export type CollaborationMember = {
   state: CollaborationState
   stopped: boolean
   result?: string
+  /** Display title, attached at snapshot time so tool results render names immediately. */
+  title?: string
 }
 export type CollaborationCreateInput = {
   requestId?: string
@@ -32,7 +34,7 @@ export type CollaborationCreateInput = {
   model?: string
   providerId?: string | null
 }
-export type CollaborationCreateResult = { sessionId: string; workDir?: string; messageId: string; state: CollaborationState; delivery: CollaborationMessage['status']; error?: string; errorCode?: string }
+export type CollaborationCreateResult = { sessionId: string; workDir?: string; messageId: string; title?: string; state: CollaborationState; delivery: CollaborationMessage['status']; error?: string; errorCode?: string }
 export type SessionCollaborationDependencies = {
   statePath: string
   sessions: {
@@ -41,6 +43,8 @@ export type SessionCollaborationDependencies = {
     exists(sessionId: string): Promise<boolean>
     /** Must use the caller's effective runtime and an isolated Git worktree. */
     create(callerSessionId: string, input: CollaborationCreateInput): Promise<{ sessionId: string; workDir?: string }>
+    /** Optional display titles for snapshot members; keyed by session id. */
+    titles?(sessionIds: string[]): Promise<Record<string, string>> | Record<string, string>
   }
   runtime: {
     getState?(sessionId: string): 'running' | 'blocked' | 'idle'
@@ -52,8 +56,13 @@ export type SessionCollaborationDependencies = {
   }
   now?: () => Date
 }
-type Store = { version: 1; revision: number; members: Record<string, CollaborationMember>; messages: CollaborationMessage[]; stopEpochs?: Record<string, number>; creations?: Record<string, { input: string; rootSessionId?: string; stopEpoch?: number; result?: { sessionId: string; workDir?: string; messageId: string }; failure?: { message: string; code: string; status: number } }> }
+type Store = { version: 1; revision: number; members: Record<string, CollaborationMember>; messages: CollaborationMessage[]; stopEpochs?: Record<string, number>; creations?: Record<string, { input: string; rootSessionId?: string; stopEpoch?: number; result?: { sessionId: string; workDir?: string; messageId: string; title?: string }; failure?: { message: string; code: string; status: number } }> }
 export type CollaborationSnapshot = { revision: number; members: CollaborationMember[]; messages: CollaborationMessage[]; waitReason?: 'capacity_blocked'; guidance?: string; truncated?: boolean; omittedMessages?: number; omittedMembers?: number }
+
+/** Mirrors the host's customTitle rule so the tool result carries the same name the session list shows. */
+function collaborationSessionTitle(input: CollaborationCreateInput): string {
+  return input.title?.trim() || input.prompt.slice(0, 80)
+}
 
 /** A bounded evidence projection, never a generated semantic summary. */
 export function projectCollaborationHistory(value: unknown, options: { limit?: number; includeOutputs?: boolean; maxOutputCharsPerItem?: number; budgetChars?: number } = {}): unknown {
@@ -263,7 +272,7 @@ export class SessionCollaborationService {
       historyComplete: next === null && page.page.historyComplete === true && !truncated }
   }
 
-  private async describeCreation(result: { sessionId: string; workDir?: string; messageId: string }): Promise<CollaborationCreateResult> {
+  private async describeCreation(result: { sessionId: string; workDir?: string; messageId: string; title?: string }): Promise<CollaborationCreateResult> {
     const snapshot = await this.status([result.sessionId])
     const member = snapshot.members.find(item => item.sessionId === result.sessionId)
     const message = snapshot.messages.find(item => item.id === result.messageId)
@@ -317,11 +326,11 @@ export class SessionCollaborationService {
         member.stopped = true
         member.state = 'stopped'
       }
-      if (creationKey) this.store.creations![creationKey]!.result = { ...created, messageId: message.id }
+      if (creationKey) this.store.creations![creationKey]!.result = { ...created, messageId: message.id, title: collaborationSessionTitle(input) }
       return message
     })
     await this.pump()
-    return this.describeCreation({ ...created, messageId: message.id })
+    return this.describeCreation({ ...created, messageId: message.id, title: collaborationSessionTitle(input) })
   }
 
   async send(callerSessionId: string, targetSessionId: string, content: string, messageId?: string): Promise<CollaborationMessage> {
@@ -342,8 +351,12 @@ export class SessionCollaborationService {
     await this.ready
     await this.tail
     const ids = sessionIds && new Set(sessionIds)
+    const members = Object.values(this.store.members).filter(member => !ids || ids.has(member.sessionId))
+    const titles = this.deps.sessions.titles
+      ? await Promise.resolve(this.deps.sessions.titles(members.map(member => member.sessionId))).catch(() => undefined)
+      : undefined
     return structuredClone({ revision: this.store.revision,
-      members: Object.values(this.store.members).filter(member => !ids || ids.has(member.sessionId)),
+      members: members.map(member => titles?.[member.sessionId] ? { ...member, title: titles[member.sessionId] } : member),
       messages: this.store.messages.filter(message => !ids || ids.has(message.targetSessionId) || ids.has(message.sourceSessionId)) })
   }
 
