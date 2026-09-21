@@ -47,6 +47,25 @@ test('terminal failure does not claim an accepted message was consumed', async (
   expect((await service.status()).messages[0]?.status).toBe('consumed')
 })
 
+test('streaming output does not broadcast collaboration refreshes until collaboration state changes', async () => {
+  const service = new SessionCollaborationService({
+    statePath: join(directory, 'state.json'),
+    sessions: { exists: async () => true, list: async () => [], read: async () => [], create: async () => ({ sessionId: 'unused' }) },
+    runtime: { start: async () => {}, enqueue: async () => {}, stop: async () => {} },
+  })
+
+  expect(await handleSessionCollaborationEvent(service, {
+    type: 'output',
+    sessionId: 'worker',
+    message: { type: 'assistant', content: [{ type: 'text', text: 'stream fragment' }] },
+  })).toBe(false)
+  expect(await handleSessionCollaborationEvent(service, {
+    type: 'output',
+    sessionId: 'worker',
+    message: { type: 'result', is_error: false, result: 'done', uuid: 'result-1' },
+  })).toBe(true)
+})
+
 test('host rejects unavailable source workspace explicitly instead of silently choosing another directory', async () => {
   const previous = process.env.CLAUDE_CONFIG_DIR
   process.env.CLAUDE_CONFIG_DIR = directory

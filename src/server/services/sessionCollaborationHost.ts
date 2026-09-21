@@ -128,23 +128,36 @@ export async function getSessionCollaborationService(): Promise<SessionCollabora
   return current.service
 }
 
-export async function handleSessionCollaborationEvent(service: SessionCollaborationService, event: SessionTurnEvent): Promise<void> {
+export async function handleSessionCollaborationEvent(service: SessionCollaborationService, event: SessionTurnEvent): Promise<boolean> {
   // A renderer input arrives before the CLI is started. Only reopen its fence
   // here; the shared admission's committed event proves the SDK can accept the
   // pending collaboration inbox without racing process startup.
-  if (event.type === 'user-input') { await service.onUserInput(event.sessionId, { dispatch: false }); return }
-  if (event.type === 'input-committed') { await service.onSessionState(event.sessionId, 'running'); return }
-  if (event.type === 'stopped') { await service.onStopped(event.sessionId); return }
+  if (event.type === 'user-input') { await service.onUserInput(event.sessionId, { dispatch: false }); return false }
+  if (event.type === 'input-committed') { await service.onSessionState(event.sessionId, 'running'); return false }
+  if (event.type === 'stopped') { await service.onStopped(event.sessionId); return false }
   const message = event.message
+  let collaborationStateChanged = false
   if (message.type === 'system' && message.subtype === 'session_message_receipt' && message.status === 'consumed') {
     await service.onMessageConsumed(message.message_id, event.sessionId)
+    collaborationStateChanged = true
   } else if (message.type === 'result') {
     await service.onSessionState(event.sessionId, message.is_error ? 'failed' : 'completed',
       String(message.result ?? message.errors?.join('\n') ?? '').slice(0, 8000), message.uuid)
+    collaborationStateChanged = true
   } else if (message.type === 'control_request' && message.request?.subtype === 'can_use_tool') {
     await service.onSessionState(event.sessionId, 'blocked', `Waiting for permission: ${message.request.tool_name ?? 'tool'}`, message.request_id)
+    collaborationStateChanged = true
   } else if (message.type === 'control_response' || message.type === 'control_cancel_request') {
-    if (getSessionTurnState(event.sessionId) === 'running') await service.onSessionState(event.sessionId, 'running')
+    if (getSessionTurnState(event.sessionId) === 'running') {
+      await service.onSessionState(event.sessionId, 'running')
+      collaborationStateChanged = true
+    }
   }
+  // The SDK emits every streaming assistant fragment through this observer.
+  // Broadcasting a collaboration update for fragments that do not mutate the
+  // collaboration state made every renderer refetch the full session list,
+  // creating thousands of concurrent requests during multi-agent turns.
+  if (!collaborationStateChanged) return false
   sendToSession(event.sessionId, { type: 'system_notification', subtype: 'session_collaboration_updated', data: { sessionId: event.sessionId } })
+  return true
 }

@@ -372,13 +372,13 @@ describe('sessionStore', () => {
       recent,
       { ...historical, permissionMode: 'plan' },
     ])
-    expect(listMock).toHaveBeenLastCalledWith({ limit: 400 })
+    expect(listMock).toHaveBeenLastCalledWith({ view: 'sidebar', perProjectLimit: 6 })
 
     useTabStore.getState().closeTab(historical.id)
     await useSessionStore.getState().fetchSessions()
     expect(useSessionStore.getState().sessions).toEqual([recent])
     expect(useSessionStore.getState().historicalSessionIds).toEqual(new Set())
-    expect(listMock).toHaveBeenLastCalledWith({ limit: 400 })
+    expect(listMock).toHaveBeenLastCalledWith({ view: 'sidebar', perProjectLimit: 6 })
   })
 
   it('uses fresh recent metadata when an opened historical session reenters the recent page', async () => {
@@ -416,15 +416,19 @@ describe('sessionStore', () => {
     expect(useSessionStore.getState().sessions).toEqual([])
   })
 
-  it('requests a large default session page for noisy history directories', async () => {
+  it('requests a bounded preview for every project instead of a large global page', async () => {
     listMock.mockResolvedValue({
       sessions: [makeSession('session-newest', '2026-05-07T00:00:03.000Z')],
       total: 474,
+      projects: [{ projectRoot: '/workspace/project', total: 474 }],
     })
 
     await useSessionStore.getState().fetchSessions()
 
-    expect(listMock).toHaveBeenCalledWith({ limit: 400 })
+    expect(listMock).toHaveBeenCalledWith({ view: 'sidebar', perProjectLimit: 6 })
+    expect(useSessionStore.getState().projectSessionTotals).toEqual({
+      '/workspace/project': 474,
+    })
   })
 
   it('loads one project below its recent boundary without skipping restored old tabs and retains pages on refresh', async () => {
@@ -455,7 +459,7 @@ describe('sessionStore', () => {
       isLoading: false,
       error: null,
     })
-    expect(listMock).toHaveBeenLastCalledWith({ limit: 400 })
+    expect(listMock).toHaveBeenLastCalledWith({ view: 'sidebar', perProjectLimit: 6 })
   })
 
   it('uses cursor pages once, deduplicates overlapping rows, and keeps current titles and runtime metadata', async () => {

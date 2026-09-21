@@ -17,8 +17,8 @@ import type { RuntimeSelection } from '../types/runtime'
 import { isPlaceholderSessionTitle } from '../lib/sessionTitle'
 import { invalidateRecentProjectsCache } from '../lib/recentProjectsCache'
 import { releaseWorkspaceSession } from '../lib/workspace/releaseSession'
+import { SIDEBAR_PROJECT_SESSION_PREVIEW_LIMIT } from '../lib/sessionListPagination'
 
-const SESSION_LIST_LIMIT = 400
 const PROJECT_HISTORY_PAGE_SIZE = 50
 
 export type ProjectHistoryState = {
@@ -52,6 +52,7 @@ type SessionStore = {
   historicalSessionIds: Set<string>
   recentSessionIds: Set<string>
   recentProjectBoundaries: Record<string, RecentProjectBoundary>
+  projectSessionTotals: Record<string, number>
   projectHistory: Record<string, ProjectHistoryState>
 
   fetchSessions: (project?: string) => Promise<void>
@@ -103,6 +104,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   historicalSessionIds: new Set(),
   recentSessionIds: new Set(),
   recentProjectBoundaries: {},
+  projectSessionTotals: {},
   projectHistory: {},
 
   fetchSessions: async (project?: string) => {
@@ -150,6 +152,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
             ...raw.map((session) => session.id),
           ]),
           recentProjectBoundaries: shouldRetainRenderedSessions(indexStatus) ? {} : buildRecentProjectBoundaries(raw),
+          projectSessionTotals: response.projects
+            ? Object.fromEntries(response.projects.map((project) => [project.projectRoot, project.total]))
+            : {},
           indexStatus,
           isLoading: indexStatus?.state === 'building' && sessions.length === 0,
         }
@@ -542,8 +547,8 @@ function removeProjectHistorySessionIds(
 
 function buildSessionListParams(project: string | undefined) {
   return project
-    ? { project, limit: SESSION_LIST_LIMIT }
-    : { limit: SESSION_LIST_LIMIT }
+    ? { project, limit: SIDEBAR_PROJECT_SESSION_PREVIEW_LIMIT }
+    : { view: 'sidebar' as const, perProjectLimit: SIDEBAR_PROJECT_SESSION_PREVIEW_LIMIT }
 }
 
 function getDefaultSessionPermissionMode(): PermissionMode | undefined {

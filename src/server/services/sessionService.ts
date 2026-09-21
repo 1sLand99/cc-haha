@@ -81,6 +81,7 @@ import {
   type ProjectHistoryOptions,
   type ProjectHistoryPage,
   type ProjectHistoryRow,
+  type ProjectSessionPreviews,
 } from './projectSessionHistory.js'
 
 // ============================================================================
@@ -3310,6 +3311,11 @@ export class SessionService {
   /** Browse one logical project's history independently of the recent list. */
   listProjectHistory(options: ProjectHistoryOptions): Promise<ProjectHistoryPage> {
     return this.projectHistory.list(options)
+  }
+
+  /** Load the newest few sessions for every logical project in one request. */
+  listProjectPreviews(perProjectLimit?: number): Promise<ProjectSessionPreviews> {
+    return this.projectHistory.listPreviews(perProjectLimit)
   }
 
   private projectHistoryRevision(): string {

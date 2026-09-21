@@ -28,6 +28,7 @@ import { OPENAI_CODEX_REDIRECT_PATH } from '../services/openaiAuth/client.js'
 import { ensureDesktopCliLauncherInstalled } from './services/desktopCliLauncherService.js'
 import { enableConfigs } from '../utils/config.js'
 import { diagnosticsService } from './services/diagnosticsService.js'
+import { apiPerformanceMonitor } from './services/apiPerformanceMonitor.js'
 import { ensurePersistentStorageUpgraded } from './services/persistentStorageMigrations.js'
 import { handleStaticH5Request } from './staticH5.js'
 import {
@@ -623,6 +624,7 @@ export function startServer(port = PORT, host = HOST) {
     const disposeCollaboration = configureSessionCollaborationHost(localConnectHost, server.port)
     const stop = server.stop.bind(server)
     server.stop = (closeActiveConnections?: boolean) => {
+      apiPerformanceMonitor.stop()
       disposeCollaboration()
       publicAccess.disable()
       publicAccessServers.delete(publicAccess)
@@ -630,6 +632,7 @@ export function startServer(port = PORT, host = HOST) {
     }
     serverPort = server.port
     ProviderService.setServerPort(serverPort)
+    apiPerformanceMonitor.start()
   } catch (error) {
     publicAccess.disable()
     publicAccessServers.delete(publicAccess)

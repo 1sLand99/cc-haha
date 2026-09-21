@@ -463,6 +463,7 @@ describe('Sidebar', () => {
     useSessionStore.setState({
       sessions: [],
       projectHistory: {},
+      projectSessionTotals: {},
       recentSessionIds: new Set(),
       recentProjectBoundaries: {},
       historicalSessionIds: new Set(),
@@ -772,6 +773,37 @@ describe('Sidebar', () => {
 
     expect(screen.getByTestId('sidebar-project-session-list-workspace-alpha')).toHaveClass('max-h-[420px]', 'overflow-y-auto')
     expect(screen.getByRole('button', { name: 'Collapse display' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('offers automatic history expansion when the preview contains exactly six rows', async () => {
+    const base = new Date('2026-05-15T10:00:00.000Z').getTime()
+    useSessionStore.setState({
+      sessions: Array.from({ length: 6 }, (_, index) => (
+        makeSession(`alpha-${index + 1}`, `Alpha ${index + 1}`, '/workspace/alpha', new Date(base - index * 1000).toISOString())
+      )),
+      projectSessionTotals: { '/workspace/alpha': 42 },
+    })
+
+    render(<Sidebar />)
+
+    const expandButton = screen.getByRole('button', { name: 'Expand display' })
+    const scroller = screen.getByTestId('sidebar-project-session-list-workspace-alpha')
+    const outer = screen.getByTestId('sidebar-session-scroll-area')
+    outer.getBoundingClientRect = () => ({ top: 0, bottom: 900 } as DOMRect)
+    scroller.getBoundingClientRect = () => ({ top: 100, bottom: 400 } as DOMRect)
+    Object.defineProperties(scroller, {
+      clientHeight: { configurable: true, value: 420 },
+      scrollHeight: { configurable: true, value: 300 },
+    })
+    fireEvent.click(expandButton)
+
+    expect(scroller).toHaveClass('max-h-[420px]', 'overflow-y-auto')
+    await waitFor(() => {
+      expect(sessionsApiMock.listProjectHistory).toHaveBeenCalledWith(
+        expect.objectContaining({ projectRoot: '/workspace/alpha', limit: 50 }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      )
+    })
   })
 
   it('scrolls older sessions into their existing project and releases them on collapse', async () => {

@@ -15,6 +15,7 @@ import { GlobalSearchModal } from '../search/GlobalSearchModal'
 import { FindInPageModal } from '../search/FindInPageModal'
 import { ProjectEditorModal, type ProjectEditorSubmission } from './ProjectEditorModal'
 import { SidebarTaskList } from './SidebarTaskList'
+import { SIDEBAR_PROJECT_SESSION_PREVIEW_LIMIT } from '../../lib/sessionListPagination'
 import { ProjectSessionList, notifyProjectHistoryAtSidebarBottom } from '@/components/layout/ProjectSessionList'
 import {
   buildSidebarTaskGroups,
@@ -55,7 +56,7 @@ const PROJECT_PINNED_STORAGE_KEY = 'cc-haha-sidebar-pinned-projects'
 const PROJECT_HIDDEN_STORAGE_KEY = 'cc-haha-sidebar-hidden-projects'
 const PROJECT_ORGANIZATION_STORAGE_KEY = 'cc-haha-sidebar-project-organization'
 const PROJECT_SORT_STORAGE_KEY = 'cc-haha-sidebar-project-sort'
-const PROJECT_GROUP_VISIBLE_COUNT = 6
+const PROJECT_GROUP_VISIBLE_COUNT = SIDEBAR_PROJECT_SESSION_PREVIEW_LIMIT
 
 type SidebarProjectOrganization = 'project' | 'recentProject' | 'time'
 type SidebarProjectSortBy = 'createdAt' | 'updatedAt'
@@ -115,6 +116,7 @@ export function Sidebar({
   const t = useTranslation()
   const sessions = useSessionStore((s) => s.sessions)
   const projectHistory = useSessionStore((s) => s.projectHistory)
+  const projectSessionTotals = useSessionStore((s) => s.projectSessionTotals)
   const isLoading = useSessionStore((s) => s.isLoading)
   const indexStatus = useSessionStore((s) => s.indexStatus)
   const indexBuilding = indexStatus?.mode === 'on' && indexStatus.state === 'building'
@@ -1212,7 +1214,12 @@ export function Sidebar({
                   ? []
                   : getVisibleProjectSessions(project.sessions, sessionsExpanded, activeTabId)
                 const hiddenCount = project.sessions.length - visibleItems.length
-                const showSessionFoldControl = project.sessions.length > PROJECT_GROUP_VISIBLE_COUNT
+                const projectSessionTotal = projectSessionTotals[project.key]
+                const hasUnloadedSessions = projectSessionTotal === undefined
+                  ? false
+                  : projectSessionTotal > project.sessions.length
+                const showSessionFoldControl = project.sessions.length > PROJECT_GROUP_VISIBLE_COUNT ||
+                  (projectSessionTotal ?? 0) > PROJECT_GROUP_VISIBLE_COUNT
                 const groupIds = project.sessions.map((session) => session.id)
                 const groupSelectedCount = groupIds.filter((id) => selectedSessionIds.has(id)).length
                 const history = projectHistory[project.key]
@@ -1336,11 +1343,11 @@ export function Sidebar({
                           outerScrollRef={sessionScrollAreaRef}
                           testId={`sidebar-project-session-list-${domSafeProjectKey(project.key)}`}
                           expanded={sessionsExpanded}
-                          hasHiddenSessions={hiddenCount > 0}
+                          hasHiddenSessions={hiddenCount > 0 || hasUnloadedSessions}
                           itemCount={visibleItems.length}
                           nextCursor={history?.nextCursor}
                           isLoading={history?.isLoading ?? false}
-                          hasMore={history?.hasMore ?? true}
+                          hasMore={history?.hasMore ?? (projectSessionTotal === undefined || hasUnloadedSessions)}
                           error={history?.error}
                           onExpand={() => setExpandedProjectKeys((current) => new Set([...current, project.key]))}
                           onLoadMore={() => useSessionStore.getState().loadMoreProjectSessions(project.key)}

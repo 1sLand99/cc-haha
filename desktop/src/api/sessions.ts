@@ -8,6 +8,10 @@ import type { TraceCallRecord, TraceSession } from '../types/trace'
 export type SessionsResponse = {
   sessions: SessionListItem[]
   total: number
+  projects?: Array<{
+    projectRoot: string
+    total: number
+  }>
   index?: LocalIndexStatus
 }
 export type ProjectSessionHistoryParams = {
@@ -411,11 +415,19 @@ function buildWorkspacePath(
 }
 
 export const sessionsApi = {
-  list(params?: { project?: string; limit?: number; offset?: number }, options?: ApiRequestOptions) {
+  list(params?: {
+    project?: string
+    limit?: number
+    offset?: number
+    view?: 'sidebar'
+    perProjectLimit?: number
+  }, options?: ApiRequestOptions) {
     const query = new URLSearchParams()
     if (params?.project) query.set('project', params.project)
     if (params?.limit) query.set('limit', String(params.limit))
     if (params?.offset) query.set('offset', String(params.offset))
+    if (params?.view) query.set('view', params.view)
+    if (params?.perProjectLimit) query.set('perProjectLimit', String(params.perProjectLimit))
     const qs = query.toString()
     return api.get<SessionsResponse>(`/api/sessions${qs ? `?${qs}` : ''}`, options)
   },

@@ -17,6 +17,7 @@ import { resolveActiveProviderRuntimeSelection, resolveProviderRuntimeModelId } 
 import { useTabStore } from './tabStore'
 import { randomSpinnerVerb } from '../config/spinnerVerbs'
 import { notifyDesktop } from '../lib/desktopNotifications'
+import { createAsyncRefreshCoalescer } from '../lib/asyncRefreshCoalescer'
 import { deriveSessionTitle, isPlaceholderSessionTitle } from '../lib/sessionTitle'
 import { t } from '../i18n'
 import {
@@ -2027,6 +2028,9 @@ function refreshCompletedTranscriptHistory(
 }
 
 const collaborationHistoryRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const refreshCollaborationSessionList = createAsyncRefreshCoalescer(
+  () => useSessionStore.getState().fetchSessions(),
+)
 
 /** Debounced idle-only transcript refetch for collaboration deliveries. */
 function scheduleCollaborationHistoryRefresh(sessionId: string): void {
@@ -5611,7 +5615,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
           // refetch is only the idle fallback — a busy session already receives
           // the delivery through the live replay stream, and refetching mid-turn
           // on every lifecycle event would churn the streaming view.
-          void useSessionStore.getState().fetchSessions()
+          void refreshCollaborationSessionList()
           const target = (msg.data as { sessionId?: unknown } | undefined)?.sessionId
           const affectedId = typeof target === 'string' ? target : sessionId
           const affected = get().sessions[affectedId]
