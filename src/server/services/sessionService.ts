@@ -820,6 +820,14 @@ export class SessionService {
     this.observedSharedMutationEpoch = sharedState.epoch
   }
 
+  private syncIndexedSessionTitle(sessionId: string, title: string): void {
+    // Title entries are tiny, authoritative mutations. Patch an existing index
+    // row immediately so a cold restart cannot briefly serve the older title
+    // while the transcript watcher is still queued. The watcher still performs
+    // the full source projection (fingerprint, locators, and metadata) later.
+    this.localIndexGateway.updateSessionTitle?.(sessionId, title)
+  }
+
   private prepareSessionListCaches(scope: string): void {
     if (this.activeSessionListCacheScope !== scope) {
       this.sessionListCache.clear()
@@ -4517,6 +4525,7 @@ export class SessionService {
     }
 
     await this.appendJsonlEntry(found.filePath, entry)
+    this.syncIndexedSessionTitle(sessionId, title)
     this.invalidateSessionListCache()
   }
 
@@ -4536,6 +4545,7 @@ export class SessionService {
       aiTitle: title,
       timestamp: new Date().toISOString(),
     })
+    this.syncIndexedSessionTitle(sessionId, title)
     this.invalidateSessionListCache()
   }
 
@@ -4713,6 +4723,9 @@ export class SessionService {
           .join('\n') + '\n',
         'utf-8',
       )
+      if (customTitleEntry) {
+        this.syncIndexedSessionTitle(sessionId, customTitleEntry.customTitle)
+      }
       this.invalidateSessionListCache()
     } catch (error) {
       // Clear aborts old-generation appends so none can land after a successful
@@ -4862,6 +4875,7 @@ export class SessionService {
         customTitle,
         timestamp: new Date().toISOString(),
       })
+      this.syncIndexedSessionTitle(sessionId, customTitle)
     }
     this.invalidateSessionListCache()
   }

@@ -80,6 +80,7 @@ export interface LocalIndexGateway extends SessionIndexReader {
   isActivityScopeReady?(): boolean
   getActivityStats?(range: StatsDateRange, now?: Date): ClaudeCodeStats | null
   rebuild(): Promise<LocalIndexStatus>
+  updateSessionTitle?(sessionId: string, title: string): boolean
   getSessionEntryLocators?(
     transcriptPath: string,
     entryTypes?: string[],
@@ -117,6 +118,7 @@ export interface SessionIndex extends SessionIndexReader, ActivityIndex {
   countSources(): number
   getProjectionSeed(path: string): TranscriptProjection | null
   getBackfillState(scope: string): PersistedBackfillState | null
+  updateSessionTitle?(sessionId: string, title: string): boolean
   getSessionEntryLocators(
     transcriptPath: string,
     entryTypes?: string[],
@@ -424,6 +426,14 @@ export function createSessionIndex(database: LocalIndexDatabase): SessionIndex {
         `, sessionId)
         return row ? sessionFromRow(row) : null
       })
+    },
+
+    updateSessionTitle(sessionId, title): boolean {
+      return database.write(operation => operation.run(
+        'UPDATE sessions SET title = ? WHERE session_id = ?',
+        title,
+        sessionId,
+      ).changes > 0)
     },
 
     findSearchCandidates(filters): IndexedSessionSearchCandidate[] {

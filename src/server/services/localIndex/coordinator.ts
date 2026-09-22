@@ -1523,6 +1523,16 @@ export function createLocalIndexCoordinator(
       }
     },
 
+    updateSessionTitle(sessionId: string, title: string): boolean {
+      if (!synchronizeRuntimeConfiguration() || !index?.updateSessionTitle) return false
+      try {
+        return index.updateSessionTitle(sessionId, title)
+      } catch (error) {
+        markDegraded(error, 'LOCAL_INDEX_TITLE_WRITE_FAILED')
+        return false
+      }
+    },
+
     getSessionEntryLocators(
       transcriptPath: string,
       entryTypes?: string[],
