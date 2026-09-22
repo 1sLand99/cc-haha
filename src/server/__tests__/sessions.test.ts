@@ -2578,6 +2578,34 @@ describe('SessionService', () => {
     })
   })
 
+  it('preserves a collaboration title only when startup replaces its empty placeholder', async () => {
+    const workDir = path.join(tmpDir, 'startup-title-placeholder')
+    await fs.mkdir(workDir, { recursive: true })
+    const { sessionId } = await service.createSession(workDir)
+    await service.appendSessionMetadata(sessionId, {
+      workDir,
+      customTitle: 'Review the auth boundary',
+    })
+
+    await service.clearSessionTranscript(
+      sessionId,
+      workDir,
+      undefined,
+      'Review the auth boundary',
+    )
+
+    expect((await service.getSessionLaunchInfo(sessionId))?.customTitle)
+      .toBe('Review the auth boundary')
+    expect((await service.listSessions()).sessions.find(session => session.id === sessionId)?.title)
+      .toBe('Review the auth boundary')
+
+    await service.clearSessionTranscript(sessionId, workDir)
+
+    expect((await service.getSessionLaunchInfo(sessionId))?.customTitle).toBeNull()
+    expect((await service.listSessions()).sessions.find(session => session.id === sessionId)?.title)
+      .toBe('Untitled Session')
+  })
+
   it('should preserve permission metadata when clearing placeholder transcripts', async () => {
     const workDir = path.join(tmpDir, 'clear-permission-workdir')
     await fs.mkdir(workDir, { recursive: true })

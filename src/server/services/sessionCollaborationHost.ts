@@ -79,7 +79,20 @@ export async function getSessionCollaborationService(): Promise<SessionCollabora
         },
         read: (sessionId, options) => sessionService.getSessionHistoryPage(sessionId, { ...options, projectContext: false }),
         exists: async sessionId => Boolean(await sessionService.getSessionSummary(sessionId)),
-        titles: sessionIds => Object.fromEntries(sessionService.getSessionSuggestionMetadata(sessionIds).map(item => [item.id, item.title])),
+        titles: sessionIds => {
+          const titles: Record<string, string> = {}
+          // The index can briefly contain both the source placeholder and the
+          // worktree transcript. Rows are newest-first; keep the first useful
+          // title instead of letting an older duplicate or Untitled overwrite it.
+          for (const item of sessionService.getSessionSuggestionMetadata(sessionIds)) {
+            const title = item.title.trim()
+            if (!title) continue
+            if (!(item.id in titles) || titles[item.id] === 'Untitled Session') {
+              titles[item.id] = title
+            }
+          }
+          return titles
+        },
         async create(callerSessionId, input) {
           const workDir = input.workDir ?? await sessionService.getSessionWorkDir(callerSessionId)
           if (!workDir) throw new ApiError(409, 'The source session working directory is unavailable', 'SESSION_WORKSPACE_UNAVAILABLE')

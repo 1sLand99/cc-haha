@@ -143,6 +143,37 @@ test('a full metadata page skips transcript search and returns immediately from 
   }
 })
 
+test('duplicate transcript rows cannot replace a useful collaboration title with Untitled', async () => {
+  const previous = process.env.CLAUDE_CONFIG_DIR
+  process.env.CLAUDE_CONFIG_DIR = directory
+  const dispose = configureSessionCollaborationHost('127.0.0.1', 1234)
+  const row = (title: string, modifiedAt: string) => ({
+    id: 'worker', title, workDir: '/fixture', projectPath: 'project', modifiedAt,
+  })
+  const indexed = spyOn(sessionService, 'getSessionSuggestionMetadata')
+    .mockReturnValue([
+      row('Untitled Session', 'newer'),
+      row('Review the auth boundary', 'older'),
+    ])
+  try {
+    const service = await getSessionCollaborationService()
+    await service.onUserInput('worker')
+    expect((await service.status(['worker'])).members[0]?.title)
+      .toBe('Review the auth boundary')
+
+    indexed.mockReturnValue([
+      row('Newest useful title', 'newer'),
+      row('Older useful title', 'older'),
+    ])
+    expect((await service.status(['worker'])).members[0]?.title)
+      .toBe('Newest useful title')
+  } finally {
+    dispose(); mock.restore()
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = previous
+  }
+})
+
 test('content suggestions fill metadata pages without duplicate metadata hits or canonical history reads', async () => {
   const previous = process.env.CLAUDE_CONFIG_DIR
   process.env.CLAUDE_CONFIG_DIR = directory

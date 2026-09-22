@@ -119,6 +119,29 @@ describe('session collaboration', () => {
     expect(nextId).toBe(1)
   })
 
+  test('keeps the creation title while the transcript index is missing or temporarily untitled', async () => {
+    let indexedTitle: string | undefined = 'Untitled Session'
+    deps.sessions.titles = sessionIds => indexedTitle
+      ? Object.fromEntries(sessionIds.map(sessionId => [sessionId, indexedTitle]))
+      : {}
+
+    const created = await service.create('root', {
+      prompt: 'Review the authentication boundary',
+      title: 'Auth boundary review',
+    })
+    expect((await service.status([created.sessionId])).members[0]?.title)
+      .toBe('Auth boundary review')
+
+    indexedTitle = undefined
+    service = new SessionCollaborationService(deps)
+    expect((await service.status([created.sessionId])).members[0]?.title)
+      .toBe('Auth boundary review')
+
+    indexedTitle = 'Indexed auth review'
+    expect((await service.status([created.sessionId])).members[0]?.title)
+      .toBe('Indexed auth review')
+  })
+
   test('migrates a versionless fixture while preserving unknown metadata', async () => {
     await writeFile(deps.statePath, JSON.stringify({ members: {}, messages: [], futureField: { preserve: true } }))
     service = new SessionCollaborationService(deps)

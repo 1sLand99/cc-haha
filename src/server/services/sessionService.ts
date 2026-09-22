@@ -4601,6 +4601,7 @@ export class SessionService {
     sessionId: string,
     fallbackWorkDir?: string,
     preservedPermissionMode?: string,
+    preservedCustomTitle?: string | null,
   ): Promise<void> {
     const persist = this.shouldPersistSession()
     const nextEpoch = (this.taskNotificationMutationEpochs.get(sessionId) ?? 0) + 1
@@ -4622,7 +4623,9 @@ export class SessionService {
         } : null)
         if (info) {
           this.memoryLaunchInfo.set(this.memorySessionKey(sessionId), {
-            ...info, transcriptMessageCount: 0, customTitle: null,
+            ...info,
+            transcriptMessageCount: 0,
+            customTitle: preservedCustomTitle?.trim() || null,
             ...(preservedPermissionMode && VALID_SESSION_PERMISSION_MODES.has(preservedPermissionMode)
               ? { permissionMode: preservedPermissionMode } : {}),
           })
@@ -4693,11 +4696,21 @@ export class SessionService {
         timestamp: now,
       }
 
+      const customTitleEntry = preservedCustomTitle?.trim()
+        ? {
+            type: 'custom-title',
+            customTitle: preservedCustomTitle.trim(),
+            timestamp: now,
+          }
+        : null
+
       if (!this.shouldPersistSession()) return
       this.memoryLaunchInfo.delete(this.memorySessionKey(sessionId))
       await fs.writeFile(
         found.filePath,
-        `${JSON.stringify(initialEntry)}\n${JSON.stringify(metaEntry)}\n`,
+        [initialEntry, metaEntry, ...(customTitleEntry ? [customTitleEntry] : [])]
+          .map(entry => JSON.stringify(entry))
+          .join('\n') + '\n',
         'utf-8',
       )
       this.invalidateSessionListCache()

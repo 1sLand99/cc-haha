@@ -121,7 +121,8 @@ export function migrateCollaborationStore(value: unknown): Store {
   }
   for (const [id, member] of Object.entries(source.members)) {
     if (!member || typeof member !== 'object' || member.sessionId !== id || typeof member.rootSessionId !== 'string' ||
-      !['queued', 'running', 'idle', 'blocked', 'completed', 'failed', 'stopped'].includes(member.state)) throw new Error('Invalid collaboration member')
+      !['queued', 'running', 'idle', 'blocked', 'completed', 'failed', 'stopped'].includes(member.state) ||
+      (member.title !== undefined && typeof member.title !== 'string')) throw new Error('Invalid collaboration member')
   }
   for (const message of source.messages) {
     if (!message || typeof message.id !== 'string' || typeof message.sourceSessionId !== 'string' ||
@@ -331,6 +332,7 @@ export class SessionCollaborationService {
     const message = await this.mutate(() => {
       const parent = this.ensureMember(callerSessionId)
       const member = this.ensureMember(created.sessionId, parent.rootSessionId, callerSessionId)
+      member.title = collaborationSessionTitle(input)
       // Stop may arrive while workspace/session creation awaits. Keep the
       // independently created session visible, but do not launch stale work.
       member.stopped = parent.stopped
@@ -371,7 +373,12 @@ export class SessionCollaborationService {
       ? await Promise.resolve(this.deps.sessions.titles(members.map(member => member.sessionId))).catch(() => undefined)
       : undefined
     return structuredClone({ revision: this.store.revision,
-      members: members.map(member => titles?.[member.sessionId] ? { ...member, title: titles[member.sessionId] } : member),
+      members: members.map(member => {
+        const indexedTitle = titles?.[member.sessionId]?.trim()
+        return indexedTitle && indexedTitle !== 'Untitled Session'
+          ? { ...member, title: indexedTitle }
+          : member
+      }),
       messages: this.store.messages.filter(message => !ids || ids.has(message.targetSessionId) || ids.has(message.sourceSessionId)) })
   }
 
