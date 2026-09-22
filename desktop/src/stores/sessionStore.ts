@@ -91,6 +91,11 @@ const projectHistoryRequests = new Map<string, {
 // The local index can lag the create response by one refresh. Keep explicit
 // ids from that response until the list has observed them at least once.
 const pendingCreatedSessionIds = new Set<string>()
+// Title notifications and collaboration tool results can arrive before the
+// session-list projection has observed a newly-created transcript. Remember
+// those authoritative names so a later stale `Untitled Session` row cannot
+// erase them while the local index reconciles.
+const pendingSessionTitles = new Map<string, string>()
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
@@ -379,6 +384,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     await sessionsApi.delete(id)
     releaseWorkspaceSession(id)
     pendingCreatedSessionIds.delete(id)
+    pendingSessionTitles.delete(id)
     invalidateRecentProjectsCache()
     useSessionRuntimeStore.getState().clearSelection(id)
     excludeDeletedProjectSessions([id])
@@ -403,6 +409,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     for (const id of result.successes) {
       releaseWorkspaceSession(id)
       pendingCreatedSessionIds.delete(id)
+      pendingSessionTitles.delete(id)
       useSessionRuntimeStore.getState().clearSelection(id)
     }
     excludeDeletedProjectSessions(result.successes)
@@ -445,6 +452,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   renameSession: async (id: string, title: string) => {
     await sessionsApi.rename(id, title)
+    pendingSessionTitles.set(id, title)
     set((s) => ({
       sessions: s.sessions.map((session) =>
         session.id === id ? { ...session, title } : session,
@@ -453,11 +461,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   updateSessionTitle: (id, title) => {
-    set((s) => ({
-      sessions: s.sessions.map((session) =>
-        session.id === id ? { ...session, title } : session,
-      ),
-    }))
+    const normalizedTitle = title.trim()
+    if (!normalizedTitle) return
+    pendingSessionTitles.set(id, normalizedTitle)
+    set((s) => {
+      let changed = false
+      const sessions = s.sessions.map((session) => {
+        if (session.id !== id || session.title === normalizedTitle) return session
+        changed = true
+        return { ...session, title: normalizedTitle }
+      })
+      return changed ? { sessions } : s
+    })
   },
 
   updateSessionMessageCount: (id, messageCount) => {
@@ -580,7 +595,7 @@ function mergeSessionList(
 
   for (const item of incoming) {
     const current = currentById.get(item.id)
-    const candidate = preserveLocalTitle(current, item)
+    const candidate = applyPendingSessionTitle(preserveLocalTitle(current, item))
     const existing = byId.get(candidate.id)
     if (!existing || sessionModifiedTime(candidate) > sessionModifiedTime(existing)) {
       byId.set(candidate.id, candidate)
@@ -588,6 +603,16 @@ function mergeSessionList(
   }
 
   return [...byId.values()].sort((a, b) => sessionModifiedTime(b) - sessionModifiedTime(a))
+}
+
+function applyPendingSessionTitle(session: SessionListItem): SessionListItem {
+  const pendingTitle = pendingSessionTitles.get(session.id)
+  if (!pendingTitle) return session
+  if (session.title === pendingTitle) {
+    pendingSessionTitles.delete(session.id)
+    return session
+  }
+  return { ...session, title: pendingTitle }
 }
 
 function reconcilePendingCreatedSessions(

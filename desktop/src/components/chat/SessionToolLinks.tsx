@@ -1,6 +1,8 @@
 import { Button } from '@/components/ui/Button'
 import { useTranslation } from '@/i18n'
 import { openSessionSource, sessionSourceTitle } from '@/lib/sessionNavigation'
+import { useSessionStore } from '@/stores/sessionStore'
+import { useEffect, useMemo } from 'react'
 
 export const SESSION_TOOL_NAMES = new Set(['ListSessions', 'ReadSession', 'CreateSession', 'SendSessionMessage', 'WaitSessions'])
 
@@ -58,9 +60,14 @@ function sessionToolResultTitles(result: unknown): Map<string, string> {
 export function SessionToolLinks({ input, result }: { input: unknown, result: unknown }) {
   const t = useTranslation()
   const targets = sessionToolTargets(input, result)
-  const resultTitles = sessionToolResultTitles(result)
+  const resultTitles = useMemo(() => sessionToolResultTitles(result), [result])
+  useEffect(() => {
+    for (const [sessionId, title] of resultTitles) {
+      useSessionStore.getState().updateSessionTitle(sessionId, title)
+    }
+  }, [resultTitles])
   if (!targets.length) return null
   return <div className="flex flex-wrap gap-1 px-3 py-1" aria-label={t('chat.referenceSessions')}>
-    {targets.map(id => <Button key={id} size="sm" variant="ghost" onClick={() => openSessionSource(id)}>{t('chat.openReferencedSession', { id: resultTitles.get(id) ?? sessionSourceTitle(id) })}</Button>)}
+    {targets.map(id => <Button key={id} size="sm" variant="ghost" onClick={() => openSessionSource(id, resultTitles.get(id))}>{t('chat.openReferencedSession', { id: resultTitles.get(id) ?? sessionSourceTitle(id) })}</Button>)}
   </div>
 }

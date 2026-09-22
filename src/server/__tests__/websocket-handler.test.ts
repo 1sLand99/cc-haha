@@ -156,6 +156,21 @@ describe('WebSocket handler session title lifecycle', () => {
     mock.restore()
   })
 
+  it('replays a persisted custom title when a renderer reconnects before the index refreshes', async () => {
+    const sessionId = `title-reconnect-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+    spyOn(sessionService, 'getCustomTitle').mockResolvedValue('安全相关更新分析')
+
+    handleWebSocket.open(ws)
+    await flushMicrotasks()
+
+    expect(ws.sent.map((payload) => JSON.parse(payload))).toContainEqual({
+      type: 'session_title_updated',
+      sessionId,
+      title: '安全相关更新分析',
+    })
+  })
+
   it('does not regenerate a title when a resumed session already has transcript messages', async () => {
     const sessionId = `title-resumed-${crypto.randomUUID()}`
     const ws = makeClientSocket(sessionId)
@@ -2483,6 +2498,8 @@ describe('WebSocket handler session isolation', () => {
 
     handleWebSocket.open(first)
     handleWebSocket.open(second)
+    await flushMicrotasks()
+    getCustomTitle.mockClear()
     outputCallback?.({
       type: 'system',
       subtype: 'task_started',
@@ -4962,6 +4979,11 @@ describe('WebSocket handler session isolation', () => {
     const ws = makeClientSocket(sessionId)
     spyOn(conversationService, 'getPendingPermissionRequests').mockReturnValue([])
 
+    const reconnectTitle = spyOn(sessionService, 'getCustomTitle').mockResolvedValue(null)
+    handleWebSocket.open(ws)
+    await flushMicrotasks()
+    reconnectTitle.mockRestore()
+
     let rejectFirst!: (error: Error) => void
     let customTitleCalls = 0
     spyOn(sessionService, 'getCustomTitle').mockImplementation(() => {
@@ -4974,7 +4996,6 @@ describe('WebSocket handler session isolation', () => {
       return new Promise(() => {})
     })
 
-    handleWebSocket.open(ws)
     handleWebSocket.message(ws, JSON.stringify({
       type: 'user_message',
       content: 'older turn',

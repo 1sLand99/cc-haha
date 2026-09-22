@@ -198,6 +198,21 @@ describe('sessionStore', () => {
     expect(useSessionStore.getState().sessions[0]?.title).toBe('开始优化UI')
   })
 
+  it('applies a collaboration title that arrives before the indexed session row', async () => {
+    useSessionStore.getState().updateSessionTitle('session-late-index', '安全相关更新分析')
+    listMock.mockResolvedValue({
+      sessions: [{
+        ...makeSession('session-late-index', '2026-09-22T00:00:01.000Z'),
+        title: 'Untitled Session',
+      }],
+      total: 1,
+    })
+
+    await useSessionStore.getState().fetchSessions()
+
+    expect(useSessionStore.getState().sessions[0]?.title).toBe('安全相关更新分析')
+  })
+
   it('syncs refreshed session titles into already-open tabs', async () => {
     useTabStore.getState().openTab('session-title-2', '```json {"title":')
     listMock.mockResolvedValue({

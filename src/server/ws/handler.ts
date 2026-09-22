@@ -614,6 +614,17 @@ export const handleWebSocket = {
 
     const msg: ServerMessage = { type: 'connected', sessionId }
     sendMessage(ws, msg)
+    // The persisted transcript is authoritative for a custom title, while the
+    // SQLite session-list projection can still be catching up after startup.
+    // Replay the title to the connected renderer so the page header, tab, and
+    // sidebar do not wait for the background reconciliation watcher.
+    void sessionService.getCustomTitle(sessionId).then((title) => {
+      if (!title || !activeSessions.get(sessionId)?.has(ws)) return
+      sendMessage(ws, { type: 'session_title_updated', sessionId, title })
+    }).catch(() => {
+      // A missing or temporarily unreadable transcript must not reject the
+      // WebSocket connection; the normal session-list refresh remains a fallback.
+    })
     const toolRequestIds = replayPendingPermissionRequests(ws, sessionId)
     const computerUseRequestIds = replayPendingComputerUsePermissionRequests(ws, sessionId)
     sendMessage(ws, {
