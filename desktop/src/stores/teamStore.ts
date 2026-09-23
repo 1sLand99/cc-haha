@@ -144,6 +144,7 @@ function toTeamMember(raw: Record<string, unknown>): TeamMember {
     currentTask: raw.currentTask as string | undefined,
     color: raw.color as AgentColor | undefined,
     sessionId: raw.sessionId as string | undefined,
+    model: typeof raw.model === 'string' ? raw.model : undefined,
   }
 }
 
@@ -803,7 +804,7 @@ function syncMemberSessionMessages(
     memberIsWorking(member, snapshot) ||
     unsettledReplies.length > 0
   )
-  useChatStore.setState((state) => {
+  useChatStore.getState().applyBoundedUpdate((state) => {
     const existing = state.sessions[sessionId]
     const nextState = existing ?? createMemberSessionState()
     const currentStreamRevision = nextState.agentStreamRevision ?? 0
@@ -919,7 +920,7 @@ function clearMemberSessionState(sessionIds: Iterable<string>): void {
     initialMemberSessionLoads.delete(sessionId)
     awaitingMemberReplies.delete(sessionId)
   }
-  useChatStore.setState((state) => {
+  useChatStore.getState().applyBoundedUpdate((state) => {
     const sessions = { ...state.sessions }
     for (const sessionId of ids) delete sessions[sessionId]
     return { sessions }

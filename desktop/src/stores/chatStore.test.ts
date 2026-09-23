@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentTaskNotification } from '../types/chat'
-import type { MessageEntry } from '../types/session'
+import type { AgentTaskNotification, UIMessage } from '../types/chat'
+import type { MessageEntry, SessionListItem } from '../types/session'
+import type { SessionHistoryPage } from '../api/sessions'
 import type { SavedProvider } from '../types/provider'
+import type { Tab } from './tabStore'
 import {
   buildMainSessionActivityModel,
   buildSessionActivityModel,
@@ -35,6 +37,7 @@ const {
   connectionStateHandlers,
   sendSubagentMessageMock,
   tabStoreSnapshot,
+  tabStoreListeners,
   providerStoreSnapshot,
 } = vi.hoisted(() => ({
   sendMock: vi.fn(),
@@ -75,7 +78,8 @@ const {
   },
   connectionStateHandlers: new Map<string, (state: 'connecting' | 'connected' | 'reconnecting' | 'disconnected') => void>(),
   sendSubagentMessageMock: vi.fn(async () => ({ ok: true })),
-  tabStoreSnapshot: { tabs: [] as Array<Record<string, unknown>> },
+  tabStoreSnapshot: { tabs: [] as Tab[], activeTabId: null as string | null },
+  tabStoreListeners: new Set<(state: any, previous: any) => void>(),
   providerStoreSnapshot: { providers: [] as SavedProvider[], activeId: null as string | null },
 }))
 
@@ -104,7 +108,9 @@ vi.mock('../api/websocket', () => ({
 
 vi.mock('../api/sessions', () => ({
   sessionsApi: {
-    getMessages: vi.fn(async () => ({ messages: [] })),
+    getFullHistory: vi.fn(async () => ({ messages: [] })),
+    getHistoryPage: vi.fn(async () => ({ messages: [] })),
+    getHistoryRecovery: vi.fn(async () => ({ status: 'incomplete', messages: [] })),
     getSlashCommands: vi.fn(async () => ({ commands: [] })),
   },
 }))
@@ -133,9 +139,14 @@ vi.mock('./tabStore', () => ({
   useTabStore: {
     getState: () => ({
       tabs: tabStoreSnapshot.tabs,
+      activeTabId: tabStoreSnapshot.activeTabId,
       updateTabStatus: updateTabStatusMock,
       updateTabTitle: updateTabTitleMock,
     }),
+    subscribe: (listener: (state: any, previous: any) => void) => {
+      tabStoreListeners.add(listener)
+      return () => tabStoreListeners.delete(listener)
+    },
   },
 }))
 
@@ -166,11 +177,14 @@ vi.mock('./cliTaskStore', () => ({
 }))
 
 import { sessionsApi } from '../api/sessions'
+import { ApiResponseParseError } from '../api/client'
+import { t } from '../i18n'
 import type { ServerMessage } from '../types/chat'
 import { useSettingsStore } from './settingsStore'
 import { runsForOwner, runsForSession, useWorkflowStore } from './workflowStore'
 import {
   mapHistoryMessagesToUiMessages,
+  appendReplayedUserMessage,
   registerAgentRunSession,
   reconstructAgentNotifications,
   reconstructRunActivityFromTranscript,
@@ -487,8 +501,8 @@ describe('chatStore history mapping', () => {
     updateSessionTitleMock.mockReset()
     updateSessionMessageCountMock.mockReset()
     connectionStateHandlers.clear()
-    vi.mocked(sessionsApi.getMessages).mockReset()
-    vi.mocked(sessionsApi.getMessages).mockResolvedValue({ messages: [] })
+    vi.mocked(sessionsApi.getFullHistory).mockReset()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValue({ messages: [] })
     vi.mocked(sessionsApi.getSlashCommands).mockReset()
     vi.mocked(sessionsApi.getSlashCommands).mockResolvedValue({ commands: [] })
     sessionStoreSnapshot.sessions = []
@@ -508,7 +522,7 @@ describe('chatStore history mapping', () => {
     'restores an existing transcript when runtime selection fails %s history loading',
     async (errorTiming) => {
       let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-      vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+      vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
       }))
       useChatStore.setState({
@@ -681,6 +695,38 @@ describe('chatStore history mapping', () => {
     ])
     expect(mapped[2]).toMatchObject({ parentToolUseId: 'agent-1' })
     expect(mapped[3]).toMatchObject({ parentToolUseId: 'agent-1' })
+  })
+
+  it('keeps collaboration source metadata on user messages from history', () => {
+    const messages: MessageEntry[] = [
+      {
+        id: 'collab-1',
+        type: 'user',
+        timestamp: '2026-04-06T00:00:00.000Z',
+        content: '只读发现：#1335 未复现',
+        collaboration: { sourceSessionId: 'root-1', messageId: 'm-1' },
+      },
+    ]
+
+    const mapped = mapHistoryMessagesToUiMessages(messages)
+
+    expect(mapped).toHaveLength(1)
+    expect(mapped[0]).toMatchObject({
+      type: 'user_text',
+      content: '只读发现：#1335 未复现',
+      collaboration: { sourceSessionId: 'root-1', messageId: 'm-1' },
+    })
+  })
+
+  it('keeps collaboration source metadata on live replayed user messages', () => {
+    const mapped = appendReplayedUserMessage([], '发现两条线索', 1000, undefined, { sourceSessionId: 'root-1', messageId: 'm-2' })
+
+    expect(mapped).toHaveLength(1)
+    expect(mapped[0]).toMatchObject({
+      type: 'user_text',
+      content: '发现两条线索',
+      collaboration: { sourceSessionId: 'root-1', messageId: 'm-2' },
+    })
   })
 
   it('collapses replayed and blank thinking blocks from history mapping', () => {
@@ -1391,7 +1437,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('restores completed /goal state from transcript history after app restart', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'goal-command',
@@ -1449,7 +1495,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('restores token usage from transcript history after reopening a session', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'user-1',
@@ -1492,7 +1538,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('uses transcript terminal events to repair stale live goal and background task state', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'goal-command',
@@ -1578,7 +1624,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('restores only root-run background activity from joined session history', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'root-shell-use',
@@ -1668,7 +1714,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('does not assign an unjoined child notification to the root run', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [{
         id: 'root-agent-use',
         type: 'assistant',
@@ -1701,7 +1747,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('uses persisted owner identity when root and child reuse the same tool id', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'root-shell-use',
@@ -1762,7 +1808,7 @@ describe('chatStore history mapping', () => {
   })
 
   function mockRestoredSubagentActivity() {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'restored-child-use',
@@ -1892,7 +1938,7 @@ describe('chatStore history mapping', () => {
 
   it('keeps restored history when live output arrives during the initial history load', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -1903,7 +1949,7 @@ describe('chatStore history mapping', () => {
 
     const historyLoad = useChatStore.getState().loadHistory(TEST_SESSION_ID)
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
 
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
@@ -1952,7 +1998,7 @@ describe('chatStore history mapping', () => {
     async (reset, attemptOutput) => {
       const sessionId = `cold-attempt-${reset}-${attemptOutput}`
       let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-      vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+      vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
       }))
       useChatStore.getState().connectToSession(sessionId, { minimalBootstrap: true })
@@ -2039,7 +2085,7 @@ describe('chatStore history mapping', () => {
   it('treats the first history load as cold when a live task arrived before it started', async () => {
     const sessionId = 'cold-live-before-load'
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
 
@@ -2098,7 +2144,7 @@ describe('chatStore history mapping', () => {
   it('starts a fresh history request after disconnecting and recreating the same session id', async () => {
     const sessionId = 'disconnect-recreate-load'
     const historyResolvers: Array<(value: { messages: MessageEntry[] }) => void> = []
-    vi.mocked(sessionsApi.getMessages).mockImplementation(
+    vi.mocked(sessionsApi.getFullHistory).mockImplementation(
       () => new Promise((resolve) => { historyResolvers.push(resolve) }),
     )
 
@@ -2138,7 +2184,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('backfills transcript rows persisted while a hydrated session was disconnected', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'persisted-before-disconnect',
@@ -2189,7 +2235,7 @@ describe('chatStore history mapping', () => {
   it('ignores an old reload after disconnecting and recreating the same session id', async () => {
     const sessionId = 'disconnect-recreate-reload'
     const historyResolvers: Array<(value: { messages: MessageEntry[] }) => void> = []
-    vi.mocked(sessionsApi.getMessages).mockImplementation(
+    vi.mocked(sessionsApi.getFullHistory).mockImplementation(
       () => new Promise((resolve) => { historyResolvers.push(resolve) }),
     )
 
@@ -2234,7 +2280,7 @@ describe('chatStore history mapping', () => {
 
   it('does not mistake an identical reply in a newer live turn for restored history', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -2288,7 +2334,7 @@ describe('chatStore history mapping', () => {
 
   it('does not mistake an identical completed reply for cold history loaded in parallel', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -2337,7 +2383,7 @@ describe('chatStore history mapping', () => {
 
   it('does not mistake an identical stopped reply for cold history loaded in parallel', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -2383,7 +2429,7 @@ describe('chatStore history mapping', () => {
 
   it('keeps newer live tool fields when cold history contains the same tool call', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -2434,7 +2480,7 @@ describe('chatStore history mapping', () => {
   it('keeps durable tool details when the live row is only a pending placeholder', async () => {
     const sessionId = 'cold-pending-tool-overlay'
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.getState().connectToSession(sessionId, {
@@ -2477,7 +2523,7 @@ describe('chatStore history mapping', () => {
   it('keeps every tool row when tool ids are empty', async () => {
     const sessionId = 'cold-empty-tool-identities'
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.getState().connectToSession(sessionId, {
@@ -2523,7 +2569,7 @@ describe('chatStore history mapping', () => {
   it('does not overlay a live tool row onto an ambiguous restored identity', async () => {
     const sessionId = 'cold-ambiguous-tool-identities'
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.getState().connectToSession(sessionId, {
@@ -2574,7 +2620,7 @@ describe('chatStore history mapping', () => {
 
   it('keeps a live goal event when cold history arrives', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -2626,7 +2672,7 @@ describe('chatStore history mapping', () => {
 
   it('does not revive a stale REST goal after a live goal clear during cold load', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -2667,7 +2713,7 @@ describe('chatStore history mapping', () => {
 
   it('keeps a live goal clear and its event when a stale reload returns', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -2713,7 +2759,7 @@ describe('chatStore history mapping', () => {
 
   it('keeps a live goal message when a stale reload returns', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -2747,7 +2793,7 @@ describe('chatStore history mapping', () => {
 
   it('discards a stale warm history response after a live goal mutation', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -2817,7 +2863,7 @@ describe('chatStore history mapping', () => {
         content: [{ type: 'text', text: 'persisted before the task update' }],
       }],
     }
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
       }))
@@ -2829,7 +2875,7 @@ describe('chatStore history mapping', () => {
 
     const historyLoad = useChatStore.getState().loadHistory(TEST_SESSION_ID)
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'system_notification',
@@ -2852,7 +2898,7 @@ describe('chatStore history mapping', () => {
     })
     resolveHistory(restoredHistory)
     await historyLoad
-    expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
 
     const session = useChatStore.getState().sessions[TEST_SESSION_ID]
     expect(session?.historyStatus).toBe('ready')
@@ -2890,7 +2936,7 @@ describe('chatStore history mapping', () => {
       usage: { input_tokens: 10, output_tokens: 70 },
       usageKey: 'msg_second\0req_second',
     }
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         blockLine('msg_first\0req_first'),
         blockLine('msg_first\0req_first'),
@@ -2913,7 +2959,7 @@ describe('chatStore history mapping', () => {
 
   it('does not replace newer live token usage with a stale cold snapshot', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -2946,7 +2992,7 @@ describe('chatStore history mapping', () => {
 
   it('does not replace equal-valued live token usage with a stale cold snapshot', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -2983,7 +3029,7 @@ describe('chatStore history mapping', () => {
 
   it('does not replace equal-valued live token usage with a stale reload snapshot', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -3028,7 +3074,7 @@ describe('chatStore history mapping', () => {
 
   it('does not clear a newer live todo list with a stale cold snapshot', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     cliTaskStoreSnapshot.sessionId = TEST_SESSION_ID
@@ -3072,7 +3118,7 @@ describe('chatStore history mapping', () => {
 
   it('does not clear a newer live todo list with a stale reload snapshot', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     cliTaskStoreSnapshot.sessionId = TEST_SESSION_ID
@@ -3140,7 +3186,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('hydrates transcript ids for a just-completed live turn', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'transcript-user-1',
@@ -3211,7 +3257,7 @@ describe('chatStore history mapping', () => {
         },
       ],
     ).flat()
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: repeatedTurnHistory(1) })
       .mockResolvedValueOnce({ messages: repeatedTurnHistory(2) })
 
@@ -3232,7 +3278,7 @@ describe('chatStore history mapping', () => {
         usage: { input_tokens: 1, output_tokens: 2 },
       })
       await vi.waitFor(() => {
-        expect(sessionsApi.getMessages).toHaveBeenCalledTimes(expectedHistoryLoads)
+        expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(expectedHistoryLoads)
         expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
       })
     }
@@ -3421,7 +3467,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('collapses duplicate assistant replies after transcript id hydration', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'transcript-user-1',
@@ -3487,7 +3533,7 @@ describe('chatStore history mapping', () => {
 
   it('retries transcript id hydration after the assistant message is persisted', async () => {
     vi.useFakeTimers()
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({
         messages: [
           {
@@ -3540,7 +3586,7 @@ describe('chatStore history mapping', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     const firstHydrationMessages = useChatStore.getState().sessions[TEST_SESSION_ID]?.messages ?? []
     expect(firstHydrationMessages[0]).toMatchObject({
       type: 'user_text',
@@ -3553,7 +3599,7 @@ describe('chatStore history mapping', () => {
 
     await vi.advanceTimersByTimeAsync(750)
 
-    expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     const secondHydrationMessages = useChatStore.getState().sessions[TEST_SESSION_ID]?.messages ?? []
     expect(secondHydrationMessages[0]).toMatchObject({
       type: 'user_text',
@@ -3944,6 +3990,29 @@ describe('chatStore history mapping', () => {
     ])
   })
 
+  it.each(['string', 'blocks', 'replay'])('restores path-only image references as previews through %s', (mode) => {
+    const path = '/private/tmp/uploads/screenshot.PNG'
+    const content = `@"${path}" @"/tmp/notes.md" 看这张图`
+    const mapped = mode === 'replay'
+      ? appendReplayedUserMessage([], content, 1)
+      : mapHistoryMessagesToUiMessages([{
+          id: 'path-image',
+          type: 'user',
+          timestamp: '2026-09-21T00:00:00.000Z',
+          content: mode === 'string' ? content : [{ type: 'text', text: content }],
+        }])
+
+    expect(mapped).toMatchObject([{
+      type: 'user_text',
+      content: '看这张图',
+      modelContent: content,
+      attachments: [
+        { type: 'image', name: 'screenshot.PNG', path },
+        { type: 'file', name: 'notes.md', path: '/tmp/notes.md' },
+      ],
+    }])
+  })
+
   it('restores persisted workspace diff comments without exposing the model prompt', () => {
     const modelPrompt = [
       '@"/repo/homepage/src/App.vue" Referenced workspace context:',
@@ -4251,7 +4320,7 @@ describe('chatStore history mapping', () => {
 
   it('hydrates TodoWrite history into the currently tracked task store only', async () => {
     const todos = [{ content: 'Session task', status: 'in_progress' }]
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'assistant-todo',
@@ -4279,7 +4348,7 @@ describe('chatStore history mapping', () => {
 
   it('does not hydrate parent-linked SubAgent task history into the session task store', async () => {
     const childTodos = [{ content: 'SubAgent internal task', status: 'completed' }]
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'child-todo',
@@ -4315,7 +4384,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('marks history task completion dismissed when the user already continued', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'assistant-task',
@@ -4348,7 +4417,7 @@ describe('chatStore history mapping', () => {
 
   it('reloads history task state for the requested session', async () => {
     const todos = [{ content: 'Reloaded task', status: 'pending' }]
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'assistant-todo',
@@ -4373,7 +4442,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('clears reloaded task state after completed history is followed by a user turn', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'assistant-task',
@@ -5204,7 +5273,7 @@ describe('chatStore history mapping', () => {
       id: 'provider-1', presetId: 'custom', name: 'DeepSeek', apiKey: 'fixture',
       baseUrl: 'http://127.0.0.1:1', apiFormat: 'anthropic',
       models: { main: model, haiku: '', sonnet: '', opus: '' },
-      model1mSupport: { main: enabled, haiku: false, sonnet: false, opus: false },
+      model1mSupport: { main: enabled, fable: false, haiku: false, sonnet: false, opus: false },
     }]
     const staleSelection = { providerId: 'provider-1', modelId: `${model}${enabled ? '' : '[1m]'}`, effortLevel: 'high' as const }
     const expectedSelection = { ...staleSelection, modelId: `${model}${enabled ? '[1m]' : ''}` }
@@ -5229,7 +5298,7 @@ describe('chatStore history mapping', () => {
       id: 'provider-1', presetId: 'custom', name: 'DeepSeek', apiKey: 'fixture',
       baseUrl: 'http://127.0.0.1:1', apiFormat: 'anthropic',
       models: { main: 'deepseek-v4.1', haiku: '', sonnet: '', opus: '' },
-      model1mSupport: { main: true, haiku: false, sonnet: false, opus: false },
+      model1mSupport: { main: true, fable: false, haiku: false, sonnet: false, opus: false },
     }]
     useChatStore.getState().sendMessage(TEST_SESSION_ID, 'continue')
     expect(sendMock.mock.calls.slice(0, 2)).toEqual([
@@ -5303,7 +5372,7 @@ describe('chatStore history mapping', () => {
     })
 
     expect(fetchSessionTasksMock).not.toHaveBeenCalled()
-    expect(sessionsApi.getMessages).not.toHaveBeenCalled()
+    expect(sessionsApi.getFullHistory).not.toHaveBeenCalled()
     expect(sessionsApi.getSlashCommands).not.toHaveBeenCalled()
 
     const onConnectionState = connectionStateHandlers.get(TEST_SESSION_ID)
@@ -5318,11 +5387,11 @@ describe('chatStore history mapping', () => {
       usage: { input_tokens: 1, output_tokens: 1 },
     })
 
-    expect(sessionsApi.getMessages).not.toHaveBeenCalled()
+    expect(sessionsApi.getFullHistory).not.toHaveBeenCalled()
   })
 
   it('uses terminal backfill when a reconnected minimal client is promoted', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [{
         id: 'durable-after-minimal-promotion',
         type: 'assistant',
@@ -5360,14 +5429,14 @@ describe('chatStore history mapping', () => {
       type: 'session_state',
       turnState: 'idle',
     })
-    expect(sessionsApi.getMessages).not.toHaveBeenCalled()
+    expect(sessionsApi.getFullHistory).not.toHaveBeenCalled()
 
     useChatStore.getState().connectToSession(TEST_SESSION_ID, {
       prewarm: false,
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
 
@@ -5387,7 +5456,7 @@ describe('chatStore history mapping', () => {
   it('keeps initial cold history when the first socket attempt fails and backfills the gap after sync', async () => {
     let resolveInitialHistory!: (value: { messages: MessageEntry[] }) => void
     let resolveReconnectHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -5400,7 +5469,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('loading')
     })
     const onConnectionState = connectionStateHandlers.get(TEST_SESSION_ID)
@@ -5437,7 +5506,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'system_notification',
@@ -5476,7 +5545,7 @@ describe('chatStore history mapping', () => {
 
   it('keeps initial cold REST after the socket connects and drops before hydration', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
 
@@ -5485,7 +5554,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('loading')
     })
     const onConnectionState = connectionStateHandlers.get(TEST_SESSION_ID)
@@ -5512,7 +5581,7 @@ describe('chatStore history mapping', () => {
   it('keeps user and error rows received before pre-hydration gap sync_state', async () => {
     let resolveInitialHistory!: (value: { messages: MessageEntry[] }) => void
     let resolveReconnectHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -5543,7 +5612,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveReconnectHistory({ messages: [] })
     await vi.waitFor(() => {
@@ -5566,7 +5635,7 @@ describe('chatStore history mapping', () => {
     let resolveReconnectHistory!: (value: { messages: MessageEntry[] }) => void
     const initialTodos = [{ content: 'old durable task', status: 'pending' }]
     const latestTodos = [{ content: 'latest durable task', status: 'in_progress' }]
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -5591,7 +5660,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     })
     const onConnectionState = connectionStateHandlers.get(TEST_SESSION_ID)
     onConnectionState?.('connected')
@@ -5653,7 +5722,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveReconnectHistory({
       messages: [
@@ -5727,7 +5796,7 @@ describe('chatStore history mapping', () => {
   it('keeps L2 tool payload when Stop only mutates an L1-restored tool status', async () => {
     let resolveInitialHistory!: (value: { messages: MessageEntry[] }) => void
     let resolveReconnectHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -5771,7 +5840,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
 
     useChatStore.getState().stopGeneration(TEST_SESSION_ID)
@@ -5812,7 +5881,7 @@ describe('chatStore history mapping', () => {
   it('separates inherited pending payload from an authoritative live completion over L2', async () => {
     let resolveInitialHistory!: (value: { messages: MessageEntry[] }) => void
     let resolveReconnectHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -5861,7 +5930,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'content_start',
@@ -5956,7 +6025,7 @@ describe('chatStore history mapping', () => {
   it('applies only a live partial tool-input delta over the L2 durable payload', async () => {
     let resolveInitialHistory!: (value: { messages: MessageEntry[] }) => void
     let resolveReconnectHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -5995,7 +6064,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'content_start',
@@ -6047,7 +6116,7 @@ describe('chatStore history mapping', () => {
     let resolveInitialHistory!: (value: { messages: MessageEntry[] }) => void
     let resolveReloadHistory!: (value: { messages: MessageEntry[] }) => void
     let resolveReconnectHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -6076,7 +6145,7 @@ describe('chatStore history mapping', () => {
       }],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveReloadHistory({
       messages: [{
@@ -6095,7 +6164,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(3)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(3)
     })
     resolveReconnectHistory({
       messages: [{
@@ -6163,7 +6232,7 @@ describe('chatStore history mapping', () => {
       ],
       taskNotifications: [staleNotification],
     }
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -6252,7 +6321,7 @@ describe('chatStore history mapping', () => {
 
     resolveInitialHistory(staleSnapshot)
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveReloadHistory(staleSnapshot)
     await reload
@@ -6280,7 +6349,7 @@ describe('chatStore history mapping', () => {
       turnState: 'running',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(3)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(3)
     })
     resolveReconnectHistory(staleSnapshot)
     await vi.waitFor(() => {
@@ -6322,7 +6391,7 @@ describe('chatStore history mapping', () => {
       status: 'completed',
       summary: 'stale completed attempt',
     }
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -6385,7 +6454,7 @@ describe('chatStore history mapping', () => {
       turnState: 'running',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveReconnectHistory({ messages: [], taskNotifications: [staleNotification] })
     await vi.waitFor(() => {
@@ -6427,7 +6496,7 @@ describe('chatStore history mapping', () => {
         }],
       },
     ]
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -6489,7 +6558,7 @@ describe('chatStore history mapping', () => {
       turnState: 'running',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveReconnectHistory({ messages: staleRunningHistory })
     await vi.waitFor(() => {
@@ -6531,7 +6600,7 @@ describe('chatStore history mapping', () => {
         },
       ],
     }
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -6592,7 +6661,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveReconnectHistory(staleHistory)
     await vi.waitFor(() => {
@@ -6619,7 +6688,7 @@ describe('chatStore history mapping', () => {
   it('lets the sync backfill replace an older pre-hydration request still in flight', async () => {
     let resolveInitialHistory!: (value: { messages: MessageEntry[] }) => void
     let resolveReconnectHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveInitialHistory = resolve
       }))
@@ -6641,7 +6710,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
 
     resolveInitialHistory({
@@ -6680,13 +6749,13 @@ describe('chatStore history mapping', () => {
   })
 
   it('keeps a repeated normal reconnect gated until its pending sync arrives', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValue({ messages: [] })
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValue({ messages: [] })
     useChatStore.getState().connectToSession(TEST_SESSION_ID, {
       prewarm: false,
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     const onConnectionState = connectionStateHandlers.get(TEST_SESSION_ID)
@@ -6714,7 +6783,7 @@ describe('chatStore history mapping', () => {
       prewarm: false,
       applyRuntimeSelection: false,
     })
-    expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
 
     onConnectionState?.('connected')
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
@@ -6723,14 +6792,14 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     const timer = useChatStore.getState().sessions[TEST_SESSION_ID]?.elapsedTimer
     if (timer) clearInterval(timer)
   })
 
   it('retries a failed cold REST while the first socket gap is still pending', async () => {
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockRejectedValueOnce(new Error('initial REST failed'))
       .mockResolvedValueOnce({
         messages: [{
@@ -6755,7 +6824,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toContainEqual(
@@ -6766,7 +6835,7 @@ describe('chatStore history mapping', () => {
   it('still backfills the socket gap after a pre-hydration REST retry succeeds', async () => {
     let resolveRetryHistory!: (value: { messages: MessageEntry[] }) => void
     let resolveReconnectHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockRejectedValueOnce(new Error('initial REST failed'))
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveRetryHistory = resolve
@@ -6790,7 +6859,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveRetryHistory({
       messages: [{
@@ -6811,7 +6880,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(3)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(3)
     })
     resolveReconnectHistory({
       messages: [{
@@ -6832,7 +6901,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('starts cold REST when a minimal client is promoted during its first socket gap', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [{
         id: 'durable-after-minimal-gap-promotion',
         type: 'assistant',
@@ -6847,14 +6916,14 @@ describe('chatStore history mapping', () => {
     })
     const onConnectionState = connectionStateHandlers.get(TEST_SESSION_ID)
     onConnectionState?.('reconnecting')
-    expect(sessionsApi.getMessages).not.toHaveBeenCalled()
+    expect(sessionsApi.getFullHistory).not.toHaveBeenCalled()
 
     useChatStore.getState().connectToSession(TEST_SESSION_ID, {
       prewarm: false,
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toContainEqual(
@@ -6914,7 +6983,7 @@ describe('chatStore history mapping', () => {
 
   it('losslessly backfills history after automatic reconnect while task progress continues', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
@@ -6924,7 +6993,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     const onConnectionState = connectionStateHandlers.get(TEST_SESSION_ID)
@@ -6960,13 +7029,13 @@ describe('chatStore history mapping', () => {
       prewarm: false,
       applyRuntimeSelection: false,
     })
-    expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'session_state',
       turnState: 'running',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'system_notification',
@@ -6989,7 +7058,7 @@ describe('chatStore history mapping', () => {
     await vi.waitFor(() => {
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
-    expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toContainEqual(
       expect.objectContaining({
         type: 'assistant_text',
@@ -7014,7 +7083,7 @@ describe('chatStore history mapping', () => {
 
   it('accepts an explicit durable goal clear during a running reconnect', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
@@ -7062,7 +7131,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveHistory({
       messages: [{
@@ -7095,7 +7164,7 @@ describe('chatStore history mapping', () => {
 
   it('preserves the cached goal during a running reconnect with no durable goal evidence', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
@@ -7136,7 +7205,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveHistory({
       messages: [{
@@ -7161,7 +7230,7 @@ describe('chatStore history mapping', () => {
   it('preserves live goal token and Todo mutations received before a running reconnect snapshot', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
     const staleTodos = [{ content: 'stale REST todo', status: 'pending' }]
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
@@ -7177,7 +7246,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     useChatStore.setState((state) => ({
@@ -7222,7 +7291,7 @@ describe('chatStore history mapping', () => {
       turnState: 'running',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveHistory({
       messages: [
@@ -7261,7 +7330,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('accepts an empty durable transcript after an automatic idle reconnect', async () => {
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [] })
     useChatStore.getState().connectToSession(TEST_SESSION_ID, {
@@ -7269,7 +7338,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     useChatStore.setState((state) => ({
@@ -7300,7 +7369,7 @@ describe('chatStore history mapping', () => {
     })
 
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toEqual([])
@@ -7311,7 +7380,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('clears stale background activity when an idle reconnect confirms an empty transcript', async () => {
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [] })
     useChatStore.getState().connectToSession(TEST_SESSION_ID, {
@@ -7319,7 +7388,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     const staleTask = {
@@ -7376,7 +7445,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('keeps a cached background task that the reconnect snapshot confirms is active', async () => {
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [] })
     useChatStore.getState().connectToSession(TEST_SESSION_ID, {
@@ -7436,7 +7505,7 @@ describe('chatStore history mapping', () => {
       outputFile: '/tmp/old-output.txt',
       usage: { totalTokens: 123, toolUses: 4, durationMs: 5000 },
     }
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [], taskNotifications: [staleNotification] })
     useChatStore.getState().connectToSession(TEST_SESSION_ID, {
@@ -7511,7 +7580,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('does not let stale REST mark a snapshot-inactive background task running again', async () => {
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({
         messages: [
@@ -7587,7 +7656,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('keeps an inactive background task settled during a running reconnect backfill', async () => {
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({
         messages: [
@@ -7665,7 +7734,7 @@ describe('chatStore history mapping', () => {
 
   it('keeps only post-boundary background activity during an empty terminal backfill', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
@@ -7714,7 +7783,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'system_notification',
@@ -7745,7 +7814,7 @@ describe('chatStore history mapping', () => {
       status: 'completed' as const,
       summary: 'old lifecycle completed',
     }
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [], taskNotifications: [staleNotification] })
     useChatStore.getState().connectToSession(TEST_SESSION_ID, {
@@ -7809,7 +7878,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('waits for the reconnect snapshot before reconciling a completed turn', async () => {
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockResolvedValueOnce({ messages: [] })
     useChatStore.getState().connectToSession(TEST_SESSION_ID, {
@@ -7817,7 +7886,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     const onConnectionState = connectionStateHandlers.get(TEST_SESSION_ID)
@@ -7842,7 +7911,7 @@ describe('chatStore history mapping', () => {
       usage: { input_tokens: 1, output_tokens: 1 },
     })
 
-    expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.awaitingReconnectSync).toBe(true)
 
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
@@ -7850,14 +7919,14 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
   })
 
   it('keeps user and error rows received between reconnect and sync_state', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
@@ -7867,7 +7936,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     useChatStore.setState((state) => ({
@@ -7935,7 +8004,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveHistory({ messages: [] })
     await vi.waitFor(() => {
@@ -7970,7 +8039,7 @@ describe('chatStore history mapping', () => {
 
   it('authoritatively reconciles a terminal automatic reconnect while SubAgent progress continues', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
@@ -7980,7 +8049,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     const onConnectionState = connectionStateHandlers.get(TEST_SESSION_ID)
@@ -8044,7 +8113,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: ['agent-task-idle-reconnect'],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'system_notification',
@@ -8133,7 +8202,7 @@ describe('chatStore history mapping', () => {
 
   it('keeps a new foreground turn started during terminal reconnect backfill', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
@@ -8143,7 +8212,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     const onConnectionState = connectionStateHandlers.get(TEST_SESSION_ID)
@@ -8168,7 +8237,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
 
     useChatStore.getState().sendMessage(TEST_SESSION_ID, 'new turn after reconnect')
@@ -8201,7 +8270,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('reuses the original terminal reconnect boundary after a failed request', async () => {
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockRejectedValueOnce(new Error('temporary history failure'))
       .mockResolvedValueOnce({
         messages: [
@@ -8297,7 +8366,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('carries an unresolved terminal boundary into a later running reconnect', async () => {
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockRejectedValueOnce(new Error('first terminal backfill failed'))
       .mockResolvedValueOnce({
@@ -8341,7 +8410,7 @@ describe('chatStore history mapping', () => {
       applyRuntimeSelection: false,
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
     useChatStore.setState((state) => ({
@@ -8453,7 +8522,7 @@ describe('chatStore history mapping', () => {
       turnState: 'running',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(3)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(3)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
 
@@ -8507,7 +8576,7 @@ describe('chatStore history mapping', () => {
 
   it('uses the latest reconnect baseline for a later terminal snapshot', async () => {
     const latestTodos = [{ content: 'latest durable todo', status: 'completed' }]
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockRejectedValueOnce(new Error('first terminal backfill failed'))
       .mockResolvedValueOnce({
@@ -8619,7 +8688,7 @@ describe('chatStore history mapping', () => {
 
   it('promotes a failed terminal boundary before a later running reconnect', async () => {
     const durableTodos = [{ content: 'durable after two failures', status: 'completed' }]
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockRejectedValueOnce(new Error('first terminal backfill failed'))
       .mockRejectedValueOnce(new Error('second terminal backfill failed'))
@@ -8710,7 +8779,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(3)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(3)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('error')
     })
 
@@ -8721,7 +8790,7 @@ describe('chatStore history mapping', () => {
       turnState: 'running',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(4)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(4)
       expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
     })
 
@@ -8741,7 +8810,7 @@ describe('chatStore history mapping', () => {
 
   it('preserves a same-id tool completion received during terminal backfill', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockResolvedValueOnce({ messages: [] })
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
@@ -8785,7 +8854,7 @@ describe('chatStore history mapping', () => {
       activeBackgroundTaskIds: [],
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
 
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
@@ -8813,7 +8882,7 @@ describe('chatStore history mapping', () => {
 
   it('uses terminal REST goal and Todo state when neither changed during backfill', async () => {
     const restoredTodos = [{ content: 'offline task', status: 'completed' }]
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'durable-goal-cleared',
@@ -8876,7 +8945,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('clears stale token usage when terminal REST confirms an empty transcript', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({ messages: [] })
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({ messages: [] })
     useChatStore.setState({
       sessions: {
         [TEST_SESSION_ID]: makeSession({
@@ -8965,9 +9034,66 @@ describe('chatStore history mapping', () => {
     useChatStore.getState().connectToSession(TEST_SESSION_ID)
     await Promise.resolve()
 
-    expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(sendMock).not.toHaveBeenCalledWith(TEST_SESSION_ID, { type: 'prewarm_session' })
   })
+
+  it('keeps the selected runtime on reconnect after stopping and receiving stale list metadata', () => {
+    useChatStore.setState({ sessions: {
+      [TEST_SESSION_ID]: makeSession({ chatState: 'streaming' }),
+    } })
+    const oldMetadata = {
+      id: TEST_SESSION_ID, runtimeProviderId: null, runtimeModelId: 'k3[1m]',
+    }
+    useSessionRuntimeStore.getState().syncFromSessions([oldMetadata as SessionListItem])
+    useChatStore.getState().stopGeneration(TEST_SESSION_ID)
+    const next = { providerId: null, modelId: 'deepseek-v4-flash' }
+    useSessionRuntimeStore.getState().setSelection(TEST_SESSION_ID, next)
+    useChatStore.getState().setSessionRuntime(TEST_SESSION_ID, next)
+    useSessionRuntimeStore.getState().syncFromSessions([oldMetadata as SessionListItem])
+    useChatStore.getState().disconnectSession(TEST_SESSION_ID)
+    sendMock.mockClear()
+    useChatStore.getState().connectToSession(TEST_SESSION_ID)
+
+    expect(sendMock).toHaveBeenCalledWith(TEST_SESSION_ID, { type: 'set_runtime_config', ...next })
+    expect(sendMock).not.toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ modelId: 'k3[1m]' }))
+  })
+
+  it.each(['before-send', 'after-send', 'after-confirmation'] as const)(
+    'keeps the new model when stopping, switching, and sending despite an old response arriving %s',
+    (arrival) => {
+      useChatStore.setState({ sessions: {
+        [TEST_SESSION_ID]: makeSession({ chatState: 'streaming' }),
+      } })
+      const runtime = useSessionRuntimeStore.getState()
+      const oldMetadata = {
+        id: TEST_SESSION_ID, runtimeProviderId: 'kimi-fixture', runtimeModelId: 'k3[1m]',
+      } as SessionListItem
+      runtime.syncFromSessions([oldMetadata])
+      sendMock.mockClear()
+      useChatStore.getState().stopGeneration(TEST_SESSION_ID)
+
+      const next = { providerId: 'deepseek-fixture', modelId: 'deepseek-v4-flash' }
+      runtime.setSelection(TEST_SESSION_ID, next)
+      useChatStore.getState().setSessionRuntime(TEST_SESSION_ID, next)
+      const pendingList = useSessionRuntimeStore.getState().selections
+      const deliverOldResponse = () => runtime.syncFromSessions([oldMetadata], pendingList)
+      if (arrival === 'before-send') deliverOldResponse()
+      useChatStore.getState().sendMessage(TEST_SESSION_ID, 'Continue with the selected model')
+      if (arrival === 'after-send') deliverOldResponse()
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'runtime_config_applied', ...next,
+      })
+      if (arrival === 'after-confirmation') deliverOldResponse()
+
+      expect(useSessionRuntimeStore.getState().selections[TEST_SESSION_ID]).toEqual(next)
+      expect(sendMock.mock.calls.map(([, message]) => message)).toEqual([
+        { type: 'stop_generation' },
+        { type: 'set_runtime_config', ...next },
+        { type: 'user_message', content: 'Continue with the selected model', attachments: undefined },
+      ])
+    },
+  )
 
   it('sends explicit runtime overrides over websocket', () => {
     useChatStore.getState().setSessionRuntime(TEST_SESSION_ID, {
@@ -8995,6 +9121,7 @@ describe('chatStore history mapping', () => {
         [TEST_SESSION_ID]: makeSession({ runtimeConfigReadyCount: 0 }),
       },
     })
+    const pendingRequest = useSessionRuntimeStore.getState().selections
 
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'runtime_config_applied',
@@ -9011,6 +9138,27 @@ describe('chatStore history mapping', () => {
       effortLevel: 'high',
     })
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.runtimeConfigReadyCount).toBe(1)
+    const remote = {
+      id: TEST_SESSION_ID, runtimeProviderId: 'provider-a', runtimeModelId: 'model-a', effortLevel: 'high',
+    } as SessionListItem
+    useSessionRuntimeStore.getState().syncFromSessions([remote], pendingRequest)
+    expect(useSessionRuntimeStore.getState().selections[TEST_SESSION_ID]?.modelId).toBe('model-b')
+    useSessionRuntimeStore.getState().syncFromSessions([remote], useSessionRuntimeStore.getState().selections)
+    expect(useSessionRuntimeStore.getState().selections[TEST_SESSION_ID]?.modelId).toBe('model-a')
+  })
+
+  it.each(['RUNTIME_CONFIG_INVALID', 'CLI_RESTART_FAILED'])('allows fresh metadata to correct a rejected selection (%s)', (code) => {
+    const runtime = useSessionRuntimeStore.getState()
+    runtime.setSelection(TEST_SESSION_ID, { providerId: null, modelId: 'rejected-model' })
+    const staleRequest = useSessionRuntimeStore.getState().selections
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'error', code, message: 'Fixture runtime switch failed',
+    })
+    const actual = { id: TEST_SESSION_ID, runtimeProviderId: null, runtimeModelId: 'k3' } as SessionListItem
+    runtime.syncFromSessions([actual], staleRequest)
+    expect(useSessionRuntimeStore.getState().selections[TEST_SESSION_ID]?.modelId).toBe('rejected-model')
+    runtime.syncFromSessions([actual], useSessionRuntimeStore.getState().selections)
+    expect(useSessionRuntimeStore.getState().selections[TEST_SESSION_ID]?.modelId).toBe('k3')
   })
 
   it('shows AskUserQuestion when permission arrives before the streamed tool block', () => {
@@ -9241,6 +9389,33 @@ describe('chatStore history mapping', () => {
     expect(session?.pendingPermissions).toEqual({})
     expect(session?.pendingPermission).toBeNull()
     expect(session?.chatState).toBe('tool_executing')
+  })
+
+  it('keeps teammate displayName on the lead-session permission prompt', () => {
+    useChatStore.setState({
+      sessions: { [TEST_SESSION_ID]: makeSession() },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'permission_request',
+      requestId: 'perm-teammate-1',
+      toolName: 'Bash',
+      toolUseId: 'tool-teammate-1',
+      input: { command: 'ls' },
+      description: 'list files',
+      displayName: 'researcher',
+    })
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.pendingPermission).toEqual(expect.objectContaining({
+      requestId: 'perm-teammate-1',
+      displayName: 'researcher',
+    }))
+    expect(session?.messages).toContainEqual(expect.objectContaining({
+      type: 'permission_request',
+      requestId: 'perm-teammate-1',
+      displayName: 'researcher',
+    }))
   })
 
   it('removes replayed or cancelled requests when the server resolves them', () => {
@@ -9838,7 +10013,7 @@ describe('chatStore history mapping', () => {
 
   it('restores only the latest terminal attempt for one workflow run', async () => {
     const runId = 'wf_restored-resume'
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [],
       taskNotifications: [
         {
@@ -9894,7 +10069,7 @@ describe('chatStore history mapping', () => {
 
   it('does not restore an old workflow output over a newer live attempt', async () => {
     const runId = 'wf_restore-race'
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [],
       taskNotifications: [{
         taskId: 'workflow-task-old',
@@ -10944,7 +11119,7 @@ describe('chatStore history mapping', () => {
   })
 
   it('replays a cold reconnect stop failure after task history hydrates', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [],
       taskNotifications: [],
     })
@@ -11000,7 +11175,7 @@ describe('chatStore history mapping', () => {
 
   it('surfaces a cold reconnect stop failure when task history fails to load', async () => {
     let rejectHistory!: (error: Error) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((_resolve, reject) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((_resolve, reject) => {
       rejectHistory = reject
     }))
     useChatStore.setState({
@@ -11036,7 +11211,7 @@ describe('chatStore history mapping', () => {
 
   it('surfaces a failed cold request without discarding a concurrent live turn', async () => {
     let rejectHistory!: (error: Error) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((_resolve, reject) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((_resolve, reject) => {
       rejectHistory = reject
     }))
     useChatStore.setState({
@@ -11064,10 +11239,32 @@ describe('chatStore history mapping', () => {
     }))
   })
 
+  it('explains an oversized history response instead of a bare parse error', async () => {
+    vi.mocked(sessionsApi.getFullHistory).mockRejectedValueOnce(
+      new ApiResponseParseError({
+        bytes: 541_817_705,
+        readChars: 0,
+        contentType: 'application/json',
+      }),
+    )
+    useChatStore.setState({
+      sessions: { [TEST_SESSION_ID]: makeSession({ chatState: 'idle' }) },
+    })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.historyStatus).toBe('error')
+    // Chromium turns a body past its string limit into an empty string, so the
+    // raw failure reads "Unexpected end of JSON input" — which tells nobody
+    // anything. Say what happened instead.
+    expect(session?.historyError).toBe(t('session.historyTooLarge'))
+  })
+
   it('flushes a cached stop failure when a task start makes history stale', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
     let resolveReload!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveHistory = resolve
       }))
@@ -11108,7 +11305,7 @@ describe('chatStore history mapping', () => {
     await historyLoad
 
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveReload({
       messages: [{
@@ -11220,7 +11417,7 @@ describe('chatStore history mapping', () => {
         timestamp: string
       }>
     }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -11284,7 +11481,7 @@ describe('chatStore history mapping', () => {
 
   it('settles history state when clearMessages invalidates an in-flight load', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -11686,8 +11883,8 @@ describe('chatStore history mapping', () => {
   })
 
   it('reloads authoritative history when a reconnect finds the turn already idle', async () => {
-    vi.mocked(sessionsApi.getMessages).mockClear()
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockClear()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [
         {
           id: 'completed-assistant',
@@ -11721,7 +11918,7 @@ describe('chatStore history mapping', () => {
       )
     })
     const session = useChatStore.getState().sessions[TEST_SESSION_ID]
-    expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(session?.streamingText).toBe('')
     expect(session?.messages).toContainEqual(expect.objectContaining({
       type: 'assistant_text',
@@ -11730,8 +11927,8 @@ describe('chatStore history mapping', () => {
   })
 
   it('reconciles a persisted stopped SubAgent after its terminal event was missed offline', async () => {
-    vi.mocked(sessionsApi.getMessages).mockClear()
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockClear()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [],
       taskNotifications: [
         {
@@ -11775,13 +11972,13 @@ describe('chatStore history mapping', () => {
           ?.backgroundAgentTasks?.['agent-task-1']?.status,
       ).toBe('stopped')
     })
-    expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'idle')
   })
 
   it('keeps a genuinely running SubAgent when idle reconnect history has no terminal event', async () => {
-    vi.mocked(sessionsApi.getMessages).mockClear()
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockClear()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [],
       taskNotifications: [],
     })
@@ -11811,7 +12008,7 @@ describe('chatStore history mapping', () => {
     })
 
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
       expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'running')
     })
     expect(
@@ -11821,8 +12018,8 @@ describe('chatStore history mapping', () => {
   })
 
   it('settles a stale H5 SubAgent when reconnect says no background task is still active', async () => {
-    vi.mocked(sessionsApi.getMessages).mockClear()
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockClear()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [],
       taskNotifications: [],
     })
@@ -11852,7 +12049,7 @@ describe('chatStore history mapping', () => {
     })
 
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
       expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'idle')
     })
     expect(
@@ -11862,8 +12059,8 @@ describe('chatStore history mapping', () => {
   })
 
   it('settles a stale background Bash task when reconnect reports no active process', async () => {
-    vi.mocked(sessionsApi.getMessages).mockClear()
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockClear()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [],
       taskNotifications: [],
     })
@@ -11893,7 +12090,7 @@ describe('chatStore history mapping', () => {
     })
 
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
       expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'idle')
     })
     expect(
@@ -11903,8 +12100,8 @@ describe('chatStore history mapping', () => {
   })
 
   it('does not let an older persisted terminal overwrite a new lifecycle with the same Agent id', async () => {
-    vi.mocked(sessionsApi.getMessages).mockClear()
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockClear()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [],
       taskNotifications: [
         {
@@ -11942,7 +12139,7 @@ describe('chatStore history mapping', () => {
     })
 
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
       expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'running')
     })
     expect(
@@ -11953,8 +12150,8 @@ describe('chatStore history mapping', () => {
 
   it('lets fresh reconnect reconciliation follow an older in-flight history load', async () => {
     let resolveOlderHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
-    vi.mocked(sessionsApi.getMessages).mockClear()
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory).mockClear()
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveOlderHistory = resolve
       }))
@@ -11990,7 +12187,7 @@ describe('chatStore history mapping', () => {
 
     const olderLoad = useChatStore.getState().loadHistory(TEST_SESSION_ID)
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'session_state',
@@ -12000,7 +12197,7 @@ describe('chatStore history mapping', () => {
     await olderLoad
 
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
       expect(
         useChatStore.getState().sessions[TEST_SESSION_ID]
           ?.backgroundAgentTasks?.['agent-task-history-order']?.status,
@@ -12011,7 +12208,7 @@ describe('chatStore history mapping', () => {
   it('does not let an older concurrent reload overwrite the latest history snapshot', async () => {
     let resolveOlderReload!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
     let resolveLatestReload!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => {
         resolveOlderReload = resolve
       }))
@@ -12045,7 +12242,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
 
     resolveLatestReload({
@@ -12099,7 +12296,7 @@ describe('chatStore history mapping', () => {
         timestamp: string
       }>
     }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -12128,7 +12325,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
     useChatStore.getState().sendMessage(TEST_SESSION_ID, 'new turn')
 
@@ -12159,7 +12356,7 @@ describe('chatStore history mapping', () => {
 
   it('does not let delayed idle reconciliation overwrite an externally completed turn', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -12177,7 +12374,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     })
 
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
@@ -12229,7 +12426,7 @@ describe('chatStore history mapping', () => {
 
   it('protects a live completion from reconciliation started after its user replay', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -12259,7 +12456,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     })
 
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
@@ -12302,7 +12499,7 @@ describe('chatStore history mapping', () => {
 
   it('does not let delayed idle reconciliation overwrite a live API error', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -12319,7 +12516,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'error',
@@ -12353,7 +12550,7 @@ describe('chatStore history mapping', () => {
 
   it('does not let delayed idle reconciliation overwrite a known stop failure', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -12381,7 +12578,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'background_task_stop_failed',
@@ -12415,7 +12612,7 @@ describe('chatStore history mapping', () => {
 
   it('does not let delayed idle reconciliation discard a newly started Agent', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -12432,7 +12629,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'system_notification',
@@ -12462,7 +12659,7 @@ describe('chatStore history mapping', () => {
 
   it('does not let delayed idle reconciliation discard a terminal Agent notification', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[]; taskNotifications: [] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -12490,7 +12687,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     })
     useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
       type: 'system_notification',
@@ -12525,7 +12722,7 @@ describe('chatStore history mapping', () => {
 
   it('does not let delayed reconnect history overwrite a newly sent turn', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -12543,7 +12740,7 @@ describe('chatStore history mapping', () => {
       turnState: 'idle',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
     useChatStore.getState().sendMessage(TEST_SESSION_ID, 'new turn')
 
@@ -12571,8 +12768,8 @@ describe('chatStore history mapping', () => {
   })
 
   it('keeps the turn running but discards stale partials when reconnect reconciliation says running', async () => {
-    vi.mocked(sessionsApi.getMessages).mockClear()
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({ messages: [] })
+    vi.mocked(sessionsApi.getFullHistory).mockClear()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({ messages: [] })
     useChatStore.setState({
       sessions: {
         [TEST_SESSION_ID]: makeSession({
@@ -12589,7 +12786,7 @@ describe('chatStore history mapping', () => {
       turnState: 'running',
     })
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledWith(TEST_SESSION_ID)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledWith(TEST_SESSION_ID, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
 
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]).toMatchObject({
@@ -12601,8 +12798,8 @@ describe('chatStore history mapping', () => {
   })
 
   it('replaces orphan thinking with authoritative history when a reconnected turn completes', async () => {
-    vi.mocked(sessionsApi.getMessages).mockClear()
-    vi.mocked(sessionsApi.getMessages).mockResolvedValue({
+    vi.mocked(sessionsApi.getFullHistory).mockClear()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValue({
       messages: [
         {
           id: 'persisted-user',
@@ -12658,7 +12855,7 @@ describe('chatStore history mapping', () => {
         expect.objectContaining({ type: 'thinking' }),
       )
     })
-    expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
   })
 
   it('keeps the tab running for background agents when reconnect reconciliation finds the foreground idle', () => {
@@ -14603,7 +14800,9 @@ describe('chatStore history mapping', () => {
     const subagentSessionId = '__subagent__parent-session__tool-agent-1'
     tabStoreSnapshot.tabs = [{
       sessionId: subagentSessionId,
+      title: 'Subagent',
       type: 'subagent',
+      status: 'idle',
       sourceSessionId: 'parent-session',
       subagentToolUseId: 'tool-agent-1',
       subagentTaskId: 'agent-1',
@@ -14866,8 +15065,8 @@ describe('chatStore wake replay of a finished thinking turn', () => {
     getMemberBySessionIdMock.mockReset()
     getMemberBySessionIdMock.mockReturnValue(null)
     connectionStateHandlers.clear()
-    vi.mocked(sessionsApi.getMessages).mockReset()
-    vi.mocked(sessionsApi.getMessages).mockResolvedValue({ messages: buildFinishedTurnHistory() })
+    vi.mocked(sessionsApi.getFullHistory).mockReset()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValue({ messages: buildFinishedTurnHistory() })
     localStorage.clear()
     useSettingsStore.setState({ locale: 'en' })
     useChatStore.setState({
@@ -14985,8 +15184,10 @@ describe('chatStore activity state survival across reload paths', () => {
     markCompletedAndDismissedMock.mockReset()
     updateTabStatusMock.mockReset()
     connectionStateHandlers.clear()
-    vi.mocked(sessionsApi.getMessages).mockReset()
-    vi.mocked(sessionsApi.getMessages).mockResolvedValue({ messages: [] })
+    vi.mocked(sessionsApi.getHistoryPage).mockReset()
+    vi.mocked(sessionsApi.getHistoryPage).mockResolvedValue({ messages: [] })
+    vi.mocked(sessionsApi.getFullHistory).mockReset()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValue({ messages: [] })
     vi.mocked(sessionsApi.getSlashCommands).mockReset()
     vi.mocked(sessionsApi.getSlashCommands).mockResolvedValue({ commands: [] })
     sessionStoreSnapshot.sessions = []
@@ -15020,7 +15221,7 @@ describe('chatStore activity state survival across reload paths', () => {
   })
 
   it('reloadHistory still lets transcript terminal state reconcile a stopped task', async () => {
-    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
       messages: [],
       taskNotifications: [
         {
@@ -15078,9 +15279,272 @@ describe('chatStore activity state survival across reload paths', () => {
     expect(session?.agentTaskNotifications).toEqual(notifications)
   })
 
+  it('shows a bounded page immediately and restores state independently without treating the tail as authoritative', async () => {
+    const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 1024, omittedOversizedEntries: 0 }
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({ messages: [{ id: 'tail', type: 'assistant', content: 'recent', timestamp: '2026-01-01T00:00:00Z' }], page })
+    let resolveRecovery!: (value: Awaited<ReturnType<typeof sessionsApi.getHistoryRecovery>>) => void
+    vi.mocked(sessionsApi.getHistoryRecovery).mockReturnValueOnce(new Promise((resolve) => { resolveRecovery = resolve }))
+    const usage = { input_tokens: 321, output_tokens: 123 }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ tokenUsage: usage }) } })
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toEqual(expect.arrayContaining([expect.objectContaining({ content: 'recent' })]))
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.tokenUsage).toBe(usage)
+    expect(setTasksFromTodosMock).not.toHaveBeenCalled()
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyRecoveryStatus).toBe('loading')
+    resolveRecovery({ status: 'ready', sourceVersion: 'v1', omittedRecords: 0, messages: [], tokenUsage: { input_tokens: 999, output_tokens: 888 } })
+    await vi.waitFor(() => expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyRecoveryStatus).toBe('ready'))
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.tokenUsage).toEqual({ input_tokens: 999, output_tokens: 888 })
+  })
+
+  it('cancels stale background recovery before an authoritative history reload', async () => {
+    const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 10, omittedOversizedEntries: 0 }
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({ messages: [], page })
+    let resolveRecovery!: (value: Awaited<ReturnType<typeof sessionsApi.getHistoryRecovery>>) => void
+    let signal: AbortSignal | undefined
+    vi.mocked(sessionsApi.getHistoryRecovery).mockImplementationOnce((_id, options) => {
+      signal = options?.signal
+      return new Promise((resolve) => { resolveRecovery = resolve })
+    })
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession() } })
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    await useChatStore.getState().reloadHistory(TEST_SESSION_ID)
+    expect(signal?.aborted).toBe(true)
+    resolveRecovery({ status: 'ready', sourceVersion: 'v1', messages: [], tokenUsage: { input_tokens: 999, output_tokens: 999 }, omittedRecords: 0 })
+    await Promise.resolve()
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.tokenUsage).toEqual({ input_tokens: 0, output_tokens: 0 })
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyRecoveryStatus).toBe('ready')
+  })
+
+  it('restores complete recovery fields from a newer append without clearing incomplete fields', async () => {
+    const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: '1:2:10:1', scannedBytes: 10, omittedOversizedEntries: 0 }
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({ messages: [], page })
+    vi.mocked(sessionsApi.getHistoryRecovery).mockResolvedValueOnce({
+      status: 'incomplete', sourceVersion: '1:2:20:2', omittedRecords: 1, messages: [],
+      completeness: { usage: true, goal: false, todos: false, activity: false },
+      tokenUsage: { input_tokens: 999, output_tokens: 888 },
+    })
+    const goal = { action: 'created' as const, objective: 'Preserve live goal', updatedAt: 1 }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ activeGoal: goal }) } })
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    await vi.waitFor(() => expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyRecoveryStatus).toBe('incomplete'))
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.tokenUsage).toEqual({ input_tokens: 999, output_tokens: 888 })
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.activeGoal).toBe(goal)
+    expect(setTasksFromTodosMock).not.toHaveBeenCalled()
+  })
+
+  it('prepends an older page into the single mounted timeline without touching live rows', async () => {
+    const live = [{ id: 'live', type: 'assistant_text' as const, content: 'Live', timestamp: 1 }]
+    const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 1024, omittedOversizedEntries: 0 }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: live, chatState: 'thinking', historyPage: page }) } })
+    vi.mocked(sessionsApi.getHistoryPage).mockResolvedValueOnce({
+      messages: [{ id: 'old', type: 'user', content: 'old page', timestamp: '2020-01-01T00:00:00Z' }],
+      page: { nextCursor: null, previousCursor: null, hasMore: false, historyComplete: true, sourceVersion: 'v1', scannedBytes: 2048, omittedOversizedEntries: 0 },
+    })
+    await useChatStore.getState().loadOlderHistory(TEST_SESSION_ID)
+    const current = useChatStore.getState().sessions[TEST_SESSION_ID]
+    // The older row is mounted ahead of the live rows in one array; no separate
+    // browse window, no tail eviction, no seam between pages.
+    expect(current?.messages.map(message => message.id)).toEqual(['old', 'live'])
+    expect(current?.chatState).toBe('thinking')
+    expect(current?.historyPage?.nextCursor).toBeNull()
+    expect(current?.historyWindowed).toBe(false)
+  })
+
+  it('keeps historyWindowed until every older page is loaded', async () => {
+    const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 1024, omittedOversizedEntries: 0 }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: [], historyPage: page }) } })
+    vi.mocked(sessionsApi.getHistoryPage).mockResolvedValueOnce({
+      messages: [{ id: 'old', type: 'user', content: 'old page', timestamp: '2020-01-01T00:00:00Z' }],
+      page: { nextCursor: 'older-2', previousCursor: null, hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 2048, omittedOversizedEntries: 0 },
+    })
+    await useChatStore.getState().loadOlderHistory(TEST_SESSION_ID)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyWindowed).toBe(true)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyPage?.nextCursor).toBe('older-2')
+  })
+
+  it('does not request an older page twice while one is in flight', async () => {
+    const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 1024, omittedOversizedEntries: 0 }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ historyPage: page }) } })
+    let resolvePage: ((value: SessionHistoryPage) => void) | undefined
+    vi.mocked(sessionsApi.getHistoryPage).mockReturnValueOnce(new Promise<SessionHistoryPage>((resolve) => { resolvePage = resolve }))
+    const first = useChatStore.getState().loadOlderHistory(TEST_SESSION_ID)
+    const second = useChatStore.getState().loadOlderHistory(TEST_SESSION_ID)
+    resolvePage?.({ messages: [], page: { nextCursor: null, previousCursor: null, hasMore: false, historyComplete: true, sourceVersion: 'v1', scannedBytes: 2048, omittedOversizedEntries: 0 } })
+    await Promise.all([first, second])
+    expect(vi.mocked(sessionsApi.getHistoryPage)).toHaveBeenCalledTimes(1)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyPageLoading).toBe(false)
+  })
+
+
+
+  it('keeps complete user payloads through send and repeated replay', () => {
+    const content = 'start ' + 'x'.repeat(40_000) + ' final requirement'
+    const data = 'data:image/png;base64,' + 'A'.repeat(60_000)
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession() } })
+    useChatStore.getState().sendMessage(TEST_SESSION_ID, content, [
+      { type: 'image', name: 'image.png', data, mimeType: 'image/png' },
+      { type: 'file', name: 'notes.md', path: '/tmp/notes.md' },
+    ])
+    for (let index = 0; index < 3; index++) {
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'user_message_replay', content: `@"/tmp/notes.md" ${content}`,
+      })
+    }
+    const users = useChatStore.getState().sessions[TEST_SESSION_ID]!.messages.filter(message => message.type === 'user_text')
+    expect(users).toHaveLength(1)
+    expect(users[0]).toMatchObject({
+      content,
+      attachments: [
+        { type: 'image', name: 'image.png', data, mimeType: 'image/png' },
+        { type: 'file', name: 'notes.md', path: '/tmp/notes.md' },
+      ],
+    })
+  })
+
+  it('preserves both sides of a completed large Edit tool', () => {
+    const input = { file_path: '/tmp/file.ts', old_string: 'old line\n'.repeat(5000), new_string: 'fixed' }
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession() } })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, { type: 'tool_use_complete', toolName: 'Edit', toolUseId: 'large-edit', input })
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'tool_use', toolUseId: 'large-edit', input }),
+    ]))
+  })
+
+  it('keeps the complete long streaming reply through completion and canonical history reconciliation', async () => {
+    vi.useFakeTimers()
+    try {
+      const content = 'HEAD_SENTINEL' + 'm'.repeat(70_000) + 'TAIL_SENTINEL'
+      const canonical: MessageEntry[] = [
+        { id: 'user-long', type: 'user', content: 'write', timestamp: new Date(1).toISOString() },
+        { id: 'assistant-long', type: 'assistant', content, timestamp: new Date(2).toISOString() },
+      ]
+      vi.mocked(sessionsApi.getFullHistory).mockResolvedValue({ messages: canonical, page: {
+        nextCursor: null, hasMore: false, historyComplete: true, sourceVersion: 'long-fixture', scannedBytes: 71_000, omittedOversizedEntries: 0,
+      } })
+      useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({
+        historyHydrated: true, historyStatus: 'ready',
+        messages: [{ id: 'user-long', type: 'user_text', content: 'write', transcriptMessageId: 'user-long', timestamp: 1 }],
+      }) } })
+      const store = useChatStore.getState()
+      store.handleServerMessage(TEST_SESSION_ID, { type: 'content_start', blockType: 'text' })
+      store.handleServerMessage(TEST_SESSION_ID, { type: 'content_delta', text: content })
+      await vi.advanceTimersByTimeAsync(51)
+      expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.streamingText).toBe(content)
+      store.handleServerMessage(TEST_SESSION_ID, { type: 'message_complete', usage: { input_tokens: 1, output_tokens: 1 } })
+      await vi.advanceTimersByTimeAsync(801)
+      const replies = useChatStore.getState().sessions[TEST_SESSION_ID]!.messages.filter(message => message.type === 'assistant_text')
+      expect(replies).toHaveLength(1)
+      expect(replies[0]).toMatchObject({ content, transcriptMessageId: 'assistant-long' })
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
+
+  it('trims activity text without changing task control state, permission input, or mounted history', () => {
+    const raw = 'x'.repeat(2_000_000)
+    const task = { taskId: 'task', toolUseId: 'tool', status: 'running' as const, startedAt: 1, updatedAt: 2, prompt: raw, result: raw, summary: raw }
+    const permission = { requestId: 'permission', toolName: 'Bash', input: { command: raw } }
+    const messageRows = Array.from({ length: 600 }, (_, row) => ({ id: String(row), type: 'assistant_text' as const, content: 'x'.repeat(30_000), timestamp: row }))
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions: { [TEST_SESSION_ID]: makeSession({
+      messages: messageRows,
+      backgroundAgentTasks: { task },
+      agentTaskNotifications: { tool: { taskId: 'task', toolUseId: 'tool', status: 'completed', result: raw, summary: raw } },
+      pendingPermission: permission,
+    }) } }))
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]!
+    // Transcript rows are never evicted from the middle of a mounted timeline;
+    // the per-session budget only trims the activity projections.
+    expect(session.messages).toBe(messageRows)
+    expect(session.messages.length).toBe(600)
+    expect(session.backgroundAgentTasks?.task).toMatchObject({ taskId: 'task', toolUseId: 'tool', status: 'running', startedAt: 1, updatedAt: 2 })
+    expect(session.pendingPermission).toBe(permission)
+    // Activity previews are trimmed; the original large fields are not
+    // preserved in the bounded projection.
+    expect(session.backgroundAgentTasks?.task?.prompt?.length ?? 0).toBeLessThan(raw.length)
+    expect(session.agentTaskNotifications?.tool?.result?.length ?? 0).toBeLessThan(raw.length)
+    expect(task.result).toHaveLength(2_000_000)
+    expect(permission.input.command).toHaveLength(2_000_000)
+  })
+
+  it('shares a terminal activity count budget across twenty sessions without dropping active lifecycles', () => {
+    const sessions = Object.fromEntries(Array.from({ length: 20 }, (_, sessionIndex) => {
+      const tasks = Object.fromEntries(Array.from({ length: 700 }, (_, index) => [String(index), { taskId: String(index), toolUseId: String(index), status: 'completed' as const, startedAt: index, updatedAt: index }]))
+      const notifications = Object.fromEntries(Array.from({ length: 700 }, (_, index) => [String(index), { taskId: String(index), toolUseId: String(index), status: 'completed' as const, timestamp: new Date(index).toISOString() }]))
+      return [String(sessionIndex), makeSession({ backgroundAgentTasks: { ...tasks, active: { taskId: 'active', status: 'running', startedAt: 0, updatedAt: 0 } }, agentTaskNotifications: notifications })]
+    }))
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions }))
+    let terminalCount = 0
+    for (const session of Object.values(useChatStore.getState().sessions)) {
+      expect(session.backgroundAgentTasks?.active?.status).toBe('running')
+      expect(session.backgroundAgentTasks?.['699']?.status).toBe('completed')
+      expect(session.agentTaskNotifications['699']?.status).toBe('completed')
+      terminalCount += Object.values(session.backgroundAgentTasks ?? {}).filter((task) => task.status !== 'running').length
+      terminalCount += Object.keys(session.agentTaskNotifications).length
+    }
+    expect(terminalCount).toBe(4000)
+    const before = useChatStore.getState().sessions['0']!
+    useChatStore.getState().handleServerMessage('0', { type: 'content_delta', text: 'live text' })
+    expect(useChatStore.getState().sessions['0']?.backgroundAgentTasks).toBe(before.backgroundAgentTasks)
+    expect(useChatStore.getState().sessions['0']?.agentTaskNotifications).toBe(before.agentTaskNotifications)
+  })
+
+  it('keeps every running session mounted timeline intact', () => {
+    // Running sessions never have rows evicted from under their timeline; the
+    // display budget only trims dormant idle tabs, never anything live.
+    const sessions = Object.fromEntries(Array.from({ length: 20 }, (_, sessionIndex) => [
+      `budget-${sessionIndex}`,
+      makeSession({ chatState: 'thinking', messages: Array.from({ length: 60 }, (_, index) => ({ id: `${sessionIndex}-${index}`, type: 'assistant_text', content: 'x'.repeat(30_000), timestamp: index })) }),
+    ]))
+    useChatStore.setState({ sessions })
+    useChatStore.getState().handleServerMessage('budget-0', { type: 'status', state: 'thinking', verb: 'Working' })
+    const retained = Object.values(useChatStore.getState().sessions)
+    expect(retained.every((session) => session.chatState === 'thinking')).toBe(true)
+    expect(retained.every((session) => session.messages.length === 60)).toBe(true)
+  })
+
+  it('keeps the live timeline whole while a turn is in flight', () => {
+    const rows = Array.from({ length: 2000 }, (_, index) => ({ id: String(index), type: 'assistant_text' as const, content: 'old', timestamp: index }))
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: rows, chatState: 'thinking' }) } })
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, { type: 'status', state: 'thinking', verb: 'Working' })
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]
+    expect(session?.messages).toBe(rows)
+    expect(session?.historyWindowed).toBeUndefined()
+    expect(session?.chatState).toBe('thinking')
+  })
+
+  it('aborts a pending history download on disconnect', async () => {
+    let requestSignal: AbortSignal | undefined
+    vi.mocked(sessionsApi.getFullHistory).mockImplementationOnce((_id, options) => new Promise((_resolve, reject) => {
+      requestSignal = options?.signal
+      requestSignal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    }))
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession() } })
+    const pending = useChatStore.getState().loadHistory(TEST_SESSION_ID)
+    expect(requestSignal?.aborted).toBe(false)
+    useChatStore.getState().disconnectSession(TEST_SESSION_ID)
+    expect(requestSignal?.aborted).toBe(true)
+    await pending
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]).toBeUndefined()
+  })
+
+  it('aborts a superseded authoritative history reload', async () => {
+    let firstSignal: AbortSignal | undefined
+    vi.mocked(sessionsApi.getFullHistory).mockImplementationOnce((_id, options) => new Promise((_resolve, reject) => {
+      firstSignal = options?.signal
+      firstSignal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    }))
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession() } })
+    const first = useChatStore.getState().reloadHistory(TEST_SESSION_ID)
+    const second = useChatStore.getState().reloadHistory(TEST_SESSION_ID)
+    expect(firstSignal?.aborted).toBe(true)
+    await Promise.all([first, second])
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.historyStatus).toBe('ready')
+  })
+
   it('applies a cold history response against the latest optimistic user turn', async () => {
     let resolveHistory!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages).mockReturnValueOnce(new Promise((resolve) => {
+    vi.mocked(sessionsApi.getFullHistory).mockReturnValueOnce(new Promise((resolve) => {
       resolveHistory = resolve
     }))
     useChatStore.setState({
@@ -15102,7 +15566,7 @@ describe('chatStore activity state survival across reload paths', () => {
     await loadPromise
 
     const session = useChatStore.getState().sessions[TEST_SESSION_ID]
-    expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(1)
     expect(session?.historyStatus).toBe('ready')
     expect(session?.messages).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -15119,7 +15583,7 @@ describe('chatStore activity state survival across reload paths', () => {
   it('keeps a pending cold load when a reload started behind it fails', async () => {
     let resolveInitial!: (value: { messages: MessageEntry[] }) => void
     let rejectReload!: (error: Error) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => { resolveInitial = resolve }))
       .mockReturnValueOnce(new Promise((_resolve, reject) => { rejectReload = reject }))
     useChatStore.setState({
@@ -15140,7 +15604,7 @@ describe('chatStore activity state survival across reload paths', () => {
     })
     await initialLoad
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     rejectReload(new Error('authoritative reload failed'))
     await reload
@@ -15156,7 +15620,7 @@ describe('chatStore activity state survival across reload paths', () => {
   it('captures reload token and goal baselines after a pending cold load', async () => {
     let resolveInitial!: (value: { messages: MessageEntry[] }) => void
     let resolveReload!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => { resolveInitial = resolve }))
       .mockReturnValueOnce(new Promise((resolve) => { resolveReload = resolve }))
     useChatStore.setState({
@@ -15190,7 +15654,7 @@ describe('chatStore activity state survival across reload paths', () => {
     })
     await initialLoad
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveReload({
       messages: [{
@@ -15217,7 +15681,7 @@ describe('chatStore activity state survival across reload paths', () => {
     let resolveReload!: (value: { messages: MessageEntry[] }) => void
     const initialTodos = [{ content: 'Todo from pending cold load', status: 'pending' }]
     const reloadedTodos = [{ content: 'Todo from queued reload', status: 'in_progress' }]
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => { resolveInitial = resolve }))
       .mockReturnValueOnce(new Promise((resolve) => { resolveReload = resolve }))
     cliTaskStoreSnapshot.sessionId = TEST_SESSION_ID
@@ -15255,7 +15719,7 @@ describe('chatStore activity state survival across reload paths', () => {
     })
     await initialLoad
     await vi.waitFor(() => {
-      expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+      expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
     })
     resolveReload({
       messages: [{
@@ -15293,7 +15757,7 @@ describe('chatStore activity state survival across reload paths', () => {
   it('keeps a successful reload when an older cold snapshot returns later', async () => {
     let resolveReload!: (value: { messages: MessageEntry[] }) => void
     let resolveColdLoad!: (value: { messages: MessageEntry[] }) => void
-    vi.mocked(sessionsApi.getMessages)
+    vi.mocked(sessionsApi.getFullHistory)
       .mockReturnValueOnce(new Promise((resolve) => { resolveReload = resolve }))
       .mockReturnValueOnce(new Promise((resolve) => { resolveColdLoad = resolve }))
     useChatStore.setState({
@@ -15304,7 +15768,7 @@ describe('chatStore activity state survival across reload paths', () => {
 
     const reload = useChatStore.getState().reloadHistory(TEST_SESSION_ID)
     const coldLoad = useChatStore.getState().loadHistory(TEST_SESSION_ID)
-    expect(sessionsApi.getMessages).toHaveBeenCalledTimes(2)
+    expect(sessionsApi.getFullHistory).toHaveBeenCalledTimes(2)
 
     resolveReload({
       messages: [{
@@ -15338,4 +15802,218 @@ describe('chatStore activity state survival across reload paths', () => {
     }))
   })
 
+})
+
+describe('chatStore AskUserQuestion drafts', () => {
+  beforeEach(() => {
+    sendMock.mockReset()
+    connectionStateHandlers.clear()
+    vi.mocked(sessionsApi.getFullHistory).mockReset()
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValue({ messages: [] })
+    vi.mocked(sessionsApi.getSlashCommands).mockReset()
+    vi.mocked(sessionsApi.getSlashCommands).mockResolvedValue({ commands: [] })
+    useChatStore.setState({ ...initialState, sessions: {}, askUserQuestionDrafts: {} })
+  })
+
+  it('keeps a filled draft and drops the entry once it is empty again', () => {
+    const store = useChatStore.getState()
+    store.setAskUserQuestionDraft('session-drafts', 'tool-1', {
+      activeTab: 1,
+      selections: { 0: ['Yes'] },
+      freeTexts: { 1: 'custom' },
+    })
+    expect(useChatStore.getState().askUserQuestionDrafts['session-drafts']?.['tool-1'])
+      .toMatchObject({ activeTab: 1, freeTexts: { 1: 'custom' } })
+
+    store.clearAskUserQuestionDraft('session-drafts', 'tool-1')
+    expect(useChatStore.getState().askUserQuestionDrafts['session-drafts']?.['tool-1'])
+      .toBeUndefined()
+
+    // The card writes on every mount, including an empty one: that must not
+    // leave an entry behind for every question the user never answered.
+    store.setAskUserQuestionDraft('session-drafts', 'tool-2', {
+      activeTab: 0,
+      selections: {},
+      freeTexts: {},
+    })
+    expect(useChatStore.getState().askUserQuestionDrafts['session-drafts']?.['tool-2'])
+      .toBeUndefined()
+  })
+
+  it('drops a session\'s drafts when the session goes away', () => {
+    const store = useChatStore.getState()
+    store.setAskUserQuestionDraft(TEST_SESSION_ID, 'tool-1', {
+      activeTab: 0,
+      selections: { 0: ['Yes'] },
+      freeTexts: {},
+    })
+
+    store.disconnectSession(TEST_SESSION_ID)
+
+    expect(useChatStore.getState().askUserQuestionDrafts[TEST_SESSION_ID]).toBeUndefined()
+  })
+})
+
+it('restores reference sources from both structured history and older server-enveloped messages', () => {
+  const envelope = 'Use @Review\n\n<session_references>\nRead referenced history first.\n[{"sessionId":"prior"}]\n</session_references>'
+  const mapped = mapHistoryMessagesToUiMessages([
+    { id: 'old', type: 'user', content: envelope, timestamp: '2026-09-20T00:00:00Z' },
+    { id: 'new', type: 'user', content: 'Use @Review', sessionReferences: [{ sessionId: 'prior' }], timestamp: '2026-09-20T00:00:01Z' },
+  ])
+  expect(mapped).toEqual([
+    expect.objectContaining({ type: 'user_text', content: 'Use @Review', sessionReferences: [{ sessionId: 'prior' }] }),
+    expect.objectContaining({ type: 'user_text', content: 'Use @Review', sessionReferences: [{ sessionId: 'prior' }] }),
+  ])
+})
+
+describe('chatStore inactive complete-page retention', () => {
+  let activeSessionId = 'image-cache-0'
+  let restoreTabState = () => {}
+  let imageData: string
+  const page = { nextCursor: null, hasMore: false, historyComplete: true, sourceVersion: 'cache-fixture', scannedBytes: 1_000_000, omittedOversizedEntries: 0 }
+  const imageSessions = () => Object.fromEntries(Array.from({ length: 20 }, (_, index) => {
+    const id = `image-cache-${index}`
+    const messages: UIMessage[] = [{ id: `${id}-user`, type: 'user_text', content: 'Inspect', timestamp: 1,
+      attachments: Array.from({ length: 3 }, (_, imageIndex) => ({ type: 'image' as const, name: `${imageIndex}.png`, data: imageData, mimeType: 'image/png' })),
+    }]
+    return [id, makeSession({ chatState: 'idle', historyStatus: 'ready', historyHydrated: true, messages, historyPage: page })]
+  }))
+
+  beforeEach(async () => {
+    const { readFileSync } = await import('node:fs')
+    imageData = `data:image/png;base64,${readFileSync('src/assets/pets/action-sheet-guide.zh.png').toString('base64')}`
+    const { useTabStore } = await import('./tabStore')
+    tabStoreSnapshot.tabs = []
+    tabStoreSnapshot.activeTabId = null
+    const tabState = useTabStore.getState()
+    activeSessionId = 'image-cache-0'
+    const spy = vi.spyOn(useTabStore, 'getState').mockImplementation(() => ({ ...tabState, tabs: tabStoreSnapshot.tabs, activeTabId: activeSessionId }))
+    restoreTabState = () => spy.mockRestore()
+    getMemberBySessionIdMock.mockReturnValue(null)
+    vi.mocked(sessionsApi.getFullHistory).mockReset()
+    vi.mocked(sessionsApi.getSlashCommands).mockResolvedValue({ commands: [] })
+    useChatStore.setState({ ...initialState, sessions: {} })
+  })
+
+  afterEach(() => {
+    restoreTabState()
+    tabStoreSnapshot.tabs = []
+    tabStoreSnapshot.activeTabId = null
+    useChatStore.setState({ ...initialState, sessions: {} })
+  })
+
+  it('keeps the last open chat history when a settings or other page takes focus', () => {
+    const sessions = imageSessions()
+    const recentId = 'image-cache-4'
+    for (const [id, session] of Object.entries(sessions)) {
+      useChatStore.getState().markHistoryRowsDurable(id, session.messages)
+    }
+    const sessionTab: Tab = { sessionId: recentId, type: 'session', title: 'Recent', status: 'idle' }
+    const settingsTab: Tab = { sessionId: '__settings__', type: 'settings', title: 'Settings', status: 'idle' }
+    const marketTab: Tab = { sessionId: '__market__', type: 'market', title: 'Market', status: 'idle' }
+    const previous = { tabs: [sessionTab], activeTabId: recentId }
+    const settings = { tabs: [sessionTab, settingsTab], activeTabId: settingsTab.sessionId }
+    tabStoreSnapshot.tabs = settings.tabs
+    activeSessionId = settings.activeTabId
+    for (const listener of tabStoreListeners) listener(settings, previous)
+
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions }))
+    expect(useChatStore.getState().sessions[recentId]!.messages).toHaveLength(1)
+    expect(useChatStore.getState().sessions['image-cache-0']!.messages).toHaveLength(0)
+
+    const market = { tabs: [...settings.tabs, marketTab], activeTabId: marketTab.sessionId }
+    tabStoreSnapshot.tabs = market.tabs
+    activeSessionId = market.activeTabId
+    for (const listener of tabStoreListeners) listener(market, settings)
+    useChatStore.getState().applyBoundedUpdate(state => ({ sessions: { ...state.sessions } }))
+    expect(useChatStore.getState().sessions[recentId]!.messages).toHaveLength(1)
+
+    const closed = { tabs: [settingsTab, marketTab], activeTabId: marketTab.sessionId }
+    tabStoreSnapshot.tabs = closed.tabs
+    for (const listener of tabStoreListeners) listener(closed, market)
+    for (const [id, session] of Object.entries(sessions)) {
+      useChatStore.getState().markHistoryRowsDurable(id, session.messages)
+    }
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions }))
+    expect(useChatStore.getState().sessions[recentId]!.messages).toHaveLength(0)
+  })
+
+  it('keeps live rows intact while an idle-tab eviction would drop durable pages', () => {
+    // Live rows that have not yet been persisted are not eligible for the
+    // durable eviction set, so a tab holding them stays mounted whole.
+    const live: UIMessage[] = Array.from({ length: 4 }, (_, index) => ({ id: `live-${index}`, type: 'assistant_text', content: 'x'.repeat(200_000), timestamp: index }))
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions: { [activeSessionId]: makeSession({
+      chatState: 'idle', historyHydrated: true, historyStatus: 'ready', messages: live,
+    }) } }))
+    const session = useChatStore.getState().sessions[activeSessionId]!
+    expect(session.messages.map(message => message.id)).toEqual(['live-0', 'live-1', 'live-2', 'live-3'])
+  })
+
+  it('evicts idle page caches across 20 image sessions and cold-loads one again without disconnecting', async () => {
+    const sessions = imageSessions()
+    sessions['image-cache-1']!.chatState = 'thinking'
+    sessions['image-cache-2']!.pendingPermission = { requestId: 'permission', toolName: 'Bash', input: { command: 'test' } }
+    sessions['image-cache-3']!.backgroundAgentTasks = { running: { taskId: 'running', status: 'running', startedAt: 1, updatedAt: 1 } }
+    // Direct fixtures bypass loadHistory, so register their rows as durable
+    // the same way the cold-load path would before eviction can exercise them.
+    for (const [id, session] of Object.entries(sessions)) {
+      useChatStore.getState().markHistoryRowsDurable(id, session.messages)
+    }
+    useChatStore.getState().applyBoundedUpdate(() => ({ sessions }))
+    const retained = useChatStore.getState().sessions
+    const retainedCharacters = Object.values(retained).reduce((sum, session) => sum + [...new Set(
+      session.messages,
+    )].reduce((count, message) => count + (message.type === 'user_text' ? message.attachments?.reduce((bytes, attachment) => bytes + (attachment.data?.length ?? 0), 0) ?? 0 : 0), 0), 0)
+    expect(retainedCharacters * 2).toBeLessThanOrEqual(16 * 1024 * 1024)
+    for (const index of [0, 1, 2, 3]) expect(retained[`image-cache-${index}`]!.messages).toHaveLength(1)
+    expect(retained['image-cache-2']!.pendingPermission).toBe(sessions['image-cache-2']!.pendingPermission)
+    expect(retained['image-cache-3']!.backgroundAgentTasks).toBe(sessions['image-cache-3']!.backgroundAgentTasks)
+    const evictedId = Object.keys(retained).find(id => retained[id]!.messages.length === 0)!
+    expect(retained[evictedId]).toMatchObject({ historyHydrated: false, historyStatus: 'idle', connectionState: 'connected' })
+    expect(retained[evictedId]!.historyPage).toBeUndefined()
+
+    activeSessionId = evictedId
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({ messages: [{ id: `${evictedId}-user`, type: 'user', timestamp: new Date(1).toISOString(), content: [
+      { type: 'text', text: 'Inspect' },
+      ...Array.from({ length: 3 }, () => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageData.split(',')[1] } })),
+    ] }], page })
+    const { wsManager } = await import('../api/websocket')
+    const disconnectCalls = vi.mocked(wsManager.disconnect).mock.calls.length
+    useChatStore.getState().connectToSession(evictedId)
+    await vi.waitFor(() => expect(useChatStore.getState().sessions[evictedId]!.historyHydrated).toBe(true))
+    expect(vi.mocked(wsManager.disconnect).mock.calls).toHaveLength(disconnectCalls)
+    expect(useChatStore.getState().sessions[evictedId]!.messages).toEqual([
+      expect.objectContaining({ type: 'user_text', attachments: expect.arrayContaining([expect.objectContaining({ data: imageData })]) }),
+    ])
+    useChatStore.getState().applyBoundedUpdate(state => ({ sessions: { ...state.sessions } }))
+    expect(useChatStore.getState().sessions[evictedId]!.historyHydrated).toBe(true)
+  })
+
+  it('does not evict a just-completed background reply before its transcript catches up', async () => {
+    vi.useFakeTimers()
+    try {
+      const sessions = imageSessions()
+      for (const session of Object.values(sessions)) session.chatState = 'thinking'
+      const id = 'image-cache-19'
+      sessions[id]!.streamingText = 'Completed but not yet persisted'
+      useChatStore.setState({ sessions })
+      vi.mocked(sessionsApi.getFullHistory).mockImplementationOnce(async () => {
+        // Completion marks idle before starting the HTTP refresh. The prior
+        // historyHydrated flag does not prove this new live row is durable.
+        expect(useChatStore.getState().sessions[id]!.messages).toEqual(expect.arrayContaining([
+          expect.objectContaining({ type: 'assistant_text', content: 'Completed but not yet persisted' }),
+        ]))
+        return { messages: [{ id: `${id}-user`, type: 'user', content: 'Inspect', timestamp: new Date(1).toISOString() }], page }
+      })
+      useChatStore.getState().handleServerMessage(id, { type: 'message_complete', usage: { input_tokens: 1, output_tokens: 1 } })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(useChatStore.getState().sessions[id]!.messages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'assistant_text', content: 'Completed but not yet persisted' }),
+      ]))
+      expect(useChatStore.getState().sessions[id]!.connectionState).toBe('connected')
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
+  })
 })

@@ -55,6 +55,9 @@ export const ModelMappingSchema = z.object({
 
 export const Model1mSupportSchema = z.object({
   main: z.boolean(),
+  // Defaulted rather than required: providers saved before the Fable slot
+  // existed carry no `fable` key, and a required field would reject them.
+  fable: z.boolean().default(false),
   haiku: z.boolean(),
   sonnet: z.boolean(),
   opus: z.boolean(),
@@ -167,6 +170,12 @@ export const TestProviderSchema = z.object({
   apiFormat: ApiFormatSchema.default('anthropic'),
   supportsNestedToolResultMedia: SupportsNestedToolResultMediaSchema.optional(),
   requestCompatibility: RequestCompatibilitySchema.optional(),
+  /**
+   * Preset the config derives from, so an unsaved test resolves the same per-model
+   * protocol rules and upstream headers the proxy would. Only an id crosses the
+   * wire — the rules themselves stay server-side.
+   */
+  presetId: z.string().optional(),
 })
 
 export const ReorderProvidersSchema = z.object({

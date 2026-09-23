@@ -52,7 +52,9 @@ const FORCED_REFRESH_RETRY_MS = 5_000
 const POPOVER_WIDTH = 340
 const POPOVER_GAP = 8
 const VIEWPORT_MARGIN = 16
-const POPOVER_MAX_HEIGHT = 420
+// The collapsed panel is much shorter than the old always-expanded breakdown; the expanded
+// section scrolls inside the panel via overflow-y-auto instead of growing the cap back.
+const POPOVER_MAX_HEIGHT = 340
 
 type PopoverPosition = {
   top?: number
@@ -77,10 +79,11 @@ function formatUpdatedAt(timestamp: number | null, t: ReturnType<typeof useTrans
 
 function pickUsedContextCategory(context: SessionContextSnapshot) {
   const ignored = new Set(['free space', 'autocompact buffer'])
+  // No top-N cap: the segmented bar compresses any count into one strip, and the collapsible
+  // breakdown is the diagnostic view where the long tail (MCP tools, memory files) matters.
   return context.categories
     .filter((category) => category.tokens > 0 && !category.isDeferred && !ignored.has(category.name.toLowerCase()))
     .sort((a, b) => b.tokens - a.tokens)
-    .slice(0, 4)
 }
 
 function firstNonEmpty(...values: Array<string | undefined | null>) {
@@ -385,7 +388,6 @@ export function ContextUsageIndicator({
   const percentage = displayContext ? Math.max(0, Math.min(100, displayContext.percentage)) : 0
   const usedTokens = displayContext?.totalTokens ?? 0
   const maxTokens = displayContext?.rawMaxTokens ?? 0
-  const freeTokens = Math.max(0, maxTokens - usedTokens)
   const strokeColor = percentage >= 90
     ? 'var(--color-error)'
     : percentage >= 75
@@ -420,20 +422,18 @@ export function ContextUsageIndicator({
 
   const detailLabels = useMemo(() => ({
     title: t('contextIndicator.title'),
+    remaining: t('contextIndicator.remaining'),
     used: t('contextIndicator.used'),
-    free: t('contextIndicator.free'),
     window: t('contextIndicator.window'),
     estimate: t('contextIndicator.estimate'),
     pendingDetail: t('contextIndicator.pendingDetail'),
     loading: t('contextIndicator.loading'),
     unavailableDetail: t('contextIndicator.unavailableDetail'),
-    sessionUsage: t('contextIndicator.sessionUsage'),
-    sessionTotalTokens: t('contextIndicator.sessionTotalTokens'),
+    breakdown: t('contextIndicator.breakdown'),
     sessionCacheHit: t('contextIndicator.sessionCacheHit'),
     sessionSpeed: t('contextIndicator.sessionSpeed'),
-    sessionApiDuration: t('contextIndicator.sessionApiDuration'),
+    sessionCost: t('contextIndicator.sessionCost'),
     sessionSpeedUnit: t('contextIndicator.sessionSpeedUnit'),
-    sessionScopeNote: t('contextIndicator.sessionScopeNote'),
   }), [t])
 
   // Derived per render rather than memoized on `usage` alone: the session it belongs to lives in
@@ -442,14 +442,13 @@ export function ContextUsageIndicator({
   const sessionStats = useMemo<ContextUsageSessionStats | null>(() => {
     if (!displayUsage) return null
     const metrics = deriveSessionUsageMetrics(displayUsage)
-    // A session with nothing spent yet has no honest answer for any of these rows; showing an
+    // A session with nothing produced yet has no honest answer for any of these rows; showing an
     // empty block (or a 0 tok/s) would read as a measurement rather than an absence.
     if (metrics.totalTokens === 0) return null
     return {
-      totalTokens: metrics.totalTokens,
       cacheHitRate: metrics.cacheHitRate,
       tokensPerSecond: metrics.tokensPerSecond,
-      apiDurationMs: displayUsage.totalAPIDuration,
+      costDisplay: displayUsage.costDisplay,
     }
   }, [displayUsage])
 
@@ -457,9 +456,8 @@ export function ContextUsageIndicator({
     <ContextUsageDetails
       variant={preferSheet ? 'sheet' : 'popover'}
       modelLabel={modelLabel}
-      percentageLabel={displayContext ? formatPercent(percentage) : '--'}
+      remainingLabel={displayContext ? formatPercent(100 - percentage) : '--'}
       usedTokens={usedTokens}
-      freeTokens={freeTokens}
       maxTokens={maxTokens}
       categories={details}
       sessionStats={sessionStats}
@@ -544,29 +542,31 @@ export function ContextUsageIndicator({
         onClick={handleTriggerClick}
         title={t('contextIndicator.title')}
         data-testid="context-usage-indicator"
-        className={`flex shrink-0 items-center gap-[7px] rounded-full border border-[var(--color-border)] bg-transparent text-[var(--color-text-secondary)] transition-[background-color,color,border-color] duration-150 ease-out hover:border-[var(--color-outline)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-container-lowest)] ${
-          isMobileBrowser ? 'h-11' : 'h-8'
-        } ${compact ? 'px-2' : 'px-3'} ${detailsOpen ? 'border-[var(--color-outline)] bg-[var(--color-surface-hover)] text-[var(--color-text-primary)]' : ''}`}
+        className={`group grid shrink-0 place-items-center rounded-full bg-transparent text-[var(--color-text-secondary)] transition-[background-color,color] duration-150 ease-out hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-container-lowest)] ${
+          isMobileBrowser ? 'h-11 w-11' : 'h-8 w-8'
+        } ${detailsOpen ? 'bg-[var(--color-surface-hover)] text-[var(--color-text-primary)]' : ''}`}
       >
-        <span className="relative grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full">
+        <span className={`relative grid shrink-0 place-items-center rounded-full ${isMobileBrowser ? 'h-[22px] w-[22px]' : 'h-5 w-5'}`}>
           {loading && !displayContext ? (
             <span className="absolute inset-[2px] rounded-full border-2 border-[var(--color-text-tertiary)] border-t-transparent motion-safe:animate-spin" />
           ) : (
             <span
-              className="relative grid h-[18px] w-[18px] place-items-center rounded-full"
+              className={`relative grid place-items-center rounded-full ${isMobileBrowser ? 'h-[22px] w-[22px]' : 'h-5 w-5'}`}
               style={ringStyle}
             >
-              <span className="absolute inset-[3px] rounded-full bg-[var(--color-surface-container-lowest)]" />
+              <span className={`absolute inset-[3.5px] rounded-full transition-colors duration-150 ${
+                detailsOpen
+                  ? 'bg-[var(--color-surface-hover)]'
+                  : 'bg-[var(--color-surface-container-lowest)] group-hover:bg-[var(--color-surface-hover)]'
+              }`} />
               <span
-                className="relative h-[5px] w-[5px] rounded-full"
+                className="relative h-1.5 w-1.5 rounded-full"
                 style={{ backgroundColor: displayContext ? strokeColor : 'var(--color-text-tertiary)' }}
               />
             </span>
           )}
         </span>
-        <span className="font-mono text-[11px] font-semibold tabular-nums">
-          {displayPercent}
-        </span>
+        <span className="sr-only">{displayPercent}</span>
       </button>
 
       {!preferSheet && detailsOpen && popoverPosition && createPortal(

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { PUBLIC_ACCESS_CONSENT_VERSION } from '../../src/lib/desktopHost/types'
 import { ELECTRON_IPC_CHANNELS } from './channels'
 import {
   ELECTRON_IPC_VALIDATORS,
@@ -13,8 +14,10 @@ describe('Electron IPC capabilities', () => {
     for (const value of ['', 'a b', 'x'.repeat(4097), {}, null]) {
       expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.publicAccessSaveCredential, value)).toBe(false)
     }
-    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.publicAccessStart, 1)).toBe(true)
-    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.publicAccessStart, 0)).toBe(false)
+    expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.publicAccessStart, PUBLIC_ACCESS_CONSENT_VERSION)).toBe(true)
+    for (const value of [0, PUBLIC_ACCESS_CONSENT_VERSION - 1, PUBLIC_ACCESS_CONSENT_VERSION + 1, '2', null]) {
+      expect(validateElectronIpcPayload(ELECTRON_IPC_CHANNELS.publicAccessStart, value)).toBe(false)
+    }
     for (const channel of Object.values(ELECTRON_IPC_CHANNELS).filter(value => value.startsWith('desktop:public-access:'))) {
       expect(isElectronIpcChannelAllowedForPetWindow(channel)).toBe(false)
     }
