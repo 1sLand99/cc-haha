@@ -98,11 +98,11 @@ export function getSlashCommandNameConflict(
  *
  * Only commands this desktop can actually run belong here. The list is merged
  * into the slash menu for sessions whose CLI has not reported its own commands
- * yet, and every entry either resolves locally (see `resolveSlashUiAction`) or
- * runs in the headless CLI. Interactive-TUI-only commands (`clear`, `vim`,
- * `terminal-setup`, `permissions`), internal commands (`commit`, `pr`, `bug`)
- * and sign-in commands are deliberately absent: the headless CLI answers them
- * with "Unknown skill" instead of doing anything.
+ * yet, and every entry either resolves locally (see `resolveSlashUiAction`),
+ * is handled by the desktop server (`clear`), or runs in the headless CLI.
+ * Interactive-TUI-only commands (`vim`, `terminal-setup`, `permissions`),
+ * internal commands (`commit`, `pr`, `bug`) and sign-in commands are deliberately
+ * absent: the headless CLI answers them with "Unknown skill" instead of doing anything.
  */
 export const FALLBACK_SLASH_COMMANDS: SlashCommandOption[] = [
   { name: 'agent', description: 'Run a prompt with a selected Agent', argumentHint: '<agent> <prompt>' },
@@ -117,6 +117,7 @@ export const FALLBACK_SLASH_COMMANDS: SlashCommandOption[] = [
   { name: 'memory', description: 'Open project memory files in Settings' },
   { name: 'doctor', description: 'Open Doctor in Diagnostics' },
   { name: 'compact', description: 'Compact conversation context' },
+  { name: 'clear', description: 'Clear conversation history and free up context' },
   { name: 'goal', description: 'Set a completion goal', argumentHint: '[<condition> | clear]' },
   { name: 'review', description: 'Review code changes' },
   { name: 'init', description: 'Initialize project CLAUDE.md' },

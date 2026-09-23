@@ -2803,6 +2803,19 @@ describe('ChatInput file mentions', () => {
     )
   })
 
+  it('submits /clear from an active session instead of completing it to /goal', async () => {
+    render(<ChatInput />)
+
+    setComposerText('/clear', 6)
+    expect(await screen.findByRole('option', { name: '/clear' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: '/goal' })).not.toBeInTheDocument()
+
+    act(() => fireEvent.keyDown(getComposerElement(), { key: 'Enter' }))
+    expect(mocks.wsSend).toHaveBeenCalledWith(sessionId, {
+      type: 'user_message', content: '/clear', attachments: [],
+    })
+  })
+
   it('prioritizes active-session slash commands by command name when filtering', async () => {
     useChatStore.setState({
       sessions: {
