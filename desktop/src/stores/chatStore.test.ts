@@ -15279,6 +15279,60 @@ describe('chatStore activity state survival across reload paths', () => {
     expect(session?.agentTaskNotifications).toEqual(notifications)
   })
 
+  it.each(['loadHistory', 'reloadHistory'] as const)('keeps stopped live output and tool context when %s omits oversized records', async (method) => {
+    useChatStore.getState().disconnectSession(TEST_SESSION_ID)
+    const original: UIMessage[] = [
+      { id: 'user', type: 'user_text', content: 'Read the file', timestamp: 1 },
+      { id: 'tool', type: 'tool_use', toolUseId: 'read-1', toolName: 'Read', input: { file_path: '/fixture/large.txt' }, isPending: false, timestamp: 2 },
+      { id: 'result', type: 'tool_result', toolUseId: 'read-1', content: 'file contents', isError: false, timestamp: 3 },
+    ]
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({
+      messages: original, historyHydrated: true, historyStatus: 'ready',
+      chatState: 'thinking', streamingText: 'Partial answer before stop',
+    }) } })
+    useChatStore.getState().stopGeneration(TEST_SESSION_ID)
+    const stopped = useChatStore.getState().sessions[TEST_SESSION_ID]!.messages
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({
+      messages: [{ id: 'result', type: 'user', timestamp: new Date(3).toISOString(), content: [{ type: 'tool_result', tool_use_id: 'read-1', content: 'file contents' }] }],
+      page: { nextCursor: null, hasMore: false, historyComplete: false, sourceVersion: 'oversized-fixture', scannedBytes: 10_000_000, omittedOversizedEntries: 1 },
+    })
+
+    await useChatStore.getState()[method](TEST_SESSION_ID)
+
+    const session = useChatStore.getState().sessions[TEST_SESSION_ID]!
+    expect(session.chatState).toBe('idle')
+    expect(session.messages.map(message => message.type)).toEqual(stopped.map(message => message.type))
+    expect(session.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'user_text', content: 'Read the file' }),
+      expect.objectContaining({ type: 'tool_use', toolUseId: 'read-1', toolName: 'Read' }),
+      expect.objectContaining({ type: 'assistant_text', content: 'Partial answer before stop' }),
+    ]))
+    expect(session.historyPage?.nextCursor).toBeNull()
+    expect(session.historyWindowed).toBe(true)
+  })
+
+  it('does not duplicate stopped text when repeatedly reloading incomplete history', async () => {
+    useChatStore.getState().disconnectSession(TEST_SESSION_ID)
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({
+      historyHydrated: true, historyStatus: 'ready', chatState: 'thinking', streamingText: 'Stopped answer',
+      messages: [{ id: 'user-live', type: 'user_text', content: 'Continue', timestamp: 1 }],
+    }) } })
+    useChatStore.getState().stopGeneration(TEST_SESSION_ID)
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValue({
+      messages: [
+        { id: 'user-disk', type: 'user', content: 'Continue', timestamp: new Date(1).toISOString() },
+        { id: 'answer-disk', type: 'assistant', content: 'Stopped answer', timestamp: new Date(2).toISOString() },
+      ],
+      page: { nextCursor: null, hasMore: false, historyComplete: false, sourceVersion: 'omitted-earlier-tool', scannedBytes: 10, omittedOversizedEntries: 1 },
+    })
+    await useChatStore.getState().reloadHistory(TEST_SESSION_ID)
+    await useChatStore.getState().reloadHistory(TEST_SESSION_ID)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.messages).toMatchObject([
+      { type: 'user_text', content: 'Continue', transcriptMessageId: 'user-disk' },
+      { type: 'assistant_text', content: 'Stopped answer', transcriptMessageId: 'answer-disk' },
+    ])
+  })
+
   it('shows a bounded page immediately and restores state independently without treating the tail as authoritative', async () => {
     const page = { nextCursor: 'older', hasMore: true, historyComplete: false, sourceVersion: 'v1', scannedBytes: 1024, omittedOversizedEntries: 0 }
     vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({ messages: [{ id: 'tail', type: 'assistant', content: 'recent', timestamp: '2026-01-01T00:00:00Z' }], page })

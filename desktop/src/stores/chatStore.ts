@@ -4102,7 +4102,19 @@ export const useChatStore = create<ChatStore>((setState, get) => {
           !requestedGoalEventIds.has(message.id))
         const tokenUsageChangedWhileLoading =
           session.tokenUsage !== requestedTokenUsage
-        const reloadedMessages = liveGoalEventsWhileLoading.length > 0
+        // A bounded read may omit oversized records (including tool calls).
+        // It cannot authoritatively delete rows already received over the live
+        // connection when a stopped turn is reconciled with its transcript.
+        const reloadedMessages = !historyComplete
+          ? mergeColdRestoredHistoryIntoLiveMessages(
+              uiMessages,
+              session.messages === sessionAtFetchStart?.messages
+                ? dropDuplicateTranscriptTextMessages(
+                    mergeRestoredTranscriptMessageIds(session.messages, uiMessages),
+                  )
+                : session.messages,
+            )
+          : liveGoalEventsWhileLoading.length > 0
           ? mergeColdRestoredHistoryIntoLiveMessages(
               uiMessages,
               liveGoalEventsWhileLoading,
