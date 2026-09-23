@@ -45,7 +45,7 @@ function isLocalOrigin(origin?: string | null): boolean {
   return LOCAL_DESKTOP_ORIGINS.has(origin) || isLoopbackBrowserOrigin(origin)
 }
 
-function isLoopbackBrowserOrigin(origin: string): boolean {
+export function isLoopbackBrowserOrigin(origin: string): boolean {
   let parsed: URL
   try {
     parsed = new URL(origin)

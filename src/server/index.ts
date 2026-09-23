@@ -10,7 +10,7 @@ import { handleSessionCollaborationApi } from './api/sessionCollaboration.js'
 
 import { handleApiRequest } from './router.js'
 import { handleWebSocket, type WebSocketData } from './ws/handler.js'
-import { resolveCors, type CorsResolution } from './middleware/cors.js'
+import { isLoopbackBrowserOrigin, resolveCors, type CorsResolution } from './middleware/cors.js'
 import { requireAuth, requireH5Token } from './middleware/auth.js'
 import { teamWatcher } from './services/teamWatcher.js'
 import { cronScheduler } from './services/cronScheduler.js'
@@ -376,6 +376,23 @@ export function startServer(port = PORT, host = HOST) {
           context: h5RequestContext,
         })
         const h5AccessControlBlocked = isH5AccessControlRequest(req, url, h5RequestContext)
+
+        // A *loopback* renderer's CORS preflight is answered before the
+        // capability gates. A preflight never carries credentials, so a
+        // browser-hosted renderer (the Vite dev server on
+        // http://localhost:<port>) could never reach the API once H5 access was
+        // disabled: the preflight was rejected with a CORS-less 403, the
+        // browser refused to send the real request, and the app could only
+        // report an opaque `TypeError: Failed to fetch`. This grants nothing —
+        // the actual request is still gated below and still has to present the
+        // process token. Remote origins deliberately skip this block and keep
+        // hitting the strict rejection path beneath it.
+        if (req.method === 'OPTIONS' && origin && isLoopbackBrowserOrigin(origin)) {
+          if (cors.rejected) {
+            return corsRejectedResponse(cors)
+          }
+          return new Response(null, { status: 204, headers: cors.headers })
+        }
 
         if (h5AccessControlBlocked) {
           return isLocalCredentialOnlyPath(url.pathname)
