@@ -2293,6 +2293,29 @@ describe('ProviderService', () => {
       expect(JSON.stringify(body)).not.toContain('Image omitted:')
     })
 
+    test.each(['user', 'tool'] as const)('forwards Kimi K3 images through OpenCode Go from %s content (#1368)', async (contentSource) => {
+      const body = await captureOpenAIChatRequest({
+        baseUrl: 'https://opencode.ai/zen/go/v1',
+        model: 'kimi-k3',
+        contentSource,
+        content: [
+          { type: 'text', text: 'Describe these pictures.' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'k3-picture-one' } },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'k3-picture-two' } },
+        ],
+      })
+
+      const images = ['one', 'two'].map(suffix => ({
+        type: 'image_url', image_url: { url: `data:image/png;base64,k3-picture-${suffix}` },
+      }))
+      expect(body.messages).toEqual(contentSource === 'user'
+        ? [{ role: 'user', content: [{ type: 'text', text: 'Describe these pictures.' }, ...images] }]
+        : [
+            { role: 'tool', tool_call_id: 'computer_1', content: 'Describe these pictures.' },
+            { role: 'user', content: [{ type: 'text', text: '[Media content for tool call computer_1]' }, ...images] },
+          ])
+    })
+
     test('keeps generic OpenAI Chat providers vision-capable by default', async () => {
       const body = await captureOpenAIChatRequest({
         baseUrl: 'https://chat.example.test',

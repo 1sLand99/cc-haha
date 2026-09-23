@@ -887,11 +887,10 @@ function shouldUseTextOnlyOpenAIChatContent(baseUrl: string, model: string): boo
     return !hasExplicitVisionModelMarker(model)
   }
 
-  // image_url inside a tool message is a gateway extension, not a universal
-  // Chat Completions contract. Only opt opencode models in when their id
-  // explicitly advertises vision capability; unknown gateway models stay safe.
+  // OpenCode Go's Kimi K3 accepts image_url despite lacking "vision" in its
+  // model id. Keep other unverified gateway models on the text-only path.
   if (/(^|[./-])opencode\.ai([:/]|$)/i.test(baseUrl)) {
-    return !hasExplicitVisionModelMarker(model)
+    return !hasExplicitVisionModelMarker(model) && model.toLowerCase() !== 'kimi-k3'
   }
 
   // Preserve the existing behavior for generic compatible providers whose
