@@ -21,6 +21,7 @@ import {
 } from './virtualHeightCache'
 import { relativizeWorkspacePath } from './CurrentTurnChangeCard'
 import { sessionsApi } from '../../api/sessions'
+import { ApiError } from '../../api/client'
 import { subagentsApi, type SubagentRunResponse } from '../../api/subagents'
 import { teamsApi } from '../../api/teams'
 import { resetAgentRunActivityCache } from './useAgentRunActivity'
@@ -6060,6 +6061,28 @@ describe('MessageList nested tool calls', () => {
     })
     expect(screen.queryByText(/Cannot read properties/)).toBeNull()
     expect(screen.queryByLabelText('Turn changed files')).toBeNull()
+  })
+
+  it('does not show the checkpoint preview budget as a chat error', async () => {
+    vi.spyOn(sessionsApi, 'getTurnCheckpoints').mockRejectedValue(new ApiError(413, {
+      error: 'HISTORY_CHECKPOINT_PREVIEW_LIMIT',
+      message: 'This transcript exceeds the full checkpoint preview budget. Chat history remains available in pages.',
+    }))
+    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({
+      messages: [
+        { id: 'user-1', type: 'user_text', content: 'Continue the work', timestamp: 1 },
+        { id: 'assistant-1', type: 'assistant_text', content: 'Done', timestamp: 2 },
+      ],
+    }) } })
+
+    await act(async () => {
+      render(<MessageList />)
+      await Promise.resolve()
+    })
+
+    expect(sessionsApi.getTurnCheckpoints).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Done')).toBeTruthy()
+    expect(screen.queryByText(/This transcript exceeds the full checkpoint preview budget/)).toBeNull()
   })
 
   it('renders multiple historical turn change cards across three turns', async () => {

@@ -1437,6 +1437,15 @@ function getApiErrorMessage(error: unknown) {
       : String(error)
 }
 
+function isCheckpointPreviewBudgetError(error: unknown): boolean {
+  return error instanceof ApiError &&
+    error.status === 413 &&
+    typeof error.body === 'object' &&
+    error.body !== null &&
+    'error' in error.body &&
+    error.body.error === 'HISTORY_CHECKPOINT_PREVIEW_LIMIT'
+}
+
 function isSessionTurnCheckpoint(value: unknown): value is SessionTurnCheckpoint {
   if (!value || typeof value !== 'object') return false
   const checkpoint = value as Partial<SessionTurnCheckpoint>
@@ -3078,7 +3087,8 @@ export function MessageList({
       .catch((error) => {
         if (cancelled) return
         setTurnChangeCards([])
-        setTurnChangeLoadError(getApiErrorMessage(error))
+        // This limit only disables optional turn previews; the chat transcript is still readable.
+        setTurnChangeLoadError(isCheckpointPreviewBudgetError(error) ? null : getApiErrorMessage(error))
       })
       .finally(() => {
         if (!cancelled) {
