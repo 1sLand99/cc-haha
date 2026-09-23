@@ -181,7 +181,7 @@ function normalizeModel1mSupport(
     sonnet: model1mSupport.sonnet === true,
     opus: model1mSupport.opus === true,
   }
-  return MODEL_SLOTS.some((slot) => normalized[slot]) ? normalized : undefined
+  return Object.values(normalized).some(Boolean) ? normalized : undefined
 }
 
 export function normalizeImageGeneration(
