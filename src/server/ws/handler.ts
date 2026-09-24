@@ -158,7 +158,9 @@ const sessionSlashCommands = new Map<string, SessionSlashCommand[]>()
  * Timers for delayed session cleanup after client disconnect.
  * If a client reconnects before the timer fires, the timer is cancelled.
  */
-const PENDING_PERMISSION_DISCONNECT_CLEANUP_MS = 30 * 60_000
+// The longest automatic question wait is 30 minutes; leave room for its
+// bounded model request before reclaiming a disconnected CLI.
+const PENDING_PERMISSION_DISCONNECT_CLEANUP_MS = 31 * 60_000
 const sessionCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 /**
  * Per-session removers for the active-work watcher (issue #764). When the last
@@ -705,6 +707,10 @@ export const handleWebSocket = {
 
         case 'permission_response':
           handlePermissionResponse(ws, message)
+          break
+
+        case 'ask_user_question_activity':
+          conversationService.cancelAutoQuestionAnswer(ws.data.sessionId, message.requestId)
           break
 
         case 'computer_use_permission_response':

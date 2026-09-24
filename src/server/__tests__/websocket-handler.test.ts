@@ -4045,6 +4045,18 @@ describe('WebSocket handler session isolation', () => {
     } finally { unsubscribe() }
   })
 
+  it('cancels an automatic question deadline when the client starts answering', () => {
+    const ws = makeClientSocket('question-activity')
+    const cancel = spyOn(conversationService, 'cancelAutoQuestionAnswer').mockImplementation(() => {})
+
+    handleWebSocket.message(ws, JSON.stringify({
+      type: 'ask_user_question_activity',
+      requestId: 'question-1',
+    }))
+
+    expect(cancel).toHaveBeenCalledWith('question-activity', 'question-1')
+  })
+
   it('reports an unavailable session reference without starting or reopening its inbox', async () => {
     const ws = makeClientSocket('invalid-reference-owner')
     const events: SessionTurnEvent[] = []
@@ -4427,7 +4439,7 @@ describe('WebSocket handler session isolation', () => {
     handleWebSocket.close(ws, 1006, 'permission prompt abandoned')
 
     expect(setTimeoutSpy).toHaveBeenCalledTimes(1)
-    expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(30 * 60_000)
+    expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(31 * 60_000)
     expect(turnCompleteCallback).not.toBeNull()
 
     const expirePermissionWait = setTimeoutSpy.mock.calls[0]?.[0] as (() => void) | undefined
@@ -4478,7 +4490,7 @@ describe('WebSocket handler session isolation', () => {
     })
 
     expect(setTimeoutSpy).toHaveBeenCalledTimes(1)
-    expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(30 * 60_000)
+    expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(31 * 60_000)
   })
 
   it('does not forward prewarm startup status to a reconnecting client', async () => {
@@ -4848,7 +4860,7 @@ describe('WebSocket handler session isolation', () => {
     handleWebSocket.close(ws, 1000, 'pet closed while awaiting permission')
 
     expect(setTimeoutSpy).toHaveBeenCalledTimes(1)
-    expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(30 * 60_000)
+    expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(31 * 60_000)
     expect(outputCallbacks).toHaveLength(2)
 
     outputCallbacks[1]?.({

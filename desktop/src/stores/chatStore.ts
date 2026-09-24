@@ -413,6 +413,7 @@ type ChatStore = {
       runtimeOverride?: RuntimeSelection
     },
   ) => void
+  recordAskUserQuestionActivity: (sessionId: string, requestId: string) => void
   respondToComputerUsePermission: (
     sessionId: string,
     requestId: string,
@@ -3427,6 +3428,10 @@ export const useChatStore = create<ChatStore>((setState, get) => {
     }))
   },
 
+  recordAskUserQuestionActivity: (sessionId, requestId) => {
+    wsManager.send(sessionId, { type: 'ask_user_question_activity', requestId })
+  },
+
   respondToComputerUsePermission: (sessionId, requestId, response) => {
     wsManager.send(sessionId, {
       type: 'computer_use_permission_response',
@@ -6289,6 +6294,7 @@ function normalizeHistoryToolResultContent(content: unknown, toolUseResult: unkn
   return {
     questions: result.questions,
     answers,
+    ...(result.selectionSource === 'automatic' ? { selectionSource: 'automatic' } : {}),
   }
 }
 

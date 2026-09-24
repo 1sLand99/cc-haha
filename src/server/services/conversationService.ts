@@ -31,7 +31,7 @@ import {
   IMAGE_GENERATION_PROVIDER_ID_ENV_KEY,
   IMAGE_GENERATION_PROVIDER_KIND_ENV_KEY,
 } from '../../services/imageGeneration/config.js'
-import { sessionService } from './sessionService.js'
+import { sessionService, type MessageEntry } from './sessionService.js'
 import { diagnosticsService } from './diagnosticsService.js'
 import {
   isMaterializedWorktreeLaunch,
@@ -65,6 +65,8 @@ import {
 } from './networkSettings.js'
 import { readTraceCaptureSettings } from './traceCaptureService.js'
 import { logError } from '../../utils/log.js'
+import { normalizeAutoQuestionSettings } from '../../shared/autoQuestionSettings.js'
+import { decideAutoQuestionAnswers, getRecommendedQuestionAnswers, type AutoQuestion } from './autoQuestionDecisionService.js'
 import {
   createImageMetadataText,
   maybeResizeAndDownsampleImageBuffer,
@@ -179,6 +181,73 @@ type MaterializedAttachments = {
 
 type SessionOutputCallback = (msg: any) => void
 
+type TrackedPermissionRequest = {
+  toolName: string
+  agentId?: string
+  toolUseId?: string
+  description?: string
+  displayName?: string
+  input: Record<string, unknown>
+  permissionSuggestions?: unknown[]
+  autoAnswerTimer?: ReturnType<typeof setTimeout>
+  autoAnswerAbortController?: AbortController
+  autoAnswerCancelled?: boolean
+  autoAnswerCreatedAt?: number
+  autoAnswerGeneration?: number
+}
+
+function stripAutomaticQuestionMarker(input: Record<string, unknown>): Record<string, unknown> {
+  const metadata = input.metadata
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return input
+  const { autoAnswered: _untrusted, ...rest } = metadata as Record<string, unknown>
+  return { ...input, metadata: rest }
+}
+
+function parseAutoQuestions(input: Record<string, unknown>): AutoQuestion[] | null {
+  if (!Array.isArray(input.questions) || input.questions.length < 1 || input.questions.length > 4) return null
+  const questions: AutoQuestion[] = []
+  const seenQuestions = new Set<string>()
+  for (const value of input.questions) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const question = value as Record<string, unknown>
+    if (typeof question.question !== 'string' || !question.question.trim() ||
+      seenQuestions.has(question.question) || !Array.isArray(question.options) ||
+      question.options.length < 2 || question.options.length > 4) return null
+    seenQuestions.add(question.question)
+    const options: AutoQuestion['options'] = []
+    const seenLabels = new Set<string>()
+    for (const item of question.options) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+      const option = item as Record<string, unknown>
+      if (typeof option.label !== 'string' || !option.label.trim() || seenLabels.has(option.label)) return null
+      seenLabels.add(option.label)
+      options.push({ label: option.label, ...(typeof option.description === 'string' ? { description: option.description } : {}) })
+    }
+    questions.push({
+      question: question.question,
+      options,
+      multiSelect: question.multiSelect === true,
+    })
+  }
+  return questions
+}
+
+function autoQuestionConversationText(messages: MessageEntry[], includeSidechain = false): string {
+  const parts = messages.flatMap((message) => {
+    if ((message.type !== 'user' && message.type !== 'assistant') ||
+      (!includeSidechain && (message.isSidechain || message.parentToolUseId))) return []
+    if (typeof message.content === 'string') return [`${message.type}: ${message.content}`]
+    if (!Array.isArray(message.content)) return []
+    const text = message.content.flatMap((block) =>
+      block && typeof block === 'object' &&
+      'type' in block && block.type === 'text' &&
+      'text' in block && typeof block.text === 'string' ? [block.text] : [],
+    ).join('\n')
+    return text ? [`${message.type}: ${text}`] : []
+  })
+  return parts.join('\n').slice(-4_000)
+}
+
 function networkRoutingFingerprint(
   settings: NetworkSettings,
   env: NodeJS.ProcessEnv = process.env,
@@ -200,6 +269,8 @@ type SessionProcess = {
   outputCallbacks: SessionOutputCallback[]
   workDir: string
   permissionMode: string
+  providerId?: string | null
+  providerConfigFingerprint?: string
   networkRoutingFingerprint: string
   networkDerivedFirstTokenTimeout: boolean
   networkDerivedStreamMaxDuration: boolean
@@ -224,17 +295,8 @@ type SessionProcess = {
   usesOfficialOAuth: boolean
   officialOAuthToken: string | null
   officialOAuthRefreshPromise?: Promise<void>
-  pendingPermissionRequests: Map<
-    string,
-    {
-      toolName: string
-      toolUseId?: string
-      description?: string
-      displayName?: string
-      input: Record<string, unknown>
-      permissionSuggestions?: unknown[]
-    }
-  >
+  pendingPermissionRequests: Map<string, TrackedPermissionRequest>
+  autoResolvedRequestIds?: Set<string>
   pendingControlRequests: Map<string, (reason: Error) => void>
 }
 
@@ -278,6 +340,153 @@ export class ConversationService {
   private deletedSessions = new Set<string>()
   private providerService = new ProviderService()
   private pendingPermissionModeChanges = new Map<string, Map<string, number>>()
+
+  private clearAutoAnswerWait(request: TrackedPermissionRequest | undefined): void {
+    if (request?.autoAnswerTimer) clearTimeout(request.autoAnswerTimer)
+    request?.autoAnswerAbortController?.abort()
+  }
+
+  private clearSessionAutoAnswerWaits(session: SessionProcess): void {
+    for (const request of session.pendingPermissionRequests.values()) {
+      this.clearAutoAnswerWait(request)
+    }
+  }
+
+  cancelAutoQuestionAnswer(sessionId: string, requestId: string): void {
+    const request = this.sessions.get(sessionId)?.pendingPermissionRequests.get(requestId)
+    if (request?.toolName !== 'AskUserQuestion') return
+    this.clearAutoAnswerWait(request)
+    request.autoAnswerTimer = undefined
+    request.autoAnswerAbortController = undefined
+    request.autoAnswerCancelled = true
+    request.autoAnswerGeneration = (request.autoAnswerGeneration ?? 0) + 1
+  }
+
+  /** Apply setting changes to questions that are already waiting. */
+  refreshAutoQuestionSettings(): void {
+    for (const [sessionId, session] of this.sessions) {
+      for (const [requestId, request] of session.pendingPermissionRequests) {
+        if (request.toolName !== 'AskUserQuestion' || request.autoAnswerCancelled) continue
+        this.clearAutoAnswerWait(request)
+        request.autoAnswerGeneration = (request.autoAnswerGeneration ?? 0) + 1
+        request.autoAnswerTimer = undefined
+        request.autoAnswerAbortController = undefined
+        void this.scheduleAutoQuestionAnswer(sessionId, session, requestId, request)
+      }
+    }
+  }
+
+  private async scheduleAutoQuestionAnswer(
+    sessionId: string,
+    session: SessionProcess,
+    requestId: string,
+    request: TrackedPermissionRequest,
+  ): Promise<void> {
+    if (request.toolName !== 'AskUserQuestion') return
+    const generation = request.autoAnswerGeneration ?? 0
+    try {
+      const settings = normalizeAutoQuestionSettings(
+        (await new SettingsService().getUserSettings()).autoQuestion,
+      )
+      if (!settings.enabled || request.autoAnswerCancelled ||
+        (request.autoAnswerGeneration ?? 0) !== generation || this.sessions.get(sessionId) !== session ||
+        session.pendingPermissionRequests.get(requestId) !== request) return
+
+      const remainingMs = Math.max(0, (request.autoAnswerCreatedAt ?? Date.now()) +
+        settings.timeoutMinutes * 60_000 - Date.now())
+      request.autoAnswerTimer = setTimeout(() => {
+        request.autoAnswerTimer = undefined
+        void this.autoAnswerQuestion(sessionId, session, requestId, request)
+      }, remainingMs)
+    } catch (error) {
+      console.warn(`[ConversationService] Cannot schedule automatic answer for ${sessionId}:`, error)
+    }
+  }
+
+  private async autoAnswerQuestion(
+    sessionId: string,
+    session: SessionProcess,
+    requestId: string,
+    request: TrackedPermissionRequest,
+  ): Promise<void> {
+    if (request.autoAnswerCancelled || this.sessions.get(sessionId) !== session ||
+      session.pendingPermissionRequests.get(requestId) !== request) return
+    const controller = new AbortController()
+    request.autoAnswerAbortController = controller
+    try {
+      const settings = normalizeAutoQuestionSettings(
+        (await new SettingsService().getUserSettings()).autoQuestion,
+      )
+      if (!settings.enabled) return
+      const questions = parseAutoQuestions(request.input)
+      if (!questions) return
+      const { messages } = await sessionService.getSessionHistoryPage(sessionId, {
+        limit: 60,
+        projectContext: false,
+      }).catch(() => ({ messages: [] }))
+      const rootContext = autoQuestionConversationText(messages)
+      const agentContext = request.agentId
+        ? autoQuestionConversationText(
+            (await sessionService.getSubagentTranscript(sessionId, request.agentId, { bounded: true })
+              .catch(() => ({ messages: [] }))).messages.slice(-60),
+            true,
+          )
+        : ''
+      const conversationText = request.agentId
+        ? `${rootContext.slice(-2_000)}\n${agentContext.slice(-2_000)}`
+        : rootContext
+      if (Object.keys(getRecommendedQuestionAnswers(questions)).length !== questions.length &&
+        !(request.agentId ? agentContext.trim() : rootContext.trim())) return
+      const launchInfo = await sessionService.getSessionLaunchInfo(sessionId).catch(() => null)
+      const providerId = session.providerId !== undefined
+        ? session.providerId
+        : launchInfo?.runtimeProviderId ?? null
+      if (providerId === null && session.usesOfficialOAuth === false &&
+        Object.keys(getRecommendedQuestionAnswers(questions)).length !== questions.length) return
+      // The CLI keeps its launch-time provider configuration. Never send its
+      // conversation to a provider address or account edited while it waited.
+      if (providerId && session.providerConfigFingerprint &&
+        Object.keys(getRecommendedQuestionAnswers(questions)).length !== questions.length) {
+        const current = await this.providerService.getProvider(providerId)
+        if (JSON.stringify(current) !== session.providerConfigFingerprint) return
+      }
+      const answers = await decideAutoQuestionAnswers({
+        questions,
+        conversationText,
+        providerId,
+        sessionId,
+        signal: controller.signal,
+      })
+      if (!answers || request.autoAnswerCancelled || controller.signal.aborted || this.sessions.get(sessionId) !== session ||
+        session.pendingPermissionRequests.get(requestId) !== request) return
+      if (!normalizeAutoQuestionSettings(
+        (await new SettingsService().getUserSettings()).autoQuestion,
+      ).enabled || controller.signal.aborted) return
+
+      const metadata = request.input.metadata
+      const resolved = this.respondToPermission(sessionId, requestId, true, undefined, {
+        ...request.input,
+        answers,
+        metadata: {
+          ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+          autoAnswered: true,
+        },
+      }, undefined, undefined, true)
+      if (!resolved) return
+      session.autoResolvedRequestIds ??= new Set()
+      session.autoResolvedRequestIds.add(requestId)
+      this.notifyOutputCallbacks(sessionId, session.outputCallbacks, {
+        type: 'control_response',
+        response: { request_id: requestId, response: { behavior: 'allow' } },
+      })
+    } catch (error) {
+      console.warn(`[ConversationService] Automatic answer failed for ${sessionId}:`, error)
+    } finally {
+      if (request.autoAnswerAbortController === controller) {
+        request.autoAnswerAbortController = undefined
+      }
+    }
+  }
 
   private trackPendingPermissionModeChange(sessionId: string, mode: string, delta: 1 | -1): void {
     const sessionChanges = this.pendingPermissionModeChanges.get(sessionId) ?? new Map<string, number>()
@@ -444,12 +653,14 @@ export class ConversationService {
       firstTokenTimeoutDerived: false,
       streamMaxDurationDerived: false,
     }
+    const providerCapture: { fingerprint?: string } = {}
     const childEnv = await this.buildChildEnv(
       launchWorkDir,
       sdkUrl,
       options,
       networkSettings,
       networkRuntimeMetadata,
+      providerCapture,
     )
     const usesOfficialOAuth = this.shouldMarkManagedOAuth(options?.providerId)
 
@@ -487,6 +698,8 @@ export class ConversationService {
       outputCallbacks: [],
       workDir: launchWorkDir,
       permissionMode: options?.permissionMode || 'default',
+      providerId: options?.providerId,
+      providerConfigFingerprint: providerCapture.fingerprint,
       networkRoutingFingerprint: networkRoutingFingerprint(networkSettings, childEnv),
       networkDerivedFirstTokenTimeout: networkRuntimeMetadata.firstTokenTimeoutDerived,
       networkDerivedStreamMaxDuration: networkRuntimeMetadata.streamMaxDurationDerived,
@@ -507,6 +720,7 @@ export class ConversationService {
       usesOfficialOAuth,
       officialOAuthToken: childEnv.CLAUDE_CODE_OAUTH_TOKEN ?? null,
       pendingPermissionRequests: new Map(),
+      autoResolvedRequestIds: new Set(),
       pendingControlRequests: new Map(),
     }
     this.sessions.set(sessionId, session)
@@ -535,6 +749,7 @@ export class ConversationService {
     if (startupExitCode !== null) {
       await this.waitForProcessOutputDrain(session)
       const startupError = this.buildStartupError(sessionId, startupExitCode)
+      this.clearSessionAutoAnswerWaits(session)
       this.sessions.delete(sessionId)
 
       if (this.clearStaleLock(sessionId)) {
@@ -711,9 +926,12 @@ export class ConversationService {
     updatedInput?: Record<string, unknown>,
     denyMessage?: string,
     permissionUpdates?: unknown[],
+    automaticQuestionAnswer = false,
   ): boolean {
     const session = this.sessions.get(sessionId)
+    if (session?.autoResolvedRequestIds?.has(requestId)) return false
     const pendingRequest = session?.pendingPermissionRequests.get(requestId)
+    this.clearAutoAnswerWait(pendingRequest)
     if (session) {
       session.pendingPermissionRequests.delete(requestId)
     }
@@ -726,7 +944,9 @@ export class ConversationService {
         response: allowed
           ? {
               behavior: 'allow',
-              updatedInput: updatedInput ?? {},
+              updatedInput: pendingRequest?.toolName === 'AskUserQuestion' && !automaticQuestionAnswer
+                ? stripAutomaticQuestionMarker(updatedInput ?? {})
+                : updatedInput ?? {},
               ...(Array.isArray(permissionUpdates) && permissionUpdates.length > 0
                 ? { updatedPermissions: permissionUpdates }
                 : rule === 'always' && pendingRequest
@@ -1144,19 +1364,23 @@ export class ConversationService {
           msg.request?.subtype === 'can_use_tool' &&
           typeof msg.request_id === 'string'
         ) {
-          session.pendingPermissionRequests.set(msg.request_id, {
+          const request: TrackedPermissionRequest = {
             toolName:
               typeof msg.request.tool_name === 'string'
                 ? msg.request.tool_name
                 : 'Unknown',
+            agentId: typeof msg.request.agent_id === 'string' && msg.request.agent_id.trim()
+              ? msg.request.agent_id.trim()
+              : undefined,
             toolUseId:
               typeof msg.request.tool_use_id === 'string' && msg.request.tool_use_id.trim()
                 ? msg.request.tool_use_id
                 : undefined,
-            input:
+            input: stripAutomaticQuestionMarker(
               msg.request.input && typeof msg.request.input === 'object'
                 ? (msg.request.input as Record<string, unknown>)
                 : {},
+            ),
             description:
               typeof msg.request.description === 'string' && msg.request.description.trim()
                 ? msg.request.description
@@ -1168,18 +1392,24 @@ export class ConversationService {
             permissionSuggestions: Array.isArray(msg.request.permission_suggestions)
               ? msg.request.permission_suggestions
               : undefined,
-          })
+            autoAnswerCreatedAt: Date.now(),
+          }
+          this.clearAutoAnswerWait(session.pendingPermissionRequests.get(msg.request_id))
+          session.pendingPermissionRequests.set(msg.request_id, request)
+          void this.scheduleAutoQuestionAnswer(sessionId, session, msg.request_id, request)
         }
         if (
           (msg?.type === 'control_cancel_request' || msg?.type === 'control_response') &&
           typeof msg.request_id === 'string'
         ) {
+          this.clearAutoAnswerWait(session.pendingPermissionRequests.get(msg.request_id))
           session.pendingPermissionRequests.delete(msg.request_id)
         }
         if (
           msg?.type === 'control_response' &&
           typeof msg.response?.request_id === 'string'
         ) {
+          this.clearAutoAnswerWait(session.pendingPermissionRequests.get(msg.response.request_id))
           session.pendingPermissionRequests.delete(msg.response.request_id)
         }
         this.notifyOutputCallbacks(sessionId, session.outputCallbacks, msg)
@@ -1315,6 +1545,7 @@ export class ConversationService {
     if (!session) return
 
     this.cancelPendingControlRequests(session)
+    this.clearSessionAutoAnswerWaits(session)
     this.sessions.delete(sessionId)
     this.killProcess(sessionId, session)
   }
@@ -1327,6 +1558,7 @@ export class ConversationService {
     if (!session) return
 
     this.cancelPendingControlRequests(session)
+    this.clearSessionAutoAnswerWaits(session)
     this.sessions.delete(sessionId)
     await this.stopProcessAndWait(sessionId, session, timeoutMs)
   }
@@ -1523,6 +1755,7 @@ export class ConversationService {
         },
       })
       const callbacks = [...activeSession.outputCallbacks]
+      this.clearSessionAutoAnswerWaits(activeSession)
       this.sessions.delete(sessionId)
       this.notifyOutputCallbacks(sessionId, callbacks, {
         type: 'result',
@@ -1583,6 +1816,7 @@ export class ConversationService {
       firstTokenTimeoutDerived: boolean
       streamMaxDurationDerived: boolean
     },
+    providerCapture?: { fingerprint?: string },
   ): Promise<Record<string, string>> {
     // Provider isolation: when Desktop has its own provider config/index,
     // strip inherited provider env vars so the child CLI reads fresh values
@@ -1660,6 +1894,9 @@ export class ConversationService {
       typeof options?.providerId === 'string'
         ? await this.providerService.getProvider(options.providerId)
         : null
+    if (explicitProvider && providerCapture) {
+      providerCapture.fingerprint = JSON.stringify(explicitProvider)
+    }
     const explicitProviderEnv = explicitProvider
       ? await this.providerService.getProviderRuntimeEnv(explicitProvider.id)
       : null

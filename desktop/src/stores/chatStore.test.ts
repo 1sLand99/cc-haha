@@ -850,6 +850,24 @@ describe('chatStore history mapping', () => {
         answers: { 'Pick one?': 'A' },
       },
     })
+
+    const automaticallyAnswered = mapHistoryMessagesToUiMessages([
+      messages[0]!,
+      {
+        ...messages[1]!,
+        toolUseResult: {
+          ...messages[1]!.toolUseResult as Record<string, unknown>,
+          selectionSource: 'automatic',
+        },
+      },
+    ])
+    expect(automaticallyAnswered[1]).toMatchObject({
+      type: 'tool_result',
+      content: {
+        answers: { 'Pick one?': 'A' },
+        selectionSource: 'automatic',
+      },
+    })
   })
 
   it('maps compact boundary and summary history without hiding pre-compact messages', () => {

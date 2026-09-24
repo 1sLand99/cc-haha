@@ -19,6 +19,7 @@ import { Card } from '@/components/ui/Card'
 import { SettingsPill, SettingsSection } from '@/components/settings/SettingsSection'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Switch } from '@/components/ui/Switch'
+import { SelectField } from '@/components/ui/SelectField'
 import { PermissionModeSelector } from '../../components/controls/PermissionModeSelector'
 import { ReasoningEffortPopover } from '../../components/controls/ReasoningEffortPopover'
 import { isDarkThemeMode, isLightThemeMode } from '../../types/settings'
@@ -33,6 +34,7 @@ import { getDesktopNotificationPermission, notifyDesktop, getDesktopNotification
 import { SETTINGS_CHECKBOX_INPUT_CLASS, SettingsCheckboxMark, isValidHttpProxyUrl } from '../settings/shared'
 import { isTouchH5Document } from '../../lib/touchH5'
 import { MODEL_REASONING_EFFORTS } from '../../../../src/shared/modelReasoning'
+import { AUTO_QUESTION_TIMEOUT_OPTIONS } from '../../../../src/shared/autoQuestionSettings'
 
 /**
  * The General settings panel — the largest of the seven, and the one most often
@@ -76,6 +78,8 @@ export function GeneralSettings() {
     setPermissionMode,
     autoDreamEnabled,
     setAutoDreamEnabled,
+    autoQuestion,
+    setAutoQuestion,
     locale,
     setLocale,
     setTheme,
@@ -1137,6 +1141,41 @@ export function GeneralSettings() {
             label={t('settings.general.agentTeamsEnabled')}
             description={t('settings.general.agentTeamsHint')}
           />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        className="mt-8"
+        title={t('settings.general.autoQuestionTitle')}
+        description={t('settings.general.autoQuestionDescription')}
+      >
+        <div className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-4 py-3">
+          <Switch
+            checked={autoQuestion.enabled}
+            onChange={(enabled) => void setAutoQuestion({ ...autoQuestion, enabled }).catch(() => {
+              addToast({ type: 'error', message: t('settings.general.autoQuestionSaveFailed') })
+            })}
+            label={t('settings.general.autoQuestionEnabled')}
+            description={t('settings.general.autoQuestionHint')}
+          />
+          {autoQuestion.enabled && (
+            <div className="mt-4">
+              <SelectField
+                label={t('settings.general.autoQuestionTimeout')}
+                value={String(autoQuestion.timeoutMinutes)}
+                options={AUTO_QUESTION_TIMEOUT_OPTIONS.map((minutes) => ({
+                  value: String(minutes),
+                  label: t('settings.general.autoQuestionMinutes', { count: minutes }),
+                }))}
+                onChange={(value) => void setAutoQuestion({
+                  ...autoQuestion,
+                  timeoutMinutes: Number(value),
+                }).catch(() => {
+                  addToast({ type: 'error', message: t('settings.general.autoQuestionSaveFailed') })
+                })}
+              />
+            </div>
+          )}
         </div>
       </SettingsSection>
 
