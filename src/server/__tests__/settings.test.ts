@@ -945,6 +945,14 @@ describe('Models API', () => {
         context: '1m',
       },
       {
+        id: 'claude-opus-5-5',
+        name: 'Opus 5.5',
+        description: 'Best for complex agentic coding and enterprise work',
+        context: '1m',
+        defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      },
+      {
         id: 'claude-opus-5',
         name: 'Opus 5',
         description: 'Best for complex agentic coding and enterprise work',
@@ -1206,6 +1214,7 @@ describe('Models API', () => {
     expect(listBody.models.map((model: { id: string }) => model.id)).toEqual([
       'claude-fable-5-1',
       'claude-fable-5',
+      'claude-opus-5-5',
       'claude-opus-5',
       'claude-opus-4-8',
       'claude-sonnet-5',
@@ -1228,8 +1237,9 @@ describe('Models API', () => {
     const body = await response.json()
 
     expect(body.model).toMatchObject({
-      id: 'claude-opus-5',
-      name: 'Opus 5',
+      id: 'claude-opus-5-5',
+      name: 'Opus 5.5',
+      defaultReasoningEffort: 'medium',
     })
   })
 

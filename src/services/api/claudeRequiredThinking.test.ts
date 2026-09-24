@@ -817,3 +817,38 @@ test('Opus 5 preserves max effort with adaptive thinking enabled', async () => {
   expect(requests[0]?.thinking).toEqual({ type: 'adaptive' })
   expect(requests[0]?.output_config).toEqual({ effort: 'max' })
 }, 10_000)
+
+for (const disableAdaptive of [false, true]) {
+  test(`Opus 5.5 requires adaptive thinking with optional adaptive disabled=${disableAdaptive}`, async () => {
+    const { content, requests, requestHeaders } = await captureQueryRequest({
+      model: 'claude-opus-5-5',
+      configureCapabilityOverrides: false,
+      globalThinkingEnabled: false,
+      env: {
+        CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: disableAdaptive ? '1' : undefined,
+        CLAUDE_CODE_ATTRIBUTION_HEADER: '1',
+        CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: '1',
+      },
+    })
+    expect(content).toContainEqual({ type: 'text', text: 'OK' })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.model).toBe('claude-opus-5-5')
+    expect(requests[0]?.thinking).toEqual({ type: 'adaptive' })
+    expect(requests[0]?.max_tokens).toBe(128_000)
+    expect(requests[0]?.output_config).toEqual({ effort: 'medium' })
+    expect(requestHeaders[0]?.get('anthropic-beta')).not.toContain('thinking-binding-controls-2026-08-01')
+    expect(requestHeaders[0]?.get('user-agent')).toContain('claude-cli/2.1.281')
+    expect(JSON.stringify(requests[0]?.system)).toContain('cc_version=2.1.281')
+  }, 10_000)
+}
+
+test('Opus 5.5 respects an explicit third-party capability opt-out', async () => {
+  const { requests } = await captureQueryRequest({
+    model: 'claude-opus-5-5',
+    capabilities: '',
+    globalThinkingEnabled: false,
+  })
+  expect(requests).toHaveLength(1)
+  expect(requests[0]?.thinking).toBeUndefined()
+  expect(requests[0]?.output_config).toBeUndefined()
+}, 10_000)

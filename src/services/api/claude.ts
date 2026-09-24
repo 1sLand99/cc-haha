@@ -195,6 +195,7 @@ import { endQueryProfile, queryCheckpoint } from "src/utils/queryProfiler.js";
 import {
   modelSupportsAdaptiveThinking,
   modelUsesBoundThinking,
+  modelRequiresThinking,
   modelSupportsThinking,
   resolveModelThinkingEnabled,
   shouldSendExplicitDisabledThinking,
@@ -1784,7 +1785,7 @@ async function* queryModel(
     // setting that can greatly affect model quality and bashing.
     if (hasThinking && modelCanThink) {
       if (
-        (modelUsesBoundThinking(options.model) ||
+        (modelRequiresThinking(options.model) ||
           !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING)) &&
         modelSupportsAdaptiveThinking(options.model)
       ) {
@@ -1980,7 +1981,12 @@ async function* queryModel(
   const contentBlocks: (BetaContentBlock | ConnectorTextBlock)[] = [];
   let usage: NonNullableUsage = EMPTY_USAGE;
   let costUSD = 0;
+  let hasStreamingUsage = false;
   let stopReason: BetaStopReason | null = null;
+  const completedBlockIndexes = new Set<number>();
+  const completedToolUseIds = new Set<string>();
+  const handledStopReasons = new Set<BetaStopReason>();
+  let incompleteStream = false;
   let didFallBackToNonStreaming = false;
   let fallbackMessage: AssistantMessage | undefined;
   let maxOutputTokens = 0;
@@ -2531,6 +2537,8 @@ async function* queryModel(
             break;
           }
           case "content_block_stop": {
+            if (completedBlockIndexes.has(part.index)) continue;
+            completedBlockIndexes.add(part.index);
             toolInputDurationGuard.stop(part.index);
             const contentBlock = contentBlocks[part.index];
             if (!contentBlock) {
@@ -2551,6 +2559,10 @@ async function* queryModel(
                   part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
               });
               throw new Error("Message not found");
+            }
+            if (contentBlock.type === "tool_use" || contentBlock.type === "server_tool_use") {
+              if (completedToolUseIds.has(contentBlock.id)) continue;
+              completedToolUseIds.add(contentBlock.id);
             }
             const m: AssistantMessage = {
               message: {
@@ -2580,6 +2592,7 @@ async function* queryModel(
           }
           case "message_delta": {
             usage = updateUsage(usage, part.usage);
+            hasStreamingUsage = true;
             // Capture research from message_delta if available (internal only).
             // Always overwrite with the latest value. Also write back to
             // already-yielded messages since message_delta arrives after
@@ -2607,12 +2620,22 @@ async function* queryModel(
             // replacement ({ ...lastMsg.message, usage }) would disconnect
             // the queued reference; direct mutation ensures the transcript
             // captures the final values.
-            stopReason = part.delta.stop_reason;
+            // Some providers append usage-only deltas with null/omitted stop
+            // fields. They must not erase the terminal state already received.
+            const hasStopReason = part.delta.stop_reason != null;
+            const isNewStopReason = hasStopReason && !handledStopReasons.has(part.delta.stop_reason);
+            if (hasStopReason) {
+              stopReason = part.delta.stop_reason;
+              handledStopReasons.add(stopReason);
+            }
 
             const lastMsg = newMessages.at(-1);
             if (lastMsg) {
               lastMsg.message.usage = usage;
               lastMsg.message.stop_reason = stopReason;
+              if (hasStopReason) {
+                lastMsg.message.stop_sequence = part.delta.stop_sequence ?? null;
+              }
             }
 
             // Max-token recovery needs the completed assistant blocks before
@@ -2620,7 +2643,7 @@ async function* queryModel(
             // terminal message and can continue from the partial response.
             const outputLimitCommit = commitOutputLimitResponse(
               assistantCommitBuffer,
-              stopReason,
+              isNewStopReason ? stopReason : null,
             );
             if (outputLimitCommit) {
               for (const committedMessage of outputLimitCommit.messages) {
@@ -2628,16 +2651,8 @@ async function* queryModel(
               }
             }
 
-            // Update cost
-            const costUSDForPart = calculateUSDCost(resolvedModel, usage);
-            costUSD += addToTotalSessionCost(
-              costUSDForPart,
-              usage,
-              options.model,
-            );
-
             const refusalMessage = getErrorMessageIfRefusal(
-              part.delta.stop_reason,
+              isNewStopReason ? part.delta.stop_reason : null,
               options.model,
             );
             if (refusalMessage) {
@@ -2647,7 +2662,7 @@ async function* queryModel(
               yield refusalMessage;
             }
 
-            if (stopReason === "max_tokens") {
+            if (isNewStopReason && stopReason === "max_tokens") {
               logEvent("tengu_max_tokens_reached", {
                 max_tokens: maxOutputTokens,
               });
@@ -2658,7 +2673,7 @@ async function* queryModel(
               });
             }
 
-            if (stopReason === "model_context_window_exceeded") {
+            if (isNewStopReason && stopReason === "model_context_window_exceeded") {
               logEvent("tengu_context_window_exceeded", {
                 max_tokens: maxOutputTokens,
                 output_tokens: usage.output_tokens,
@@ -2734,6 +2749,25 @@ async function* queryModel(
           );
       }
 
+      // Preserve visible text when the socket closes before its block_stop.
+      // Never synthesize a completed tool or unsigned thinking block from EOF.
+      if (partialMessage && stopReason !== "max_tokens" && stopReason !== "model_context_window_exceeded") {
+        for (const [index, block] of contentBlocks.entries()) {
+          if (block?.type !== "text" || !block.text || completedBlockIndexes.has(index)) continue;
+          const partialTextMessage: AssistantMessage = {
+            message: { ...partialMessage, content: [block], usage },
+            requestId: streamRequestId ?? undefined,
+            type: "assistant",
+            uuid: randomUUID(),
+            timestamp: new Date().toISOString(),
+          };
+          newMessages.push(partialTextMessage);
+          for (const committedMessage of assistantCommitBuffer.add(partialTextMessage, "text")) {
+            yield committedMessage;
+          }
+        }
+      }
+
       // Detect when the stream completed without producing any assistant messages.
       // This covers two proxy failure modes:
       // 1. No events at all (!partialMessage): proxy returned 200 with non-SSE body
@@ -2772,6 +2806,18 @@ async function* queryModel(
             "unknown") as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         });
         throw new Error("Stream ended without receiving any events");
+      }
+
+      // A clean socket EOF is not a successful Anthropic response. Explicit
+      // output limits already have a recovery message and may omit message_stop.
+      if (
+        stopReason !== "max_tokens" &&
+        stopReason !== "model_context_window_exceeded" &&
+        (!streamWatchdogState.snapshot().messageStopReceived || stopReason === null ||
+          contentBlocks.some((block, index) => block && !completedBlockIndexes.has(index)))
+      ) {
+        incompleteStream = true;
+        throw new Error("Provider stream ended before completing the response");
       }
 
       // No tool boundary was crossed, so completed thinking/text blocks were
@@ -2830,6 +2876,18 @@ async function* queryModel(
 
       // A safety rejection is terminal, including for non-streaming fallback.
       if (isOpenAIPolicyError(streamingError)) throw streamingError
+
+      // Never replay a response after server-side work began or a local tool
+      // completed. Keep displayable blocks, but discard uncommitted local tools.
+      // Completed partial text on a clean EOF is also surfaced with an error,
+      // rather than silently accepted or replaced by a second response.
+      if (incompleteStream || assistantCommitBuffer.hasCrossedSideEffectBoundary() ||
+          streamWatchdogState.snapshot().serverToolUseStarted) {
+        for (const committedMessage of assistantCommitBuffer.flushWithoutToolUse()) {
+          yield committedMessage;
+        }
+        throw streamingError;
+      }
 
       // Instrumentation: if the watchdog had already fired and the for-await
       // threw (rather than exiting cleanly), record that the loop DID exit and
@@ -3333,9 +3391,14 @@ async function* queryModel(
     // until the generator itself is GC'd (see GH #32920).
     releaseStreamResources();
 
-    // Non-streaming fallback cost: the streaming path tracks cost in the
-    // message_delta handler before any yield. Fallback pushes to newMessages
-    // then yields, so tracking must be here to survive .return() at the yield.
+    if (hasStreamingUsage) {
+      costUSD += addToTotalSessionCost(
+        calculateUSDCost(resolvedModel, usage), usage, options.model,
+      );
+    }
+
+    // Track fallback separately: it is a different request. Keep accounting
+    // here to survive .return() while the consumer handles a yielded message.
     if (fallbackMessage) {
       const fallbackUsage = normalizeUsage(fallbackMessage.message.usage);
       fallbackMessage.message.usage = fallbackUsage;
