@@ -6323,6 +6323,26 @@ describe('MessageList nested tool calls', () => {
   })
 
   it('preserves the expanded change card through virtual unmount and returns to its file opener', async () => {
+    const frames = new Map<number, FrameRequestCallback>()
+    let nextFrameId = 0
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      const id = ++nextFrameId
+      frames.set(id, callback)
+      return id
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn((id: number) => frames.delete(id)))
+    const advanceFrame = async (time: number) => {
+      const scheduled = [...frames.keys()]
+      await act(async () => {
+        for (const id of scheduled) {
+          const callback = frames.get(id)
+          frames.delete(id)
+          callback?.(time)
+        }
+        await Promise.resolve()
+      })
+    }
+
     vi.mocked(sessionsApi.getTurnCheckpoints).mockResolvedValue({ checkpoints: [{
       target: { targetUserMessageId: 'user-virtual-file', userMessageIndex: 0, userMessageCount: 221 },
       code: { available: true, filesChanged: ['src/virtual.ts'], insertions: 1, deletions: 0 },
@@ -6344,7 +6364,7 @@ describe('MessageList nested tool calls', () => {
     const scrollArea = container.querySelector<HTMLElement>('.chat-scroll-area')!
     Object.defineProperty(scrollArea, 'clientHeight', { configurable: true, value: 500 })
     Object.defineProperty(scrollArea, 'scrollHeight', { configurable: true, value: 222 * 112 })
-    await waitForProgrammaticScrollReset()
+    await advanceFrame(0)
     scrollArea.scrollTop = 0
     fireEvent.scroll(scrollArea)
     fireEvent.click(await screen.findByRole('button', { name: 'Show 1 changed files' }))
@@ -6353,15 +6373,19 @@ describe('MessageList nested tool calls', () => {
     await waitFor(() => expect(useWorkspaceStore.getState().getSession(ACTIVE_TAB).origin)
       .toEqual({ sourceTurnKey: 'assistant-virtual-file', sourceElementId: opener.id }))
 
-    await waitForProgrammaticScrollReset()
+    await advanceFrame(16)
     scrollArea.scrollTop = 222 * 112 - 500
     fireEvent.scroll(scrollArea)
     await waitFor(() => expect(container.querySelector('[data-chat-render-item-key="assistant-virtual-file"]')).toBeNull())
     act(() => useWorkspaceStore.getState().setLayout(ACTIVE_TAB, 'hidden'))
 
-    const remountedOpener = await screen.findByRole('button', { name: 'Open src/virtual.ts in workspace' })
+    // The first frame remounts the virtual row; the next frame restores focus.
+    // Flush React between frames instead of racing real rAF against role queries.
+    await advanceFrame(32)
+    const remountedOpener = screen.getByRole('button', { name: 'Open src/virtual.ts in workspace' })
     expect(remountedOpener).not.toBe(opener)
-    await waitFor(() => expect(document.activeElement).toBe(remountedOpener))
+    await advanceFrame(48)
+    expect(document.activeElement).toBe(remountedOpener)
     expect(screen.getByRole('button', { name: 'Hide changed files' }).getAttribute('aria-expanded')).toBe('true')
     expect(useWorkspaceStore.getState().getSession(ACTIVE_TAB).origin).toBeNull()
   })
