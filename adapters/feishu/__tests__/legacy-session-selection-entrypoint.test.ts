@@ -187,6 +187,44 @@ async function send(platform: Platform, text: string, options: { unauthorized?: 
 
 for (const platform of platforms) {
   describe(`${platform} actual module session selection`, () => {
+    it('keeps the original session and project after reconnect timeout and resumes it on retry', async () => {
+      const adapter = adapterFor(platform)
+      const chatId = chatFor(platform)
+      const originalProject = path.join(temporaryRoot, `${platform}-original`)
+      fs.mkdirSync(originalProject)
+      adapter.bridge.resetSession(chatId)
+      adapter.clearTransientChatState(chatId)
+      adapter.sessionStore.set(chatId, 'original-session', originalProject)
+      const originalBinding = adapter.sessionStore.get(chatId)
+      const creationsBefore = newSessionCount
+      const failedPrompt = `${platform}: Continue after reconnect`
+      const failedOpen = spyOn(adapter.bridge, 'waitForOpen').mockImplementationOnce(async () => {
+        adapter.bridge.resetSession(chatId)
+        return false
+      })
+      const sendSpy = spyOn(adapter.bridge, 'sendUserMessage')
+      try {
+        await send(platform, failedPrompt)
+        expect(adapter.sessionStore.get(chatId)).toEqual(originalBinding)
+        expect(newSessionCount).toBe(creationsBefore)
+        expect(sentPrompts.some((prompt) => prompt.content === failedPrompt)).toBe(false)
+        expect(sendSpy).not.toHaveBeenCalled()
+        expect(notices.at(-1)).toContain('已保留会话和工作目录')
+        expect(notices.at(-1)).not.toContain('/new')
+
+        await send(platform, 'Retry the original conversation')
+        expect(adapter.bridge.getSessionId(chatId)).toBe('original-session')
+        expect(adapter.sessionStore.get(chatId)).toEqual(originalBinding)
+        expect(newSessionCount).toBe(creationsBefore)
+        expect(sendSpy).toHaveBeenCalledWith(chatId, 'Retry the original conversation', undefined)
+      } finally {
+        failedOpen.mockRestore()
+        sendSpy.mockRestore()
+        adapter.bridge.resetSession(chatId)
+        adapter.clearTransientChatState(chatId)
+      }
+    })
+
     it('restores original history and honors the real initial active-turn snapshot', async () => {
       const adapter = adapterFor(platform)
       const chatId = chatFor(platform)
