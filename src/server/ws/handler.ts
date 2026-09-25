@@ -1,3 +1,4 @@
+import { getSideChat, isSideChatId } from '../services/sideChatRegistry.js'
 /**
  * WebSocket connection handler
  *
@@ -1643,6 +1644,11 @@ async function handlePlanApprovalWithRuntimeOverride(
     return
   }
 
+  if (isSideChatId(sessionId) && (currentProviderId !== nextOverride.providerId || (nextOverride.effort !== undefined && nextOverride.effort !== currentEffort))) {
+    sendMessage(ws, { type: 'error', code: 'SIDE_CHAT_RUNTIME_RESTART_UNAVAILABLE', message: 'Open a new side chat to change provider or reasoning effort.' })
+    return
+  }
+
   const canSwitchInProcess =
     conversationService.hasSession(sessionId) &&
     currentProviderId === nextOverride.providerId &&
@@ -1811,7 +1817,7 @@ async function applyPermissionModeToActiveSession(
     }
     await commitConfirmedPermissionMode(sessionId, mode)
   } catch (err) {
-    if (shouldFallbackToPermissionRestart(mode, err)) {
+    if (!isSideChatId(sessionId) && shouldFallbackToPermissionRestart(mode, err)) {
       await restartSessionWithPermissionMode(ws, sessionId, mode)
       return
     }
@@ -1891,6 +1897,21 @@ async function handleSetRuntimeConfig(
     }
 
     const nextOverride = normalized.override
+    const side = getSideChat(sessionId)
+    if (side?.started) {
+      const current = runtimeOverrides.get(sessionId)
+      const provider = current?.providerId ?? side.launchInfo.runtimeProviderId ?? null
+      const effort = current?.effort ?? side.launchInfo.effortLevel
+      if (!conversationService.hasSession(sessionId) || provider !== nextOverride.providerId || (nextOverride.effort !== undefined && nextOverride.effort !== effort)) {
+        sendMessage(ws, { type: 'error', code: 'SIDE_CHAT_RUNTIME_RESTART_UNAVAILABLE', message: 'A temporary side chat cannot restart without losing its history. Open a new side chat to change provider or reasoning effort.' })
+        return
+      }
+      await conversationService.setModel(sessionId, nextOverride.modelId)
+      runtimeOverrides.set(sessionId, { ...nextOverride, ...(effort ? { effort } : {}) })
+      await persistSessionRuntimeConfig(sessionId, runtimeOverrides.get(sessionId)!)
+      broadcastAppliedRuntimeConfig(sessionId)
+      return
+    }
     const prevOverride = runtimeOverrides.get(sessionId)
     if (
       prevOverride &&

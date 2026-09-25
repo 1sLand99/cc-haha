@@ -1,3 +1,4 @@
+import { closeSideChatsForParent, getSideChat, isSideChatId, SIDE_CHAT_BOUNDARY } from './sideChatRegistry.js'
 /**
  * ConversationService — CLI subprocess manager
  *
@@ -513,6 +514,7 @@ export class ConversationService {
     options?: SessionStartOptions,
     repository?: PreparedSessionWorkspace['repository'],
   ): string[] {
+    const side = getSideChat(sessionId)
     const dangerousMode = process.env.CLAUDE_DANGEROUS_MODE === '1'
     const worktreeArgs =
       !shouldResume && repository?.worktree
@@ -537,7 +539,7 @@ export class ConversationService {
       // Desktop chat depends on partial assistant deltas; without this the
       // server only sees the completed assistant message at turn end.
       '--include-partial-messages',
-      ...(shouldResume ? ['--resume', sessionId] : ['--session-id', sessionId]),
+      ...(side ? ['--resume', side.resumePath, '--resume-session-at', side.resumeAt, '--fork-session', '--session-id', side.cliSessionId, '--no-session-persistence', '--append-system-prompt', SIDE_CHAT_BOUNDARY] : shouldResume ? ['--resume', sessionId] : ['--session-id', sessionId]),
       ...worktreeArgs,
       '--replay-user-messages',
       ...this.getRuntimeArgs(options),
@@ -559,10 +561,14 @@ export class ConversationService {
     }
     if (this.sessions.has(sessionId)) return
 
+    const side = getSideChat(sessionId)
+    if (isSideChatId(sessionId) && (!side || side.closed || side.started)) {
+      throw new ConversationStartupError('This temporary side chat has expired. Open a new side chat.', 'SESSION_DELETED')
+    }
     const launchInfo = await sessionService.getSessionLaunchInfo(sessionId)
     const shouldResume = !!launchInfo && launchInfo.transcriptMessageCount > 0
     const shouldReplacePlaceholder =
-      !!launchInfo && launchInfo.transcriptMessageCount === 0
+      !side && !!launchInfo && launchInfo.transcriptMessageCount === 0
     const shouldCreateWorktree =
       !!launchInfo && shouldCreateWorktreeForSessionLaunch(launchInfo)
     const hasMaterializedWorktree =
@@ -662,11 +668,18 @@ export class ConversationService {
       networkRuntimeMetadata,
       providerCapture,
     )
+    if (side) {
+      delete childEnv.CLAUDE_CODE_RESUME_INTERRUPTED_TURN
+      delete childEnv.CC_HAHA_TRACE_API_CALLS
+      delete childEnv.CLAUDE_CODE_DIAGNOSTICS_FILE
+    }
+    if (side?.closed) throw new ConversationStartupError('This temporary side chat has expired. Open a new side chat.', 'SESSION_DELETED')
     const usesOfficialOAuth = this.shouldMarkManagedOAuth(options?.providerId)
 
     let proc: ReturnType<typeof Bun.spawn>
     try {
       proc = Bun.spawn(args, buildConversationCliSpawnOptions(launchWorkDir, childEnv))
+      if (side) side.started = true
     } catch (spawnErr) {
       void diagnosticsService.recordEvent({
         type: 'cli_spawn_failed',
@@ -1624,6 +1637,7 @@ export class ConversationService {
   }
 
   markSessionDeleted(sessionId: string): void {
+    for (const childId of closeSideChatsForParent(sessionId)) this.stopSession(childId)
     this.deletedSessions.add(sessionId)
     this.stopSession(sessionId)
   }

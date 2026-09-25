@@ -44,6 +44,7 @@ export type AttachmentRef = {
   diffSide?: 'old' | 'new'
   hunkId?: string
   note?: string
+  referenceKind?: 'chat-selection'
   quote?: string
   selectionNumber?: number
 }
@@ -78,6 +79,7 @@ export type UIAttachment = {
   diffSide?: 'old' | 'new'
   hunkId?: string
   note?: string
+  referenceKind?: 'chat-selection'
   quote?: string
   selectionNumber?: number
 }

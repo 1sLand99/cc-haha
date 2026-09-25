@@ -10,6 +10,7 @@ import {
   hasVisibleSessionActivity,
 } from '../components/activity/sessionActivityModel'
 import { useSessionRuntimeStore } from './sessionRuntimeStore'
+import { registerSideChatSession, unregisterSideChatSession } from '../lib/sideChatSessions'
 
 const {
   sendMock,
@@ -482,6 +483,34 @@ describe('chatStore background agent activity interleaving', () => {
 })
 
 describe('chatStore history mapping', () => {
+  it('never replaces temporary side-chat messages with empty durable history', async () => {
+    const id = 'side-history-test'
+    registerSideChatSession(id, 'parent-history-test')
+    const messages: UIMessage[] = [{ id: 'side-answer', type: 'assistant_text', content: 'Retain this answer', timestamp: 1 }]
+    useChatStore.setState({ sessions: { [id]: { ...useChatStore.getState().getSession(id), messages } } })
+    await useChatStore.getState().loadHistory(id)
+    await useChatStore.getState().reloadHistory(id)
+    expect(sessionsApi.getFullHistory).not.toHaveBeenCalled()
+    expect(useChatStore.getState().sessions[id]?.messages).toEqual(messages)
+    expect(useChatStore.getState().sessions[id]?.historyStatus).toBe('ready')
+    unregisterSideChatSession(id)
+  })
+  it('loads side-chat skills without loading durable history and isolates permission acknowledgements', async () => {
+    const id = 'side-skills-test'
+    registerSideChatSession(id, 'main-skills-test')
+    const commands = [{ name: 'fixture-skill', description: 'A skill in this project' }]
+    vi.mocked(sessionsApi.getSlashCommands).mockResolvedValueOnce({ commands })
+    useChatStore.getState().connectToSession(id, { prewarm: false, applyRuntimeSelection: false })
+    await Promise.resolve()
+    expect(sessionsApi.getSlashCommands).toHaveBeenCalledWith(id)
+    expect(sessionsApi.getFullHistory).not.toHaveBeenCalled()
+    expect(useChatStore.getState().sessions[id]?.slashCommands).toEqual(commands)
+    useChatStore.getState().handleServerMessage(id, { type: 'permission_mode_changed', mode: 'plan' })
+    expect(useChatStore.getState().sessions[id]?.permissionMode).toBe('plan')
+    expect(useChatStore.getState().sessions['main-skills-test']).toBeUndefined()
+    useChatStore.getState().disconnectSession(id)
+    unregisterSideChatSession(id)
+  })
   beforeEach(() => {
     providerStoreSnapshot.providers = []
     providerStoreSnapshot.activeId = null
@@ -500,6 +529,7 @@ describe('chatStore history mapping', () => {
     updateTabStatusMock.mockReset()
     updateSessionTitleMock.mockReset()
     updateSessionMessageCountMock.mockReset()
+    updateSessionPermissionModeMock.mockReset()
     connectionStateHandlers.clear()
     vi.mocked(sessionsApi.getFullHistory).mockReset()
     vi.mocked(sessionsApi.getFullHistory).mockResolvedValue({ messages: [] })

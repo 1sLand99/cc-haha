@@ -1,4 +1,5 @@
 import { isInlineImagePath } from '@/lib/attachmentImages'
+import { isSideChatSession } from '@/lib/sideChatSessions'
 import { CHAT_HISTORY_CACHE_BYTES, historyCacheBytes } from '../lib/chatHistoryCache'
 import { normalizeSessionReferences, splitSessionReferenceContext } from '@/lib/sessionReferences'
 import { create } from 'zustand'
@@ -125,6 +126,7 @@ type PendingComputerUsePermissions = Record<string, PendingComputerUsePermission
 export type PerSessionState = {
   messages: UIMessage[]
   chatState: ChatState
+  permissionMode?: PermissionMode
   /**
    * The first prompt is waiting for an empty placeholder session to be
    * replaced with its selected branch/worktree session. This is UI-only turn
@@ -2951,6 +2953,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
   getSession: (sessionId) => get().sessions[sessionId] ?? createDefaultSessionState(),
 
   connectToSession: (sessionId, options) => {
+    if (isSideChatSession(sessionId)) options = { ...options, minimalBootstrap: true }
     if (!options?.minimalBootstrap) {
       void useCLITaskStore.getState().fetchSessionTasks(sessionId)
     }
@@ -2998,7 +3001,8 @@ export const useChatStore = create<ChatStore>((setState, get) => {
           // A new connection lifecycle may have durable transcript rows that
           // were persisted while this renderer was offline. Keep the visible
           // cache, but require one lossless durable backfill for this lifecycle.
-          historyHydrated: false,
+          historyHydrated: isSideChatSession(sessionId),
+          ...(isSideChatSession(sessionId) ? { historyStatus: 'ready' as const } : {}),
           awaitingReconnectSync: false,
           preHydrationSocketGapPending: false,
           historyBootstrapDisabled: options?.minimalBootstrap === true,
@@ -3173,8 +3177,8 @@ export const useChatStore = create<ChatStore>((setState, get) => {
       wsManager.send(sessionId, { type: 'prewarm_session' })
     }
 
-    if (!options?.minimalBootstrap) {
-      get().loadHistory(sessionId)
+    if (!options?.minimalBootstrap || isSideChatSession(sessionId)) {
+      if (!options?.minimalBootstrap) get().loadHistory(sessionId)
       sessionsApi.getSlashCommands(sessionId)
         .then(({ commands }) => {
           if (get().sessions[sessionId]) {
@@ -3238,6 +3242,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
             hunkId: a.hunkId,
             note: a.note,
             quote: a.quote,
+            referenceKind: a.referenceKind,
             selectionNumber: a.selectionNumber,
           }))
         : undefined
@@ -3545,6 +3550,10 @@ export const useChatStore = create<ChatStore>((setState, get) => {
   },
 
   loadHistory: async (sessionId, options) => {
+    if (isSideChatSession(sessionId)) {
+      set((state) => ({ sessions: updateSessionIn(state.sessions, sessionId, () => ({ historyStatus: 'ready', historyHydrated: true })) }))
+      return
+    }
     if (historyPageControllers.has(sessionId)) {
       historyPageControllers.get(sessionId)?.abort()
       historyPageControllers.delete(sessionId)
@@ -4013,10 +4022,12 @@ export const useChatStore = create<ChatStore>((setState, get) => {
   },
 
   loadOlderHistory: async (sessionId) => {
+    if (isSideChatSession(sessionId)) return
     await loadOlderHistoryPage(sessionId, get, set)
   },
 
   reloadHistory: async (sessionId, guard) => {
+    if (isSideChatSession(sessionId)) return
     if (historyPageControllers.has(sessionId)) {
       historyPageControllers.get(sessionId)?.abort()
       historyPageControllers.delete(sessionId)
@@ -4845,6 +4856,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
         // 选择器拿到无法渲染的值。
         const KNOWN_MODES: PermissionMode[] = ['default', 'acceptEdits', 'auto', 'plan', 'bypassPermissions', 'dontAsk']
         if (KNOWN_MODES.includes(msg.mode)) {
+          update(() => ({ permissionMode: msg.mode }))
           useSessionStore.getState().updateSessionPermissionMode(sessionId, msg.mode)
         }
         break
@@ -7563,6 +7575,7 @@ function mapQueuedDisplayAttachments(attachments?: AttachmentRef[]): UIAttachmen
     hunkId: attachment.hunkId,
     note: attachment.note,
     quote: attachment.quote,
+    referenceKind: attachment.referenceKind,
     selectionNumber: attachment.selectionNumber,
   }))
 }

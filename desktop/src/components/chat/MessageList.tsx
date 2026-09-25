@@ -1,6 +1,7 @@
+import { openSideChat } from '@/lib/workspace/openSideChat'
 import { useRef, useEffect, useMemo, memo, useState, useCallback, useDeferredValue, useLayoutEffect, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal, flushSync } from 'react-dom'
-import { ArrowDown, BookMarked, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleStop, FileStack, LoaderCircle, MessageCircle, Settings, Target, Undo2, XCircle } from 'lucide-react'
+import { ArrowDown, BookMarked, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleStop, FileStack, LoaderCircle, Settings, Target, Undo2, XCircle } from 'lucide-react'
 import { ApiError } from '../../api/client'
 import { sessionsApi, type SessionRewindMode, type SessionTurnCheckpoint } from '../../api/sessions'
 import { listPendingPermissions, useChatStore } from '../../stores/chatStore'
@@ -142,7 +143,7 @@ type SelectionPointer = {
 }
 
 const CHAT_SELECTION_MENU_OFFSET = 10
-const CHAT_SELECTION_MENU_WIDTH = 158
+const CHAT_SELECTION_MENU_WIDTH = 360
 const CHAT_SELECTION_MENU_HEIGHT = 44
 
 function getElementForNode(node: Node | null): Element | null {
@@ -207,30 +208,24 @@ function isKeyboardSelectionKey(event: KeyboardEvent) {
 function ChatSelectionMenu({
   selection,
   onAdd,
+  onSideChat,
   popoverRef,
 }: {
   selection: ChatSelectionState | null
   onAdd: () => void
-  popoverRef: { current: HTMLButtonElement | null }
+  onSideChat: () => void
+  popoverRef: { current: HTMLDivElement | null }
 }) {
   const t = useTranslation()
   if (!selection) return null
-
   return createPortal(
-    <button
-      ref={popoverRef}
-      type="button"
-      onMouseDown={(event) => {
-        if (event.button === 0 && !event.ctrlKey) event.preventDefault()
-      }}
-      onClick={onAdd}
-      className="fixed z-[var(--z-popover)] inline-flex h-11 items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] px-5 text-[15px] font-semibold text-[var(--color-text-primary)] shadow-[var(--shadow-overlay)] transition-colors hover:bg-[var(--color-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]"
-      style={{ left: selection.x, top: selection.y }}
-    >
-      <MessageCircle size={21} strokeWidth={2.15} className="shrink-0 text-[var(--color-text-primary)]" aria-hidden="true" />
-      <span>{t('chat.addSelectionToChat')}</span>
-    </button>,
-    document.body,
+    <div ref={popoverRef} role="toolbar" aria-label={t('chat.selectionActions')}
+      onMouseDown={event => { if (event.button === 0 && !event.ctrlKey) event.preventDefault() }}
+      className="fixed z-[var(--z-popover)] inline-flex max-w-[calc(100vw-24px)] items-center rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)] p-1 shadow-[var(--shadow-overlay)]"
+      style={{ left: selection.x, top: selection.y }}>
+      <Button variant="ghost" onClick={onAdd}>{t('chat.addSelectionToChat')}</Button>
+      <Button variant="ghost" onClick={onSideChat}>{t('chat.askSelectionInSideChat')}</Button>
+    </div>, document.body,
   )
 }
 
@@ -493,7 +488,7 @@ function SelectableChatMessage({
   children: ReactNode
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
-  const selectionMenuRef = useRef<HTMLButtonElement>(null)
+  const selectionMenuRef = useRef<HTMLDivElement>(null)
   const lastSelectionPointerRef = useRef<SelectionPointer | null>(null)
   const selectionGestureEpochRef = useRef(0)
   const selectionStartedInsideRef = useRef(false)
@@ -637,6 +632,16 @@ function SelectableChatMessage({
     clearWindowSelection()
   }, [addReference, messageId, role, selectionMenu, sessionId, sourceName])
 
+  const askSelectionInSideChat = useCallback(() => {
+    if (!sessionId || !selectionMenu) return
+    void openSideChat(sessionId, { reference: {
+      kind: 'chat-selection', path: `chat://${role}/${messageId}`,
+      name: sourceName, quote: selectionMenu.text, sourceRole: role, messageId,
+    } })
+    setSelectionMenu(null)
+    clearWindowSelection()
+  }, [messageId, role, selectionMenu, sessionId, sourceName])
+
   return (
     <div
       ref={rootRef}
@@ -646,7 +651,7 @@ function SelectableChatMessage({
       }}
     >
       {children}
-      <ChatSelectionMenu selection={selectionMenu} onAdd={addCurrentSelectionToChat} popoverRef={selectionMenuRef} />
+      <ChatSelectionMenu selection={selectionMenu} onAdd={addCurrentSelectionToChat} onSideChat={askSelectionInSideChat} popoverRef={selectionMenuRef} />
     </div>
   )
 }

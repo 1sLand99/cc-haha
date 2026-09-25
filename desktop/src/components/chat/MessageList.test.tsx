@@ -1,3 +1,4 @@
+import { openSideChat } from '@/lib/workspace/openSideChat'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import {
@@ -39,6 +40,8 @@ import type { MessageEntry } from '../../types/session'
 import type { PerSessionState } from '../../stores/chatStore'
 import { FindInPageModal } from '../search/FindInPageModal'
 import { getConversationFindController } from '../search/conversationFindBridge'
+
+vi.mock('@/lib/workspace/openSideChat', () => ({ openSideChat: vi.fn(async () => 'tab-side') }))
 
 const ACTIVE_TAB = 'active-tab'
 
@@ -3595,6 +3598,21 @@ describe('MessageList nested tool calls', () => {
     expect(document.activeElement).not.toBe(copyButton)
   })
 
+  it('opens a side chat with a selected quote without adding it to the main composer', async () => {
+    useChatStore.setState({ sessions: { [ACTIVE_TAB]: makeSessionState({ messages: [{
+      id: 'assistant-side', type: 'assistant_text', content: 'Explain this isolated selection.', timestamp: 1,
+    }] }) } })
+    render(<MessageList />)
+    await selectMessageText(screen.getByText('Explain this isolated selection.'), 'isolated selection')
+    fireEvent.click(screen.getByRole('button', { name: 'Ask in side chat' }))
+    expect(openSideChat).toHaveBeenCalledWith(ACTIVE_TAB, { reference: {
+      kind: 'chat-selection', path: 'chat://assistant/assistant-side', name: 'Assistant message',
+      quote: 'isolated selection', sourceRole: 'assistant', messageId: 'assistant-side',
+    } })
+    expect(useWorkspaceChatContextStore.getState().referencesBySession[ACTIVE_TAB] ?? []).toEqual([])
+    expect(window.getSelection()?.toString()).toBe('')
+  })
+
   it('adds selected user message text to the composer context', async () => {
     useChatStore.setState({
       sessions: {
@@ -3615,8 +3633,8 @@ describe('MessageList nested tool calls', () => {
     await selectMessageText(userText, 'workspace selection behavior')
     const floatingAddButton = screen.getByRole('button', { name: 'Add to chat' })
 
-    expect(floatingAddButton.style.left).toBe('141px')
-    expect(floatingAddButton.style.top).toBe('26px')
+    expect((floatingAddButton.closest('[role=toolbar]') as HTMLElement).style.left).toBe('40px')
+    expect((floatingAddButton.closest('[role=toolbar]') as HTMLElement).style.top).toBe('26px')
 
     fireEvent.click(floatingAddButton)
 
@@ -3801,8 +3819,8 @@ describe('MessageList nested tool calls', () => {
     })
     const floatingAddButton = screen.getByRole('button', { name: 'Add to chat' })
 
-    expect(floatingAddButton.style.left).toBe('290px')
-    expect(floatingAddButton.style.top).toBe('12px')
+    expect((floatingAddButton.closest('[role=toolbar]') as HTMLElement).style.left).toBe('290px')
+    expect((floatingAddButton.closest('[role=toolbar]') as HTMLElement).style.top).toBe('12px')
   })
 
   it('adds multi-line assistant reply selections across markdown blocks to the composer context', async () => {
@@ -3838,8 +3856,8 @@ describe('MessageList nested tool calls', () => {
     )
     const floatingAddButton = screen.getByRole('button', { name: 'Add to chat' })
 
-    expect(floatingAddButton.style.left).toBe('530px')
-    expect(floatingAddButton.style.top).toBe('129px')
+    expect((floatingAddButton.closest('[role=toolbar]') as HTMLElement).style.left).toBe('530px')
+    expect((floatingAddButton.closest('[role=toolbar]') as HTMLElement).style.top).toBe('129px')
 
     fireEvent.click(floatingAddButton)
 

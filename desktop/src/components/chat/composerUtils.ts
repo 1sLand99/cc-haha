@@ -32,6 +32,7 @@ const SLASH_CMD_DESCRIPTION_KEYS: Record<string, TranslationKey> = {
   config: 'slashCmd.config.description',
   login: 'slashCmd.login.description',
   logout: 'slashCmd.logout.description',
+  btw: 'sideQuestion.commandDescription',
   model: 'slashCmd.model.description',
   permissions: 'slashCmd.permissions.description',
   'terminal-setup': 'slashCmd.terminal-setup.description',
@@ -120,6 +121,7 @@ export const FALLBACK_SLASH_COMMANDS: SlashCommandOption[] = [
   { name: 'clear', description: 'Clear conversation history and free up context' },
   { name: 'goal', description: 'Set a completion goal', argumentHint: '[<condition> | clear]' },
   { name: 'review', description: 'Review code changes' },
+  { name: 'btw', description: 'Ask a side question without interrupting this task', argumentHint: '[question]' },
   { name: 'init', description: 'Initialize project CLAUDE.md' },
   { name: 'config', description: 'Open configuration' },
   { name: 'model', description: 'Switch AI model' },
@@ -430,4 +432,9 @@ export function insertSlashTrigger(
     value: `${before}${token}${after}`,
     cursorPos: before.length + token.length,
   }
+}
+
+export function parseSideQuestionCommand(input: string): string | null {
+  const match = /^\/btw(?:\s+([\s\S]*))?$/i.exec(input.trim())
+  return match ? (match[1] ?? '').trim() : null
 }

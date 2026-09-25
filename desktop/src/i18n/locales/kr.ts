@@ -1,6 +1,29 @@
 import type { TranslationKey } from './en'
 
 export const kr: Record<TranslationKey, string> = {
+  'sideChat.closeTitle': '사이드 채팅을 닫을까요?',
+  'sideChat.closeBody': '이 임시 대화가 삭제되고 진행 중인 응답이 중지됩니다。',
+  'sideChat.emptyDescription': '이 임시 대화는 탭을 닫거나 앱을 종료하면 지워집니다.',
+  'chat.selectedText': '선택한 텍스트',
+  'sideChat.title': '사이드 채팅',
+  'chat.askSelectionInSideChat': '사이드 채팅에서 질문',
+  'chat.selectionActions': '선택한 텍스트 작업',
+  "sideQuestion.title": "별도 질문",
+  "sideQuestion.clear": "질문 기록 지우기",
+  "sideQuestion.close": "별도 질문 닫기",
+  "sideQuestion.hint": "기본 작업을 중단하지 않고 현재 대화에 대해 질문하세요. 답변은 앱을 종료할 때까지 보관됩니다.",
+  "sideQuestion.empty": "현재 대화에 대해 궁금한 점을 물어보세요.",
+  "sideQuestion.thinking": "생각 중…",
+  "sideQuestion.cancelled": "취소됨",
+  "sideQuestion.failed": "이 질문에 답변하지 못했습니다.",
+  "sideQuestion.copy": "답변 복사",
+  "sideQuestion.copied": "복사됨",
+  "sideQuestion.input": "질문",
+  "sideQuestion.placeholder": "질문 또는 추가 질문 입력…",
+  "sideQuestion.cancel": "질문 취소",
+  "sideQuestion.send": "질문하기",
+  "sideQuestion.commandDescription": "작업을 중단하지 않고 별도로 질문하기",
+
 
 
   "chat.sessionNoProject": "프로젝트 없음",

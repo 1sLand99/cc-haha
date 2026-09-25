@@ -1,8 +1,11 @@
+import { openSideChat } from '@/lib/workspace/openSideChat'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { act } from 'react'
 import type { TeamWorkbenchSessionTimeline, TeamWorkbenchSnapshot } from '../types/team'
+
+vi.mock('@/lib/workspace/openSideChat', () => ({ openSideChat: vi.fn(async () => 'tab-side') }))
 
 const viewportMocks = vi.hoisted(() => ({
   isMobile: false,
@@ -107,6 +110,7 @@ import {
 } from '../stores/workspaceStore'
 
 beforeEach(() => {
+  vi.mocked(openSideChat).mockClear()
   sessionApiMocks.getGitInfo.mockReset()
   sessionApiMocks.getGitInfo.mockResolvedValue({
     branch: 'main',
@@ -141,6 +145,38 @@ afterEach(() => {
 })
 
 describe('ActiveSession task polling', () => {
+  it('opens side chat through the workspace without replacing the main surface', () => {
+    const id = 'side-question-session'
+    useSettingsStore.setState({ locale: 'en' })
+    useTabStore.setState({ activeTabId: id, tabs: [{ sessionId: id, title: 'Main', type: 'session', status: 'idle' }] })
+    useSessionStore.setState({ sessions: [{ id, title: 'Main', messageCount: 1, createdAt: '', modifiedAt: '', projectPath: '/repo', workDir: '/repo', workDirExists: true }] })
+    useChatStore.setState({ sessions: { [id]: { ...createDefaultSessionState(), connectionState: 'connected', historyStatus: 'ready', historyHydrated: true, messages: [{ id: 'm', type: 'assistant_text', content: 'main', timestamp: 1 }] } } })
+    useWorkspaceStore.getState().setLayout(id, 'split')
+    render(<ActiveSession sessionId={id} />)
+    const workbench = screen.getByTestId('workbench-panel')
+    const main = screen.getByTestId('message-list')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Side chat' })[0]!)
+    expect(openSideChat).toHaveBeenCalledWith(id)
+    expect(screen.getByTestId('workbench-panel')).toBe(workbench)
+    expect(workbench).not.toHaveClass('hidden')
+    expect(screen.getByTestId('message-list')).toBe(main)
+  })
+
+  it('can hide a mobile side chat without destroying its temporary tab', () => {
+    viewportMocks.isMobile = true
+    const id = 'mobile-side-parent'
+    useTabStore.setState({ activeTabId: id, tabs: [{ sessionId: id, title: 'Main', type: 'session', status: 'idle' }] })
+    useSessionStore.setState({ sessions: [{ id, title: 'Main', messageCount: 1, createdAt: '', modifiedAt: '', projectPath: '/repo', workDir: '/repo', workDirExists: true }] })
+    useChatStore.setState({ sessions: { [id]: { ...createDefaultSessionState(), connectionState: 'connected', historyStatus: 'ready', historyHydrated: true } } })
+    const tabId = useWorkspaceStore.getState().openTarget(id, { kind: 'side-chat', sideChatId: 'side-mobile' })!
+    render(<ActiveSession sessionId={id} />)
+    expect(screen.getByTestId('workbench-panel')).toHaveAttribute('data-workspace-layout', 'full')
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Workspace' }))
+    expect(screen.queryByTestId('workbench-panel')).not.toBeInTheDocument()
+    expect(useWorkspaceStore.getState().getTab(id, tabId)).not.toBeNull()
+    expect(screen.getByTestId('active-session-chat-column')).not.toHaveClass('hidden')
+  })
+
   it('keeps the same message list bound to its session while settings is selected', () => {
     const sessionId = 'retained-session'
     useSessionStore.setState({

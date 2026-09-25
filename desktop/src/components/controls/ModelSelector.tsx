@@ -67,6 +67,7 @@ type Props = {
   runtimeSelection?: RuntimeSelection
   onRuntimeSelectionChange?: (selection: RuntimeSelection) => void
   runtimeKey?: string
+  lockedProviderId?: string | null
   disabled?: boolean
   compact?: boolean
   fluid?: boolean
@@ -249,6 +250,7 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   runtimeSelection: controlledRuntimeSelection,
   onRuntimeSelectionChange,
   runtimeKey,
+  lockedProviderId,
   disabled = false,
   compact = false,
   fluid = false,
@@ -420,16 +422,17 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase()
   const selectableModels = isControlled && models ? models : availableModels
   const filteredProviderChoices = useMemo(() => {
-    if (!normalizedSearchQuery) return providerChoices
+    const choices = lockedProviderId === undefined ? providerChoices : providerChoices.filter(choice => choice.providerId === lockedProviderId)
+    if (!normalizedSearchQuery) return choices
 
-    return providerChoices.flatMap((choice) => {
+    return choices.flatMap((choice) => {
       const providerMatches = choice.providerName.toLocaleLowerCase().includes(normalizedSearchQuery)
       const models = providerMatches
         ? choice.models
         : choice.models.filter(model => modelMatchesSearch(model, normalizedSearchQuery))
       return models.length > 0 ? [{ ...choice, models }] : []
     })
-  }, [normalizedSearchQuery, providerChoices])
+  }, [normalizedSearchQuery, providerChoices, lockedProviderId])
   const filteredAvailableModels = useMemo(
     () => normalizedSearchQuery
       ? selectableModels.filter(model => modelMatchesSearch(model, normalizedSearchQuery))
@@ -584,12 +587,14 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   }), [openSelector])
 
   const handleRuntimeSelect = (selection: RuntimeSelection) => {
+    if (lockedProviderId !== undefined && selection.providerId !== lockedProviderId) return
     const provider = providers.find((entry) => entry.id === selection.providerId)
     const normalizedSelection = normalizeRuntimeSelection(
       selection,
       provider?.apiFormat,
       provider ? getBundledPresetReasoningProviderKind(provider.presetId) : undefined,
     )
+    if (lockedProviderId !== undefined) normalizedSelection.effortLevel = activeRuntimeSelection?.effortLevel
     onRuntimeSelectionChange?.(normalizedSelection)
     if (runtimeKey) {
       useSessionRuntimeStore.getState().setSelection(runtimeKey, normalizedSelection)
@@ -601,7 +606,7 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
   }
 
   const handleRuntimeEffortSelect = (level: ReasoningEffortLevel) => {
-    if (!activeRuntimeSelection) return
+    if (!activeRuntimeSelection || lockedProviderId !== undefined) return
     handleRuntimeSelect({
       ...activeRuntimeSelection,
       effortLevel: level,
@@ -889,7 +894,7 @@ export const ModelSelector = forwardRef<ModelSelectorHandle, Props>(function Mod
           <button
             ref={effortButtonRef}
             type="button"
-            disabled={disabled}
+            disabled={disabled || lockedProviderId !== undefined}
             aria-label={`${t('model.effort')}: ${effortLabels[selectedRuntimeEffort]}`}
             aria-expanded={effortOpen}
             onClick={() => {

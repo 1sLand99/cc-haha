@@ -1,3 +1,6 @@
+import { useSideChatStore } from '@/stores/sideChatStore'
+import { openSideChat } from '@/lib/workspace/openSideChat'
+import { parseSideQuestionCommand } from './composerUtils'
 import { getSessionReferences } from '@/lib/composerMentions'
 import { isComposerReferenceVisible, isComposerSlashCommandVisible } from '@/lib/composerCapabilityVisibility'
 import { useState, useRef, useEffect, useCallback, useMemo, useId } from 'react'
@@ -111,6 +114,7 @@ function workspaceReferenceToAttachment(reference: WorkspaceChatReference): Atta
   return {
     id: reference.id,
     name: reference.name,
+    referenceKind: reference.kind === 'chat-selection' ? 'chat-selection' : undefined,
     type: 'file',
     path: reference.kind === 'chat-selection' ? undefined : reference.path,
     isDirectory: reference.isDirectory,
@@ -239,7 +243,9 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
     ? `${runtimeSelection.providerId ?? 'official'}:${runtimeSelection.modelId}:${runtimeSelection.effortLevel ?? 'auto'}`
     : undefined
   const runtimeModelLabel = runtimeSelection?.modelId ?? currentModel?.name ?? currentModel?.id
-  const activeSession = useSessionStore((state) => activeTabId ? state.sessions.find((session) => session.id === activeTabId) ?? null : null)
+  const sideChat = useSideChatStore(state => activeTabId ? state.entries[activeTabId] : undefined)
+  const listedSession = useSessionStore((state) => activeTabId ? state.sessions.find((session) => session.id === activeTabId) ?? null : null)
+  const activeSession = listedSession ?? (sideChat ? { ...sideChat, id: sideChat.sessionId, workDirExists: true, workspaceState: 'available' as const, messageCount: 1, projectRoot: sideChat.workDir } : null)
   const loadedMessageCount = sessionState?.messages?.length ?? 0
   const messageCount = Math.max(loadedMessageCount, activeSession?.messageCount ?? 0)
   const memberInfo = useTeamStore((s) => activeTabId ? s.getMemberBySessionId(activeTabId) : null)
@@ -297,7 +303,7 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
   const hasWorkspaceReferences = !isMemberSession && workspaceReferences.length > 0
   const isHeroComposer = variant === 'hero' && !isMemberSession && !compact
   const resolvedWorkDir = activeSession?.workDir || gitInfo?.workDir || undefined
-  const showLaunchControls = !isMemberSession && messageCount === 0
+  const showLaunchControls = !isMemberSession && !sideChat && messageCount === 0
   // Two different questions, and they used to share one answer.
   //
   // `useCompactChrome` is about context: the shell's padding, its top divider
@@ -412,7 +418,7 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
 
   useEffect(() => {
     if (visible) composerRef.current?.focus()
-  }, [isActive, visible])
+  }, [activeTabId, visible])
 
   useEffect(() => {
     if (visible) return
@@ -791,6 +797,17 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
     const text = input.trim()
     if ((!text && ((!attachments.length && !hasWorkspaceReferences) || isMemberSession)) || isWorkspaceMissing) return
 
+    // Immediate local command: never enter the main turn, launch flow or queue.
+    const sideQuestion = !isMemberSession ? parseSideQuestionCommand(text) : null
+    if (sideQuestion !== null && activeTabId) {
+      void openSideChat(sideChat?.parentSessionId ?? activeTabId, { question: sideQuestion || undefined, submit: true })
+      setComposerInput('', [])
+      setSlashMenuOpen(false)
+      setFileSearchOpen(false)
+      setPlusMenuOpen(false)
+      return
+    }
+
     if (pendingSlashUiAction?.type === 'panel') {
       setLocalSlashPanel(pendingSlashUiAction.command as LocalSlashCommandName)
       setComposerInput('', [])
@@ -860,9 +877,10 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
       }))
     const visibleAttachmentPayload: AttachmentRef[] = [
       ...uploadAttachmentPayload,
-      ...workspaceReferences.map((reference) => ({
+      ...workspaceReferences.map((reference): AttachmentRef => ({
         type: 'file' as const,
         name: reference.name,
+        referenceKind: reference.kind === 'chat-selection' ? 'chat-selection' : undefined,
         path: reference.kind === 'chat-selection' ? undefined : reference.path,
         isDirectory: reference.isDirectory,
         lineStart: reference.lineStart,
@@ -1035,7 +1053,7 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
     void filesToComposerAttachments(files)
       .then((nextAttachments) => {
         if (pasteGeneration !== pasteGenerationRef.current) return
-        if (pastedSessionId !== useTabStore.getState().activeTabId) return
+        if (pastedSessionId !== previousActiveTabIdRef.current) return
         if (nextAttachments.length === 0) return
         setComposerAttachments((prev) => [...prev, ...nextAttachments])
       })
@@ -1046,8 +1064,10 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
   }
 
   const appendFiles = useCallback((files: FileList | File[]) => {
+    const generation = pasteGenerationRef.current
     void filesToComposerAttachments(files)
       .then((nextAttachments) => {
+        if (generation !== pasteGenerationRef.current) return
         if (nextAttachments.length === 0) return
         setComposerAttachments((prev) => [...prev, ...nextAttachments])
       })
@@ -1077,8 +1097,10 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
       return
     }
 
+    const generation = pasteGenerationRef.current
     void selectNativeFileAttachments()
       .then((nativeAttachments) => {
+        if (generation !== pasteGenerationRef.current) return
         if (nativeAttachments) {
           if (nativeAttachments.length > 0) {
             setComposerAttachments((prev) => [...prev, ...nativeAttachments])
@@ -1567,7 +1589,7 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
                   </div>
 
                   <div className="shrink-0">
-                    <PermissionModeSelector compact={useCompactControls} />
+                    <PermissionModeSelector sessionId={activeTabId ?? undefined} workDir={resolvedWorkDir} compact={useCompactControls} />
                   </div>
 
                   {showLocationInToolbar && (
@@ -1625,6 +1647,7 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
                 <ModelSelector
                   ref={modelSelectorRef}
                   runtimeKey={activeTabId}
+                  lockedProviderId={sideChat ? runtimeSelection?.providerId ?? null : undefined}
                   disabled={isActive}
                   compact={useCompactControls}
                   fluid

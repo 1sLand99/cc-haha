@@ -1241,6 +1241,7 @@ function runHeadlessStreaming(
   // include Assistant, User, Attachment, and Progress messages.
   // TODO: Clean up this code to avoid passing around a mutable array.
   const mutableMessages: Message[] = initialMessages
+  const sideQuestionControllers = new Map<string, AbortController>()
 
   // Seed the readFileState cache from the transcript (content the model saw,
   // with message timestamps) so getChangedFiles can detect external edits.
@@ -4096,40 +4097,27 @@ function runHeadlessStreaming(
               sendControlResponseError(message, errorMessage(e))
             }
           })()
+        } else if (message.request.subtype === 'cancel_side_question') {
+          const controller = sideQuestionControllers.get(message.request.question_id)
+          controller?.abort(new Error('Side question cancelled'))
+          sendControlResponseSuccess(message, { cancelled: Boolean(controller) })
         } else if (message.request.subtype === 'side_question') {
-          // Same fire-and-forget pattern as generate_session_title above —
-          // the forked agent's API roundtrip must not block the stdin loop.
-          //
-          // The snapshot captured by stopHooks (for querySource === 'sdk')
-          // holds the exact systemPrompt/userContext/systemContext/messages
-          // sent on the last main-thread turn. Reusing them gives a byte-
-          // identical prefix → prompt cache hit.
-          //
-          // Fallback (resume before first turn completes — no snapshot yet):
-          // rebuild from scratch. buildSideQuestionFallbackParams mirrors
-          // QueryEngine.ts:ask()'s system prompt assembly (including
-          // --system-prompt / --append-system-prompt) so the rebuilt prefix
-          // matches in the common case. May still miss the cache for
-          // coordinator mode or memory-mechanics extras — acceptable, the
-          // alternative is the side question failing entirely.
-          const { question } = message.request
+          // Register synchronously so a following cancel request can find the
+          // fork even while fallback context is being assembled.
+          const { question, history, question_id } = message.request
+          const questionId = question_id ?? message.request_id
+          if (sideQuestionControllers.has(questionId)) {
+            sendControlResponseError(message, 'Side question already running')
+            continue
+          }
+          const controller = createAbortController()
+          sideQuestionControllers.set(questionId, controller)
+          const currentMessages = mutableMessages.slice()
           void (async () => {
             try {
               const saved = getLastCacheSafeParams()
               const cacheSafeParams = saved
-                ? {
-                    ...saved,
-                    // If the last turn was interrupted, the snapshot holds an
-                    // already-aborted controller; createChildAbortController in
-                    // createSubagentContext would propagate it and the fork
-                    // would die before sending a request. The controller is
-                    // not part of the cache key — swapping in a fresh one is
-                    // safe. Same guard as generate_session_title above.
-                    toolUseContext: {
-                      ...saved.toolUseContext,
-                      abortController: createAbortController(),
-                    },
-                  }
+                ? { ...saved, forkContextMessages: currentMessages }
                 : await buildSideQuestionFallbackParams({
                     tools: buildAllTools(getAppState()),
                     commands: currentCommands,
@@ -4138,7 +4126,7 @@ function runHeadlessStreaming(
                       ...sdkClients,
                       ...dynamicMcpState.clients,
                     ],
-                    messages: mutableMessages,
+                    messages: currentMessages,
                     readFileState,
                     getAppState,
                     setAppState,
@@ -4147,13 +4135,12 @@ function runHeadlessStreaming(
                     thinkingConfig: options.thinkingConfig,
                     agents: currentAgents,
                   })
-              const result = await runSideQuestion({
-                question,
-                cacheSafeParams,
-              })
+              const result = await runSideQuestion({ question, history, cacheSafeParams, signal: controller.signal })
               sendControlResponseSuccess(message, { response: result.response })
             } catch (e) {
               sendControlResponseError(message, errorMessage(e))
+            } finally {
+              sideQuestionControllers.delete(questionId)
             }
           })()
         } else if (

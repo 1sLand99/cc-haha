@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
-import { GitFork, Target } from 'lucide-react'
+import { ArrowLeft, GitFork, Target, MessageCircleQuestion } from 'lucide-react'
+import { IconButton } from '@/components/ui/IconButton'
+import { openSideChat } from '@/lib/workspace/openSideChat'
 import {
   SCHEDULED_TAB_ID,
   SETTINGS_TAB_ID,
@@ -368,18 +370,26 @@ export function ActiveSession({ sessionId, active = true }: { sessionId?: string
     sessionId: string
     info: SessionGitInfo
   } | null>(null)
+  const activeWorkspaceIsSideChat = useWorkspaceStore(state => {
+    const workspace = activeTabId ? state.bySession[activeTabId] : undefined
+    return Boolean(workspace?.tabs.some(tab => tab.id === workspace.activeSideTabId && tab.kind === 'side-chat'))
+  })
   const workspaceEnabled = Boolean(activeTabId) &&
     isSessionTabState(activeTabId, activeTabType) &&
-    !isMobileLayout
+    (!isMobileLayout || activeWorkspaceIsSideChat)
   const workspaceLayout = useWorkspaceStore((state) =>
     workspaceEnabled && activeTabId ? state.bySession[activeTabId]?.layout ?? 'hidden' : 'hidden',
   )
   const showWorkbench = workspaceLayout !== 'hidden'
+  const sideChatOpen = useWorkspaceStore(state => {
+    const workspace = activeTabId ? state.bySession[activeTabId] : undefined
+    return Boolean(showWorkbench && workspace?.tabs.some(tab => tab.id === workspace.activeSideTabId && tab.kind === 'side-chat'))
+  })
   const showRightPanel = showWorkbench
   // `full` still renders the same panel; the chat column is what gives way, so
   // no tab is recreated and no page or PTY restarts on the way in or out.
   const compactWorkspace = useWorkspaceAdaptiveLayout(workbenchPanelRef, showWorkbench)
-  const isWorkspaceFull = workspaceLayout === 'full' || compactWorkspace
+  const isWorkspaceFull = workspaceLayout === 'full' || compactWorkspace || (showWorkbench && isMobileLayout)
   const rightPanelWidth = useWorkspaceStore((state) => state.sideWidth)
   const showTerminalPanel = useWorkspaceStore((state) =>
     workspaceEnabled && activeTabId ? state.bySession[activeTabId]?.bottomOpen ?? false : false,
@@ -781,7 +791,8 @@ export function ActiveSession({ sessionId, active = true }: { sessionId?: string
         />
       ) : null}
       chatColumnHidden={isWorkspaceFull}
-      sidePanel={showWorkbench ? (
+      sidePanel={<>
+        {showWorkbench ? (
         <>
           {isWorkspaceFull ? null : <WorkspaceResizeHandle panelRef={workbenchPanelRef} />}
           <aside
@@ -793,6 +804,11 @@ export function ActiveSession({ sessionId, active = true }: { sessionId?: string
               ? { flex: '1 1 auto' }
               : { width: rightPanelWidth, flex: '0 0 auto', maxWidth: '70%', minWidth: 'min(420px, 54%)' }}
           >
+            {isMobileLayout && sideChatOpen && <div className="flex shrink-0 items-center border-b border-[var(--color-border)] px-2 py-1">
+              <IconButton icon={<ArrowLeft size={18} />} label={t('tabs.hideWorkspace')} size="2xl"
+                onClick={() => useWorkspaceStore.getState().setLayout(activeTabId, 'hidden')} />
+              <span className="text-sm text-[var(--color-text-secondary)]">{t('sideChat.title')}</span>
+            </div>}
             <WorkspaceSurface
               sessionId={activeTabId}
               dock="side"
@@ -801,8 +817,14 @@ export function ActiveSession({ sessionId, active = true }: { sessionId?: string
             />
           </aside>
         </>
-      ) : null}
+      ) : null}</>}
     >
+          {(isEmpty || isMobileLayout) && (
+            <div className="flex justify-end px-4 py-2">
+              <IconButton icon={<MessageCircleQuestion size={18} />} label={t('sideChat.title')}
+                pressed={sideChatOpen} onClick={() => void openSideChat(activeTabId)} />
+            </div>
+          )}
           {isEmpty ? (
             <div
               data-testid="empty-session-hero"
@@ -834,6 +856,8 @@ export function ActiveSession({ sessionId, active = true }: { sessionId?: string
                   title={headerTitle}
                   compact={showRightPanel}
                   metadata={headerMetadata}
+                  actions={<IconButton icon={<MessageCircleQuestion size={18} />} label={t('sideChat.title')}
+                    pressed={sideChatOpen} onClick={() => void openSideChat(activeTabId)} />}
                 >
                   {session && getSessionWorkspaceState(session) !== 'available' && (
                     <div className={`mt-2 inline-flex max-w-full items-center gap-2 rounded-[var(--radius-md)] border px-3 py-1.5 text-[11px] ${

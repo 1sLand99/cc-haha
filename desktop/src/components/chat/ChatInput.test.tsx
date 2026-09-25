@@ -1,3 +1,5 @@
+import { getComposerViewForTesting } from './MentionComposer'
+import { useSideChatStore } from '@/stores/sideChatStore'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
@@ -12,6 +14,7 @@ const originalRangeGetClientRects = Object.getOwnPropertyDescriptor(Range.protot
 const originalRangeGetBoundingClientRect = Object.getOwnPropertyDescriptor(Range.prototype, 'getBoundingClientRect')
 
 const mocks = vi.hoisted(() => ({
+  sideOpen: vi.fn(),
   create: vi.fn(),
   delete: vi.fn(),
   list: vi.fn(),
@@ -31,6 +34,8 @@ const mocks = vi.hoisted(() => ({
   webviewDragHandlers: [] as Array<(event: { payload: unknown }) => void>,
   webviewUnlisten: vi.fn(),
 }))
+
+vi.mock('@/lib/workspace/openSideChat', () => ({ openSideChat: mocks.sideOpen }))
 
 vi.mock('../../api/sessions', () => ({
   sessionsApi: {
@@ -87,8 +92,8 @@ vi.mock('../controls/PermissionModeSelector', () => ({
   // Surfaces `compact` because that prop is the difference between the labelled
   // pill and the bare icon the real selector renders, and the composer decides
   // it from the column width.
-  PermissionModeSelector: ({ compact }: { compact?: boolean }) => (
-    <button type="button" data-testid="permission-mode-selector" data-compact={compact ? 'true' : 'false'}>
+  PermissionModeSelector: ({ compact, sessionId }: { compact?: boolean; sessionId?: string }) => (
+    <button type="button" data-testid="permission-mode-selector" data-session={sessionId} data-compact={compact ? 'true' : 'false'}>
       Permissions
     </button>
   ),
@@ -97,11 +102,11 @@ vi.mock('../controls/PermissionModeSelector', () => ({
 vi.mock('../controls/ModelSelector', async () => {
   const React = await vi.importActual<typeof import('react')>('react')
   return {
-    ModelSelector: React.forwardRef<{ open: () => void }, { fluid?: boolean }>(({ fluid }, ref) => {
+    ModelSelector: React.forwardRef<{ open: () => void }, { fluid?: boolean; runtimeKey?: string }>(({ fluid, runtimeKey }, ref) => {
       const [open, setOpen] = React.useState(false)
       React.useImperativeHandle(ref, () => ({ open: () => setOpen(true) }), [])
       return (
-        <div data-testid="model-selector-shell" className={fluid ? 'min-w-0 flex-1' : 'shrink-0'}>
+        <div data-testid="model-selector-shell" data-session={runtimeKey} className={fluid ? 'min-w-0 flex-1' : 'shrink-0'}>
           <button type="button">Model</button>
           {open && <div data-testid="model-selector-dropdown">Model selector opened</div>}
         </div>
@@ -209,6 +214,8 @@ describe('ChatInput file mentions', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    useSideChatStore.setState({ entries: {} })
+    mocks.sideOpen.mockResolvedValue('side-tab')
     mocks.createRepositoryBranch.mockReset()
     act(() => {
       hydrateProjectDisplayNames({}, Number.MAX_SAFE_INTEGER)
@@ -684,6 +691,68 @@ describe('ChatInput file mentions', () => {
     await waitFor(() => {
       expect(screen.queryByAltText('screenshot-full.png')).not.toBeInTheDocument()
     })
+  })
+
+  it('two composers isolate child send, references, controls and focus from the parent', async () => {
+    const child = 'side-scoped'
+    useSideChatStore.setState({ entries: { [child]: { sessionId: child, parentSessionId: sessionId, workDir: '/child', title: 'Side chat', ephemeral: true } } })
+    useChatStore.setState(state => ({ sessions: { ...state.sessions, [child]: useChatStore.getState().getSession(child) } }))
+    useWorkspaceChatContextStore.getState().addReference(child, { kind: 'chat-selection', path: '', name: 'Selection', quote: 'quoted parent text' })
+    const { container } = render(<><ChatInput sessionId={sessionId} compact /><ChatInput sessionId={child} compact /></>)
+    const shells = screen.getAllByTestId('chat-input-shell')
+    const parentEditor = shells[0]!.querySelector('[data-composer-editor]') as HTMLElement
+    const childEditor = shells[1]!.querySelector('[data-composer-editor]') as HTMLElement
+    const parentView = getComposerViewForTesting(parentEditor)!
+    const childView = getComposerViewForTesting(childEditor)!
+    act(() => parentView.dispatch(parentView.state.tr.insertText('parent draft')))
+    act(() => childView.dispatch(childView.state.tr.insertText('child question')))
+    childEditor.focus()
+    act(() => useChatStore.setState(state => ({ sessions: { ...state.sessions, [sessionId]: { ...state.sessions[sessionId]!, chatState: 'streaming' } } })))
+    expect(document.activeElement).toBe(childEditor)
+    expect(within(shells[1] as HTMLElement).getByTestId('permission-mode-selector')).toHaveAttribute('data-session', child)
+    expect(within(shells[1] as HTMLElement).getByTestId('model-selector-shell')).toHaveAttribute('data-session', child)
+    fireEvent.keyDown(childEditor, { key: 'Enter' })
+    await waitFor(() => expect(mocks.wsSend).toHaveBeenCalledWith(child, expect.objectContaining({ type: 'user_message', content: expect.stringContaining('quoted parent text') })))
+    expect(useChatStore.getState().sessions[child]?.messages.find(message => message.type === 'user_text')).toMatchObject({ attachments: [expect.objectContaining({ referenceKind: 'chat-selection', quote: 'quoted parent text' })] })
+    expect(parentEditor.textContent).toBe('parent draft')
+    expect(mocks.wsSend).not.toHaveBeenCalledWith(sessionId, expect.objectContaining({ type: 'user_message' }))
+    expect(container.querySelector('[data-session-id="side-scoped"]')).toBeInTheDocument()
+    expect(mocks.listReferences).toHaveBeenCalledWith('/child')
+  })
+
+  it('accepts asynchronous image paste in an explicit child while the global tab stays on its parent', async () => {
+    const child = 'side-paste'
+    useSideChatStore.setState({ entries: { [child]: { sessionId: child, parentSessionId: sessionId, workDir: '/child', title: 'Side chat', ephemeral: true } } })
+    render(<><ChatInput sessionId={sessionId} compact /><ChatInput sessionId={child} compact /></>)
+    const shells = screen.getAllByTestId('chat-input-shell')
+    const editor = shells[1]!.querySelector('[data-composer-editor]') as HTMLElement
+    const file = new File(['image'], 'child.png', { type: 'image/png' })
+    fireEvent.paste(editor, { clipboardData: { files: [], getData: () => '', items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }] } })
+    await waitFor(() => expect(within(shells[1] as HTMLElement).getByRole('img')).toBeInTheDocument())
+    expect(within(shells[0] as HTMLElement).queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  it.each(['idle', 'streaming'] as const)('routes /btw immediately while %s without main send or queue', async (chatState) => {
+    const initial = useChatStore.getState().sessions[sessionId]!
+    useChatStore.setState({ sessions: { [sessionId]: { ...initial, chatState } } })
+    const before = useChatStore.getState().sessions[sessionId]?.messages
+    render(<ChatInput compact />)
+    setComposerText('/btw Why this change?', 21)
+    fireEvent.keyDown(getComposerElement(), { key: 'Enter' })
+    await waitFor(() => expect(mocks.sideOpen).toHaveBeenCalledTimes(1))
+    expect(mocks.sideOpen).toHaveBeenCalledWith(sessionId, { question: 'Why this change?', submit: true })
+    expect(useChatStore.getState().sessions[sessionId]?.queuedUserMessages ?? []).toEqual([])
+    expect(useChatStore.getState().sessions[sessionId]?.messages).toEqual(before)
+    expect(mocks.wsSend).not.toHaveBeenCalledWith(sessionId, expect.objectContaining({ type: 'user_message' }))
+    expect(getComposerText()).toBe('')
+  })
+
+  it('opens an empty full side chat with /btw without sending a main message', async () => {
+    render(<ChatInput compact />)
+    setComposerText('/btw', 4)
+    fireEvent.keyDown(getComposerElement(), { key: 'Enter' })
+    await waitFor(() => expect(mocks.sideOpen).toHaveBeenCalledWith(sessionId, { question: undefined, submit: true }))
+    expect(useChatStore.getState().sessions[sessionId]?.queuedUserMessages ?? []).toEqual([])
   })
 
   it('queues prompts submitted while a turn is running until the user guides them', async () => {

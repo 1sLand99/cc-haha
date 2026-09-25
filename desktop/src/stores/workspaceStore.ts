@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { useSideChatStore } from '@/stores/sideChatStore'
+import { useUIStore } from '@/stores/uiStore'
 import { destroyTerminalRuntime } from '../lib/terminalRuntime'
 import { releaseWorkspaceBrowserTab } from '../lib/workspace/browserHost'
 import { useWorkspaceBrowserStore } from './workspaceBrowserStore'
@@ -199,6 +201,12 @@ function withFocus(
  * which is exactly the bug the old `BrowserSurface` teardown had.
  */
 function releaseTabResources(tab: WorkspaceTab) {
+  if (tab.kind === 'side-chat') {
+    void useSideChatStore.getState().close(tab.sideChatId).catch(error => {
+      useUIStore.getState().addToast({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    })
+    return
+  }
   if (tab.kind === 'terminal') {
     destroyTerminalRuntime(tab.runtimeId)
     return
@@ -267,13 +275,13 @@ function removeTabs(
   const closed: WorkspaceClosedGroup[] = [
     ...state.closed,
     {
-      tabs: removed.map((tab) => ({
+      tabs: removed.filter(tab => tab.kind !== 'side-chat').map((tab) => ({
         tab,
         dockIndex: (tab.dock === 'side' ? previousSide : previousBottom)
           .findIndex((candidate) => candidate.id === tab.id),
       })),
     },
-  ].slice(-UNDO_STACK_LIMIT)
+  ].filter(group => group.tabs.length > 0).slice(-UNDO_STACK_LIMIT)
 
   return {
     ...state,
@@ -449,6 +457,17 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       const dockTabs = tabsInDock(current, dock)
       const activeId = current[activeIdKey(dock)]
 
+      if (target.kind === 'side-chat') {
+        const existing = dockTabs.find(tab => tab.kind === 'side-chat' && tab.sideChatId === target.sideChatId)
+        if (existing) {
+          createdId = existing.id
+          const next = activate
+            ? withFocus({ ...current, activeSideTabId: existing.id, layout: current.layout === 'hidden' ? 'split' : current.layout }, 'active-side-tab')
+            : current
+          return { bySession: { ...store.bySession, [sessionId]: next } }
+        }
+      }
+
       // --- Reuse rules -----------------------------------------------------
       if (target.kind === 'file') {
         const existing = dockTabs.find(
@@ -546,6 +565,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       let nextTerminalOrdinal = current.nextTerminalOrdinal
 
       switch (target.kind) {
+        case 'side-chat':
+          tab = { id: nextId('wt-chat'), kind: 'side-chat', dock: 'side', preview: false, createdAt, sideChatId: target.sideChatId }
+          break
         case 'file':
           tab = {
             id: nextId('wt-file'),
@@ -926,6 +948,7 @@ export function isWorkspaceVisible(state: WorkspaceSessionState) {
 export function workspaceTabTitle(
   tab: WorkspaceTab,
   labels: {
+    sideChat?: string
     newTab: string
     review: string
     files: string
@@ -933,6 +956,8 @@ export function workspaceTabTitle(
   },
 ): string {
   switch (tab.kind) {
+    case 'side-chat':
+      return labels.sideChat ?? labels.newTab
     case 'file':
       // Opening "Files" with nothing selected is a tree waiting for a choice;
       // an empty basename would render as a nameless tab.

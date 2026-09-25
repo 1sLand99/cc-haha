@@ -29,6 +29,14 @@ function extractUserText(message: any): string {
 
 const sdkUrl = getArg('--sdk-url')
 const sessionId = getArg('--session-id') || getArg('--resume') || crypto.randomUUID()
+const sideChatHistory = args.includes('--no-session-persistence') && getArg('--resume')
+  ? readFile(getArg('--resume')!, 'utf8').then(raw => {
+      const entries = raw.split('\n').filter(Boolean).map(line => JSON.parse(line))
+      const end = entries.findIndex(entry => entry.uuid === getArg('--resume-session-at'))
+      return entries.slice(0, end + 1).filter(entry => entry.type === 'user' || entry.type === 'assistant').map(entry => transcriptText(entry))
+    })
+  : undefined
+const sideChatTurns: string[] = []
 const initMode = process.env.MOCK_SDK_INIT_MODE || 'on_open'
 const initDelayMs = Number(process.env.MOCK_SDK_INIT_DELAY_MS || '0')
 const streamDelayMs = Number(process.env.MOCK_SDK_STREAM_DELAY_MS || '0')
@@ -41,6 +49,7 @@ const resumeUpstreamUrl = process.env.MOCK_SDK_RESUME_UPSTREAM_URL
 let initSent = false
 let firstUserExitScheduled = false
 let releaseReconnectStream: (() => void) | undefined
+const sideQuestions = new Map<string, { requestId: string; timer: ReturnType<typeof setTimeout> }>()
 
 /**
  * Deterministic tool-use support.
@@ -329,6 +338,28 @@ ws.addEventListener('message', (event) => {
   void (async () => {
     for (const line of lines) {
       const parsed = JSON.parse(line)
+      if (parsed.type === 'control_request' && parsed.request?.subtype === 'side_question') {
+        const { question_id: questionId, question, history = [] } = parsed.request
+        const timer = setTimeout(() => {
+          sideQuestions.delete(questionId)
+          emit(ws, { type: 'control_response', response: {
+            subtype: 'success', request_id: parsed.request_id,
+            response: { response: `Side answer: ${question}\n\nPrevious side questions: ${history.length}. Main task ${normalRunning ? 'is still running' : 'is idle'}.` },
+          }, session_id: sessionId })
+        }, question.startsWith('MOCK_SLOW') ? 30_000 : 100)
+        sideQuestions.set(questionId, { requestId: parsed.request_id, timer })
+        continue
+      }
+      if (parsed.type === 'control_request' && parsed.request?.subtype === 'cancel_side_question') {
+        const pending = sideQuestions.get(parsed.request.question_id)
+        if (pending) {
+          clearTimeout(pending.timer)
+          sideQuestions.delete(parsed.request.question_id)
+          emit(ws, { type: 'control_response', response: { subtype: 'error', request_id: pending.requestId, error: 'Side question cancelled' }, session_id: sessionId })
+        }
+        emit(ws, { type: 'control_response', response: { subtype: 'success', request_id: parsed.request_id, response: { cancelled: Boolean(pending) } }, session_id: sessionId })
+        continue
+      }
       if (parsed.type === 'control_request' && parsed.request?.subtype === 'mock_release_reconnect_stream') {
         releaseReconnectStream?.()
         releaseReconnectStream = undefined
@@ -365,6 +396,13 @@ ws.addEventListener('message', (event) => {
         const text = extractUserText(parsed)
         if (resumeTranscriptPath && resumeUpstreamUrl) {
           await runResumeTurn(ws, text)
+          continue
+        }
+        if (sideChatHistory && text.startsWith('MOCK_SIDE_CONTEXT')) {
+          sideChatTurns.push(text)
+          const answer = JSON.stringify({ inherited: await sideChatHistory, turns: sideChatTurns, boundary: getArg('--append-system-prompt'), ephemeral: args.includes('--no-session-persistence'), fork: args.includes('--fork-session') })
+          emit(ws, { type: 'assistant', message: { id: crypto.randomUUID(), role: 'assistant', content: [{ type: 'text', text: answer }] }, uuid: crypto.randomUUID(), session_id: sessionId })
+          emit(ws, { type: 'result', subtype: 'success', is_error: false, result: answer, usage: { input_tokens: 0, output_tokens: 0 }, session_id: sessionId })
           continue
         }
         const toolStep = parseMockToolStep(text)
@@ -505,6 +543,10 @@ ws.addEventListener('message', (event) => {
         }
       }
 
+      if (parsed.type === 'control_request' && parsed.request?.subtype === 'set_model') {
+        emit(ws, { type: 'control_response', response: { subtype: 'success', request_id: parsed.request_id, response: {} }, session_id: sessionId })
+        continue
+      }
       if (parsed.type === 'control_request' && parsed.request?.subtype === 'interrupt') {
         collaborationEpoch++
         for (const message of collaborationQueue) collaborationInbox.delete(message.message_id)

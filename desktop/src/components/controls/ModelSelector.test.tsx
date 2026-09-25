@@ -1283,6 +1283,21 @@ describe('ModelSelector', () => {
     })
   })
 
+  it('keeps temporary side chat model choices within its inherited provider', async () => {
+    useProviderStore.setState({ providers: ['a', 'b'].map(id => ({ id, presetId: 'custom', name: `Provider ${id}`, apiKey: 'fixture', baseUrl: 'https://fixture.invalid', apiFormat: 'anthropic' as const, models: { main: `model-${id}`, sonnet: `alternate-${id}`, haiku: '', opus: '' } })), activeId: 'a', hasLoadedProviders: true })
+    useSessionRuntimeStore.getState().setSelection('side-model', { providerId: 'a', modelId: 'model-a', effortLevel: 'high' })
+    render(<ModelSelector runtimeKey="side-model" lockedProviderId="a" />)
+    await clickByRole(/model-a/i)
+    const dropdown = screen.getByTestId('model-selector-dropdown')
+    expect(dropdown.textContent).toContain('alternate-a')
+    expect(dropdown.textContent).not.toContain('Provider b')
+    expect(dropdown.textContent).not.toContain('Claude Official')
+    await clickByRole(/alternate-a/i)
+    expect(useSessionRuntimeStore.getState().selections['side-model']?.effortLevel).toBe('high')
+    const effort = screen.queryByRole('button', { name: /effort:/i })
+    if (effort) expect(effort).toBeDisabled()
+  })
+
   it('hides official provider sections when OAuth is not logged in', async () => {
     useHahaOAuthStore.setState({ status: { loggedIn: false }, fetchStatus: async () => {} })
     useHahaOpenAIOAuthStore.setState({ status: { loggedIn: false }, fetchStatus: async () => {} })

@@ -9,9 +9,12 @@ if (typeof (vi as HoistedVi).hoisted !== 'function') {
 }
 
 const mocks = vi.hoisted(() => ({
+  closeSideChat: vi.fn(async () => {}),
   destroyTerminalRuntime: vi.fn(),
   releaseWorkspaceBrowserTab: vi.fn(),
 }))
+
+vi.mock('@/stores/sideChatStore', () => ({ useSideChatStore: { getState: () => ({ close: mocks.closeSideChat }) } }))
 
 vi.mock('../lib/terminalRuntime', () => ({
   destroyTerminalRuntime: mocks.destroyTerminalRuntime,
@@ -663,4 +666,18 @@ describe('tab ceiling', () => {
     expect(sideTabs().map((tab) => tab.id)).toEqual(before)
     expect(mocks.releaseWorkspaceBrowserTab).not.toHaveBeenCalled()
   })
+})
+
+
+it('keeps side chats alive on navigation and releases them only on close without undo', () => {
+  const sideId = store().openTarget(SESSION, { kind: 'side-chat', sideChatId: 'side-child' })!
+  const fileId = store().openTarget(SESSION, { kind: 'file', path: '/repo/a.ts' })!
+  store().setLayout(SESSION, 'hidden')
+  expect(mocks.closeSideChat).not.toHaveBeenCalled()
+  expect(store().openTarget(SESSION, { kind: 'side-chat', sideChatId: 'side-child' })).toBe(sideId)
+  expect(store().getTabs(SESSION, 'side')).toHaveLength(2)
+  store().closeTab(SESSION, sideId)
+  expect(mocks.closeSideChat).toHaveBeenCalledWith('side-child')
+  expect(store().getTab(SESSION, fileId)).not.toBeNull()
+  expect(store().bySession[SESSION]?.closed.flatMap(group => group.tabs)).toEqual([])
 })
