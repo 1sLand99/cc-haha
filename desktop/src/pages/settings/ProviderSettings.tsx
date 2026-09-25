@@ -27,6 +27,7 @@ import { normalizeProviderBaseUrl, presetMatchesBaseUrl, selectableProviderPrese
 import { ClaudeOfficialLogin } from '../../components/settings/ClaudeOfficialLogin'
 import { ChatGPTOfficialLogin } from '../../components/settings/ChatGPTOfficialLogin'
 import { GrokOfficialLogin } from '../../components/settings/GrokOfficialLogin'
+import { OfficialProviderModelSettings } from '../../components/settings/OfficialProviderModelSettings'
 import { CcSwitchImportModal } from '../../components/settings/CcSwitchImportModal'
 import { ModelIdCombobox } from '../../components/settings/ModelIdCombobox'
 import { ProviderRequestCompatibilityFields } from '@/components/settings/ProviderRequestCompatibilityFields'
@@ -295,6 +296,7 @@ export function ProviderSettings({ browserMode = false }: { browserMode?: boolea
                     details={!browserMode && isClaudeOfficialActive ? (
                       <div className="border-t border-[var(--color-border-separator)] px-4 pb-4 pt-3">
                         <ClaudeOfficialLogin />
+                        <OfficialProviderModelSettings providerId={CLAUDE_OFFICIAL_PROVIDER_ID} />
                       </div>
                     ) : null}
                   />
@@ -318,6 +320,7 @@ export function ProviderSettings({ browserMode = false }: { browserMode?: boolea
                     details={!browserMode && isOpenAIOfficialActive ? (
                       <div className="border-t border-[var(--color-border-separator)] px-4 pb-4 pt-3">
                         <ChatGPTOfficialLogin />
+                        <OfficialProviderModelSettings providerId={OPENAI_OFFICIAL_PROVIDER_ID} />
                       </div>
                     ) : null}
                   />
@@ -341,6 +344,7 @@ export function ProviderSettings({ browserMode = false }: { browserMode?: boolea
                     details={!browserMode && isGrokOfficialActive ? (
                       <div className="border-t border-[var(--color-border-separator)] px-4 pb-4 pt-3">
                         <GrokOfficialLogin />
+                        <OfficialProviderModelSettings providerId={GROK_OFFICIAL_PROVIDER_ID} />
                       </div>
                     ) : null}
                   />
