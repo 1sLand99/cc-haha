@@ -146,7 +146,8 @@ export function isPromptTooLongMessage(msg: AssistantMessage): boolean {
 
 /**
  * Parse actual/limit token counts from a raw prompt-too-long API error
- * message like "prompt is too long: 137500 tokens > 135000 maximum".
+ * message in Anthropic or OpenAI-compatible format. Requested tokens include
+ * the completion allowance so compaction also leaves room for the response.
  * The raw string may be wrapped in SDK prefixes or JSON envelopes, or
  * have different casing (Vertex), so this is intentionally lenient.
  */
@@ -154,12 +155,19 @@ export function parsePromptTooLongTokenCounts(rawMessage: string): {
   actualTokens: number | undefined
   limitTokens: number | undefined
 } {
-  const match = rawMessage.match(
+  const anthropic = rawMessage.match(
     /prompt is too long[^0-9]*(\d+)\s*tokens?\s*>\s*(\d+)/i,
   )
+  const openAI = anthropic ? null : rawMessage.match(
+    /maximum context length is\s+(\d+)\s+tokens?\.\s*(?:however,\s*)you requested\s+(\d+)\s+tokens?\b/i,
+  )
+  const actualTokens = Number(anthropic?.[1] ?? openAI?.[2])
+  const limitTokens = Number(anthropic?.[2] ?? openAI?.[1])
+  const valid = Number.isSafeInteger(actualTokens) && actualTokens > 0 &&
+    Number.isSafeInteger(limitTokens) && limitTokens > 0
   return {
-    actualTokens: match ? parseInt(match[1]!, 10) : undefined,
-    limitTokens: match ? parseInt(match[2]!, 10) : undefined,
+    actualTokens: valid ? actualTokens : undefined,
+    limitTokens: valid ? limitTokens : undefined,
   }
 }
 
