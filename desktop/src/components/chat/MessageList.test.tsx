@@ -7068,6 +7068,9 @@ describe('MessageList nested tool calls', () => {
       })
     const reloadHistory = vi.fn().mockResolvedValue(undefined)
     const queueComposerPrefill = vi.fn()
+    const reviewTabId = useWorkspaceStore.getState().openTarget(ACTIVE_TAB, {
+      kind: 'review', source: { kind: 'turn', turnKey: 'user-1', userMessageIndex: 0 },
+    })!
 
     useChatStore.setState({
       reloadHistory,
@@ -7132,6 +7135,7 @@ describe('MessageList nested tool calls', () => {
       })
     })
     expect(reloadHistory).toHaveBeenCalledWith(ACTIVE_TAB)
+    expect(useWorkspaceStore.getState().getTab(ACTIVE_TAB, reviewTabId)).toBeNull()
     expect(queueComposerPrefill).toHaveBeenCalledWith(ACTIVE_TAB, {
       text: prompt,
       attachments: undefined,

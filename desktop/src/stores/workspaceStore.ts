@@ -110,6 +110,7 @@ type WorkspaceStore = {
   pinTab: (sessionId: string, tabId: string) => void
   closeTab: (sessionId: string, tabId: string) => void
   closeTabs: (sessionId: string, tabId: string, scope: WorkspaceCloseScope) => void
+  pruneTurnReviewTabs: (sessionId: string, fromUserMessageIndex: number) => void
   moveTab: (sessionId: string, tabId: string, targetIndex: number) => void
   moveTabToDock: (sessionId: string, tabId: string, dock: WorkspaceDock) => void
   reopenClosedTab: (sessionId: string) => string | null
@@ -663,6 +664,22 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }),
 
   closeTab: (sessionId, tabId) => get().closeTabs(sessionId, tabId, 'current'),
+
+  pruneTurnReviewTabs: (sessionId, fromUserMessageIndex) =>
+    set((store) => {
+      const current = store.bySession[sessionId]
+      if (!current) return store
+      const invalid = (tab: WorkspaceTab) => tab.kind === 'review' && tab.source.kind === 'turn' &&
+        (tab.source.userMessageIndex === undefined || tab.source.userMessageIndex >= fromUserMessageIndex)
+      const doomed = new Set(current.tabs.filter(invalid).map(tab => tab.id))
+      const next = removeTabs(current, doomed)
+      // A rewound checkpoint must not be recoverable through "reopen closed tab".
+      const closed = next.closed
+        .map(group => ({ tabs: group.tabs.filter(({ tab }) => !invalid(tab)) }))
+        .filter(group => group.tabs.length > 0)
+      if (next === current && closed.length === current.closed.length) return store
+      return { bySession: { ...store.bySession, [sessionId]: { ...next, closed } } }
+    }),
 
   closeTabs: (sessionId, tabId, scope) =>
     set((store) => {

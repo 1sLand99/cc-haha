@@ -391,6 +391,28 @@ describe('undo close', () => {
 })
 
 describe('review viewed paths', () => {
+  it('removes rewound turn reviews from open and reopenable tabs', () => {
+    const file = openFile('src/keep.ts')
+    const rewound = store().openTarget(SESSION, { kind: 'review', source: { kind: 'turn', turnKey: 'second', userMessageIndex: 1 } })!
+
+    store().pruneTurnReviewTabs(SESSION, 1)
+
+    expect(sideTabs().map(tab => tab.id)).toEqual([file])
+    expect(store().getTab(SESSION, rewound)).toBeNull()
+    expect(store().getSession(SESSION).closed).toEqual([])
+    expect(store().reopenClosedTab(SESSION)).toBeNull()
+
+    const older = store().openTarget(SESSION, { kind: 'review', source: { kind: 'turn', turnKey: 'first', userMessageIndex: 0 } })!
+    store().closeTab(SESSION, older)
+    store().pruneTurnReviewTabs(SESSION, 1)
+    expect(store().reopenClosedTab(SESSION)).toBe(older)
+
+    store().setReviewSource(SESSION, older, { kind: 'turn', turnKey: 'third', userMessageIndex: 2 })
+    store().closeTab(SESSION, older)
+    store().pruneTurnReviewTabs(SESSION, 1)
+    expect(store().reopenClosedTab(SESSION)).toBeNull()
+  })
+
   it('keeps viewed files for the same source and clears them when the comparison changes', () => {
     const source = { kind: 'turn' as const, turnKey: 'message-1', userMessageIndex: 0 }
     const id = store().openTarget(SESSION, { kind: 'review', source })!
