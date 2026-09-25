@@ -2330,6 +2330,57 @@ describe('WebSocket Chat Integration', () => {
     expect(messages.some((m) => m.type === 'status' && m.state === 'idle')).toBe(true)
   })
 
+  it('preserves delayed initial and guide replays without resubmitting user input (#1360)', async () => {
+    const createRes = await fetch(`${baseUrl}/api/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workDir: tmpDir }),
+    })
+    expect(createRes.status).toBe(201)
+    const { sessionId } = await createRes.json() as { sessionId: string }
+    const initial = 'MOCK_GUIDE_REPLAY original request'
+    const guide = 'Keep the answer concise'
+    const messages: any[] = []
+    const ws = new WebSocket(`${wsUrl}/ws/${sessionId}`)
+    let guideSent = false
+    await new Promise<void>((resolve, reject) => {
+      const finish = (error?: Error) => {
+        clearTimeout(timeout)
+        ws.close()
+        error ? reject(error) : resolve()
+      }
+      const timeout = setTimeout(() => finish(new Error('Timed out waiting for delayed guide replay')), 10000)
+      ws.onerror = () => finish(new Error('Guide replay WebSocket failed'))
+      ws.onmessage = (event) => {
+        const message = JSON.parse(event.data as string)
+        messages.push(message)
+        if (message.type === 'connected') ws.send(JSON.stringify({ type: 'user_message', content: initial }))
+        if (message.type === 'thinking' && !guideSent) {
+          guideSent = true
+          ws.send(JSON.stringify({ type: 'user_message', content: guide }))
+        }
+        if (message.type === 'error') finish(new Error(message.message))
+        if (message.type === 'message_complete') finish()
+      }
+    })
+    expect(guideSent).toBe(true)
+    expect(messages.filter(message => message.type === 'user_message_replay').map(message => message.content))
+      .toEqual([initial, guide])
+    expect(messages.findIndex(message => message.type === 'thinking'))
+      .toBeLessThan(messages.findIndex(message => message.type === 'user_message_replay'))
+    const reply = `GUIDE_REPLAY_RECEIVED ${JSON.stringify([initial, guide])}`
+    expect(messages.filter(message => message.type === 'content_delta').map(message => message.text).join(''))
+      .toBe(reply)
+    const transcript = await sessionService.findSessionFile(sessionId)
+    expect(transcript).toBeTruthy()
+    const entries = (await fs.readFile(transcript!.filePath, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    const userEntries = entries.filter(entry => entry.type === 'user')
+    expect(userEntries.map(entry => entry.message.content.filter((block: any) => block.type === 'text').map((block: any) => block.text).join(' ')))
+      .toEqual([initial, guide])
+    expect(entries.filter(entry => entry.type === 'assistant').map(entry => entry.message.content[0].text))
+      .toEqual([reply])
+  }, 15000)
+
   it('should send user_message and receive streamed SDK response', async () => {
     const messages: any[] = []
     const ws = new WebSocket(`${wsUrl}/ws/chat-test-3`)

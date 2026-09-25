@@ -730,6 +730,8 @@ export const kr: Record<TranslationKey, string> = {
   'workspace.files.projectRoot': '프로젝트 루트',
   'workspace.files.directoryMissing': '디렉터리를 찾을 수 없습니다: {path}',
   'workspace.files.directoryError': '디렉터리를 읽을 수 없습니다: {path}',
+  'workspace.files.hidePreview': '미리보기 숨기기',
+  'workspace.files.showPreview': '미리보기 표시',
   'workspace.files.toggleTree': '파일 트리 표시 전환',
   'workspace.files.breadcrumb': '파일 경로',
   'workspace.files.noSelection': '선택된 파일 없음',

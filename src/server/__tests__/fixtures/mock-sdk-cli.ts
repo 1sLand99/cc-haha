@@ -50,6 +50,69 @@ let initSent = false
 let firstUserExitScheduled = false
 let releaseReconnectStream: (() => void) | undefined
 const sideQuestions = new Map<string, { requestId: string; timer: ReturnType<typeof setTimeout> }>()
+let guideReplayInitial: any | undefined
+let guideReplayInputs: string[] = []
+
+// Opt-in reproduction of QueryEngine's delayed initial ACK: partial thinking
+// streams before the first complete assistant block, so an intervening guide
+// can already be visible when the original user message is acknowledged.
+async function handleGuideReplay(message: any): Promise<boolean> {
+  const text = extractUserText(message)
+  if (!guideReplayInitial && !text.startsWith('MOCK_GUIDE_REPLAY')) return false
+  guideReplayInputs.push(text)
+  if (process.env.MOCK_SDK_GUIDE_REPLAY_LOG) {
+    await appendFile(process.env.MOCK_SDK_GUIDE_REPLAY_LOG, `${JSON.stringify({ uuid: message.uuid, text })}\n`)
+  }
+  if (!guideReplayInitial) {
+    guideReplayInitial = message
+    emit(ws, { type: 'stream_event', event: { type: 'message_start' }, session_id: sessionId })
+    emit(ws, { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }, session_id: sessionId })
+    emit(ws, { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Waiting for a guide message before acknowledging the original prompt.' } }, session_id: sessionId })
+    return true
+  }
+  emit(ws, { type: 'stream_event', event: { type: 'content_block_stop', index: 0 }, session_id: sessionId })
+  for (const input of [guideReplayInitial, message]) {
+    emit(ws, { type: 'user', message: input.message, uuid: input.uuid, isReplay: true, parent_tool_use_id: null, session_id: sessionId })
+  }
+  const reply = `GUIDE_REPLAY_RECEIVED ${JSON.stringify(guideReplayInputs)}`
+  await appendGuideReplayHistory([guideReplayInitial, message], reply)
+  emit(ws, { type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } }, session_id: sessionId })
+  emit(ws, { type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: reply } }, session_id: sessionId })
+  emit(ws, { type: 'stream_event', event: { type: 'content_block_stop', index: 1 }, session_id: sessionId })
+  emit(ws, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: reply }] }, session_id: sessionId })
+  emit(ws, { type: 'result', subtype: 'success', is_error: false, result: reply, usage: { input_tokens: 3, output_tokens: 2 }, session_id: sessionId })
+  guideReplayInitial = undefined
+  guideReplayInputs = []
+  return true
+}
+
+async function appendGuideReplayHistory(inputs: any[], reply: string): Promise<void> {
+  if (!process.env.CLAUDE_CONFIG_DIR) return
+  const projects = join(process.env.CLAUDE_CONFIG_DIR, 'projects')
+  for (const directory of await readdir(projects).catch(() => [])) {
+    const file = join(projects, directory, `${sessionId}.jsonl`)
+    try { await readFile(file) } catch { continue }
+    let parentUuid: string | null = null
+    const now = Date.now()
+    const records = inputs.map((input, index) => {
+      const uuid = input.uuid || crypto.randomUUID()
+      const record = {
+        type: 'user', uuid, parentUuid, sessionId, userType: 'external',
+        isSidechain: false, cwd: process.cwd(), message: input.message,
+        timestamp: new Date(now + index).toISOString(),
+      }
+      parentUuid = uuid
+      return record
+    })
+    const assistant = {
+      type: 'assistant', uuid: crypto.randomUUID(), parentUuid, sessionId,
+      timestamp: new Date(now + inputs.length).toISOString(),
+      message: { id: `msg_${crypto.randomUUID()}`, type: 'message', role: 'assistant', model: 'mock-opus', content: [{ type: 'text', text: reply }] },
+    }
+    await appendFile(file, `${[...records, assistant].map(record => JSON.stringify(record)).join('\n')}\n`)
+    return
+  }
+}
 
 /**
  * Deterministic tool-use support.
@@ -385,6 +448,8 @@ ws.addEventListener('message', (event) => {
       }
 
       if (parsed.type === 'user') {
+        sendInit()
+        if (await handleGuideReplay(parsed)) continue
         normalRunning = true
         try {
         sendInit()

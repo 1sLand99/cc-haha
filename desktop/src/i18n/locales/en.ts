@@ -726,6 +726,8 @@ export const en = {
   'workspace.files.projectRoot': 'Project root',
   'workspace.files.directoryMissing': 'Directory not found: {path}',
   'workspace.files.directoryError': 'Unable to read directory: {path}',
+  'workspace.files.hidePreview': 'Hide preview',
+  'workspace.files.showPreview': 'Show preview',
   'workspace.files.toggleTree': 'Toggle file tree',
   'workspace.files.breadcrumb': 'File path',
   'workspace.files.noSelection': 'No file selected',

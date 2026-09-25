@@ -728,6 +728,8 @@ export const zh: Record<TranslationKey, string> = {
   'workspace.files.projectRoot': '專案根目錄',
   'workspace.files.directoryMissing': '目錄不存在：{path}',
   'workspace.files.directoryError': '無法讀取目錄：{path}',
+  'workspace.files.hidePreview': '隱藏預覽',
+  'workspace.files.showPreview': '顯示預覽',
   'workspace.files.toggleTree': '顯示/隱藏檔案樹',
   'workspace.files.breadcrumb': '檔案路徑',
   'workspace.files.noSelection': '未選擇檔案',

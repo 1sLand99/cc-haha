@@ -728,6 +728,8 @@ export const jp: Record<TranslationKey, string> = {
   'workspace.files.projectRoot': 'プロジェクトルート',
   'workspace.files.directoryMissing': 'ディレクトリが見つかりません: {path}',
   'workspace.files.directoryError': 'ディレクトリを読み込めません: {path}',
+  'workspace.files.hidePreview': 'プレビューを非表示',
+  'workspace.files.showPreview': 'プレビューを表示',
   'workspace.files.toggleTree': 'ファイルツリーの表示切り替え',
   'workspace.files.breadcrumb': 'ファイルパス',
   'workspace.files.noSelection': 'ファイルが選択されていません',
