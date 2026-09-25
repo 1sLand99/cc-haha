@@ -49,6 +49,7 @@ export const zh: Record<TranslationKey, string> = {
   "teamPlan.dependencies": "前置任务",
   "teamPlan.unassigned": "未分配",
   "teamPlan.assignRequired": "请先为此任务分配负责人，再确认启动。",
+  "teamPlan.invalidMemberNames": "无法启动以下成员：{names}。名称只能使用字母、数字、下划线或连字符，且不能使用 team-lead。请向主 Agent 请求修改方案。",
   "teamPlan.owner": "负责人",
   "teamPlan.feedback": "调整意见（退回时必填）",
   "teamPlan.state.draft": "主 Agent 正在调整方案",

@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { startTeamWorkersBarrier } from './teamPlanRuntime.js'
+import { startTeamWorkersBarrier, validateTeamPlanRuntime } from './teamPlanRuntime.js'
+
+test('runtime rejects a legacy review with a teammate name that cannot launch', async () => {
+  const plan = { workDir: process.cwd(), members: [{ id: 'reader', name: 'README Reader' }] } as never
+  await expect(validateTeamPlanRuntime(plan)).rejects.toThrow('Invalid teammate name: README Reader')
+})
 
 describe('team worker ready barrier', () => {
   test('never releases a task before all isolated runtimes are ready', async () => {

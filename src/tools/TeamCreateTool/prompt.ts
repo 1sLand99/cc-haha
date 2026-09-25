@@ -8,6 +8,7 @@ This desktop session requires whole-team review. TeamCreate creates a draft, not
 Prefer passing a complete plan with members and tasks. Each member has id, name, agentType,
 prompt, an optional suggested runtime {providerId, modelId, effortLevel}, reason and difficulty.
 Each task has id, subject, description, ownerId and dependencies (task IDs).
+Member names may contain letters, numbers, underscores and hyphens only; team-lead is reserved.
 Agent calls with name/team_name only register draft members. They do NOT start execution.
 Finish the entire plan, then call TeamPlan with operation="submit" and expected_revision.
 After submitting, end this planning turn. The user will review presets, task owners and model

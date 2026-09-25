@@ -47,6 +47,7 @@ export const en = {
   "teamPlan.dependencies": "Dependencies",
   "teamPlan.unassigned": "Unassigned",
   "teamPlan.assignRequired": "Assign this task to a member before approving.",
+  "teamPlan.invalidMemberNames": "Cannot launch members named {names}. Names may use only letters, numbers, underscores or hyphens; team-lead is reserved. Request a revision from the lead agent.",
   "teamPlan.owner": "Assigned member",
   "teamPlan.feedback": "Revision feedback (required to return)",
   "teamPlan.state.draft": "Lead agent is revising the plan",

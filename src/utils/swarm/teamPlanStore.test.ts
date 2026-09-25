@@ -44,6 +44,13 @@ test('staged edits reject stale revisions and graph corruption without partial w
   await replaceTeamPlan('review', identity(plan), { feedback: 'new' })
   await expect(submitTeamPlan('review', identity(plan))).rejects.toThrow('changed')
 })
+test('old invalid teammate names cannot be approved or saved from review', async () => {
+  const plan = await draft()
+  await expect(replaceTeamPlan('review', identity(plan), { members: [{ ...plan.members[0]!, name: 'README Reader' }] })).rejects.toThrow('Invalid teammate name')
+  const submitted = await submitTeamPlan('review', identity(plan))
+  await expect(approveTeamPlan('review', identity(submitted), 'invalid', { ...submitted, members: [{ ...submitted.members[0]!, name: 'README Reader' }] })).rejects.toThrow('Invalid teammate name')
+  expect((await readTeamPlan('review'))?.state).toBe('review_pending')
+})
 test('approval has frozen snapshot, idempotent retries, and concurrent admission once', async () => {
   const plan = await draft()
   const submitted = await submitTeamPlan('review', identity(plan))

@@ -54,6 +54,7 @@ afterEach(async () => {
 describe('whole-team planning tools', () => {
   test('review instructions describe the actual draft and execution states', () => {
     expect(getPrompt()).toContain('Human review before execution')
+    expect(getPrompt()).toContain('Member names may contain letters, numbers, underscores and hyphens only')
     expect(getPrompt()).toContain('Additional members require a new incremental review')
     const result = teamPlanToolResult({ teamName: 'review-team', state: 'running', members: [], tasks: [] } as never)
     expect(result.message).toContain('running')
@@ -72,6 +73,9 @@ describe('whole-team planning tools', () => {
       plan: { members: [{ id: 'researcher', name: 'researcher', agentType: 'Explore', prompt: 'Inspect the source' }], tasks: [{ id: 'audit', subject: 'Audit source', ownerId: 'researcher', dependencies: [] }] },
     }, context)
     expect(submitted.data.state).toBe('review_pending')
+    expect(TeamPlanTool.mapToolResultToToolResultBlockParam(submitted.data, 'submit-plan')).toMatchObject({
+      type: 'tool_result', tool_use_id: 'submit-plan', content: [{ type: 'text', text: expect.stringContaining('review_pending') }],
+    })
     const plan = await readTeamPlan('review-team')
     expect(plan?.approvedSnapshot).toBeUndefined()
     expect(plan?.members[0]?.agentSnapshot?.systemPrompt).toContain('READ-ONLY')
@@ -88,6 +92,14 @@ describe('whole-team planning tools', () => {
     const staged = await spawnTeammate({ name: 'worker', team_name: 'review-team', prompt: 'Work' }, context)
     expect(staged.data.staged).toBe(true)
     await expect(TeamPlanTool.call({ team_name: 'review-team', operation: 'submit', expected_revision: created.data.plan!.revision }, context)).rejects.toThrow('changed')
+    expect((await readTeamPlan('review-team'))?.state).toBe('draft')
+  })
+
+  test('rejects a teammate name the launcher cannot use before submitting a plan', async () => {
+    const created = await TeamCreateTool.call({ team_name: 'review-team' }, context)
+    await expect(TeamPlanTool.call({ team_name: 'review-team', operation: 'submit', expected_revision: created.data.plan!.revision,
+      plan: { members: [{ id: 'reader', name: 'README Reader', prompt: 'Read README' }], tasks: [{ id: 'read', subject: 'Read', ownerId: 'reader', dependencies: [] }] },
+    }, context)).rejects.toThrow('Use letters, numbers, underscores or hyphens')
     expect((await readTeamPlan('review-team'))?.state).toBe('draft')
   })
 

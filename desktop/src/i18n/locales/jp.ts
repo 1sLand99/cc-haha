@@ -49,6 +49,7 @@ export const jp: Record<TranslationKey, string> = {
   "teamPlan.dependencies": "依存タスク",
   "teamPlan.unassigned": "未割り当て",
   "teamPlan.assignRequired": "承認する前に、このタスクをメンバーに割り当ててください。",
+  "teamPlan.invalidMemberNames": "{names} は起動できません。名前には文字、数字、アンダースコア、ハイフンのみ使用でき、team-lead は予約されています。リーダーエージェントに修正を依頼してください。",
   "teamPlan.owner": "担当メンバー",
   "teamPlan.feedback": "修正依頼の内容（必須）",
   "teamPlan.state.draft": "リーダーが計画を修正中",

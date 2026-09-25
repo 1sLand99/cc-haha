@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
-import type { TeamPlanRecord, TeamPlanMember } from '../../shared/teamPlan.js'
+import { isValidTeamMemberName, type TeamPlanRecord, type TeamPlanMember } from '../../shared/teamPlan.js'
 import { conversationService } from './conversationService.js'
 import { ProviderService } from './providerService.js'
 import { CLAUDE_OFFICIAL_PROVIDER_ID } from '../types/provider.js'
@@ -24,7 +24,7 @@ export async function validateTeamPlanRuntime(plan: TeamPlanRecord): Promise<Tea
   if (plan.teamName && (!team || team.leadSessionId !== plan.sessionId || createHash('sha256').update(JSON.stringify([team.name, team.leadSessionId || '', team.createdAt])).digest('hex') !== plan.incarnationId)) throw new Error('Team generation no longer exists')
   const members: TeamPlanMember[] = []
   for (const member of plan.members) {
-    if (!/^[\p{L}\p{N}_-]+$/u.test(member.name) || member.name === 'team-lead') throw new Error(`Invalid teammate name: ${member.name}`)
+    if (!isValidTeamMemberName(member.name)) throw new Error(`Invalid teammate name: ${member.name}`)
     if (team?.members.some(existing => existing.name === member.name)) throw new Error(`Member already exists: ${member.name}`)
     const snapshot = plan.agentCatalog?.[member.agentType]
     if (!snapshot || !snapshot.systemPrompt.trim()) throw new Error(`Agent preset is unavailable: ${member.agentType}`)

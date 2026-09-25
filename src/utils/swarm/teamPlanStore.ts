@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, writeFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
-import { teamPlanRecordSchema, type TeamPlanIdentity, type TeamPlanMember, type TeamPlanPatch, type TeamPlanRecord, type TeamPlanRuntime } from '../../shared/teamPlan.js'
+import { isValidTeamMemberName, teamPlanRecordSchema, type TeamPlanIdentity, type TeamPlanMember, type TeamPlanPatch, type TeamPlanRecord, type TeamPlanRuntime } from '../../shared/teamPlan.js'
 import { getTeamsDir } from '../envUtils.js'
 import { getCanonicalTeamTaskListId, withTaskListLifecycleLock } from '../tasks.js'
 import { getTeamDir, readTeamFileAsync } from './teamHelpers.js'
@@ -41,6 +41,9 @@ async function writePlan(plan: TeamPlanRecord): Promise<void> {
 }
 
 export function validateTeamPlanGraph(plan: Pick<TeamPlanRecord, 'members' | 'tasks'>, runnable = false): void {
+  for (const member of plan.members) {
+    if (!isValidTeamMemberName(member.name)) throw new TeamPlanError(`Invalid teammate name: ${member.name}. Use letters, numbers, underscores or hyphens; "team-lead" is reserved.`, 400)
+  }
   const memberIds = new Set(plan.members.map(member => member.id))
   const names = new Set(plan.members.map(member => member.name))
   const tasks = new Map(plan.tasks.map(task => [task.id, task]))

@@ -13,7 +13,7 @@ import { useSessionRuntimeStore } from '@/stores/sessionRuntimeStore'
 import { useProviderStore } from '@/stores/providerStore'
 import type { RuntimeSelection } from '@/types/runtime'
 import { CLAUDE_OFFICIAL_PROVIDER_ID } from '@/constants/openaiOfficialProvider'
-import type { TeamPlanRuntime, TeamPlanMember } from '../../../../src/shared/teamPlan'
+import { isValidTeamMemberName, type TeamPlanRuntime, type TeamPlanMember } from '../../../../src/shared/teamPlan'
 
 function selection(runtime: TeamPlanRuntime): RuntimeSelection {
   return {
@@ -57,6 +57,7 @@ export function AgentTeamsPlanCard({ sessionId }: { sessionId: string }) {
   const activeMember = members.find(member => member.id === activeMemberId) ?? members[0]
   const difficultyLabel = (member: TeamPlanMember) => member.difficulty === 'high' ? t('teamPlan.high') : member.difficulty === 'low' ? t('teamPlan.low') : member.difficulty === 'medium' ? t('teamPlan.medium') : t('teamPlan.unspecified')
   const hasUnassignedTasks = tasks.some(task => !members.some(member => member.id === task.ownerId))
+  const invalidNames = members.filter(member => !isValidTeamMemberName(member.name)).map(member => member.name)
   const presetChanged = members.some(member => plan.members.find(previous => previous.id === member.id)?.agentType !== member.agentType)
   const canStop = plan.state === 'launching' || plan.state === 'running' || Boolean(plan.parentPlanId)
   const editable = plan.state === 'review_pending' && !entry.busy && !entry.conflict
@@ -101,13 +102,13 @@ export function AgentTeamsPlanCard({ sessionId }: { sessionId: string }) {
         <div className="team-plan-footer flex w-full flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="text-xs text-[var(--color-text-secondary)]" role="status">{draft?.dirty ? t('teamPlan.unsaved') : t('teamPlan.saved')}</span>
-            {plan.state === 'review_pending' && <Button data-testid="team-plan-save" size="base" variant="ghost" disabled={!editable || !draft?.dirty} onClick={() => void save(sessionId)}>{t('teamPlan.save')}</Button>}
+            {plan.state === 'review_pending' && <Button data-testid="team-plan-save" size="base" variant="ghost" disabled={!editable || !draft?.dirty || invalidNames.length > 0} onClick={() => void save(sessionId)}>{t('teamPlan.save')}</Button>}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="ghost" disabled={entry.busy} onClick={() => setOpen(false)}>{t('teamPlan.close')}</Button>
             {plan.state === 'review_pending' && <>
               <Button variant="ghost" disabled={!editable} onClick={() => void act(sessionId, 'cancel')}>{t('teamPlan.cancel')}</Button>
-              <Button data-testid="team-plan-approve" disabled={!editable || presetChanged || hasUnassignedTasks} loading={entry.busy} onClick={() => void act(sessionId, 'approve')}>{t('teamPlan.approve')}</Button>
+              <Button data-testid="team-plan-approve" disabled={!editable || presetChanged || hasUnassignedTasks || invalidNames.length > 0} loading={entry.busy} onClick={() => void act(sessionId, 'approve')}>{t('teamPlan.approve')}</Button>
             </>}
             {canStop && <Button data-testid="team-plan-stop" variant="danger-outline" disabled={stoppingPlanId === plan.planId} onClick={() => {
               if (stoppingPlanId === plan.planId) return
@@ -128,6 +129,7 @@ export function AgentTeamsPlanCard({ sessionId }: { sessionId: string }) {
           </div>
           {plan.launch?.error && <p role="alert" className="mb-4 text-sm text-[var(--color-error)]">{plan.launch.error}</p>}
           {entry.error && <p role="alert" className="mb-4 text-sm text-[var(--color-error)]">{entry.error}</p>}
+          {plan.state === 'review_pending' && invalidNames.length > 0 && <p role="alert" className="mb-4 text-sm text-[var(--color-error)]">{t('teamPlan.invalidMemberNames', { names: invalidNames.join(', ') })}</p>}
           {entry.conflict && <div role="alert" className="mb-4 space-y-2 rounded-[var(--radius-md)] bg-[var(--color-warning-container)] p-3 text-[var(--color-on-warning-container)]">
             <p>{t('teamPlan.conflict')}</p>
             <div className="flex flex-wrap gap-2">

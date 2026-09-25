@@ -10,6 +10,7 @@ import { getSideChat, isSideChatId } from '../services/sideChatRegistry.js'
 import type { ServerWebSocket } from 'bun'
 import { sessionMessageUuid } from '../../utils/sessionMessageInbox.js'
 import { parseSessionCollaborationEnvelope } from '../../utils/sessionCollaborationEnvelope.js'
+import { isShutdownTeamPrompt } from '../../utils/swarm/teamShutdownPrompt.js'
 import { admitSessionUserTurn, emitSessionTurnEvent } from '../services/sessionTurnEvents.js'
 import { ApiError } from '../middleware/errorHandler.js'
 import { resolveSessionReferenceContext, splitSessionReferenceContext } from '../services/sessionReferenceContext.js'
@@ -3488,7 +3489,7 @@ export function translateCliMessage(cliMsg: any, sessionId: string): ServerMessa
       }
 
       const replayText = extractReplayUserText(cliMsg)
-      if (replayText) {
+      if (replayText && !isShutdownTeamPrompt(cliMsg.message?.content) && (!cliMsg.isMeta || parseSessionCollaborationEnvelope(replayText))) {
         const collaborationEnvelope = parseSessionCollaborationEnvelope(replayText)
         messages.push(collaborationEnvelope
           ? {

@@ -354,6 +354,8 @@ import {
   hasWorkingInProcessTeammates,
   waitForTeammatesToBecomeIdle,
 } from '../utils/teammate.js'
+import { TEAM_LEAD_NAME } from '../utils/swarm/constants.js'
+import { SHUTDOWN_TEAM_PROMPT } from '../utils/swarm/teamShutdownPrompt.js'
 import {
   readUnreadMessages,
   markMessagesAsRead,
@@ -402,19 +404,25 @@ const extractMemoriesModule = feature('EXTRACT_MEMORIES')
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 
-const SHUTDOWN_TEAM_PROMPT = `<system-reminder>
-You are running in non-interactive mode and cannot return a response to the user until your team is shut down.
+export function hasTeammatesRequiringShutdown(state: AppState): boolean {
+  if (hasActiveInProcessTeammates(state)) return true
+  const team = state.teamContext
+  if (!team) return false
+  for (const member of Object.values(team.teammates)) {
+    if (member.name === TEAM_LEAD_NAME) continue
+    return true
+  }
+  return false
+}
 
-You MUST shut down your team before preparing your final response:
-1. Use requestShutdown to ask each team member to shut down gracefully
-2. Wait for shutdown approvals
-3. Use the cleanup operation to clean up the team
-4. Only then provide your final response to the user
-
-The user cannot receive your response until the team is completely shut down.
-</system-reminder>
-
-Shut down your team and prepare your final response for the user.`
+export function createShutdownTeamPrompt(): QueuedCommand {
+  return {
+    mode: 'prompt',
+    value: SHUTDOWN_TEAM_PROMPT,
+    uuid: randomUUID(),
+    isMeta: true,
+  }
+}
 
 // Track message UUIDs received during the current session runtime
 const MAX_RECEIVED_UUIDS = 10_000
@@ -2583,10 +2591,7 @@ function runHeadlessStreaming(
         while (true) {
           // Check if teammates are still active
           const refreshedState = getAppState()
-          const hasActiveTeammates =
-            hasActiveInProcessTeammates(refreshedState) ||
-            (refreshedState.teamContext &&
-              Object.keys(refreshedState.teamContext.teammates).length > 0)
+          const hasActiveTeammates = hasTeammatesRequiringShutdown(refreshedState)
 
           if (!hasActiveTeammates) {
             logForDebugging(
@@ -2714,11 +2719,7 @@ function runHeadlessStreaming(
             logForDebugging(
               '[print.ts] Input closed with active teammates, injecting shutdown prompt',
             )
-            enqueue({
-              mode: 'prompt',
-              value: SHUTDOWN_TEAM_PROMPT,
-              uuid: randomUUID(),
-            })
+            enqueue(createShutdownTeamPrompt())
             void run()
             return // run() will come back here after processing
           }
@@ -2740,24 +2741,12 @@ function runHeadlessStreaming(
 
         // Re-fetch state after potential wait
         const refreshedAppState = getAppState()
-        const refreshedTeamContext = refreshedAppState.teamContext
-        const hasTeamMembersNotCleanedUp =
-          refreshedTeamContext &&
-          Object.keys(refreshedTeamContext.teammates).length > 0
-
-        return (
-          hasTeamMembersNotCleanedUp ||
-          hasActiveInProcessTeammates(refreshedAppState)
-        )
+        return hasTeammatesRequiringShutdown(refreshedAppState)
       })()
 
       if (hasActiveSwarm) {
         // Team members are idle or pane-based - inject prompt to shut down team
-        enqueue({
-          mode: 'prompt',
-          value: SHUTDOWN_TEAM_PROMPT,
-          uuid: randomUUID(),
-        })
+        enqueue(createShutdownTeamPrompt())
         void run()
       } else {
         // Wait for any in-flight push suggestion before closing the output stream.

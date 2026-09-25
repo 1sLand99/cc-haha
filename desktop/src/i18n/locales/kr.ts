@@ -49,6 +49,7 @@ export const kr: Record<TranslationKey, string> = {
   "teamPlan.dependencies": "선행 작업",
   "teamPlan.unassigned": "미배정",
   "teamPlan.assignRequired": "승인하기 전에 이 작업을 멤버에게 배정하세요.",
+  "teamPlan.invalidMemberNames": "{names} 멤버를 시작할 수 없습니다. 이름에는 문자, 숫자, 밑줄, 하이픈만 사용할 수 있으며 team-lead는 예약되어 있습니다. 리더 에이전트에게 수정을 요청하세요.",
   "teamPlan.owner": "담당 멤버",
   "teamPlan.feedback": "수정 의견 (반려 시 필수)",
   "teamPlan.state.draft": "리더가 계획 수정 중",

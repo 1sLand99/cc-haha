@@ -107,6 +107,17 @@ describe('AgentTeamsPlanCard', () => {
     expect(screen.getByRole('button', { name: 'Approve and launch' })).toBeEnabled()
   })
 
+  it('blocks an old review with an unlaunchable member name and points to revision', async () => {
+    const plan = fixture()
+    plan.members[0]!.name = 'README Reader'
+    vi.mocked(teamPlansApi.get).mockResolvedValue({ plan })
+    await open()
+    expect(screen.getByRole('button', { name: 'Approve and launch' })).toBeDisabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('README Reader')
+    expect(screen.getByRole('alert')).toHaveTextContent('Request a revision')
+    expect(teamPlansApi.act).not.toHaveBeenCalled()
+  })
+
   it('follows the current session runtime without switching the lead and falls back to the plan snapshot', async () => {
     await open()
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select all members' }))
