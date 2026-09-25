@@ -177,6 +177,52 @@ describe('Telegram entrypoint session routing', () => {
     }
   })
 
+  it.each(['status', 'stop', 'clear'] as const)('preserves the session and project when /%s cannot reconnect, then retries the original session', async (command) => {
+    const chatId = nextId++
+    const sessionId = `retry-${command}`
+    sessionPaths.set(sessionId, worktree)
+    store.set(String(chatId), sessionId, worktree)
+    const originalBinding = store.get(String(chatId))
+    const creationsBefore = requests.filter((request) => request === 'POST /api/sessions').length
+    const sendMessage = spyOn(WsBridge.prototype, 'sendUserMessage')
+    const sendStop = spyOn(WsBridge.prototype, 'sendStopGeneration')
+    const failedOpen = spyOn(WsBridge.prototype, 'waitForOpen').mockImplementationOnce(async function (this: WsBridge, id) {
+      this.resetSession(id)
+      return false
+    })
+    try {
+      await text(chatId, `/${command}`)
+      // /stop and /clear dispatch asynchronously, so wait for their failure reply.
+      await eventually(() => expect(texts(chatId).at(-1)).toContain('已保留会话和工作目录'))
+      expect(store.get(String(chatId))).toEqual(originalBinding)
+      expect(requests.filter((request) => request === 'POST /api/sessions').length).toBe(creationsBefore)
+      expect(sendMessage).not.toHaveBeenCalled()
+      expect(sendStop).not.toHaveBeenCalled()
+      expect(messages.filter((item) => item.sessionId === sessionId)).toEqual([])
+      expect(texts(chatId).at(-1)).not.toContain('/new')
+
+      await text(chatId, `/${command}`)
+      await eventually(() => {
+        if (command === 'status') {
+          expect(texts(chatId).at(-1)).toContain(sessionId)
+        } else if (command === 'stop') {
+          expect(messages.some((item) => item.sessionId === sessionId && item.message.type === 'stop_generation')).toBe(true)
+          expect(texts(chatId).at(-1)).toContain('已发送停止信号')
+        } else {
+          expect(messages.some((item) => item.sessionId === sessionId && item.message.content === '/clear')).toBe(true)
+          expect(texts(chatId).some((value) => value.includes('已清空当前会话上下文'))).toBe(true)
+        }
+      })
+      expect(store.get(String(chatId))).toEqual(originalBinding)
+      expect(requests.filter((request) => request === 'POST /api/sessions').length).toBe(creationsBefore)
+      expect(failedOpen).toHaveBeenCalledTimes(2)
+    } finally {
+      failedOpen.mockRestore()
+      sendMessage.mockRestore()
+      sendStop.mockRestore()
+    }
+  })
+
   it('runs registered history commands after authorization and deduplication', async () => {
     const before = requests.length
     await text(701, '/sessions', { userId: 99 })
