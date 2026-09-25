@@ -1383,6 +1383,9 @@ describe('Models API', () => {
       name: 'ChatGPT Official',
     })
     expect(body.models.map((model) => model.id)).toEqual([
+      'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
@@ -1390,11 +1393,15 @@ describe('Models API', () => {
       'gpt-5.4',
       'gpt-5.5',
       'gpt-5.4-mini',
-      'gpt-6-astra',
     ])
     expect(body.models[0]).toMatchObject({
-      id: 'gpt-5.6-sol',
+      id: 'gpt-6-astra',
       defaultReasoningEffort: 'low',
+      supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    })
+    expect(body.models[1]).toMatchObject({
+      id: 'gpt-6-sol',
+      defaultReasoningEffort: 'medium',
       supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     })
   })
@@ -1673,6 +1680,8 @@ describe('Model Options', () => {
     const labels = options.map(option => option.label)
 
     expect(values).toContain('gpt-5.3-codex')
+    expect(values).toContain('gpt-6-sol')
+    expect(values).toContain('gpt-6-luna')
     expect(values).toContain('gpt-5.6-sol')
     expect(values).toContain('gpt-5.6-terra')
     expect(values).toContain('gpt-5.6-luna')

@@ -5825,8 +5825,8 @@ describe('WebSocket Chat Integration', () => {
         sessionId,
         options: {
           providerId: 'openai-official',
-          model: 'gpt-5.6-sol',
-          effort: 'low',
+          model: 'gpt-6-sol',
+          effort: 'medium',
         },
       })
       expect(startCalls[0]?.options?.thinking).toBeUndefined()
