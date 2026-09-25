@@ -363,7 +363,9 @@ import {
   partitionLeadMailboxMessages,
   resolveTeammatePermissionRequests,
 } from '../utils/swarm/printLeaderPermissionBridge.js'
-import { removeTeammateFromTeamFile } from '../utils/swarm/teamHelpers.js'
+import { removeTeammateFromTeamFile, readTeamFile, getTeamFilePath } from '../utils/swarm/teamHelpers.js'
+import { setLeaderTeamName } from '../utils/tasks.js'
+import { buildTeamRuntimeSnapshot } from '../utils/swarm/teamRuntimeSnapshot.js'
 import { unassignTeammateTasks } from '../utils/tasks.js'
 import { getRunningTasks } from '../utils/task/framework.js'
 import { isBackgroundTask } from '../tasks/types.js'
@@ -2936,7 +2938,16 @@ function runHeadlessStreaming(
           } catch (error) {
             sendControlResponseError(message, error instanceof Error ? error.message : String(error))
           }
-        } else if (message.request.subtype === 'interrupt') {
+        } else if (message.request.subtype === 'team_runtime_snapshot') {
+          try {
+            const teamContext = buildTeamRuntimeSnapshot(readTeamFile(message.request.team_name), message.request.created_at, getSessionId(), getTeamFilePath(message.request.team_name))
+            setLeaderTeamName(teamContext.teamName)
+            setAppState(prev => ({ ...prev, teamContext }))
+            sendControlResponseSuccess(message)
+          } catch (error) {
+            sendControlResponseError(message, error instanceof Error ? error.message : String(error))
+          }
+        } else if (message.request.subtype === 'interrupt' || message.request.subtype === 'team_plan_pause') {
           sessionMessageInbox.cancelQueued(dequeueAllMatching)
           // Track escapes for attribution (ant-only feature)
           if (feature('COMMIT_ATTRIBUTION')) {

@@ -1273,7 +1273,7 @@ export class SessionService {
         customTitle: null as string | null, nonemptyCustomTitle: null as string | null,
         goalTitle: null as string | null, aiTitle: null as string | null, firstUserTitle: null as string | null,
         createdAt: null as string | null, modifiedAt: null as string | null,
-        count: 0, launchCount: 0,
+        count: 0, launchCount: 0, isTeamWorker: false,
       })
       const launch = makeState()
       const summary = makeState()
@@ -1286,6 +1286,7 @@ export class SessionService {
         state.launchCount += this.countTranscriptMessages([entry])
         if (typeof entry.cwd === 'string' && entry.cwd.trim()) state.cwd = normalizeDriveRootPathForPlatform(entry.cwd)
         const record = entry as Record<string, unknown>
+        if (record.entrypoint === 'claude-desktop-team-worker') state.isTeamWorker = true
         if (entry.type === 'session-meta') {
           if (typeof record.workDir === 'string') state.workDir = normalizeDriveRootPathForPlatform(record.workDir)
           state.permissionMode = this.resolvePermissionModeFromEntries([entry]) ?? state.permissionMode
@@ -1325,6 +1326,7 @@ export class SessionService {
           createdAt: summary.createdAt ?? stat.birthtime.toISOString(),
           modifiedAt: summary.modifiedAt ?? stat.mtime.toISOString(),
           messageCount: summary.count,
+          ...(summary.isTeamWorker ? { isTeamWorker: true } : {}),
           workDir: summary.workDir || summary.cwd || this.desanitizePath(projectDir),
           ...shared(summary),
         },
@@ -3376,7 +3378,7 @@ export class SessionService {
         try {
           const stat = await fs.stat(file.filePath)
           const summary = await this.getCachedSessionListSummary(file.filePath, file.projectDir, stat, scope)
-          indexedRows.push({ ...summary, id: file.sessionId, projectPath: file.projectDir, transcriptPath: file.filePath })
+          if (!summary.isTeamWorker) indexedRows.push({ ...summary, id: file.sessionId, projectPath: file.projectDir, transcriptPath: file.filePath })
         } catch { /* Ignore unreadable transcripts, like the normal list. */ }
       }
     }
@@ -3756,15 +3758,8 @@ export class SessionService {
     }> = []
     for (const item of filesWithStats) {
       try {
-        summarizedFiles.push({
-          ...item,
-          summary: await this.getCachedSessionListSummary(
-            item.filePath,
-            item.projectDir,
-            item.stat,
-            scope,
-          ),
-        })
+        const summary = await this.getCachedSessionListSummary(item.filePath, item.projectDir, item.stat, scope)
+        if (!summary.isTeamWorker) summarizedFiles.push({ ...item, summary })
       } catch {
         // Skip unreadable files
       }

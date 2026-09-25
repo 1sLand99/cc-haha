@@ -442,6 +442,36 @@ describe('WebSocket handler session isolation', () => {
     expect(cancelComputerUse).toHaveBeenCalledWith(sessionId)
   })
 
+  it('UI Stop interrupts the team runtime when the leader has no active turn', () => {
+    const sessionId = `idle-team-stop-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+    spyOn(conversationService, 'hasSession').mockReturnValue(true)
+    spyOn(conversationService, 'onOutput').mockImplementation(() => {})
+    spyOn(conversationService, 'removeOutputCallback').mockImplementation(() => {})
+    const interrupt = spyOn(conversationService, 'sendInterrupt').mockReturnValue(true)
+    handleWebSocket.open(ws)
+    handleWebSocket.message(ws, JSON.stringify({ type: 'stop_generation' }))
+    expect(interrupt).toHaveBeenCalledTimes(1)
+    expect(interrupt).toHaveBeenCalledWith(sessionId)
+  })
+
+  it('restores a waiting teammate permission after the leader completes its turn', () => {
+    const sessionId = `worker-permission-${crypto.randomUUID()}`
+    const ws = makeClientSocket(sessionId)
+    let output: ((message: any) => void) | undefined
+    spyOn(conversationService, 'hasSession').mockReturnValue(true)
+    spyOn(conversationService, 'onOutput').mockImplementation((_id, callback) => { output = callback })
+    spyOn(conversationService, 'removeOutputCallback').mockImplementation(() => {})
+    spyOn(conversationService, 'getPendingPermissionRequests').mockReturnValue([{ requestId: 'worker-request', toolName: 'Read', input: {}, displayName: 'researcher', agentId: 'researcher@team' }])
+    handleWebSocket.open(ws)
+    output!({ type: 'control_request', request_id: 'worker-request', request: { subtype: 'can_use_tool', tool_name: 'Read', input: {}, display_name: 'researcher', agent_id: 'researcher@team' } })
+    output!({ type: 'result', subtype: 'success', result: 'leader done', usage: {} })
+    const messages = ws.sent.map(payload => JSON.parse(payload))
+    const complete = messages.findLastIndex(message => message.type === 'message_complete')
+    expect(complete).toBeGreaterThan(-1)
+    expect(messages.slice(complete + 1)).toContainEqual({ type: 'permission_request', requestId: 'worker-request', toolName: 'Read', input: {}, displayName: 'researcher' })
+  })
+
   it('replays pending permission requests when a client reconnects', () => {
     const sessionId = `permission-reconnect-${crypto.randomUUID()}`
     const ws = makeClientSocket(sessionId)
@@ -1496,7 +1526,8 @@ describe('WebSocket handler session isolation', () => {
     handleWebSocket.message(ws, JSON.stringify({ type: 'stop_generation' }))
     await Promise.resolve()
 
-    expect(sendInterrupt).not.toHaveBeenCalled()
+    // Stop also revokes process teammates which are not local Agent tasks.
+    expect(sendInterrupt).toHaveBeenCalledWith(sessionId)
     expect(requestControl).toHaveBeenCalledWith(sessionId, {
       subtype: 'stop_task',
       task_id: 'agent-task-after-turn',

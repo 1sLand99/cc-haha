@@ -491,6 +491,20 @@ async function createThreeTurnCheckpointFixture(
 // ============================================================================
 
 describe('SessionService', () => {
+  it('hides only desktop team worker transcripts from the sidebar and keeps direct reads', async () => {
+    const workerId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const ordinaryId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    const siblingId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    await writeSessionFile('-tmp-team-sidebar', workerId, [{ ...makeUserEntry('worker task'), entrypoint: 'claude-desktop-team-worker', teamName: 'team', agentName: 'worker' }])
+    await writeSessionFile('-tmp-team-sidebar', ordinaryId, [{ ...makeUserEntry('legacy teammate'), teamName: 'team', agentName: 'legacy' }])
+    await writeSessionFile('-tmp-team-sidebar', siblingId, [{ ...makeUserEntry('ordinary sidebar task'), entrypoint: 'claude-desktop' }])
+    const result = await service.listSessions({ project: '-tmp-team-sidebar', limit: 20 })
+    expect(result.sessions.map(item => item.id).sort()).toEqual([ordinaryId, siblingId].sort())
+    expect(result.total).toBe(2)
+    expect(await service.findSessionFile(workerId)).not.toBeNull()
+    expect((await service.getSessionMessages(workerId)).length).toBeGreaterThan(0)
+  })
+
   beforeEach(async () => {
     await setupTmpConfigDir()
     service = new SessionService()

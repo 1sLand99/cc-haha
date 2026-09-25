@@ -27,7 +27,7 @@ export function getClaudeOfficialDefaultModelId(
     : CLAUDE_OFFICIAL_SONNET_MODEL_ID
 }
 
-function normalizeExplicitClaudeOfficialModelId(modelId: string): string | null {
+export function normalizeExplicitClaudeOfficialModelId(modelId: string): string | null {
   const trimmed = modelId.trim()
   if (!trimmed) return null
 

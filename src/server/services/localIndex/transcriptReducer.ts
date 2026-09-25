@@ -72,6 +72,7 @@ type ReducerEntry = {
 }
 
 type ReducerState = {
+  isTeamWorker: boolean
   fallbackCreatedAt: string
   fallbackModifiedAt: string
   fallbackWorkDir: string | null
@@ -249,6 +250,7 @@ function createInitialState(
     runtimeProviderId: undefined,
     runtimeModelId: undefined,
     effortLevel: undefined,
+    isTeamWorker: false,
     repository: undefined,
     worktreeSession: undefined,
     nextOrdinal: 0,
@@ -507,6 +509,7 @@ function applyActivityEntry(state: ReducerState, entry: ReducerEntry): void {
 }
 
 function applyEntry(state: ReducerState, entry: ReducerEntry): void {
+  if (entry.entrypoint === 'claude-desktop-team-worker') state.isTeamWorker = true
   applyActivityEntry(state, entry)
   if (!state.hasCreatedAt && entry.timestamp) {
     state.createdAt = entry.timestamp
@@ -613,6 +616,7 @@ function summaryFromState(state: ReducerState): SessionListSummary {
       : {}),
     ...(state.runtimeModelId ? { runtimeModelId: state.runtimeModelId } : {}),
     ...(state.effortLevel ? { effortLevel: state.effortLevel } : {}),
+    ...(state.isTeamWorker ? { isTeamWorker: true } : {}),
     ...(state.repository ? { repository: { ...state.repository } } : {}),
     ...(state.worktreeSession !== undefined
       ? {

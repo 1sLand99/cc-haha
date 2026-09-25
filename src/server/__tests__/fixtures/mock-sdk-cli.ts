@@ -381,7 +381,14 @@ function sendInit() {
   })
 }
 
+function auditTeamWorker(phase: 'boot' | 'release') {
+  const path = process.env.MOCK_SDK_TEAM_WORKER_AUDIT
+  if (!path || process.env.CC_HAHA_TEAM_WORKER !== '1') return
+  void appendFile(path, JSON.stringify({ phase, sessionId, model: getArg('--model'), baseUrl: process.env.ANTHROPIC_BASE_URL }) + '\n')
+}
+
 ws.addEventListener('open', () => {
+  auditTeamWorker('boot')
   if (initMode !== 'on_first_user') {
     if (initDelayMs > 0) {
       setTimeout(sendInit, initDelayMs)
@@ -448,6 +455,7 @@ ws.addEventListener('message', (event) => {
       }
 
       if (parsed.type === 'user') {
+        auditTeamWorker('release')
         sendInit()
         if (await handleGuideReplay(parsed)) continue
         normalRunning = true
@@ -608,7 +616,7 @@ ws.addEventListener('message', (event) => {
         }
       }
 
-      if (parsed.type === 'control_request' && parsed.request?.subtype === 'set_model') {
+      if (parsed.type === 'control_request' && ['set_model', 'team_runtime_snapshot'].includes(parsed.request?.subtype)) {
         emit(ws, { type: 'control_response', response: { subtype: 'success', request_id: parsed.request_id, response: {} }, session_id: sessionId })
         continue
       }

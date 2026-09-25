@@ -13,6 +13,7 @@ import { useSessionRuntimeStore } from './sessionRuntimeStore'
 import { registerSideChatSession, unregisterSideChatSession } from '../lib/sideChatSessions'
 
 const {
+  refreshTeamPlanMock,
   sendMock,
   getMemberBySessionIdMock,
   sendMessageToMemberMock,
@@ -41,6 +42,7 @@ const {
   tabStoreListeners,
   providerStoreSnapshot,
 } = vi.hoisted(() => ({
+  refreshTeamPlanMock: vi.fn(async () => {}),
   sendMock: vi.fn(),
   getMemberBySessionIdMock: vi.fn<(sessionId: string) => any>(() => null),
   sendMessageToMemberMock: vi.fn(async () => {}),
@@ -83,6 +85,8 @@ const {
   tabStoreListeners: new Set<(state: any, previous: any) => void>(),
   providerStoreSnapshot: { providers: [] as SavedProvider[], activeId: null as string | null },
 }))
+
+vi.mock('./teamPlanStore', () => ({ useTeamPlanStore: { getState: () => ({ refresh: refreshTeamPlanMock }) } }))
 
 vi.mock('./providerStore', () => ({
   useProviderStore: { getState: () => providerStoreSnapshot },
@@ -248,6 +252,20 @@ describe('stripGeneratedImageMetadataLines', () => {
 })
 
 describe('Agent Teams workbench invalidation', () => {
+  it('refreshes durable plans on reconnect and only accepts matching-session invalidation', () => {
+    refreshTeamPlanMock.mockClear()
+    useChatStore.getState().handleServerMessage('lead', { type: 'connected', sessionId: 'lead' })
+    useChatStore.getState().handleServerMessage('lead', {
+      type: 'team_plan_updated', sessionId: 'other', teamName: 'team', planId: 'plan', incarnationId: 'incarnation', revision: 2, state: 'review_pending',
+    })
+    expect(refreshTeamPlanMock).toHaveBeenCalledTimes(1)
+    useChatStore.getState().handleServerMessage('lead', {
+      type: 'team_plan_updated', sessionId: 'lead', teamName: 'team', planId: 'plan', incarnationId: 'incarnation', revision: 3, state: 'review_pending',
+    })
+    expect(refreshTeamPlanMock).toHaveBeenCalledTimes(2)
+    expect(refreshTeamPlanMock).toHaveBeenLastCalledWith('lead')
+  })
+
   it('binds team creation to the lead session before workbench hydration', () => {
     handleTeamCreatedMock.mockReset()
 

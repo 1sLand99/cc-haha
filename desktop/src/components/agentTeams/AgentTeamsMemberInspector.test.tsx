@@ -212,6 +212,17 @@ describe('AgentTeamsMemberInspector', () => {
     expect(inheritedCell.getAttribute('data-model-inherited')).toBe('true')
   })
 
+  it('shows the actual provider snapshot alongside its model', () => {
+    const frame = snapshot('2026-08-08T07:00:00.000Z', 'pending')
+    render(<AgentTeamsMemberInspector
+      snapshots={[frame]} selectedIndex={0} snapshot={frame}
+      member={{ ...builder, model: 'same-model-id', providerId: 'saved-provider', providerName: 'Execution provider' }}
+      isLead={false} leadIsStreaming={false} onBack={vi.fn()} onClose={vi.fn()} onOpenExecution={vi.fn()}
+    />)
+    expect(screen.getByTestId('agent-teams-member-provider').textContent).toBe('Execution provider')
+    expect(screen.getByTestId('agent-teams-member-model').textContent).toBe('same-model-id')
+  })
+
   it('never leaves the model cell blank when nothing is known', () => {
     renderInspector()
 

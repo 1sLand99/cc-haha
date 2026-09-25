@@ -427,7 +427,7 @@ describe('session projector', () => {
       expect(result.projection.summary).not.toHaveProperty('sessionApiFormat')
       expect(database.read(operation => operation.get<{ parser_version: number }>(
         'SELECT parser_version FROM source_files WHERE path = ?', candidate.path,
-      )?.parser_version)).toBe(6)
+      )?.parser_version)).toBe(SESSION_SUMMARY_PARSER_VERSION)
       expect(database.read(operation => operation.get<{ session_api_format: string }>(
         'SELECT session_api_format FROM sessions WHERE transcript_path = ?', candidate.path,
       )?.session_api_format)).toBe('unknown')
@@ -1009,4 +1009,22 @@ describe('session projector', () => {
     } finally { database.close() }
   })
 
+})
+
+it('excludes desktop team workers from sidebar pages while retaining indexed transcript lookup', async () => {
+  const root = await createTempDir('team-worker-sidebar')
+  const database = openLocalIndexDatabase({ path: join(root, 'index.sqlite') })
+  const index = createSessionIndex(database)
+  try {
+    const projector = createSessionProjector({ database, index, scope: root })
+    const worker = await createCandidate({ root, projectPath: '-repo', sessionId: 'worker-session', content: line({ ...user('worker work', '2026-01-03T00:00:00Z'), entrypoint: 'claude-desktop-team-worker', teamName: 'team', agentName: 'worker' }) })
+    const ordinary = await createCandidate({ root, projectPath: '-repo', sessionId: 'ordinary-session', content: line({ ...user('ordinary', '2026-01-02T00:00:00Z'), teamName: 'team', agentName: 'legacy-agent' }) })
+    const sibling = await createCandidate({ root, projectPath: '-repo', sessionId: 'sibling-session', content: line({ ...user('sibling', '2026-01-01T00:00:00Z'), entrypoint: 'claude-desktop' }) })
+    for (const candidate of [worker, ordinary, sibling]) await projector.projectSource(candidate)
+    expect(index.listSessions({ limit: 1 }).sessions.map(item => item.id)).toEqual(['ordinary-session'])
+    expect(index.listSessions({ project: '-repo', limit: 1, offset: 1 }).sessions.map(item => item.id)).toEqual(['sibling-session'])
+    expect(index.listSessions().total).toBe(2)
+    expect(index.findSessionFiles('worker-session')).toHaveLength(1)
+    expect(index.getSession?.('worker-session')?.id).toBe('worker-session')
+  } finally { database.close() }
 })

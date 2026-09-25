@@ -8,6 +8,7 @@ import { wsManager } from '../api/websocket'
 import { sessionsApi, type SessionHistoryPage } from '../api/sessions'
 import { ApiResponseParseError } from '../api/client'
 import { subagentsApi } from '../api/subagents'
+import { useTeamPlanStore } from './teamPlanStore'
 import { useTeamStore } from './teamStore'
 import { useSessionStore } from './sessionStore'
 import { useCLITaskStore } from './cliTaskStore'
@@ -4536,6 +4537,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
 
     switch (msg.type) {
       case 'connected':
+        void useTeamPlanStore.getState().refresh(sessionId)
         // Team lifecycle broadcasts are transition-only. A reconnect must
         // reconcile against the durable workbench so missed update/delete or
         // same-name recreate events cannot leave a live cache authoritative.
@@ -5613,6 +5615,10 @@ export const useChatStore = create<ChatStore>((setState, get) => {
             }),
           }
         })
+        break
+
+      case 'team_plan_updated':
+        if (msg.sessionId === sessionId) void useTeamPlanStore.getState().refresh(sessionId)
         break
 
       case 'team_created':

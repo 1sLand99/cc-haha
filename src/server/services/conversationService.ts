@@ -270,6 +270,7 @@ type SessionProcess = {
   outputCallbacks: SessionOutputCallback[]
   workDir: string
   permissionMode: string
+  teamWorker?: TeamWorkerStart
   providerId?: string | null
   providerConfigFingerprint?: string
   networkRoutingFingerprint: string
@@ -303,6 +304,7 @@ type SessionProcess = {
 
 export type PendingPermissionRequest = {
   requestId: string
+  agentId?: string
   toolName: string
   toolUseId?: string
   input: Record<string, unknown>
@@ -310,7 +312,18 @@ export type PendingPermissionRequest = {
   displayName?: string
 }
 
-type SessionStartOptions = {
+export type TeamWorkerStart = {
+  parentSessionId: string
+  teamName: string
+  memberId: string
+  name: string
+  systemPrompt: string
+  tools?: string[]
+  agentDefinition?: Record<string, unknown>
+}
+
+export type SessionStartOptions = {
+  teamWorker?: TeamWorkerStart
   permissionMode?: string
   model?: string
   effort?: string
@@ -338,6 +351,7 @@ export class ConversationStartupError extends Error {
 
 export class ConversationService {
   private sessions = new Map<string, SessionProcess>()
+  private teamStopOperations = new Map<string, Promise<void>>()
   private deletedSessions = new Set<string>()
   private providerService = new ProviderService()
   private pendingPermissionModeChanges = new Map<string, Map<string, number>>()
@@ -540,6 +554,23 @@ export class ConversationService {
       // server only sees the completed assistant message at turn end.
       '--include-partial-messages',
       ...(side ? ['--resume', side.resumePath, '--resume-session-at', side.resumeAt, '--fork-session', '--session-id', side.cliSessionId, '--no-session-persistence', '--append-system-prompt', SIDE_CHAT_BOUNDARY] : shouldResume ? ['--resume', sessionId] : ['--session-id', sessionId]),
+      ...(options?.teamWorker ? [
+        '--agent-id', `${options.teamWorker.name}@${options.teamWorker.teamName}`,
+        '--agent-name', options.teamWorker.name,
+        '--team-name', options.teamWorker.teamName,
+        '--parent-session-id', options.teamWorker.parentSessionId,
+        '--agents', JSON.stringify({ [options.teamWorker.name]: { ...options.teamWorker.agentDefinition, description: 'Approved team member', prompt: options.teamWorker.systemPrompt, model: options?.model, tools: options.teamWorker.tools } }),
+        '--agent', options.teamWorker.name,
+        ...(Array.isArray(options.teamWorker.agentDefinition?.disallowedTools) && options.teamWorker.agentDefinition.disallowedTools.length
+          ? ['--disallowedTools', options.teamWorker.agentDefinition.disallowedTools.join(',')]
+          : []),
+        ...(typeof options.teamWorker.agentDefinition?.maxTurns === 'number'
+          ? ['--max-turns', String(options.teamWorker.agentDefinition.maxTurns)]
+          : []),
+        ...(options.teamWorker.tools && !options.teamWorker.tools.includes('*')
+          ? ['--tools', [...new Set([...options.teamWorker.tools, 'SendMessage', 'TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate'])].join(',')]
+          : []),
+      ] : []),
       ...worktreeArgs,
       '--replay-user-messages',
       ...this.getRuntimeArgs(options),
@@ -565,7 +596,7 @@ export class ConversationService {
     if (isSideChatId(sessionId) && (!side || side.closed || side.started)) {
       throw new ConversationStartupError('This temporary side chat has expired. Open a new side chat.', 'SESSION_DELETED')
     }
-    const launchInfo = await sessionService.getSessionLaunchInfo(sessionId)
+    const launchInfo = options?.teamWorker ? null : await sessionService.getSessionLaunchInfo(sessionId)
     const shouldResume = !!launchInfo && launchInfo.transcriptMessageCount > 0
     const shouldReplacePlaceholder =
       !side && !!launchInfo && launchInfo.transcriptMessageCount === 0
@@ -668,6 +699,16 @@ export class ConversationService {
       networkRuntimeMetadata,
       providerCapture,
     )
+    if (options?.teamWorker) {
+      delete childEnv.CLAUDE_CODE_SUBAGENT_MODEL
+      delete childEnv.CLAUDE_CODE_EFFORT_LEVEL
+      delete childEnv.CLAUDE_CODE_RESUME_INTERRUPTED_TURN
+      childEnv.CC_HAHA_TEAM_WORKER = '1'
+      childEnv.CC_HAHA_TEAM_WORKER_PRESET_TYPE = typeof options.teamWorker.agentDefinition?.agentType === 'string' ? options.teamWorker.agentDefinition.agentType : options.teamWorker.name
+      childEnv.CC_HAHA_TEAM_WORKER_PRESET_SOURCE = typeof options.teamWorker.agentDefinition?.source === 'string' ? options.teamWorker.agentDefinition.source : 'flagSettings'
+      childEnv.CC_HAHA_TEAM_WORKER_OMIT_CLAUDE_MD = options.teamWorker.agentDefinition?.omitClaudeMd === true ? '1' : '0'
+      childEnv.CC_HAHA_TRANSCRIPT_ENTRYPOINT = 'claude-desktop-team-worker'
+    }
     if (side) {
       delete childEnv.CLAUDE_CODE_RESUME_INTERRUPTED_TURN
       delete childEnv.CC_HAHA_TRACE_API_CALLS
@@ -708,6 +749,7 @@ export class ConversationService {
     })
     const session: SessionProcess = {
       proc,
+      teamWorker: options?.teamWorker,
       outputCallbacks: [],
       workDir: launchWorkDir,
       permissionMode: options?.permissionMode || 'default',
@@ -801,7 +843,7 @@ export class ConversationService {
       options?.providerId !== undefined ||
       !!options?.model ||
       !!options?.effort
-    if (shouldReplacePlaceholder || !launchInfo || shouldPersistRuntimeMetadata) {
+    if (!options?.teamWorker && (shouldReplacePlaceholder || !launchInfo || shouldPersistRuntimeMetadata)) {
       // system/init can move a newly-created session into its worktree while
       // startup is still awaiting the SDK. Once that authoritative cwd is
       // known, never recreate a late metadata placeholder in launchWorkDir.
@@ -941,6 +983,8 @@ export class ConversationService {
     permissionUpdates?: unknown[],
     automaticQuestionAnswer = false,
   ): boolean {
+    const child = [...this.sessions.entries()].find(([, entry]) => entry.teamWorker?.parentSessionId === sessionId && entry.pendingPermissionRequests.has(requestId))
+    if (child) return this.respondToPermission(child[0], requestId, allowed, rule, updatedInput, denyMessage, permissionUpdates, automaticQuestionAnswer)
     const session = this.sessions.get(sessionId)
     if (session?.autoResolvedRequestIds?.has(requestId)) return false
     const pendingRequest = session?.pendingPermissionRequests.get(requestId)
@@ -1061,6 +1105,7 @@ export class ConversationService {
 
   getPendingPermissionToolName(sessionId: string, requestId: string): string | undefined {
     return this.sessions.get(sessionId)?.pendingPermissionRequests.get(requestId)?.toolName
+      ?? [...this.sessions.values()].find(child => child.teamWorker?.parentSessionId === sessionId && child.pendingPermissionRequests.has(requestId))?.pendingPermissionRequests.get(requestId)?.toolName
   }
 
   /**
@@ -1102,11 +1147,27 @@ export class ConversationService {
   }
 
   sendInterrupt(sessionId: string): boolean {
+    for (const [childId, child] of this.sessions) {
+      if (child.teamWorker?.parentSessionId === sessionId) this.stopSession(childId)
+    }
+    const stop = (this.teamStopOperations.get(sessionId) ?? Promise.resolve()).then(async () => {
+      const runtime = await import('./teamPlanRuntime.js')
+      await runtime.stopTeamPlanRuntimesForParent(sessionId)
+    }).catch(error => {
+      console.error('[ConversationService] Failed to revoke interrupted team launch', error)
+    }).finally(() => {
+      if (this.teamStopOperations.get(sessionId) === stop) this.teamStopOperations.delete(sessionId)
+    })
+    this.teamStopOperations.set(sessionId, stop)
     return this.sendSdkMessage(sessionId, {
       type: 'control_request',
       request_id: crypto.randomUUID(),
       request: { subtype: 'interrupt' },
     })
+  }
+
+  async waitForTeamWorkersStopped(sessionId: string): Promise<void> {
+    await this.teamStopOperations.get(sessionId)
   }
 
   private isControlChannelReady(session: SessionProcess): boolean {
@@ -1246,8 +1307,9 @@ export class ConversationService {
     const session = this.sessions.get(sessionId)
     if (!session) return []
 
-    return Array.from(session.pendingPermissionRequests.entries()).map(([requestId, request]) => ({
+    return [...session.pendingPermissionRequests.entries(), ...[...this.sessions.values()].filter(child => child.teamWorker?.parentSessionId === sessionId).flatMap(child => [...child.pendingPermissionRequests.entries()])].map(([requestId, request]) => ({
       requestId,
+      ...(request.agentId ? { agentId: request.agentId } : {}),
       toolName: request.toolName,
       ...(request.toolUseId ? { toolUseId: request.toolUseId } : {}),
       input: request.input,
@@ -1382,7 +1444,7 @@ export class ConversationService {
               typeof msg.request.tool_name === 'string'
                 ? msg.request.tool_name
                 : 'Unknown',
-            agentId: typeof msg.request.agent_id === 'string' && msg.request.agent_id.trim()
+            agentId: session.teamWorker ? `${session.teamWorker.name}@${session.teamWorker.teamName}` : typeof msg.request.agent_id === 'string' && msg.request.agent_id.trim()
               ? msg.request.agent_id.trim()
               : undefined,
             toolUseId:
@@ -1398,7 +1460,7 @@ export class ConversationService {
               typeof msg.request.description === 'string' && msg.request.description.trim()
                 ? msg.request.description
                 : undefined,
-            displayName:
+            displayName: session.teamWorker ? session.teamWorker.name :
               typeof msg.request.display_name === 'string' && msg.request.display_name.trim()
                 ? msg.request.display_name.trim()
                 : undefined,
@@ -1424,6 +1486,12 @@ export class ConversationService {
         ) {
           this.clearAutoAnswerWait(session.pendingPermissionRequests.get(msg.response.request_id))
           session.pendingPermissionRequests.delete(msg.response.request_id)
+        }
+        if (session.teamWorker && msg?.type === 'control_request' && msg.request?.subtype === 'can_use_tool') {
+          const parent = this.sessions.get(session.teamWorker.parentSessionId)
+          if (parent) this.notifyOutputCallbacks(session.teamWorker.parentSessionId, parent.outputCallbacks, {
+            ...msg, request: { ...msg.request, agent_id: `${session.teamWorker.name}@${session.teamWorker.teamName}`, display_name: session.teamWorker.name },
+          })
         }
         this.notifyOutputCallbacks(sessionId, session.outputCallbacks, msg)
       } catch {
@@ -1545,6 +1613,14 @@ export class ConversationService {
     session: SessionProcess,
     reason = new Error('CLI session stopped'),
   ): void {
+    if (session.teamWorker) {
+      const parent = this.sessions.get(session.teamWorker.parentSessionId)
+      if (parent) {
+        for (const requestId of session.pendingPermissionRequests.keys()) {
+          this.notifyOutputCallbacks(session.teamWorker.parentSessionId, parent.outputCallbacks, { type: 'control_cancel_request', request_id: requestId })
+        }
+      }
+    }
     const pending = session.pendingControlRequests
     if (!pending || pending.size === 0) return
     for (const cancel of [...pending.values()]) {
@@ -1554,6 +1630,9 @@ export class ConversationService {
   }
 
   stopSession(sessionId: string): void {
+    for (const [childId, child] of this.sessions) {
+      if (child.teamWorker?.parentSessionId === sessionId) this.stopSession(childId)
+    }
     const session = this.sessions.get(sessionId)
     if (!session) return
 
@@ -1567,6 +1646,9 @@ export class ConversationService {
     sessionId: string,
     timeoutMs = DESKTOP_CLI_GRACEFUL_SHUTDOWN_TIMEOUT_MS,
   ): Promise<void> {
+    for (const [childId, child] of this.sessions) {
+      if (child.teamWorker?.parentSessionId === sessionId) await this.stopSessionAndWait(childId, timeoutMs)
+    }
     const session = this.sessions.get(sessionId)
     if (!session) return
 
@@ -1745,6 +1827,9 @@ export class ConversationService {
 
     const activeSession = this.sessions.get(sessionId)
     if (activeSession?.proc === proc) {
+      for (const [childId, child] of this.sessions) {
+        if (child.teamWorker?.parentSessionId === sessionId) this.stopSession(childId)
+      }
       this.cancelPendingControlRequests(
         activeSession,
         new Error('CLI session exited before the control request completed'),
@@ -1951,6 +2036,8 @@ export class ConversationService {
       CLAUDE_CODE_ENABLE_TASKS: '1',
       // Resolve the same preference shown in General before launching the CLI.
       CC_HAHA_AGENT_TEAMS_ENABLED: agentTeamsEnabled ? '1' : '0',
+      CC_HAHA_TEAM_REVIEW_REQUIRED: sdkUrl ? '1' : cleanEnv.CC_HAHA_TEAM_REVIEW_REQUIRED || '0',
+      CC_HAHA_TEAM_LEADER_RUNTIME: JSON.stringify({ providerId: options?.providerId ?? 'claude-official', modelId: options?.model || explicitProviderEnv?.ANTHROPIC_MODEL || cleanEnv.ANTHROPIC_MODEL || 'default', ...(options?.effort ? { effortLevel: options.effort } : {}) }),
       CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: '1',
       // Desktop must fail stuck provider streams instead of leaving the UI running forever.
       CLAUDE_ENABLE_STREAM_WATCHDOG: cleanEnv.CLAUDE_ENABLE_STREAM_WATCHDOG || '1',

@@ -1121,11 +1121,7 @@ function sessionTurnConnection(
 }
 
 export function stopSessionTurn(sessionId: string): void {
-  const hadActiveTurn = activeUserTurns.has(sessionId)
   handleStopGeneration(sessionTurnConnection(sessionId, { serverHost: '127.0.0.1', serverPort: 0 }))
-  // A result can clear the host turn while peer work still waits in the CLI
-  // inbox. Group Stop must revoke that queue even at the idle boundary.
-  if (!hadActiveTurn && conversationService.hasSession(sessionId)) conversationService.sendInterrupt(sessionId)
 }
 
 export function isSessionTurnStopped(sessionId: string): boolean {
@@ -2200,6 +2196,10 @@ function handleStopGeneration(ws: SessionConnection) {
         removePendingInterruptedTurnResult(sessionId)
       }
     }
+  } else if (!stoppedTurn && conversationService.hasSession(sessionId)) {
+    // The leader can already be idle while approved process teammates still
+    // run or await readiness. Both UI and programmatic Stop revoke those workers.
+    conversationService.sendInterrupt(sessionId)
   }
 
   if ((stoppedTurn || agentTasks.length > 0) && conversationService.hasSession(sessionId)) {
@@ -4415,6 +4415,9 @@ function forwardCliMessageToClient(
   handleCliPermissionModeBroadcast(sessionId, cliMsg)
   const serverMsgs = translateCliMessage(cliMsg, sessionId)
   for (const msg of serverMsgs) sendMessage(ws, msg)
+  // Completing the leader turn clears renderer prompts; independent workers
+  // may still be awaiting an answer, so restore them after that boundary.
+  if (serverMsgs.some(msg => msg.type === 'message_complete')) replayPendingPermissionRequests(ws, sessionId)
 }
 
 function forwardCliMessageToSessionClients(sessionId: string, cliMsg: any): void {
@@ -4424,6 +4427,7 @@ function forwardCliMessageToSessionClients(sessionId: string, cliMsg: any): void
   const serverMsgs = translateCliMessage(cliMsg, sessionId)
   for (const ws of clients) {
     for (const msg of serverMsgs) sendMessage(ws, msg)
+    if (serverMsgs.some(msg => msg.type === 'message_complete')) replayPendingPermissionRequests(ws, sessionId)
   }
 }
 

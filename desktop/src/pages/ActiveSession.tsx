@@ -1,3 +1,4 @@
+import { AgentTeamsPlanCard } from '@/components/agentTeams/AgentTeamsPlanCard'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { ArrowLeft, GitFork, Target, MessageCircleQuestion } from 'lucide-react'
@@ -920,6 +921,10 @@ export function ActiveSession({ sessionId, active = true }: { sessionId?: string
               placement="overlay"
             />
           ) : null}
+
+          {active && activeTabId && <div className="mx-auto w-full max-w-[900px] shrink-0 px-4">
+            <AgentTeamsPlanCard key={activeTabId} sessionId={activeTabId} />
+          </div>}
 
           <ChatInput
             sessionId={activeTabId ?? undefined}

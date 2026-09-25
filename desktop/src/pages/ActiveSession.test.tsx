@@ -5,6 +5,10 @@ import '@testing-library/jest-dom'
 import { act } from 'react'
 import type { TeamWorkbenchSessionTimeline, TeamWorkbenchSnapshot } from '../types/team'
 
+vi.mock('../components/agentTeams/AgentTeamsPlanCard', () => ({
+  AgentTeamsPlanCard: ({ sessionId }: { sessionId: string }) => <div data-testid="durable-team-plan" data-session-id={sessionId} />,
+}))
+
 vi.mock('@/lib/workspace/openSideChat', () => ({ openSideChat: vi.fn(async () => 'tab-side') }))
 
 const viewportMocks = vi.hoisted(() => ({
@@ -378,6 +382,7 @@ describe('ActiveSession task polling', () => {
 
     render(<ActiveSession />)
     expect(screen.getByTestId('empty-session-hero')).toBeInTheDocument()
+    expect(screen.getByTestId('durable-team-plan')).toBeInTheDocument()
 
     act(() => {
       useChatStore.getState().setPreparingTurn(sessionId, true)
