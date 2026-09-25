@@ -1995,6 +1995,23 @@ async function* queryModel(
   let isFastModeRequest = isFastMode; // Keep separate state as it may change if falling back
   let isAdvisorInProgress = false;
 
+  const preservePartialText = () => {
+    if (!partialMessage || stopReason === "max_tokens" || stopReason === "model_context_window_exceeded") return;
+    for (const [index, block] of contentBlocks.entries()) {
+      if (block?.type !== "text" || !block.text || completedBlockIndexes.has(index)) continue;
+      completedBlockIndexes.add(index);
+      const partialTextMessage: AssistantMessage = {
+        message: { ...partialMessage, content: [block], usage },
+        requestId: streamRequestId ?? undefined,
+        type: "assistant",
+        uuid: randomUUID(),
+        timestamp: new Date().toISOString(),
+      };
+      newMessages.push(partialTextMessage);
+      assistantCommitBuffer.add(partialTextMessage, "text");
+    }
+  };
+
   try {
     queryCheckpoint("query_client_creation_start");
     const generator = withRetry(
@@ -2751,21 +2768,12 @@ async function* queryModel(
 
       // Preserve visible text when the socket closes before its block_stop.
       // Never synthesize a completed tool or unsigned thinking block from EOF.
-      if (partialMessage && stopReason !== "max_tokens" && stopReason !== "model_context_window_exceeded") {
-        for (const [index, block] of contentBlocks.entries()) {
-          if (block?.type !== "text" || !block.text || completedBlockIndexes.has(index)) continue;
-          const partialTextMessage: AssistantMessage = {
-            message: { ...partialMessage, content: [block], usage },
-            requestId: streamRequestId ?? undefined,
-            type: "assistant",
-            uuid: randomUUID(),
-            timestamp: new Date().toISOString(),
-          };
-          newMessages.push(partialTextMessage);
-          for (const committedMessage of assistantCommitBuffer.add(partialTextMessage, "text")) {
-            yield committedMessage;
-          }
+      preservePartialText();
+      if (signal.aborted) {
+        for (const committedMessage of assistantCommitBuffer.flushWithoutToolUse()) {
+          yield committedMessage;
         }
+        throw new APIUserAbortError();
       }
 
       // Detect when the stream completed without producing any assistant messages.
@@ -2872,6 +2880,17 @@ async function* queryModel(
       if (streamMaxDurationTimer !== null) {
         clearTimeout(streamMaxDurationTimer);
         streamMaxDurationTimer = null;
+      }
+
+      // A user interrupt may make the SDK iterator throw a transport error or
+      // finish without message_stop. Keep the visible text in the transcript
+      // and propagate the interrupt, not that incidental provider error.
+      if (signal.aborted) {
+        preservePartialText();
+        for (const committedMessage of assistantCommitBuffer.flushWithoutToolUse()) {
+          yield committedMessage;
+        }
+        throw new APIUserAbortError();
       }
 
       // A safety rejection is terminal, including for non-streaming fallback.

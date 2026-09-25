@@ -2771,6 +2771,7 @@ Row 9, all 8 cells: continuing from straight down, turning left through lower-le
   'chat.select': 'select',
   'chat.dismiss': 'dismiss',
   'chat.stopTitle': 'Stop generation (Cmd+.)',
+  'chat.generationStopped': 'Stopped',
   'chat.jumpToLatest': 'Latest',
   'chat.memorySavedTitle': 'Saved {count} memory file(s)',
   'chat.memorySavedFromToolsTitle': 'Saved {count} memory item(s)',

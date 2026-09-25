@@ -1833,6 +1833,18 @@ export class SessionService {
     const msg = entry.message
     if (!msg || !msg.role) return null
 
+    // The CLI records an explicit interrupt as a synthetic user message.
+    // Project it as a status so history retains the stop boundary without
+    // displaying the model-facing sentinel as a user prompt.
+    if (msg.role === 'user' && this.isSyntheticUserInterruption(msg.content)) {
+      return {
+        id: entry.uuid || crypto.randomUUID(),
+        type: 'system',
+        content: { subtype: 'generation_stopped' },
+        timestamp: entry.timestamp || new Date().toISOString(),
+      }
+    }
+
     // Determine our normalized type
     let type: MessageEntry['type']
     const role = msg.role
@@ -2072,7 +2084,6 @@ export class SessionService {
       return (
         isShutdownTeamPrompt(content) ||
         shouldHideCommandMetadataContent(content) ||
-        this.isSyntheticUserInterruption(content) ||
         this.isTaskNotificationContent(content)
       )
     }

@@ -2774,6 +2774,7 @@ export const kr: Record<TranslationKey, string> = {
   'chat.select': '선택',
   'chat.dismiss': '닫기',
   'chat.stopTitle': '생성 중지 (Cmd+.)',
+  'chat.generationStopped': '중지됨',
   'chat.jumpToLatest': '최신',
   'chat.memorySavedTitle': '{count}개의 메모리 파일을 저장했습니다',
   'chat.memorySavedFromToolsTitle': '{count}개의 메모리 항목을 저장했습니다',

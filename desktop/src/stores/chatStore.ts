@@ -1458,6 +1458,24 @@ function dropDuplicateTranscriptTextMessages(messages: UIMessage[]): UIMessage[]
   return changed ? deduped : messages
 }
 
+function collapseDuplicateStoppedStatuses(messages: UIMessage[]): UIMessage[] {
+  let changed = false
+  const collapsed: UIMessage[] = []
+  for (const message of messages) {
+    const previous = collapsed.at(-1)
+    if (message.type === 'system' && message.generationStopped &&
+      previous?.type === 'system' && previous.generationStopped) {
+      changed = true
+      if (message.transcriptMessageId && !previous.transcriptMessageId) {
+        collapsed[collapsed.length - 1] = message
+      }
+      continue
+    }
+    collapsed.push(message)
+  }
+  return changed ? collapsed : messages
+}
+
 type ParentLinkedToolMessage = Extract<
   UIMessage,
   { type: 'tool_use' | 'tool_result' }
@@ -1588,7 +1606,7 @@ function mergeRestoredHistoryIntoLiveMessages(
   messages: UIMessage[],
   restoredMessages: UIMessage[],
 ): UIMessage[] {
-  return mergeRestoredTerminalGoalEvents(
+  return collapseDuplicateStoppedStatuses(mergeRestoredTerminalGoalEvents(
     mergeRestoredParentToolMessages(
       dropDuplicateTranscriptTextMessages(
         mergeRestoredTranscriptMessageIds(messages, restoredMessages),
@@ -1596,7 +1614,7 @@ function mergeRestoredHistoryIntoLiveMessages(
       restoredMessages,
     ),
     restoredMessages,
-  )
+  ))
 }
 
 function nonEmptyHistoryIdentityPart(value: string | undefined): string | undefined {
@@ -1981,7 +1999,7 @@ function mergeColdRestoredHistoryIntoLiveMessages(
     ordered.push(...(beforeRows.get(index)?.reverse() ?? []))
     if (index < restoredCount) ordered.push(merged[index]!)
   }
-  return ordered
+  return collapseDuplicateStoppedStatuses(ordered)
 }
 
 function needsTranscriptIdHydrationRetry(session: PerSessionState | undefined): boolean {
@@ -3504,12 +3522,21 @@ export const useChatStore = create<ChatStore>((setState, get) => {
       const messagesWithFlushedText = pendingAssistantText.trim()
         ? appendAssistantTextMessage(session.messages, pendingAssistantText, Date.now())
         : session.messages
+      const stoppedMessages = pendingAssistantText.trim()
+        ? [...messagesWithFlushedText, {
+            id: nextId(),
+            type: 'system' as const,
+            content: t('chat.generationStopped'),
+            generationStopped: true,
+            timestamp: Date.now(),
+          }]
+        : messagesWithFlushedText
       return {
         sessions: {
           ...s.sessions,
           [sessionId]: {
             ...session,
-            messages: markPendingToolUseMessagesStopped(messagesWithFlushedText),
+            messages: markPendingToolUseMessagesStopped(stoppedMessages),
             chatState: 'idle',
             activeToolUseId: null,
             activeToolName: null,
@@ -7761,6 +7788,21 @@ export function mapHistoryMessagesToUiMessages(
     }
 
     const timestamp = new Date(msg.timestamp).getTime()
+    if (
+      msg.type === 'system' &&
+      msg.content && typeof msg.content === 'object' &&
+      (msg.content as { subtype?: unknown }).subtype === 'generation_stopped'
+    ) {
+      uiMessages.push({
+        id: msg.id || nextId(),
+        type: 'system',
+        content: t('chat.generationStopped'),
+        generationStopped: true,
+        ...(msg.id ? { transcriptMessageId: msg.id } : {}),
+        timestamp,
+      })
+      continue
+    }
     if (msg.type === 'system' && typeof msg.content === 'string') {
       if (msg.content.trim() === 'Conversation compacted' || msg.content.trim() === 'Context compacted') {
         const compactMessages = appendOrUpdateTailCompactSummary(

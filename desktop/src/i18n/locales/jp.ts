@@ -2772,6 +2772,7 @@ export const jp: Record<TranslationKey, string> = {
   'chat.select': '選択',
   'chat.dismiss': '閉じる',
   'chat.stopTitle': '生成を停止 (Cmd+.)',
+  'chat.generationStopped': '停止しました',
   'chat.jumpToLatest': '最新',
   'chat.memorySavedTitle': '{count} 件のメモリファイルを保存しました',
   'chat.memorySavedFromToolsTitle': '{count} 件のメモリ項目を保存しました',

@@ -9,6 +9,7 @@ const originalEnvironment = { ...process.env }
 let sandbox: string
 let server: ReturnType<typeof Bun.serve>
 let responseBody = ''
+let holdResponseOpen = false
 let requests = 0
 let queryModelWithStreaming: typeof import('./claude.js').queryModelWithStreaming
 let createUserMessage: typeof import('../../utils/messages.js').createUserMessage
@@ -22,6 +23,7 @@ beforeAll(async () => {
   for (const key of Object.keys(process.env)) delete process.env[key]
   Object.assign(process.env, createSandboxedTestEnvironment(sandbox, {
     NODE_ENV: 'production',
+    CLAUDE_CODE_SIMPLE: '1',
     ANTHROPIC_API_KEY: 'offline-fixture-key',
     CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: '1',
     CLAUDE_STREAM_TRANSIENT_RETRY_MAX: '0',
@@ -29,6 +31,13 @@ beforeAll(async () => {
   }, originalEnvironment))
   server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
     requests++
+    if (holdResponseOpen) {
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(responseBody))
+        },
+      }), { headers: { 'content-type': 'text/event-stream' } })
+    }
     return new Response(responseBody, { headers: { 'content-type': 'text/event-stream' } })
   } })
   process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${server.port}`
@@ -141,6 +150,59 @@ test('open text block survives EOF as displayable partial text with an error', a
   expect(messages).toHaveLength(2)
   expect(messages[0]?.message.content).toEqual([{ type: 'text', text: 'partial fixture' }])
   expect(messages[1]?.isApiErrorMessage).toBe(true)
+})
+test('user stop preserves streamed text without a provider error', async () => {
+  holdResponseOpen = true
+  responseBody = fixtureEvents().slice(0, 3).map((event: any) =>
+    `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+  ).join('')
+  const abort = new AbortController()
+  const assistants: AssistantMessage[] = []
+  try {
+    for await (const message of queryModelWithStreaming({
+      messages: [createUserMessage({ content: 'fixture' })],
+      systemPrompt: asSystemPrompt([]), thinkingConfig: { type: 'disabled' }, tools: [],
+      signal: abort.signal,
+      options: { model: 'fixture-model', querySource: 'insights', agents: [], isNonInteractiveSession: true,
+        hasAppendSystemPrompt: false, mcpTools: [], enablePromptCaching: false,
+        getToolPermissionContext: async () => getEmptyToolPermissionContext() },
+    })) {
+      if (message.type === 'stream_event' && message.event.type === 'content_block_delta') {
+        abort.abort('interrupt')
+      }
+      if (message.type === 'assistant') assistants.push(message)
+    }
+  } finally {
+    holdResponseOpen = false
+  }
+  expect(assistants.map(message => message.message.content)).toEqual([
+    [{ type: 'text', text: 'partial fixture' }],
+  ])
+  expect(assistants.some(message => message.isApiErrorMessage)).toBe(false)
+})
+test('user stop after a clean partial EOF does not become a provider error', async () => {
+  responseBody = fixtureEvents().slice(0, 3).map((event: any) =>
+    `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+  ).join('')
+  const abort = new AbortController()
+  const assistants: AssistantMessage[] = []
+  for await (const message of queryModelWithStreaming({
+    messages: [createUserMessage({ content: 'fixture' })],
+    systemPrompt: asSystemPrompt([]), thinkingConfig: { type: 'disabled' }, tools: [],
+    signal: abort.signal,
+    options: { model: 'fixture-model', querySource: 'insights', agents: [], isNonInteractiveSession: true,
+      hasAppendSystemPrompt: false, mcpTools: [], enablePromptCaching: false,
+      getToolPermissionContext: async () => getEmptyToolPermissionContext() },
+  })) {
+    if (message.type === 'stream_event' && message.event.type === 'content_block_delta') {
+      abort.abort('interrupt')
+    }
+    if (message.type === 'assistant') assistants.push(message)
+  }
+  expect(assistants.map(message => message.message.content)).toEqual([
+    [{ type: 'text', text: 'partial fixture' }],
+  ])
+  expect(assistants.some(message => message.isApiErrorMessage)).toBe(false)
 })
 test('duplicate tool id at another index is emitted only once', async () => {
   const events = fixtureEvents('tool_use')

@@ -2037,11 +2037,12 @@ describe('SessionService', () => {
     expect(before).not.toBe(after)
   })
 
-  it('should hide synthetic interruption, no-response, and malformed command breadcrumb transcript entries', async () => {
+  it('projects a synthetic interruption as stopped status while hiding no-response and malformed breadcrumbs', async () => {
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     await writeSessionFile('-tmp-project', sessionId, [
       makeSnapshotEntry(),
       makeUserEntry('正常用户消息', crypto.randomUUID()),
+      makeAssistantEntry('0001–0100', crypto.randomUUID()),
       {
         type: 'user',
         message: {
@@ -2098,20 +2099,29 @@ describe('SessionService', () => {
 
     const messages = await service.getSessionMessages(sessionId)
 
-    expect(messages).toHaveLength(4)
+    expect(messages).toHaveLength(6)
     expect(messages[0]).toMatchObject({ type: 'user', content: '正常用户消息' })
     expect(messages[1]).toMatchObject({
+      type: 'assistant',
+      content: [{ type: 'text', text: '0001–0100' }],
+    })
+    expect(messages[2]).toMatchObject({
+      type: 'system',
+      content: { subtype: 'generation_stopped' },
+      timestamp: '2026-01-01T00:00:02.000Z',
+    })
+    expect(messages[3]).toMatchObject({
       type: 'user',
       content: '<command-name>/exit</command-name>\n<command-message>exit</command-message>\n<command-args></command-args>',
     })
-    expect(messages[2]).toMatchObject({
+    expect(messages[4]).toMatchObject({
       type: 'user',
       content: [{
         type: 'text',
         text: '<command-name>/agent</command-name>\n<command-message>agent</command-message>\n<command-args>Plan 222</command-args>',
       }],
     })
-    expect(messages[3]).toMatchObject({
+    expect(messages[5]).toMatchObject({
       type: 'assistant',
       content: [{ type: 'text', text: '正常助手消息' }],
     })

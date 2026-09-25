@@ -2770,6 +2770,7 @@ export const zh: Record<TranslationKey, string> = {
   'chat.select': '选择',
   'chat.dismiss': '关闭',
   'chat.stopTitle': '停止生成 (Cmd+.)',
+  'chat.generationStopped': '已停止',
   'chat.jumpToLatest': '回到最新',
   'chat.memorySavedTitle': '已保存 {count} 个记忆文件',
   'chat.memorySavedFromToolsTitle': '保存了 {count} 条记忆',

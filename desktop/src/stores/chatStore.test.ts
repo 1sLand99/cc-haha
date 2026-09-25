@@ -14480,6 +14480,7 @@ describe('chatStore history mapping', () => {
     expect(useChatStore.getState().sessions['session-a']?.streamingText).toBe('')
     expect(useChatStore.getState().sessions['session-a']?.messages).toMatchObject([
       { type: 'assistant_text', content: 'A-only response' },
+      { type: 'system', content: 'Stopped' },
     ])
     expect(useChatStore.getState().sessions['session-b']?.streamingText).toBe('')
 
@@ -15435,6 +15436,7 @@ describe('chatStore activity state survival across reload paths', () => {
       messages: [
         { id: 'user-disk', type: 'user', content: 'Continue', timestamp: new Date(1).toISOString() },
         { id: 'answer-disk', type: 'assistant', content: 'Stopped answer', timestamp: new Date(2).toISOString() },
+        { id: 'stop-disk', type: 'system', content: { subtype: 'generation_stopped' }, timestamp: new Date(3).toISOString() },
       ],
       page: { nextCursor: null, hasMore: false, historyComplete: false, sourceVersion: 'omitted-earlier-tool', scannedBytes: 10, omittedOversizedEntries: 1 },
     })
@@ -15443,6 +15445,36 @@ describe('chatStore activity state survival across reload paths', () => {
     expect(useChatStore.getState().sessions[TEST_SESSION_ID]!.messages).toMatchObject([
       { type: 'user_text', content: 'Continue', transcriptMessageId: 'user-disk' },
       { type: 'assistant_text', content: 'Stopped answer', transcriptMessageId: 'answer-disk' },
+      { type: 'system', content: 'Stopped', transcriptMessageId: 'stop-disk' },
+    ])
+  })
+
+  it('restores partial streamed text and the stopped state after reopening the session', async () => {
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({
+      chatState: 'streaming',
+      streamingText: '0001\n0002\n',
+      messages: [{ id: 'live-user', type: 'user_text', content: 'Count to 1000', timestamp: 1 }],
+    }) } })
+
+    useChatStore.getState().stopGeneration(TEST_SESSION_ID)
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'assistant_text', content: '0001\n0002\n' }),
+      expect.objectContaining({ type: 'system', content: 'Stopped' }),
+    ]))
+
+    vi.mocked(sessionsApi.getFullHistory).mockResolvedValueOnce({ messages: [
+      { id: 'disk-user', type: 'user', content: 'Count to 1000', timestamp: new Date(1).toISOString() },
+      { id: 'disk-partial', type: 'assistant', content: '0001\n0002\n', timestamp: new Date(2).toISOString() },
+      { id: 'disk-stop', type: 'system', content: { subtype: 'generation_stopped' }, timestamp: new Date(3).toISOString() },
+    ] })
+    useChatStore.setState({ sessions: { [TEST_SESSION_ID]: makeSession({ messages: [] }) } })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages).toMatchObject([
+      { type: 'user_text', content: 'Count to 1000' },
+      { type: 'assistant_text', content: '0001\n0002\n', transcriptMessageId: 'disk-partial' },
+      { type: 'system', content: 'Stopped', transcriptMessageId: 'disk-stop' },
     ])
   })
 
