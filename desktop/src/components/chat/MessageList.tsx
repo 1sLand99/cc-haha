@@ -10,6 +10,7 @@ import { useWorkspaceStore, type WorkspaceOrigin } from '../../stores/workspaceS
 import { SETTINGS_TAB_ID, useTabStore } from '../../stores/tabStore'
 import { teamTaskWindowsForSnapshot, useTeamStore } from '../../stores/teamStore'
 import { useUIStore } from '../../stores/uiStore'
+import { useChatAppearanceStore } from '../../stores/chatAppearanceStore'
 import { useTranslation } from '../../i18n'
 import type { TranslationKey } from '../../i18n/locales/en'
 import { UserMessage } from './UserMessage'
@@ -2341,12 +2342,18 @@ export function MessageList({
     chatState === 'tool_executing' ||
     hasPendingPermissionCard ||
     (chatState === 'thinking' && Boolean(activeThinkingId))
+  const appearanceSignature = useChatAppearanceStore((state) =>
+    `${state.appearance.font}:${state.appearance.fontSize}:${state.appearance.width}`,
+  )
+  const previousAppearanceSignature = useRef(appearanceSignature)
+  const pendingAppearanceScrollTop = useRef<number | null>(null)
   const messageListRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const scrollContentRef = useRef<HTMLDivElement>(null)
-  const virtualItemHeightsRef = useRef<Map<string, number>>(
-    resolvedSessionId ? getHeightsForSession(resolvedSessionId) : new Map<string, number>(),
+  const [initialVirtualItemHeights] = useState(() =>
+    resolvedSessionId ? getHeightsForSession(resolvedSessionId, appearanceSignature) : new Map<string, number>(),
   )
+  const virtualItemHeightsRef = useRef(initialVirtualItemHeights)
   const virtualItemMetricCacheRef = useRef<Map<string, VirtualRenderItemMetric>>(
     resolvedSessionId ? getMetricsForSession(resolvedSessionId) : new Map<string, VirtualRenderItemMetric>(),
   )
@@ -2657,7 +2664,7 @@ export function MessageList({
       lastSessionIdRef.current = resolvedSessionId
       setProgrammaticNavigationItemId(null)
       virtualItemHeightsRef.current = resolvedSessionId
-        ? getHeightsForSession(resolvedSessionId)
+        ? getHeightsForSession(resolvedSessionId, appearanceSignature)
         : new Map<string, number>()
       virtualItemMetricCacheRef.current = resolvedSessionId
         ? getMetricsForSession(resolvedSessionId)
@@ -2705,7 +2712,7 @@ export function MessageList({
         scrollToBottom()
       }
     }
-  }, [resolvedSessionId, scrollToBottom])
+  }, [appearanceSignature, resolvedSessionId, scrollToBottom])
 
   const tailMessage = messages[messages.length - 1] ?? null
   const tailMessageId = tailMessage?.id ?? null
@@ -2941,6 +2948,46 @@ export function MessageList({
     ),
     [measuredItemsVersion, renderItemKeys, renderItemMetrics, renderItems, virtualViewport],
   )
+
+  useLayoutEffect(() => {
+    if (previousAppearanceSignature.current === appearanceSignature) return
+    previousAppearanceSignature.current = appearanceSignature
+    const container = scrollContainerRef.current
+    if (resolvedSessionId) getHeightsForSession(resolvedSessionId, appearanceSignature)
+    if (!container || !virtualTranscriptWindow.enabled) return
+
+    // Off-screen rows retain no valid measurements after a font/measure change.
+    // Re-measure mounted rows before paint and preserve the reader's row plus
+    // its intra-row offset while the spacer above it returns to estimates.
+    const oldOffsets = virtualTranscriptWindow.offsets
+    const oldScrollTop = virtualViewport.scrollTop
+    let anchorIndex = 0
+    while (anchorIndex + 1 < renderItemKeys.length && oldOffsets[anchorIndex + 1]! <= oldScrollTop) anchorIndex += 1
+    virtualItemHeightsRef.current.clear()
+    for (const node of container.querySelectorAll<HTMLElement>('[data-virtual-message-item]')) {
+      const height = node.getBoundingClientRect().height
+      if (height > 0) virtualItemHeightsRef.current.set(node.dataset.virtualMessageItem!, clampNumber(height, VIRTUAL_MIN_ITEM_HEIGHT, VIRTUAL_MAX_ITEM_HEIGHT))
+    }
+    const offsets = buildVirtualItemOffsets(renderItemKeys, renderItemMetrics, virtualItemHeightsRef.current)
+    const intraRowOffset = Math.max(0, oldScrollTop - (oldOffsets[anchorIndex] ?? 0))
+    const rowHeight = (offsets[anchorIndex + 1] ?? 0) - (offsets[anchorIndex] ?? 0)
+    const nextScrollTop = shouldAutoScrollRef.current
+      ? SCROLL_BOTTOM_SENTINEL
+      : (offsets[anchorIndex] ?? 0) + Math.min(intraRowOffset, Math.max(0, rowHeight - 1))
+    ignoreProgrammaticScrollUntilRef.current = performance.now() + 250
+    ignoreProgrammaticScrollTopRef.current = nextScrollTop
+    pendingAppearanceScrollTop.current = nextScrollTop
+    setVirtualViewport((current) => ({ ...current, scrollTop: nextScrollTop }))
+    setMeasuredItemsVersion((version) => version + 1)
+  }, [appearanceSignature, renderItemKeys, renderItemMetrics, resolvedSessionId, virtualTranscriptWindow, virtualViewport.scrollTop])
+
+  useLayoutEffect(() => {
+    const target = pendingAppearanceScrollTop.current
+    if (target === null || !scrollContainerRef.current) return
+    pendingAppearanceScrollTop.current = null
+    setScrollTopWithoutLayoutRead(scrollContainerRef.current, target)
+    ignoreProgrammaticScrollTopRef.current = scrollContainerRef.current.scrollTop
+  }, [measuredItemsVersion])
 
   const activeConversationNavigationItemId = useMemo(
     () => isAwayFromLatest
@@ -3636,7 +3683,7 @@ export function MessageList({
           // open — `compact` only tightens padding. Dropping to `max-w-full`
           // was what made the transcript lose its centred structure the moment
           // the agent-teams workbench appeared.
-          className="mx-auto max-w-[900px]"
+          className="mx-auto max-w-[var(--chat-content-max-width)]"
         >
           {sessionState?.historyWindowed && sessionState?.historyPage?.nextCursor ? (
             // The server's byte budget cut history short; this is the only
@@ -3722,7 +3769,7 @@ export function MessageList({
           )}
 
           {!isLoadingTurnChangeCards && visibleTurnChangeCards.length === 0 && turnChangeLoadError && (
-            <div className="mx-auto mb-5 w-full max-w-[900px] rounded-[var(--radius-lg)] border border-[var(--color-error)] bg-[var(--color-error-container)] px-4 py-3 text-xs text-[var(--color-on-error-container)]">
+            <div className="mx-auto mb-5 w-full max-w-[var(--chat-content-max-width)] rounded-[var(--radius-lg)] border border-[var(--color-error)] bg-[var(--color-error-container)] px-4 py-3 text-xs text-[var(--color-on-error-container)]">
               {turnChangeLoadError}
             </div>
           )}

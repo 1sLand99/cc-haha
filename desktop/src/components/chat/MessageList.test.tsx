@@ -29,6 +29,8 @@ import { useChatStore } from '../../stores/chatStore'
 import { useWorkspaceChatContextStore } from '../../stores/workspaceChatContextStore'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { initializeChatAppearance, useChatAppearanceStore } from '../../stores/chatAppearanceStore'
+import { CHAT_APPEARANCE_STORAGE_KEY } from '../../lib/chatAppearance'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useTabStore } from '../../stores/tabStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -583,6 +585,52 @@ describe('MessageList nested tool calls', () => {
     const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-virtual-message-item]'))
     expect(rows.length).toBeGreaterThan(0)
     for (const row of rows) expect(getHeightsForSession(sessionId).get(row.dataset.virtualMessageItem!)).toBe(180)
+    dropSession(sessionId)
+  })
+
+  it.each(['local', 'other window'])('retains the reading row and invalidates measurements after a font change from %s', async (source) => {
+    const sessionId = 'appearance-anchor'
+    dropSession(sessionId)
+    useChatAppearanceStore.setState({ appearance: { font: 'system', fontSize: 14, width: 'standard' } })
+    localStorage.setItem(CHAT_APPEARANCE_STORAGE_KEY, JSON.stringify({ version: 1, font: 'system', fontSize: 14, width: 'standard' }))
+    const dispose = initializeChatAppearance()
+    let rowHeight = 100
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { top: 0, bottom: rowHeight, width: 800, height: this.hasAttribute('data-virtual-message-item') ? rowHeight : 0 } as DOMRect
+    })
+    useChatStore.setState({ sessions: { [sessionId]: makeSessionState({
+      messages: Array.from({ length: 220 }, (_, index) => ({
+        id: `appearance-row-${index}`, type: 'assistant_text' as const,
+        content: `transcript line ${index}`, timestamp: index,
+      })),
+    }) } })
+    const { container } = render(<MessageList sessionId={sessionId} />)
+    const scroller = container.querySelector<HTMLElement>('.chat-scroll-area')!
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 })
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 22000 })
+    await waitForProgrammaticScrollReset()
+    fireEvent.wheel(scroller, { deltaY: -100 })
+    scroller.scrollTop = 0
+    fireEvent.scroll(scroller)
+    scroller.scrollTop = 150
+    fireEvent.scroll(scroller)
+    expect(container.querySelector('[data-virtual-message-item="appearance-row-1"]')).not.toBeNull()
+    getHeightsForSession(sessionId).set('appearance-row-100', 987)
+    rowHeight = 200
+    act(() => {
+      if (source === 'local') useChatAppearanceStore.getState().setAppearance({ fontSize: 24 })
+      else {
+        localStorage.setItem(CHAT_APPEARANCE_STORAGE_KEY, JSON.stringify({ version: 1, fontSize: 24 }))
+        window.dispatchEvent(new StorageEvent('storage', { key: CHAT_APPEARANCE_STORAGE_KEY, storageArea: localStorage }))
+      }
+    })
+    // Row 1 remains the reading anchor, 50px below its top, despite row 0 growing.
+    expect(scroller.scrollTop).toBe(250)
+    expect(getHeightsForSession(sessionId).has('appearance-row-100')).toBe(false)
+    expect(getHeightsForSession(sessionId).get('appearance-row-1')).toBe(200)
+    act(() => useChatAppearanceStore.setState({ appearance: { font: 'system', fontSize: 14, width: 'standard' } }))
+    dispose()
+    localStorage.removeItem(CHAT_APPEARANCE_STORAGE_KEY)
     dropSession(sessionId)
   })
 

@@ -1,6 +1,22 @@
 import type { TranslationKey } from './en'
 
 export const zh: Record<TranslationKey, string> = {
+  "settings.chatAppearance.title": "聊天外观",
+  "settings.chatAppearance.description": "独立于界面缩放调整聊天文字。修改立即生效，并保存在当前设备。",
+  "settings.chatAppearance.reset": "恢复聊天外观默认值",
+  "settings.chatAppearance.font": "聊天字体",
+  "settings.chatAppearance.fontSystem": "跟随系统",
+  "settings.chatAppearance.fontSans": "无衬线",
+  "settings.chatAppearance.fontSerif": "衬线",
+  "settings.chatAppearance.fontMono": "等宽",
+  "settings.chatAppearance.fontSize": "聊天字号",
+  "settings.chatAppearance.width": "对话宽度",
+  "settings.chatAppearance.widthStandard": "标准",
+  "settings.chatAppearance.widthWide": "宽",
+  "settings.chatAppearance.widthFull": "铺满可用区域",
+  "settings.chatAppearance.hint": "字体使用系统已有字体，代码保持等宽。宽度同时应用于消息和输入框，小窗口会自动适配。",
+  "settings.chatAppearance.preview": "字体预览",
+  "settings.chatAppearance.previewMarkdown": "### 更舒适的对话\n\n调整文字，让阅读更舒适。中文・日本語・한국어 · Hello 123。\n\n- 列表跟随所选字体与字号。\n- 行内代码保持等宽：`const answer = 42`。\n\n| 内容 | 示例 |\n| --- | --- |\n| 正文 | 按自己的节奏阅读 |",
   "chat.sessionNoProject": "无项目",
   "chat.referenceSessions": "会话",
   "chat.sessionReferencesLoadFailed": "无法加载会话。",

@@ -35,6 +35,7 @@ import { SETTINGS_CHECKBOX_INPUT_CLASS, SettingsCheckboxMark, isValidHttpProxyUr
 import { isTouchH5Document } from '../../lib/touchH5'
 import { MODEL_REASONING_EFFORTS } from '../../../../src/shared/modelReasoning'
 import { AUTO_QUESTION_TIMEOUT_OPTIONS } from '../../../../src/shared/autoQuestionSettings'
+import { ChatAppearanceSettings } from './ChatAppearanceSettings'
 
 /**
  * The General settings panel — the largest of the seven, and the one most often
@@ -1305,6 +1306,8 @@ export function GeneralSettings() {
       </div>
 
       {uiZoomSection}
+
+      <ChatAppearanceSettings />
 
       <div className="mt-8">
         <h2 className="text-[16.5px] font-semibold leading-tight text-[var(--color-text-primary)] mb-1" style={{ fontFamily: 'var(--font-headline)' }}>{t('settings.general.networkTitle')}</h2>
