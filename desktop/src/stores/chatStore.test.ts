@@ -14024,6 +14024,53 @@ describe('chatStore history mapping', () => {
     ])
   })
 
+  it.each([
+    ['Use TypeScript', 'Keep the toolbar compact'],
+    ['Use TypeScript', 'Build the editor'],
+    ['Use TypeScript', 'Use TypeScript'],
+    ['Build the editor', 'Build the editor'],
+  ])('reconciles the delayed initial replay across guides %s / %s without resending', (...guides) => {
+    const initial = 'Build the editor'
+    useChatStore.setState({ sessions: {
+      [TEST_SESSION_ID]: makeSession({ chatState: 'idle' }),
+    } })
+    useChatStore.getState().sendMessage(TEST_SESSION_ID, initial)
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'thinking', text: 'Planning the editor',
+    })
+    for (const content of guides) {
+      const id = useChatStore.getState().queueUserMessage(TEST_SESSION_ID, {
+        content, displayContent: content,
+      })
+      useChatStore.getState().sendQueuedUserMessage(TEST_SESSION_ID, id)
+    }
+    const sentBeforeReplay = sendMock.mock.calls.length
+    for (const content of [initial, ...guides]) {
+      useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+        type: 'user_message_replay', content,
+      })
+      expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages
+        .filter(message => message.type === 'user_text').map(message => message.content))
+        .toEqual([initial, ...guides])
+    }
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.messages
+      .filter(message => message.type === 'user_text' && message.optimisticQueued)).toEqual([])
+    expect(sendMock.mock.calls).toHaveLength(sentBeforeReplay)
+    expect(sendMock.mock.calls.filter(([, message]) => message.type === 'user_message')
+      .map(([, message]) => message.content)).toEqual([initial, ...guides])
+  })
+
+  it('does not suppress a new replay just because an older turn has the same text', () => {
+    const messages: UIMessage[] = [
+      { id: 'old', type: 'user_text', content: 'Try again', timestamp: 1 },
+      { id: 'current', type: 'user_text', content: 'Change direction', timestamp: 2 },
+      { id: 'guide', type: 'user_text', content: 'Keep it small', timestamp: 3, optimisticQueued: true },
+    ]
+    expect(appendReplayedUserMessage(messages, 'Try again', 4)
+      .filter(message => message.type === 'user_text').map(message => message.content))
+      .toEqual(['Try again', 'Change direction', 'Keep it small', 'Try again'])
+  })
+
   it('does not duplicate a slash-command prompt when the replay normalizes extra spaces', () => {
     // The composer keeps the raw input (`/ego-browser␣␣https://…` — two spaces
     // after the command name). The CLI preserves them inside <command-args>,

@@ -3285,7 +3285,7 @@ export const useChatStore = create<ChatStore>((setState, get) => {
         ...(userFacingContent !== modelFacingContent ? { modelContent: modelFacingContent } : {}),
         attachments: isDirectAgentSession ? undefined : uiAttachments,
         timestamp: now,
-        ...(isDirectAgentSession ? { pending: true } : {}),
+        ...(isDirectAgentSession ? { pending: true } : { awaitingReplay: true }),
       })
 
       if (!isDirectAgentSession && session.elapsedTimer) clearInterval(session.elapsedTimer)
@@ -7497,8 +7497,8 @@ export function appendReplayedUserMessage(
   const currentTurnUserIndex = findCurrentTurnUserMessageIndex(messages, modelContent, parsed)
   if (currentTurnUserIndex >= 0) {
     const optimisticMessage = messages[currentTurnUserIndex]
-    if (optimisticMessage?.type === 'user_text' && optimisticMessage.optimisticQueued) {
-      const { optimisticQueued: _optimisticQueued, ...confirmedMessage } = optimisticMessage
+    if (optimisticMessage?.type === 'user_text' && (optimisticMessage.optimisticQueued || optimisticMessage.awaitingReplay)) {
+      const { optimisticQueued: _optimisticQueued, awaitingReplay: _awaitingReplay, ...confirmedMessage } = optimisticMessage
       return [
         ...messages.slice(0, currentTurnUserIndex),
         confirmedMessage,
@@ -7572,13 +7572,30 @@ function findCurrentTurnUserMessageIndex(
   modelContent: string,
   replayDisplay: RestoredUserDisplay,
 ): number {
+  // Guides are rendered before the CLI consumes them. The initial prompt's
+  // ACK can arrive after several guides, so match outstanding input in send
+  // order (including identical prompts), bounded by the current user turn.
+  let turnStart = 0
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
-    if (message?.type !== 'user_text') {
-      continue
+    if (message?.type === 'user_text' && !message.optimisticQueued) {
+      turnStart = index
+      break
     }
-    return replayMatchesCurrentUserMessage(message, replayDisplay, modelContent) ? index : -1
   }
+  for (let index = turnStart; index < messages.length; index += 1) {
+    const message = messages[index]
+    if (
+      message?.type === 'user_text' &&
+      (message.awaitingReplay || message.optimisticQueued) &&
+      replayMatchesCurrentUserMessage(message, replayDisplay, modelContent)
+    ) return index
+  }
+  const current = messages[turnStart]
+  if (
+    current?.type === 'user_text' &&
+    replayMatchesCurrentUserMessage(current, replayDisplay, modelContent)
+  ) return turnStart
   return -1
 }
 
