@@ -1822,6 +1822,21 @@ export class SessionService {
     })
   }
 
+  private async fileHasConversationTranscript(filePath: string): Promise<boolean> {
+    let hasTranscript = false
+    const scan = await withHistoryReadBudget(undefined, () => streamBoundedHistory(
+      filePath,
+      entry => {
+        if (!hasTranscript && this.hasConversationTranscript([entry as RawEntry])) hasTranscript = true
+      },
+      undefined,
+      { maxRecordBytes: HISTORY_SEMANTIC_RECORD_BYTES },
+    ), 'metadata')
+    // An oversized record may be the only conversation turn. Prefer that
+    // transcript over a newer metadata-only placeholder until it can be read.
+    return hasTranscript || scan.oversizedRecords > 0
+  }
+
   // --------------------------------------------------------------------------
   // Entry → MessageEntry conversion
   // --------------------------------------------------------------------------
@@ -2662,11 +2677,10 @@ export class SessionService {
                 sessionId,
                 projectsRoot!,
               )
-              const entries = await this.readJsonlFile(match.filePath)
               hydratedMatches.push({
                 ...match,
                 mtimeMs: stat.mtimeMs,
-                hasTranscript: this.hasConversationTranscript(entries),
+                hasTranscript: await this.fileHasConversationTranscript(match.filePath),
               })
             } catch (error) {
               if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -2713,12 +2727,11 @@ export class SessionService {
       const filePath = path.join(projectsDir, dir, `${sessionId}.jsonl`)
       try {
         const stat = await fs.stat(filePath)
-        const entries = await this.readJsonlFile(filePath)
         matches.push({
           filePath,
           projectDir: dir,
           mtimeMs: stat.mtimeMs,
-          hasTranscript: this.hasConversationTranscript(entries),
+          hasTranscript: await this.fileHasConversationTranscript(filePath),
         })
       } catch {
         continue

@@ -576,6 +576,16 @@ describe('SessionService', () => {
     await expect(fs.access(collaborationTranscript)).resolves.toBeNull()
   })
 
+  it('prefers a transcript with an oversized turn over a newer metadata-only placeholder', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const transcript = await writeSessionFile('-tmp-large-transcript', sessionId, [
+      makeUserEntry('x'.repeat(9 * 1024 * 1024)),
+    ])
+    await writeSessionFile('-tmp-large-placeholder', sessionId, [makeSnapshotEntry()])
+
+    expect((await service.findSessionFile(sessionId))?.filePath).toBe(transcript)
+  })
+
   it('should return empty list when no sessions exist', async () => {
     const result = await service.listSessions()
     expect(result.sessions).toEqual([])
