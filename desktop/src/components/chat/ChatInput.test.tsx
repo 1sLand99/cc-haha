@@ -384,6 +384,7 @@ describe('ChatInput file mentions', () => {
     render(<ChatInput />)
 
     const editor = screen.getByRole('textbox')
+    expect(editor).toHaveClass('chat-reading-text')
     expect(editor).toHaveAttribute(
       'data-placeholder',
       'This temporary workspace was cleaned up. Start a new session in the original project to continue.',
@@ -2682,6 +2683,16 @@ describe('ChatInput file mentions', () => {
     const wrapper = getComposerElement().parentElement
     expect(wrapper).toHaveClass('flex-1')
     expect(wrapper).toHaveClass('min-w-0')
+    expect(getComposerElement()).toHaveClass('chat-reading-text')
+  })
+
+  it.each([false, true])('shares the transcript reading width with compact=%s', (compact) => {
+    const { container } = render(<ChatInput compact={compact} />)
+    const readingColumn = Array.from(container.querySelectorAll('div')).find((element) =>
+      element.classList.contains('max-w-[var(--chat-content-max-width)]'))
+    expect(readingColumn).toBeTruthy()
+    expect(readingColumn?.contains(getComposerElement())).toBe(true)
+    expect(getComposerElement()).toHaveClass('chat-reading-text')
   })
 
   it('uses Shift+Enter for a newline when Enter is the configured send shortcut', async () => {

@@ -1230,11 +1230,8 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
         className={
           isHeroComposer
             ? 'mx-auto flex w-full max-w-3xl flex-col'
-          : compact
-              ? 'mx-auto max-w-full'
-              // 900px matches the transcript column above it; at 860 the
-              // composer sat 20px narrower on each side than the messages.
-              : `${isMobileComposer ? 'mx-0 max-w-none' : 'mx-auto max-w-[900px]'}`
+            // Match the transcript even while a side panel tightens padding.
+            : `${isMobileComposer ? 'mx-0 max-w-none' : 'mx-auto max-w-[var(--chat-content-max-width)]'}`
         }
       >
         <div
@@ -1472,7 +1469,7 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
                 // break-word` does not shrink it. Without this the flex item
                 // refuses to shrink and the whole editor paints past the panel.
                 className="flex-1 min-w-0"
-                editorClassName="max-h-[200px] overflow-y-auto py-2 leading-relaxed text-[var(--color-text-primary)]"
+                editorClassName="chat-reading-text max-h-[200px] overflow-y-auto py-2 leading-relaxed text-[var(--color-text-primary)]"
                 aria={{
                   role: isSlashMenuVisible || isReferenceMenuVisible ? 'combobox' : 'textbox',
                   'aria-autocomplete': isSlashMenuVisible || isReferenceMenuVisible ? 'list' : undefined,
@@ -1501,7 +1498,7 @@ export function ChatInput({ variant = 'default', compact = false, sessionId, vis
               onCompositionEnd={() => { composingRef.current = false }}
               placeholder={composerPlaceholder}
               disabled={composerDisabled}
-              editorClassName={`max-h-[200px] overflow-y-auto text-sm leading-relaxed text-[var(--color-text-primary)] ${
+              editorClassName={`chat-reading-text max-h-[200px] overflow-y-auto text-sm leading-relaxed text-[var(--color-text-primary)] ${
                 useCompactChrome ? 'py-1.5' : 'py-2'
               }`}
               aria={{

@@ -82,6 +82,22 @@ export const kr: Record<TranslationKey, string> = {
   "sideQuestion.send": "질문하기",
   "sideQuestion.commandDescription": "작업을 중단하지 않고 별도로 질문하기",
 
+  "settings.chatAppearance.title": "채팅 모양",
+  "settings.chatAppearance.description": "UI 확대와 별도로 채팅 글자를 조정합니다. 변경 사항은 즉시 적용되며 이 기기에 저장됩니다.",
+  "settings.chatAppearance.reset": "채팅 모양 초기화",
+  "settings.chatAppearance.font": "채팅 글꼴",
+  "settings.chatAppearance.fontSystem": "시스템 기본값",
+  "settings.chatAppearance.fontSans": "고딕체",
+  "settings.chatAppearance.fontSerif": "명조체",
+  "settings.chatAppearance.fontMono": "고정폭",
+  "settings.chatAppearance.fontSize": "채팅 글자 크기",
+  "settings.chatAppearance.width": "대화 너비",
+  "settings.chatAppearance.widthStandard": "기본",
+  "settings.chatAppearance.widthWide": "넓게",
+  "settings.chatAppearance.widthFull": "사용 가능한 너비 채우기",
+  "settings.chatAppearance.hint": "시스템에 있는 글꼴을 사용합니다. 코드는 고정폭을 유지합니다. 너비는 메시지와 입력창에 적용되며 작은 창에서는 자동 조정됩니다.",
+  "settings.chatAppearance.preview": "글꼴 미리보기",
+  "settings.chatAppearance.previewMarkdown": "### 편안하게 읽는 대화\n\n글자를 조정하여 편안하게 읽으세요. 中文・日本語・한국어 · Hello 123.\n\n- 목록에도 선택한 글꼴과 크기가 적용됩니다.\n- 인라인 코드는 고정폭을 유지합니다: `const answer = 42`.\n\n| 내용 | 예시 |\n| --- | --- |\n| 본문 | 자신의 속도로 읽기 |",
 
 
   "chat.sessionNoProject": "프로젝트 없음",
